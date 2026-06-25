@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback, useRef } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useOrgSettings } from "@/lib/useOrgSettings";
 import { Button } from "@/components/ui/button";
@@ -78,6 +78,12 @@ export default function AppointmentsModule() {
 
   const [selectedAppointmentIds, setSelectedAppointmentIds] = useState(new Set());
   const [appointmentsListPage, setAppointmentsListPage] = useState(1);
+  const [selectedDayPage, setSelectedDayPage] = useState(1);
+  const [selectedDayRows, setSelectedDayRows] = useState([]);
+  const [selectedDayTotal, setSelectedDayTotal] = useState(0);
+  const [selectedDayLoading, setSelectedDayLoading] = useState(false);
+  const [calendarCounts, setCalendarCounts] = useState([]);
+  const [refreshCount, setRefreshCount] = useState(0);
 
   const {
     appointments,
@@ -93,6 +99,7 @@ export default function AppointmentsModule() {
     rescheduleAppointment,
     bulkUpdateStatus,
     fetchAppointmentsPage,
+    fetchCalendarCounts,
     loadAppointmentsRange,
     fetchStats,
     mutationCount,
@@ -106,6 +113,9 @@ export default function AppointmentsModule() {
   useEffect(() => {
     setAppointmentsListPage(1);
   }, [selectedDate, statusFilter, doctorFilter, departmentFilter, searchQuery]);
+  useEffect(() => {
+    setSelectedDayPage(1);
+  }, [selectedDate]);
 
   const form = useForm({
     resolver: zodResolver(appointmentSchema),
@@ -218,16 +228,69 @@ export default function AppointmentsModule() {
   });
   useEffect(() => {
     fetchStats().then(setStats).catch(() => {});
-  }, [mutationCount, fetchStats]);
+  }, [mutationCount, refreshCount, fetchStats]);
 
-  // Load just the date window the active calendar-style tab needs (the List tab
-  // fetches its own paginated data separately).
+  // Monthly grid loads compact per-day counts; row data is lazy-loaded only for
+  // the selected day below.
+  useEffect(() => {
+    if (activeTab !== "calendar") return;
+    let cancelled = false;
+    fetchCalendarCounts(
+      startOfMonth(currentMonth).toISOString(),
+      endOfMonth(currentMonth).toISOString(),
+    )
+      .then((rows) => {
+        if (!cancelled) setCalendarCounts(rows);
+      })
+      .catch(() => {
+        if (!cancelled) setCalendarCounts([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeTab, currentMonth, fetchCalendarCounts, mutationCount, refreshCount]);
+
+  useEffect(() => {
+    if (activeTab !== "calendar") return;
+    let cancelled = false;
+    setSelectedDayLoading(true);
+    fetchAppointmentsPage({
+      page: selectedDayPage,
+      pageSize: APPOINTMENTS_LIST_PER_PAGE,
+      date: format(selectedDate, "yyyy-MM-dd"),
+    })
+      .then(({ rows, total }) => {
+        if (!cancelled) {
+          setSelectedDayRows(rows);
+          setSelectedDayTotal(total);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setSelectedDayRows([]);
+          setSelectedDayTotal(0);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setSelectedDayLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    activeTab,
+    selectedDate,
+    selectedDayPage,
+    fetchAppointmentsPage,
+    mutationCount,
+    refreshCount,
+  ]);
+
+  // Load just the date window the weekly/today/doctor-slot tabs need (the List
+  // tab fetches its own paginated data separately).
   useEffect(() => {
     let from, to;
-    if (activeTab === "calendar") {
-      from = startOfMonth(currentMonth);
-      to = endOfMonth(currentMonth);
-    } else if (activeTab === "weekly" || activeTab === "doctor-slots") {
+    if (activeTab === "weekly" || activeTab === "doctor-slots") {
       from = currentWeek;
       to = addDays(currentWeek, 6);
     } else if (activeTab === "today") {
@@ -237,7 +300,7 @@ export default function AppointmentsModule() {
       return;
     }
     loadAppointmentsRange(from.toISOString(), to.toISOString()).catch(() => {});
-  }, [activeTab, currentMonth, currentWeek, loadAppointmentsRange]);
+  }, [activeTab, currentWeek, loadAppointmentsRange, mutationCount, refreshCount]);
 
   // Today's appointments split by lifecycle stage and sorted by time. Computed
   // once here so the "Today" tab's empty-check and its list render share one
@@ -312,25 +375,14 @@ export default function AppointmentsModule() {
     statusFilter,
     doctorFilter,
     departmentFilter,
-    appointments,
+    mutationCount,
+    refreshCount,
     fetchAppointmentsPage,
   ]);
 
-  // Index appointments by day ONCE, so the monthly grid's per-day lookups are
-  // O(1) instead of scanning the whole array for every day cell.
-  const appointmentsByDay = useMemo(() => {
-    const map = new Map();
-    for (const appointment of appointments) {
-      const key = format(parseDate(appointment.appointmentDate), "yyyy-MM-dd");
-      const list = map.get(key);
-      if (list) list.push(appointment);
-      else map.set(key, [appointment]);
-    }
-    return map;
-  }, [appointments]);
-  const getAppointmentsForDate = useCallback(
-    (date) => appointmentsByDay.get(format(date, "yyyy-MM-dd")) ?? [],
-    [appointmentsByDay],
+  const calendarCountsByDay = useMemo(
+    () => new Map(calendarCounts.map((summary) => [summary.date, summary])),
+    [calendarCounts],
   );
 
   const monthDays = useMemo(() => {
@@ -503,6 +555,11 @@ export default function AppointmentsModule() {
   const handlePrintAppointmentCard = (appointment) =>
     printAppointmentCard(appointment, orgInfo);
 
+  const handleRefresh = () => {
+    fetchData();
+    setRefreshCount((count) => count + 1);
+  };
+
   const onSubmit = async (data) => {
     try {
       setIsSubmitting(true);
@@ -577,7 +634,7 @@ export default function AppointmentsModule() {
           </p>
         </div>
         <div className="flex gap-2">
-          <Button variant="outline" onClick={fetchData}>
+          <Button variant="outline" onClick={handleRefresh}>
             <RefreshCw className="h-4 w-4 mr-2" />
             Refresh
           </Button>
@@ -628,7 +685,12 @@ export default function AppointmentsModule() {
             selectedDate={selectedDate}
             setSelectedDate={setSelectedDate}
             monthDays={monthDays}
-            getAppointmentsForDate={getAppointmentsForDate}
+            calendarCountsByDay={calendarCountsByDay}
+            selectedDayAppointments={selectedDayRows}
+            selectedDayTotal={selectedDayTotal}
+            selectedDayLoading={selectedDayLoading}
+            selectedDayPage={selectedDayPage}
+            setSelectedDayPage={setSelectedDayPage}
             getPatient={getPatient}
             onScheduleNew={() => setActiveDialog("new")}
           />

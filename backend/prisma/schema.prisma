@@ -383,6 +383,9 @@ model Appointment {
   @@index([organizationId])
   @@index([patientId])
   @@index([doctorId])
+  @@index([organizationId, appointmentDate])
+  @@index([organizationId, appointmentDate, doctorId])
+  @@index([organizationId, appointmentDate, status])
   @@index([appointmentDate, appointmentTime])
   @@index([status])
 }

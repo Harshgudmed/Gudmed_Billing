@@ -1,4 +1,5 @@
 import { db } from '../config/db.js'
+import { Prisma } from '@prisma/client'
 import { getOrgId } from "../lib/reqContext.js";
 import { startOfDay, endOfDay } from '../utils/dates.js'
 import { scopedDoctorId } from '../utils/scope.js'
@@ -68,6 +69,54 @@ export async function getAll(req, res, next) {
       data: appointments,
       meta: { total, limit, offset, hasMore: offset + limit < total }
     })
+  } catch (err) {
+    next(err)
+  }
+}
+
+// Calendar cells only need counts, not full appointment rows. The DB groups the
+// rows first, then we merge by yyyy-MM-dd for a compact month/week response.
+export async function getCalendarCounts(req, res, next) {
+  try {
+    const organizationId = getOrgId(req)
+    const { dateFrom, dateTo } = req.query
+
+    if (!dateFrom || !dateTo) {
+      return res.status(400).json({ success: false, error: 'dateFrom and dateTo are required' })
+    }
+
+    const from = startOfDay(dateFrom)
+    const to = endOfDay(dateTo)
+    const myDoctorId = scopedDoctorId(req)
+    const doctorFilter = myDoctorId
+      ? Prisma.sql`AND "doctorId" = ${myDoctorId}`
+      : Prisma.empty
+
+    const grouped = await db.$queryRaw`
+      SELECT
+        to_char(date_trunc('day', "appointmentDate"), 'YYYY-MM-DD') AS "date",
+        "status",
+        COUNT(*)::int AS "count"
+      FROM "Appointment"
+      WHERE "organizationId" = ${organizationId}
+        AND "appointmentDate" >= ${from}
+        AND "appointmentDate" <= ${to}
+        ${doctorFilter}
+      GROUP BY date_trunc('day', "appointmentDate"), "status"
+      ORDER BY date_trunc('day', "appointmentDate") ASC
+    `
+
+    const byDay = new Map()
+    for (const row of grouped) {
+      const { date, status } = row
+      const count = Number(row.count || 0)
+      const summary = byDay.get(date) || { date, total: 0, byStatus: {} }
+      summary.total += count
+      summary.byStatus[status] = (summary.byStatus[status] || 0) + count
+      byDay.set(date, summary)
+    }
+
+    res.json({ success: true, data: [...byDay.values()] })
   } catch (err) {
     next(err)
   }

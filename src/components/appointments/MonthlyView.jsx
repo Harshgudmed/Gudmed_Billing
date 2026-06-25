@@ -8,12 +8,32 @@ import {
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { CalendarDays, Plus, ChevronLeft, ChevronRight } from "lucide-react";
+import {
+  CalendarDays,
+  Plus,
+  ChevronLeft,
+  ChevronRight,
+  Loader2,
+} from "lucide-react";
 import { format, addMonths, subMonths, isSameDay, isToday } from "date-fns";
 import { getPatientFullName } from "./appointmentHelpers";
-import { STATUS_CONFIG, APPOINTMENT_TYPE_CONFIG } from "./appointmentConstants";
+import {
+  STATUS_CONFIG,
+  APPOINTMENT_TYPE_CONFIG,
+  APPOINTMENTS_LIST_PER_PAGE,
+} from "./appointmentConstants";
 
 const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+const STATUS_DOT_CLASS = {
+  scheduled: "bg-blue-400",
+  confirmed: "bg-indigo-400",
+  checked_in: "bg-green-400",
+  in_progress: "bg-orange-400",
+  completed: "bg-gray-400",
+  cancelled: "bg-red-400",
+  no_show: "bg-amber-400",
+  rescheduled: "bg-purple-400",
+};
 
 export default function MonthlyView({
   currentMonth,
@@ -21,11 +41,16 @@ export default function MonthlyView({
   selectedDate,
   setSelectedDate,
   monthDays,
-  getAppointmentsForDate,
+  calendarCountsByDay,
+  selectedDayAppointments,
+  selectedDayTotal,
+  selectedDayLoading,
+  selectedDayPage,
+  setSelectedDayPage,
   getPatient,
   onScheduleNew,
 }) {
-  const selectedDayAppointments = getAppointmentsForDate(selectedDate);
+  const totalPages = Math.ceil(selectedDayTotal / APPOINTMENTS_LIST_PER_PAGE);
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -70,7 +95,12 @@ export default function MonthlyView({
               <div key={`empty-${i}`} className="aspect-square" />
             ))}
             {monthDays.map((day) => {
-              const dayAppointments = getAppointmentsForDate(day);
+              const daySummary =
+                calendarCountsByDay.get(format(day, "yyyy-MM-dd")) || null;
+              const dayTotal = daySummary?.total || 0;
+              const visibleStatuses = Object.entries(daySummary?.byStatus || {})
+                .sort((a, b) => b[1] - a[1])
+                .slice(0, 3);
               const isSelected = isSameDay(day, selectedDate);
               const isTodayDate = isToday(day);
               return (
@@ -81,15 +111,28 @@ export default function MonthlyView({
                   onClick={() => setSelectedDate(day)}
                 >
                   <span className="text-sm">{format(day, "d")}</span>
-                  {dayAppointments.length > 0 && (
+                  {dayTotal > 0 && (
+                    <span
+                      className={`mt-1 rounded px-1.5 text-[10px] font-medium leading-4 ${
+                        isSelected
+                          ? "bg-white/20 text-white"
+                          : "bg-gray-100 text-gray-700"
+                      }`}
+                    >
+                      {dayTotal}
+                    </span>
+                  )}
+                  {dayTotal > 0 && (
                     <div className="absolute bottom-1 flex gap-0.5">
-                      {dayAppointments.slice(0, 3).map((appointment) => (
+                      {visibleStatuses.map(([status]) => (
                         <div
-                          key={appointment.id}
-                          className={`h-1.5 w-1.5 rounded-full ${appointment.status === "completed" ? "bg-gray-400" : appointment.status === "cancelled" ? "bg-red-400" : appointment.status === "in_progress" ? "bg-orange-400" : "bg-blue-400"}`}
+                          key={status}
+                          className={`h-1.5 w-1.5 rounded-full ${
+                            STATUS_DOT_CLASS[status] || "bg-gray-300"
+                          }`}
                         />
                       ))}
-                      {dayAppointments.length > 3 && (
+                      {visibleStatuses.length < Object.keys(daySummary?.byStatus || {}).length && (
                         <div className="h-1.5 w-1.5 rounded-full bg-gray-300" />
                       )}
                     </div>
@@ -109,12 +152,17 @@ export default function MonthlyView({
             {isToday(selectedDate) ? "Today" : format(selectedDate, "EEEE, MMM d")}
           </CardTitle>
           <CardDescription>
-            {selectedDayAppointments.length} appointments
+            {selectedDayLoading ? "Loading appointments..." : `${selectedDayTotal} appointments`}
           </CardDescription>
         </CardHeader>
         <CardContent>
           <ScrollArea className="h-[calc(100vh-300px)] min-h-[400px] pr-4">
-            {selectedDayAppointments.length === 0 ? (
+            {selectedDayLoading ? (
+              <div className="flex min-h-[240px] items-center justify-center text-gray-500">
+                <Loader2 className="mr-2 h-5 w-5 animate-spin" />
+                Loading appointments...
+              </div>
+            ) : selectedDayAppointments.length === 0 ? (
               <div className="text-center py-8 text-gray-500">
                 <CalendarDays className="h-12 w-12 mx-auto mb-2 opacity-50" />
                 <p>No appointments scheduled</p>
@@ -177,6 +225,33 @@ export default function MonthlyView({
               </div>
             )}
           </ScrollArea>
+          {totalPages > 1 && (
+            <div className="mt-4 flex items-center justify-end gap-2 border-t pt-3">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setSelectedDayPage((prev) => Math.max(1, prev - 1))}
+                disabled={selectedDayPage === 1 || selectedDayLoading}
+              >
+                <ChevronLeft className="h-4 w-4 mr-1" />
+                Previous
+              </Button>
+              <span className="text-sm text-gray-600">
+                Page {selectedDayPage} of {totalPages}
+              </span>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() =>
+                  setSelectedDayPage((prev) => Math.min(totalPages, prev + 1))
+                }
+                disabled={selectedDayPage === totalPages || selectedDayLoading}
+              >
+                Next
+                <ChevronRight className="h-4 w-4 ml-1" />
+              </Button>
+            </div>
+          )}
         </CardContent>
       </Card>
     </div>

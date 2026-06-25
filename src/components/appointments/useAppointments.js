@@ -57,6 +57,13 @@ export function useAppointments() {
     return res.data ?? {};
   }, []);
 
+  // Calendar grid summary: one compact row per day, not all appointments.
+  const fetchCalendarCounts = useCallback(async (dateFrom, dateTo) => {
+    const params = new URLSearchParams({ dateFrom, dateTo });
+    const res = await client.get(`/appointments/calendar-counts?${params.toString()}`);
+    return res.data ?? [];
+  }, []);
+
   const doctors = useMemo(
     () => users.filter((user) => user.role === "doctor" && user.isActive),
     [users],
@@ -150,6 +157,7 @@ export function useAppointments() {
     rescheduleAppointment,
     bulkUpdateStatus,
     fetchAppointmentsPage,
+    fetchCalendarCounts,
     loadAppointmentsRange,
     fetchStats,
     mutationCount,
