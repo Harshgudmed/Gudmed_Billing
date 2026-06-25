@@ -200,27 +200,15 @@ export default function AppointmentsModule() {
     return () => controller.abort();
   }, [watchDoctorId, watchPatientId, watchDate, form]);
 
-  // Doctors for the appointment form: filtered by the selected department's NAME
-  // (so a doctor in any "Cardiology" copy shows), then de-duplicated for display.
+  // Show all doctors until a department is selected, then match by department ID.
   const selectedDepartmentId = form.watch("departmentId");
   const availableDoctors = useMemo(() => {
-    let list = doctors;
-    if (selectedDepartmentId) {
-      const selectedDepartmentName = (departments.find((department) => department.id === selectedDepartmentId)?.name || "")
-        .trim()
-        .toLowerCase();
-      list = doctors.filter(
-        (doctor) => (doctor.department?.name || "").trim().toLowerCase() === selectedDepartmentName,
-      );
-    }
-    const seen = new Set();
-    return list.filter((doctor) => {
-      const key = `${(doctor.fullName || "").trim().toLowerCase()}|${(doctor.specialization || "").trim().toLowerCase()}`;
-      if (seen.has(key)) return false;
-      seen.add(key);
-      return true;
-    });
-  }, [selectedDepartmentId, doctors, departments]);
+    if (!selectedDepartmentId) return doctors;
+
+    return doctors.filter(
+      (doctor) => doctor.departmentId === selectedDepartmentId,
+    );
+  }, [selectedDepartmentId, doctors]);
 
   // Today's status counts come from the server (DB groupBy), refreshed on mount
   // and after any change — no need to load every appointment just to count them.
