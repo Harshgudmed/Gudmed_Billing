@@ -1,0 +1,65 @@
+<svg viewBox="0 0 480 380" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Hospital reception illustration">
+  <!-- soft backdrop -->
+  <circle cx="250" cy="170" r="160" fill="#ffffff" opacity="0.55"/>
+  <circle cx="250" cy="170" r="118" fill="#ffffff" opacity="0.65"/>
+
+  <!-- floating cards -->
+  <g opacity="0.95">
+    <rect x="40" y="70" width="92" height="58" rx="10" fill="#ffffff"/>
+    <rect x="54" y="84" width="20" height="20" rx="5" fill="#9333ea"/>
+    <path d="M59 94h10M64 89v10" stroke="#fff" stroke-width="2.4" stroke-linecap="round"/>
+    <rect x="82" y="86" width="38" height="6" rx="3" fill="#e9d5ff"/>
+    <rect x="82" y="98" width="28" height="6" rx="3" fill="#f3e8ff"/>
+    <rect x="54" y="112" width="66" height="6" rx="3" fill="#f3e8ff"/>
+  </g>
+
+  <g opacity="0.95">
+    <rect x="356" y="96" width="92" height="62" rx="10" fill="#ffffff"/>
+    <circle cx="382" cy="122" r="13" fill="#22c55e"/>
+    <path d="M376 122l4 4 8-8" stroke="#fff" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/>
+    <rect x="402" y="112" width="36" height="6" rx="3" fill="#dcfce7"/>
+    <rect x="402" y="124" width="26" height="6" rx="3" fill="#eafaf0"/>
+    <rect x="372" y="140" width="62" height="6" rx="3" fill="#eafaf0"/>
+  </g>
+
+  <!-- reception desk -->
+  <rect x="120" y="250" width="240" height="86" rx="10" fill="#7e22ce"/>
+  <rect x="120" y="250" width="240" height="20" rx="10" fill="#9333ea"/>
+  <rect x="150" y="284" width="180" height="40" rx="6" fill="#ffffff" opacity="0.18"/>
+
+  <!-- monitor on desk -->
+  <rect x="286" y="206" width="60" height="42" rx="6" fill="#1f2937"/>
+  <rect x="292" y="212" width="48" height="30" rx="3" fill="#a78bfa"/>
+  <rect x="297" y="218" width="26" height="4" rx="2" fill="#ffffff" opacity="0.9"/>
+  <rect x="297" y="226" width="34" height="4" rx="2" fill="#ffffff" opacity="0.6"/>
+  <rect x="312" y="248" width="8" height="6" fill="#1f2937"/>
+  <rect x="304" y="254" width="24" height="4" rx="2" fill="#1f2937"/>
+
+  <!-- receptionist -->
+  <g>
+    <!-- torso -->
+    <path d="M176 250c0-30 22-50 50-50s50 20 50 50z" fill="#9333ea"/>
+    <path d="M205 214h42v30h-42z" fill="#f5c9a6"/>
+    <!-- neck collar -->
+    <path d="M214 232l12 12 12-12" stroke="#ffffff" stroke-width="3" fill="none" stroke-linecap="round"/>
+    <!-- head -->
+    <circle cx="226" cy="186" r="28" fill="#f7d3b0"/>
+    <!-- hair -->
+    <path d="M198 188c0-22 13-36 28-36s28 14 28 36c-6-10-16-14-28-14s-22 4-28 14z" fill="#3f3a52"/>
+    <!-- smile + eyes -->
+    <circle cx="217" cy="186" r="2.4" fill="#3f3a52"/>
+    <circle cx="235" cy="186" r="2.4" fill="#3f3a52"/>
+    <path d="M219 196c3 4 11 4 14 0" stroke="#b9745a" stroke-width="2.2" fill="none" stroke-linecap="round"/>
+    <!-- headset -->
+    <path d="M200 188a26 26 0 0152 0" stroke="#1f2937" stroke-width="4" fill="none"/>
+    <rect x="196" y="186" width="8" height="14" rx="4" fill="#1f2937"/>
+    <rect x="248" y="186" width="8" height="14" rx="4" fill="#1f2937"/>
+    <path d="M252 198c0 10-8 14-16 14" stroke="#1f2937" stroke-width="3" fill="none" stroke-linecap="round"/>
+    <circle cx="236" cy="212" r="3" fill="#1f2937"/>
+  </g>
+
+  <!-- floating dots -->
+  <circle cx="120" cy="170" r="6" fill="#ffffff" opacity="0.8"/>
+  <circle cx="372" cy="220" r="5" fill="#ffffff" opacity="0.8"/>
+  <circle cx="96" cy="220" r="4" fill="#ffffff" opacity="0.7"/>
+</svg>

@@ -1,0 +1,35 @@
+services:
+  - type: web
+    name: gudmed-api
+    env: node
+    buildCommand: npm install && npx prisma generate && npx prisma db push --skip-generate && node scripts/ensure-ipd-indexes.mjs && node prisma/seed.js
+    startCommand: node server.js
+    envVars:
+      - key: NODE_ENV
+        value: production
+      # Require a valid login token on every API route. With this ON, a request
+      # without a doctor/coordinator token is rejected (401) instead of silently
+      # falling back to the demo org and seeing ALL patients. This is what makes
+      # per-doctor / per-coordinator isolation actually enforced.
+      - key: AUTH_ENFORCED
+        value: "true"
+      - key: DATABASE_URL
+        sync: false
+      - key: JWT_SECRET
+        sync: false
+      - key: FRONTEND_URL
+        value: https://gudmed.vercel.app
+      - key: RAZORPAY_KEY_ID
+        sync: false
+      - key: RAZORPAY_KEY_SECRET
+        sync: false
+      - key: TWILIO_ACCOUNT_SID
+        sync: false
+      - key: TWILIO_AUTH_TOKEN
+        sync: false
+      - key: TWILIO_WHATSAPP_FROM
+        value: +14155238886
+      - key: WHATSAPP_PROVIDER
+        value: twilio
+      - key: ORGANIZATION_ID
+        value: org-demo
