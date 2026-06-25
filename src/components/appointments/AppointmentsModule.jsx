@@ -149,19 +149,30 @@ export default function AppointmentsModule() {
   useEffect(() => {
     if (!watchDoctorId || !watchPatientId || !watchDate) {
       setFeeCalculation(null);
+      setFeeCalculationLoading(false);
       return;
     }
-    let cancelled = false;
-    setFeeCalculationLoading(true);
-    const apptDate = parseDate(watchDate);
-    client
-      .get(
-        `/fee-slabs/calculate?doctorId=${watchDoctorId}&patientId=${watchPatientId}&date=${apptDate.toISOString()}`,
-      )
-      .then((res) => {
-        if (cancelled || !res?.success) return;
-        const calculation = res.data;
+
+    const controller = new AbortController();
+
+    const calculateFee = async () => {
+      setFeeCalculationLoading(true);
+
+      try {
+        const response = await client.get("/fee-slabs/calculate", {
+          params: {
+            doctorId: watchDoctorId,
+            patientId: watchPatientId,
+            date: parseDate(watchDate).toISOString(),
+          },
+          signal: controller.signal,
+        });
+
+        if (!response?.success) return;
+
+        const calculation = response.data;
         setFeeCalculation(calculation);
+
         // Auto-flag the visit type (don't override a manual "emergency" choice)
         const current = form.getValues("appointmentType");
         if (current !== "emergency") {
@@ -170,18 +181,23 @@ export default function AppointmentsModule() {
             calculation.isNewPatient ? "new_patient" : "follow_up",
           );
         }
+
         // Reflect the fee that will actually be charged
         form.setValue("consultationFee", String(calculation.fee));
-      })
-      .catch(() => {
-        if (!cancelled) setFeeCalculation(null);
-      })
-      .finally(() => {
-        if (!cancelled) setFeeCalculationLoading(false);
-      });
-    return () => {
-      cancelled = true;
+      } catch (error) {
+        if (error?.name !== "CanceledError" && error?.code !== "ERR_CANCELED") {
+          setFeeCalculation(null);
+        }
+      } finally {
+        if (!controller.signal.aborted) {
+          setFeeCalculationLoading(false);
+        }
+      }
     };
+
+    calculateFee();
+
+    return () => controller.abort();
   }, [watchDoctorId, watchPatientId, watchDate, form]);
 
   // Doctors for the appointment form: filtered by the selected department's NAME
