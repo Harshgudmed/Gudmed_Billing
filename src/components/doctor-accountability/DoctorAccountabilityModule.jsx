@@ -17,6 +17,7 @@ import {
   Users, Clock, Wallet, Printer, FileDown, CheckCheck, ChevronLeft, ChevronRight,
 } from 'lucide-react'
 import client from '@/api/client'
+import DoctorTiming from './DoctorTiming'
 
 function fmt(n) {
   return '₹' + n.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
@@ -1393,6 +1394,7 @@ const TABS = [
   { id: 'doctors', label: 'Doctors', icon: UserCog },
   { id: 'commissions', label: 'Commissions', icon: IndianRupee },
   { id: 'reports', label: 'Reports', icon: BarChart3 },
+  { id: 'doctors-timetable', label: "Doctor's Timetable", icon: Clock },
 ]
 
 export default function DoctorAccountabilityModule() {
@@ -1468,6 +1470,7 @@ export default function DoctorAccountabilityModule() {
         {tab === 'doctors' && <DoctorsTab key={reloadKey} />}
         {tab === 'commissions' && <CommissionsTab openAddSignal={addCommissionSignal} />}
         {tab === 'reports' && <ReportsTab />}
+        {tab === 'doctors-timetable' && <DoctorTiming />}
       </div>
 
       {/* Add Doctor Dialog */}

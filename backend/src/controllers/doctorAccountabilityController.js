@@ -90,6 +90,40 @@ export async function handleGet(req, res, next) {
       return res.json({ success: true, data: stats })
     }
 
+    if (resource === 'timetable') {
+      const targetDoctorId = myDoctorId || doctorId
+      if (!targetDoctorId) {
+        return res.status(400).json({ success: false, error: 'Doctor ID is required' })
+      }
+      const doctor = await db.user.findUnique({
+        where: { id: targetDoctorId, organizationId: ORG_ID },
+        select: { id: true, fullName: true, preferences: true }
+      })
+      if (!doctor) {
+        return res.status(404).json({ success: false, error: 'Doctor not found' })
+      }
+      let prefs = {}
+      try {
+        if (doctor.preferences) prefs = JSON.parse(doctor.preferences)
+      } catch (e) {}
+      
+      const timetable = prefs.timetable || {
+        weeklySlots: {
+          Monday: { active: true, shifts: [{ start: '09:00', end: '17:00' }] },
+          Tuesday: { active: true, shifts: [{ start: '09:00', end: '17:00' }] },
+          Wednesday: { active: true, shifts: [{ start: '09:00', end: '17:00' }] },
+          Thursday: { active: true, shifts: [{ start: '09:00', end: '17:00' }] },
+          Friday: { active: true, shifts: [{ start: '09:00', end: '17:00' }] },
+          Saturday: { active: false, shifts: [] },
+          Sunday: { active: false, shifts: [] }
+        },
+        exceptions: [],
+        slotDuration: 15,
+        maxPatientsPerDay: 30
+      }
+      return res.json({ success: true, data: { doctorId: doctor.id, fullName: doctor.fullName, timetable } })
+    }
+
     res.status(400).json({ success: false, error: 'Unknown resource' })
   } catch (err) {
     next(err)
@@ -150,6 +184,34 @@ export async function handlePost(req, res, next) {
         },
       })
       return res.json({ success: true, data: commission })
+    }
+
+
+    if (resource === 'timetable') {
+      const { doctorId, timetable } = req.body
+      const targetDoctorId = doctorId
+      if (!targetDoctorId) {
+        return res.status(400).json({ success: false, error: 'Doctor ID is required' })
+      }
+      const doctor = await db.user.findUnique({
+        where: { id: targetDoctorId, organizationId: ORG_ID }
+      })
+      if (!doctor) {
+        return res.status(404).json({ success: false, error: 'Doctor not found' })
+      }
+      let prefs = {}
+      try {
+        if (doctor.preferences) prefs = JSON.parse(doctor.preferences)
+      } catch (e) {}
+      
+      prefs.timetable = timetable
+      
+      const updated = await db.user.update({
+        where: { id: targetDoctorId },
+        data: { preferences: JSON.stringify(prefs) },
+        select: { id: true, fullName: true, preferences: true }
+      })
+      return res.json({ success: true, message: 'Timetable updated successfully', data: updated })
     }
 
     res.status(400).json({ success: false, error: 'Unknown resource' })

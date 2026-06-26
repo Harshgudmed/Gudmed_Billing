@@ -35,6 +35,18 @@ const PRIORITY_LEVELS = ['Routine', 'Urgent', 'Emergency', 'Critical']
 
 const MARITAL_STATUSES = ['Single', 'Married', 'Divorced', 'Widowed', 'Other']
 
+function format12Hour(timeStr) {
+  if (!timeStr) return ''
+  const [hStr, mStr] = timeStr.split(':')
+  const h = parseInt(hStr, 10)
+  const m = parseInt(mStr, 10)
+  if (isNaN(h) || isNaN(m)) return timeStr
+  const ampm = h >= 12 ? 'PM' : 'AM'
+  const displayH = h % 12 === 0 ? 12 : h % 12
+  const displayM = String(m).padStart(2, '0')
+  return `${String(displayH).padStart(2, '0')}:${displayM} ${ampm}`
+}
+
 const emptyPatientForm = {
   firstName: '', middleName: '', lastName: '', dateOfBirth: '', gender: 'male',
   maritalStatus: '', referredBy: '', mlcNumber: '',
@@ -61,6 +73,70 @@ export default function RegisterPatientForm({ onSuccess, onCancel }) {
   const [savingPatient, setSavingPatient] = useState(false)
   const [doctors, setDoctors] = useState([])
   const [departments, setDepartments] = useState([])
+    const [doctorTimetable, setDoctorTimetable] = useState(null)
+  const [availableTimeSlots, setAvailableTimeSlots] = useState([])
+  const [timetableLoading, setTimetableLoading] = useState(false)
+
+  // Compute available time slots based on selected date & doctor timetable
+  useEffect(() => {
+    if (!patientForm.appointmentDate || !doctorTimetable) {
+      setAvailableTimeSlots([])
+      return
+    }
+
+    const dateObj = new Date(patientForm.appointmentDate)
+    if (isNaN(dateObj.getTime())) {
+      setAvailableTimeSlots([])
+      return
+    }
+
+    const yyyy = dateObj.getFullYear()
+    const mm = String(dateObj.getMonth() + 1).padStart(2, '0')
+    const dd = String(dateObj.getDate()).padStart(2, '0')
+    const dateStr = `${yyyy}-${mm}-${dd}`
+
+    const isException = doctorTimetable.exceptions?.some(ex => ex.date === dateStr)
+    if (isException) {
+      setAvailableTimeSlots([])
+      toast.error("Doctor is on leave/vacation on this date")
+      return
+    }
+
+    const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
+    const dayName = days[dateObj.getDay()]
+
+    const dayConfig = doctorTimetable.weeklySlots?.[dayName]
+    if (!dayConfig || !dayConfig.active || !dayConfig.shifts || dayConfig.shifts.length === 0) {
+      setAvailableTimeSlots([])
+      return
+    }
+
+    const duration = doctorTimetable.slotDuration || 15
+    const slots = []
+
+    dayConfig.shifts.forEach(shift => {
+      const [startH, startM] = shift.start.split(':').map(Number)
+      const [endH, endM] = shift.end.split(':').map(Number)
+
+      let currentMinutes = startH * 60 + startM
+      const endMinutes = endH * 60 + endM
+
+      while (currentMinutes + duration <= endMinutes) {
+        const h = Math.floor(currentMinutes / 60)
+        const m = currentMinutes % 60
+        const timeStr = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`
+        slots.push(timeStr)
+        currentMinutes += duration
+      }
+    })
+
+    setAvailableTimeSlots(slots)
+    if (slots.length > 0) {
+      setPatientForm(prev => ({ ...prev, appointmentTime: slots[0] }))
+    } else {
+      setPatientForm(prev => ({ ...prev, appointmentTime: '' }))
+    }
+  }, [patientForm.appointmentDate, doctorTimetable])
 
   useEffect(() => {
     client.get('/settings?resource=users')
@@ -362,7 +438,26 @@ export default function RegisterPatientForm({ onSuccess, onCancel }) {
                 value={patientForm.doctor}
                 onChange={v => {
                   const doc = availableDoctors.find(d => d.id === v)
-                  setPatientForm(prev => ({ ...prev, doctor: v, consultationFee: doc?.consultationFee != null ? String(doc.consultationFee) : '' }))
+                  setPatientForm(prev => ({
+                    ...prev,
+                    doctor: v,
+                    consultationFee: doc?.consultationFee != null ? String(doc.consultationFee) : '',
+                    appointmentDate: '',
+                    appointmentTime: ''
+                  }))
+                  setDoctorTimetable(null)
+                  setAvailableTimeSlots([])
+                  if (v) {
+                    setTimetableLoading(true)
+                    client.get(`/doctor-accountability?resource=timetable&doctorId=${v}`)
+                      .then(res => {
+                        if (res.success) {
+                          setDoctorTimetable(res.data.timetable)
+                        }
+                      })
+                      .catch(() => {})
+                      .finally(() => setTimetableLoading(false))
+                  }
                 }}
                 placeholder={availableDoctors.length ? 'Select doctor' : (patientForm.department ? 'No doctors in department' : 'Select doctor')}
                 searchPlaceholder="Search doctors..."
@@ -396,11 +491,40 @@ export default function RegisterPatientForm({ onSuccess, onCancel }) {
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <Label className="text-xs text-gray-600 flex items-center gap-1"><Calendar className="h-3.5 w-3.5" />Date <span className="text-red-500">*</span></Label>
-              <Input className="mt-1" type="date" value={patientForm.appointmentDate} onChange={e => setField('appointmentDate', e.target.value)} />
+              {/* <Input className="mt-1" type="date" value={patientForm.appointmentDate} onChange={e => setField('appointmentDate', e.target.value)} /> */}
+              <Input
+                className="mt-1"
+                type="date"
+                value={patientForm.appointmentDate}
+                onChange={e => setField('appointmentDate', e.target.value)}
+                disabled={!patientForm.doctor || timetableLoading}
+              />
             </div>
             <div>
               <Label className="text-xs text-gray-600 flex items-center gap-1"><Clock className="h-3.5 w-3.5" />Time</Label>
-              <Input className="mt-1" type="time" value={patientForm.appointmentTime} onChange={e => setField('appointmentTime', e.target.value)} />
+              {/* <Input className="mt-1" type="time" value={patientForm.appointmentTime} onChange={e => setField('appointmentTime', e.target.value)} /> */}
+              <Select
+                value={patientForm.appointmentTime}
+                onValueChange={v => setField('appointmentTime', v)}
+                disabled={!patientForm.appointmentDate || availableTimeSlots.length === 0}
+              >
+                <SelectTrigger className="mt-1">
+                  <SelectValue placeholder={
+                    !patientForm.doctor
+                      ? "Select doctor first"
+                      : !patientForm.appointmentDate
+                      ? "Select date first"
+                      : availableTimeSlots.length === 0
+                      ? "Sorry! Doctor not available on this date"
+                      : "Select appointment time"
+                  } />
+                </SelectTrigger>
+                <SelectContent>
+                  {availableTimeSlots.map(slot => (
+                    <SelectItem key={slot} value={slot}>{format12Hour(slot)}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
           </div>
 
