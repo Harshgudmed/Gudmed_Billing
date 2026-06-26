@@ -1,4 +1,14 @@
 import { useState, useEffect } from 'react'
+
+// Debounce hook – returns the debounced value after `delay` ms of no changes
+function useDebounce(value, delay = 400) {
+  const [debouncedValue, setDebouncedValue] = useState(value)
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedValue(value), delay)
+    return () => clearTimeout(timer)
+  }, [value, delay])
+  return debouncedValue
+}
 import { Search, User, X, Loader2, UserPlus } from 'lucide-react'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
@@ -46,27 +56,40 @@ export default function PatientLookup({
   const [newForm, setNewForm] = useState(emptyNew)
   const [creating, setCreating] = useState(false)
 
+  // Debounced search term – API call fires only after 400 ms of no typing
+  const debouncedSearch = useDebounce(search, 400)
+
+  // Show spinner immediately when the user starts typing (optimistic UX)
   useEffect(() => {
-    if (!search || search.length < 2) {
+    if (search.length >= 2) setLoading(true)
+    else { setLoading(false); setResults([]) }
+  }, [search])
+
+  // Fire the actual API call only after the debounced value settles
+  useEffect(() => {
+    if (!debouncedSearch || debouncedSearch.length < 2) {
       setResults([])
+      setLoading(false)
       return
     }
-    const timer = setTimeout(async () => {
-      setLoading(true)
+    let cancelled = false
+    ;(async () => {
       try {
         const res = await client.get('/patients', {
-          params: { search, limit: 8, status: 'active' },
+          params: { search: debouncedSearch, limit: 8, status: 'active' },
         })
-        setResults(res.data ?? [])
-        setOpen(true)
+        if (!cancelled) {
+          setResults(res.data ?? [])
+          setOpen(true)
+        }
       } catch {
-        setResults([])
+        if (!cancelled) setResults([])
       } finally {
-        setLoading(false)
+        if (!cancelled) setLoading(false)
       }
-    }, 300)
-    return () => clearTimeout(timer)
-  }, [search])
+    })()
+    return () => { cancelled = true }
+  }, [debouncedSearch])
 
   async function handleCreate() {
     if (newForm.firstName.trim().length < 2 || newForm.lastName.trim().length < 2) {
