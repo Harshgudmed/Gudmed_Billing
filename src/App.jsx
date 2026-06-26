@@ -57,6 +57,7 @@ const LEGACY_NAV = [
   { to: '/patients',              label: 'Patients' },
   { to: '/pharmacy',              label: 'Pharmacy' },
   { to: '/billing',               label: 'Billing' },
+  { to: '/doctor-accountability', label: 'Doctor Accountability' },
   { to: '/settings',              label: 'Settings' },
 ]
 
