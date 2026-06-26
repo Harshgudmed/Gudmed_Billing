@@ -37,7 +37,7 @@ export default function TodayView({
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <ScrollArea className="h-[500px] pr-4">
+        <ScrollArea className="h-[calc(100vh-320px)] pr-4">
             {upcomingAppointments.length === 0 ? (
               <div className="text-center py-8 text-gray-500">
                 <Clock className="h-12 w-12 mx-auto mb-2 opacity-50" />
@@ -179,7 +179,7 @@ export default function TodayView({
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <ScrollArea className="h-[500px] pr-4">
+         <ScrollArea className="h-[calc(100vh-220px)] pr-4">
             {completedAppointments.length === 0 ? (
               <div className="text-center py-8 text-gray-500">
                 <CheckCircle className="h-12 w-12 mx-auto mb-2 opacity-50" />

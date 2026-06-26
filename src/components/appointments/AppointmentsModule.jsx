@@ -670,10 +670,12 @@ export default function AppointmentsModule() {
       {/* Main Tabs */}
       <Tabs value={activeTab} onValueChange={setActiveTab}>
         <TabsList className="grid w-full grid-cols-5 max-w-3xl">
+           <TabsTrigger value="today">Today</TabsTrigger>
+                <TabsTrigger value="weekly">Weekly</TabsTrigger>
           <TabsTrigger value="calendar">Monthly</TabsTrigger>
-          <TabsTrigger value="weekly">Weekly</TabsTrigger>
+     
           <TabsTrigger value="list">List View</TabsTrigger>
-          <TabsTrigger value="today">Today</TabsTrigger>
+         
           <TabsTrigger value="doctor-slots">Doctor Slots</TabsTrigger>
         </TabsList>
 
