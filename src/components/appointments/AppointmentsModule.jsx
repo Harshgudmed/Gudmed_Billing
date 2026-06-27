@@ -227,7 +227,16 @@ export default function AppointmentsModule() {
     inProgress: 0, completed: 0, cancelled: 0, noShows: 0,
   });
   useEffect(() => {
-    fetchStats().then(setStats).catch(() => {});
+    const loadStats = async () => {
+      try {
+        const stats = await fetchStats()
+        setStats(stats)
+      } catch (err) {
+        console.error('Failed to load appointment stats:', err)
+      }
+    }
+
+    loadStats()
   }, [mutationCount, refreshCount, fetchStats]);
 
   // Monthly grid loads compact per-day counts; row data is lazy-loaded only for
@@ -235,19 +244,24 @@ export default function AppointmentsModule() {
   useEffect(() => {
     if (activeTab !== "calendar") return;
     let cancelled = false;
-    fetchCalendarCounts(
-      startOfMonth(currentMonth).toISOString(),
-      endOfMonth(currentMonth).toISOString(),
-    )
-      .then((rows) => {
-        if (!cancelled) setCalendarCounts(rows);
-      })
-      .catch(() => {
-        if (!cancelled) setCalendarCounts([]);
-      });
+
+    const loadCalendarCounts = async () => {
+      try {
+        const rows = await fetchCalendarCounts(
+          startOfMonth(currentMonth).toISOString(),
+          endOfMonth(currentMonth).toISOString(),
+        )
+        if (!cancelled) setCalendarCounts(rows)
+      } catch (err) {
+        console.error('Failed to load calendar counts:', err)
+        if (!cancelled) setCalendarCounts([])
+      }
+    }
+
+    loadCalendarCounts()
     return () => {
-      cancelled = true;
-    };
+      cancelled = true
+    }
   }, [activeTab, currentMonth, fetchCalendarCounts, mutationCount, refreshCount]);
 
   useEffect(() => {
