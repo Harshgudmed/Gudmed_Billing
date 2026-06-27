@@ -8,9 +8,11 @@ const FALLBACK = { name: 'Hospital', address: '', city: '', phone: '', email: ''
 export async function getOrgSettings() {
   if (_cache) return _cache
   if (_pending) return _pending
-  _pending = fetch('/api/settings')
-    .then(r => r.json())
-    .then(res => {
+
+  _pending = (async () => {
+    try {
+      const response = await fetch('/api/settings')
+      const res = await response.json()
       const org = res?.data || {}
       const settings = typeof org.settings === 'string'
         ? (() => { try { return JSON.parse(org.settings) } catch { return {} } })()
@@ -25,8 +27,13 @@ export async function getOrgSettings() {
         tagline:  settings.tagline || '',
       }
       return _cache
-    })
-    .catch(() => { _cache = { ...FALLBACK }; return _cache })
+    } catch (err) {
+      console.error('Failed to load organization settings:', err)
+      _cache = { ...FALLBACK }
+      return _cache
+    }
+  })()
+
   return _pending
 }
 

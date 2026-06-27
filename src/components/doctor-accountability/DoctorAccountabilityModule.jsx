@@ -1409,9 +1409,18 @@ export default function DoctorAccountabilityModule() {
   const [docForm, setDocForm] = useState({ fullName: '', email: '', specialization: '', phone: '', departmentId: '' })
 
   useEffect(() => {
-    client.get('/settings?resource=departments')
-      .then(res => { if (res.success) setDepartments(res.data) })
-      .catch(() => {})
+    const loadDepartments = async () => {
+      try {
+        const res = await client.get('/settings?resource=departments')
+        if (res.success) {
+          setDepartments(res.data)
+        }
+      } catch (err) {
+        console.error('Failed to load departments:', err)
+      }
+    }
+
+    loadDepartments()
   }, [])
 
   async function addDoctor() {
