@@ -108,22 +108,37 @@ export default function BarcodeScanner({ open, onClose, onScan }) {
 
       // Rear camera first (phones), then front, then the first enumerated device
       // (laptops/desktops where facingMode constraints often fail).
-      startWith({ facingMode: "environment" })
-        .catch(() => startWith({ facingMode: "user" }))
-        .catch(async () => {
-          const cams = await Html5Qrcode.getCameras();
-          if (cams && cams.length) return startWith({ deviceId: { exact: cams[0].id } });
-          throw new Error("No camera found");
-        })
-        .catch((err) => {
-          if (!cancelled) {
-            setError(
-              "Camera unavailable or permission denied. Type the barcode below " +
-                "(a USB scanner works here too)."
-            );
+      const initCamera = async () => {
+        try {
+          // Try rear camera (phones)
+          await startWith({ facingMode: "environment" });
+        } catch {
+          try {
+            // Try front camera
+            await startWith({ facingMode: "user" });
+          } catch {
+            try {
+              // Try first available device
+              const cams = await Html5Qrcode.getCameras();
+              if (cams && cams.length) {
+                await startWith({ deviceId: { exact: cams[0].id } });
+              } else {
+                throw new Error("No camera found");
+              }
+            } catch (err) {
+              if (!cancelled) {
+                setError(
+                  "Camera unavailable or permission denied. Type the barcode below " +
+                    "(a USB scanner works here too)."
+                );
+              }
+              console.warn("Barcode camera start failed:", err?.message || err);
+            }
           }
-          console.warn("Barcode camera start failed:", err?.message || err);
-        });
+        }
+      };
+
+      initCamera();
     });
 
     return () => {
