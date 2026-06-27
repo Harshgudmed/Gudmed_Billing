@@ -82,6 +82,9 @@ const patientSchema = z.object({
 export async function getAll(req, res, next) {
   try {
     const organizationId = getOrgId(req)
+    if (!organizationId) {
+      return res.status(401).json({ success: false, error: 'Organization context required' })
+    }
     const search = req.query.search || ''
     // Default to active only so soft-deleted (deactivated) patients drop out of
     // the main list. Pass ?status=inactive or ?status=all to see deactivated ones.
@@ -122,49 +125,35 @@ export async function getAll(req, res, next) {
     if (crmId) where.assignedCrmUserId = crmId
 
     const [patients, total] = await Promise.all([
-      db.patient.findMany({ where, take: limit, skip: offset, orderBy: { createdAt: 'desc' } }),
+      db.patient.findMany({
+        where,
+        take: limit,
+        skip: offset,
+        orderBy: { createdAt: 'desc' },
+        include: {
+          _count: {
+            select: {
+              labOrders: { where: { results: { some: {} } } },
+              radiologyOrders: { where: { report: { isNot: null } } },
+              admissions: { where: { status: 'admitted' } },
+              patientDocuments: true,
+            },
+          },
+        },
+      }),
       db.patient.count({ where }),
     ])
 
-    // Flag which patients have a generated report (lab order with results,
-    // radiology order with a report, or uploaded documents) so the list can show clickable icons.
-    const ids = patients.map((p) => p.id)
-    const [labGroups, radGroups, admGroups, docGroups] = ids.length
-      ? await Promise.all([
-          db.labOrder.groupBy({
-            by: ['patientId'],
-            where: { patientId: { in: ids }, results: { some: {} } },
-            _count: { _all: true },
-          }),
-          db.radiologyOrder.groupBy({
-            by: ['patientId'],
-            where: { patientId: { in: ids }, report: { isNot: null } },
-            _count: { _all: true },
-          }),
-          db.admission.groupBy({
-            by: ['patientId'],
-            where: { patientId: { in: ids }, status: 'admitted' },
-            _count: { _all: true },
-          }),
-          db.patientDocument.groupBy({
-            by: ['patientId'],
-            where: { patientId: { in: ids } },
-            _count: { _all: true },
-          }),
-        ])
-      : [[], [], [], []]
-
-    const labCount = Object.fromEntries(labGroups.map((g) => [g.patientId, g._count._all]))
-    const radCount = Object.fromEntries(radGroups.map((g) => [g.patientId, g._count._all]))
-    const admCount = Object.fromEntries(admGroups.map((g) => [g.patientId, g._count._all]))
-    const docCount = Object.fromEntries(docGroups.map((g) => [g.patientId, g._count._all]))
-    const data = patients.map((p) => ({
-      ...p,
-      labReportCount: labCount[p.id] || 0,
-      radiologyReportCount: radCount[p.id] || 0,
-      admittedCount: admCount[p.id] || 0,
-      documentCount: docCount[p.id] || 0,
-    }))
+    const data = patients.map((p) => {
+      const { _count, ...patientData } = p;
+      return {
+        ...patientData,
+        labReportCount: _count?.labOrders || 0,
+        radiologyReportCount: _count?.radiologyOrders || 0,
+        admittedCount: _count?.admissions || 0,
+        documentCount: _count?.patientDocuments || 0,
+      }
+    })
 
     res.json({ success: true, data, meta: { total, limit, offset, hasMore: offset + limit < total } })
   } catch (err) {
@@ -195,9 +184,15 @@ export async function getOne(req, res, next) {
 
 export async function getRecords(req, res, next) {
   try {
+    const organizationId = getOrgId(req)
+    if (!organizationId) {
+      return res.status(401).json({ success: false, error: 'Organization context required' })
+    }
     const { id } = req.params
     const patient = await db.patient.findUnique({ where: { id } })
-    if (!patient) return res.status(404).json({ success: false, error: 'Patient not found' })
+    if (!patient || patient.organizationId !== organizationId) {
+      return res.status(404).json({ success: false, error: 'Patient not found' })
+    }
 
     if (doctorPatientFilter(req) && !(await doctorOwnsPatient(req.user.userId, id))) {
       return res.status(404).json({ success: false, error: 'Patient not found' })
@@ -226,6 +221,7 @@ export async function getRecords(req, res, next) {
         where: { patientId: id },
         include: {
           doctor: { select: { id: true, fullName: true, specialization: true } },
+          department: { select: { id: true, name: true } },
         },
         orderBy: { appointmentDate: 'desc' },
       }),
@@ -239,25 +235,30 @@ export async function getRecords(req, res, next) {
       }),
     ])
 
-    // Attach department names (Appointment stores departmentId but has no relation)
-    const deptIds = [...new Set(appointments.map(a => a.departmentId).filter(Boolean))]
-    if (deptIds.length) {
-      const depts = await db.department.findMany({ where: { id: { in: deptIds } }, select: { id: true, name: true } })
-      const deptMap = new Map(depts.map(d => [d.id, d]))
-      appointments.forEach(a => { a.department = a.departmentId ? deptMap.get(a.departmentId) || null : null })
-    }
+    // Billing summary using Database Aggregation
+    const [billingStats] = await Promise.all([
+      db.invoice.aggregate({
+        where: {
+          patientId: id,
+          status: { not: 'cancelled' },
+          paymentStatus: { not: 'cancelled' },
+        },
+        _sum: { totalAmount: true, amountPaid: true, balanceDue: true },
+        _count: { _all: true },
+      }),
+    ])
 
-    // Billing summary across all non-cancelled invoices
-    const billable = invoices.filter(i => i.status !== 'cancelled' && i.paymentStatus !== 'cancelled')
-    const totalBilled = billable.reduce((s, i) => s + (i.totalAmount || 0), 0)
-    const totalPaid = billable.reduce((s, i) => s + (i.amountPaid || 0), 0)
-    const balanceDue = billable.reduce((s, i) => s + (i.balanceDue != null ? i.balanceDue : (i.totalAmount || 0) - (i.amountPaid || 0)), 0)
+    const totalBilled = billingStats._sum.totalAmount || 0;
+    const totalPaid = billingStats._sum.amountPaid || 0;
+    const balanceDue = billingStats._sum.balanceDue != null 
+      ? billingStats._sum.balanceDue 
+      : (totalBilled - totalPaid);
 
     res.json({
       success: true,
       data: {
         labOrders, radiologyOrders, admissions, appointments, invoices, patientDocuments,
-        billing: { totalBilled, totalPaid, balanceDue, invoiceCount: billable.length },
+        billing: { totalBilled, totalPaid, balanceDue, invoiceCount: billingStats._count._all },
       },
     })
   } catch (err) {
@@ -270,42 +271,63 @@ export async function create(req, res, next) {
     const organizationId = getOrgId(req)
     const validatedData = patientSchema.parse(req.body)
 
+    const patientData = {
+      organizationId,
+      mrn: generateUHID(),
+      firstName: validatedData.firstName,
+      middleName: validatedData.middleName,
+      lastName: validatedData.lastName,
+      dateOfBirth: new Date(validatedData.dateOfBirth),
+      gender: validatedData.gender,
+      phonePrimary: validatedData.phonePrimary,
+      phoneSecondary: validatedData.phoneSecondary,
+      email: validatedData.email || null,
+      region: validatedData.region,
+      zone: validatedData.zone,
+      woreda: validatedData.woreda,
+      kebele: validatedData.kebele,
+      houseNumber: validatedData.houseNumber,
+      postalCode: validatedData.postalCode,
+      emergencyContactName: validatedData.emergencyContactName,
+      emergencyContactPhone: validatedData.emergencyContactPhone,
+      emergencyContactRelationship: validatedData.emergencyContactRelationship,
+      bloodGroup: validatedData.bloodGroup,
+      allergies: validatedData.allergies ? JSON.stringify(validatedData.allergies) : null,
+      chronicConditions: validatedData.chronicConditions ? JSON.stringify(validatedData.chronicConditions) : null,
+      currentMedications: validatedData.currentMedications ? JSON.stringify(validatedData.currentMedications) : null,
+      hasInsurance: validatedData.hasInsurance,
+      insuranceProvider: validatedData.insuranceProvider,
+      insuranceId: validatedData.insuranceId,
+      insuranceExpiryDate: validatedData.insuranceExpiryDate ? new Date(validatedData.insuranceExpiryDate) : null,
+      maritalStatus: validatedData.maritalStatus,
+      referredBy: validatedData.referredBy,
+      mlcNumber: validatedData.mlcNumber,
+      occupation: validatedData.occupation,
+      isVip: validatedData.isVip,
+      notes: validatedData.notes,
+    };
+
+    if (req.body.appointment && req.body.appointment.doctorId && req.body.appointment.appointmentDate) {
+      const appt = req.body.appointment;
+      patientData.appointments = {
+        create: {
+          organizationId,
+          doctorId: appt.doctorId,
+          departmentId: appt.departmentId || null,
+          appointmentDate: new Date(appt.appointmentDate),
+          appointmentTime: appt.appointmentTime || '09:00',
+          appointmentType: appt.appointmentType || 'new_patient',
+          priority: appt.priority || 'normal',
+          notes: appt.notes || null,
+        }
+      };
+    }
+
     const patient = await db.patient.create({
-      data: {
-        organizationId,
-        mrn: generateUHID(),
-        firstName: validatedData.firstName,
-        middleName: validatedData.middleName,
-        lastName: validatedData.lastName,
-        dateOfBirth: new Date(validatedData.dateOfBirth),
-        gender: validatedData.gender,
-        phonePrimary: validatedData.phonePrimary,
-        phoneSecondary: validatedData.phoneSecondary,
-        email: validatedData.email || null,
-        region: validatedData.region,
-        zone: validatedData.zone,
-        woreda: validatedData.woreda,
-        kebele: validatedData.kebele,
-        houseNumber: validatedData.houseNumber,
-        postalCode: validatedData.postalCode,
-        emergencyContactName: validatedData.emergencyContactName,
-        emergencyContactPhone: validatedData.emergencyContactPhone,
-        emergencyContactRelationship: validatedData.emergencyContactRelationship,
-        bloodGroup: validatedData.bloodGroup,
-        allergies: validatedData.allergies ? JSON.stringify(validatedData.allergies) : null,
-        chronicConditions: validatedData.chronicConditions ? JSON.stringify(validatedData.chronicConditions) : null,
-        currentMedications: validatedData.currentMedications ? JSON.stringify(validatedData.currentMedications) : null,
-        hasInsurance: validatedData.hasInsurance,
-        insuranceProvider: validatedData.insuranceProvider,
-        insuranceId: validatedData.insuranceId,
-        insuranceExpiryDate: validatedData.insuranceExpiryDate ? new Date(validatedData.insuranceExpiryDate) : null,
-        maritalStatus: validatedData.maritalStatus,
-        referredBy: validatedData.referredBy,
-        mlcNumber: validatedData.mlcNumber,
-        occupation: validatedData.occupation,
-        isVip: validatedData.isVip,
-        notes: validatedData.notes,
-      },
+      data: patientData,
+      include: {
+        appointments: true
+      }
     })
 
     await db.auditLog.create({
@@ -330,8 +352,31 @@ export async function create(req, res, next) {
 
 export async function update(req, res, next) {
   try {
+    const organizationId = getOrgId(req)
     const { id } = req.params
     const body = req.body
+
+    const patient = await db.patient.findUnique({ where: { id } })
+    if (!patient) {
+      return res.status(404).json({ success: false, error: 'Patient not found' })
+    }
+
+    // Enforce organization scope
+    if (patient.organizationId !== organizationId) {
+      return res.status(404).json({ success: false, error: 'Patient not found' })
+    }
+
+    // Doctors may only update their own patients
+    const docFilter = doctorPatientFilter(req)
+    if (docFilter && !(await doctorOwnsPatient(req.user.userId, id))) {
+      return res.status(403).json({ success: false, error: 'Unauthorized' })
+    }
+
+    // CRM users may only update patients assigned to them
+    const crmId = crmScopeId(req)
+    if (crmId && patient.assignedCrmUserId !== req.user.userId) {
+      return res.status(403).json({ success: false, error: 'Unauthorized' })
+    }
 
     const updateData = { ...body }
     if (updateData.dateOfBirth) updateData.dateOfBirth = new Date(updateData.dateOfBirth)
@@ -340,8 +385,19 @@ export async function update(req, res, next) {
     if (Array.isArray(updateData.chronicConditions)) updateData.chronicConditions = JSON.stringify(updateData.chronicConditions)
     if (Array.isArray(updateData.currentMedications)) updateData.currentMedications = JSON.stringify(updateData.currentMedications)
 
-    const patient = await db.patient.update({ where: { id }, data: updateData })
-    res.json({ success: true, data: patient })
+    const updatedPatient = await db.patient.update({ where: { id }, data: updateData })
+
+    await db.auditLog.create({
+      data: {
+        organizationId,
+        action: 'update',
+        entityType: 'patient',
+        entityId: patient.id,
+        description: `Patient ${patient.mrn} updated`,
+      },
+    }).catch(() => {})
+
+    res.json({ success: true, data: updatedPatient })
   } catch (err) {
     next(err)
   }
