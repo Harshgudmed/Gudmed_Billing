@@ -182,7 +182,19 @@ export default function OpdModule() {
   }, [])
 
   useEffect(() => { fetchAll() }, [fetchAll])
-  useEffect(() => { getOrgSettings().then(setOrgInfo) }, [])
+
+  useEffect(() => {
+    const loadOrgSettings = async () => {
+      try {
+        const settings = await getOrgSettings()
+        setOrgInfo(settings)
+      } catch (err) {
+        console.error('Failed to load organization settings:', err)
+      }
+    }
+
+    loadOrgSettings()
+  }, [])
 
   const onDepartmentChange = async (dept) => {
     setDepartment(dept); setProblem(''); setGuidance(null); setConditions([])

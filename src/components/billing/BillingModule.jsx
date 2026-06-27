@@ -488,8 +488,14 @@ export default function BillingModule({ onBack }) {
       })
       toast.dismiss()
       if (res.shortUrl) {
-        await navigator.clipboard.writeText(res.shortUrl).catch(() => {})
-        toast.success('Payment link copied! Share with patient via WhatsApp')
+        try {
+          await navigator.clipboard.writeText(res.shortUrl)
+          toast.success('Payment link copied! Share with patient via WhatsApp')
+        } catch (clipboardErr) {
+          console.warn('Clipboard copy failed:', clipboardErr)
+          toast.success('Payment link generated. Share with patient via WhatsApp')
+        }
+
         // Also open WhatsApp with the link
         if (bill.phone) {
           const phone = bill.phone.replace(/\D/g, '').slice(-10)

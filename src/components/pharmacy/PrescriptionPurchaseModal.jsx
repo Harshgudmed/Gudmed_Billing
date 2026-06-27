@@ -56,7 +56,16 @@ export default function PrescriptionPurchaseModal({
   const [orgInfo, setOrgInfo]             = useState({ name: 'Hospital', phone: '', upiId: '' })
 
   useEffect(() => {
-    getOrgSettings().then(org => setOrgInfo(org))
+    const loadOrgSettings = async () => {
+      try {
+        const org = await getOrgSettings()
+        setOrgInfo(org)
+      } catch (err) {
+        console.error('Failed to load organization settings:', err)
+      }
+    }
+
+    loadOrgSettings()
   }, [])
 
   // Enrich items with prices from pharmacy catalog
