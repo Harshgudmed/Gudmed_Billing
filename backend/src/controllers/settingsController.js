@@ -19,16 +19,26 @@ export async function getOrganization(req, res, next) {
   } catch (err) { next(err) }
 }
 
+// Only these org fields may be set by clients. Spreading req.body would let a
+// caller overwrite anything on the row (mass assignment) — whitelist instead.
+// (navbar/header colours live inside the `settings` JSON, not as columns.)
+const ORG_UPDATABLE_FIELDS = [
+  'name', 'address', 'city', 'phone', 'email', 'logoUrl',
+  'primaryColor', 'secondaryColor', 'region', 'country',
+]
+
 export async function updateOrganization(req, res, next) {
   try {
     const ORG_ID = getOrgId(req)
-    const data = { ...req.body }
-    delete data.resource
-    if (data.settings && typeof data.settings === 'object') {
-      data.settings = JSON.stringify(data.settings)
+    const data = {}
+    for (const field of ORG_UPDATABLE_FIELDS) {
+      if (req.body[field] !== undefined) data[field] = req.body[field]
     }
-    if (data.modulesEnabled && typeof data.modulesEnabled === 'object') {
-      data.modulesEnabled = JSON.stringify(data.modulesEnabled)
+    if (req.body.settings && typeof req.body.settings === 'object') {
+      data.settings = JSON.stringify(req.body.settings)
+    }
+    if (req.body.modulesEnabled && typeof req.body.modulesEnabled === 'object') {
+      data.modulesEnabled = JSON.stringify(req.body.modulesEnabled)
     }
     const org = await db.organization.update({ where: { id: ORG_ID }, data })
     res.json({ success: true, data: parseOrg(org) })
@@ -80,7 +90,12 @@ export async function createUser(req, res, next) {
 
 export async function updateUser(req, res, next) {
   try {
+    const ORG_ID = getOrgId(req)
     const { id, fullName, email, role, departmentId, phone, specialization, password } = req.body
+    // Tenant guard: only update a user that belongs to the caller's org.
+    const existing = await db.user.findFirst({ where: { id, organizationId: ORG_ID }, select: { id: true } })
+    if (!existing) return res.status(404).json({ success: false, error: 'User not found' })
+
     const data = { fullName, email, role, departmentId: departmentId || null, phone: phone || null, specialization: specialization || null }
     // Optional password reset — only re-hash when a new password is supplied.
     if (password) {
@@ -101,7 +116,12 @@ export async function updateUser(req, res, next) {
 
 export async function toggleUserStatus(req, res, next) {
   try {
+    const ORG_ID = getOrgId(req)
     const { id, isActive } = req.body
+    // Tenant guard: prevent cross-org enable/disable of accounts.
+    const existing = await db.user.findFirst({ where: { id, organizationId: ORG_ID }, select: { id: true } })
+    if (!existing) return res.status(404).json({ success: false, error: 'User not found' })
+
     const user = await db.user.update({ where: { id }, data: { isActive } })
     res.json({ success: true, data: user })
   } catch (err) { next(err) }
