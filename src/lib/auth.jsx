@@ -13,10 +13,22 @@ export function AuthProvider({ children }) {
 
   useEffect(() => {
     let active = true
-    client.get('/auth/me')
-      .then((res) => { if (active && res?.user) setUser(res.user) })
-      .catch(() => { /* not logged in — fine */ })
-      .finally(() => { if (active) setLoading(false) })
+
+    const checkAuth = async () => {
+      try {
+        const res = await client.get('/auth/me')
+        if (active && res?.user) {
+          setUser(res.user)
+        }
+      } catch (err) {
+        // Not logged in — fine
+        if (active) console.debug('Auth check: user not logged in')
+      } finally {
+        if (active) setLoading(false)
+      }
+    }
+
+    checkAuth()
     return () => { active = false }
   }, [])
 
