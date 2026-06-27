@@ -267,30 +267,34 @@ export default function AppointmentsModule() {
   useEffect(() => {
     if (activeTab !== "calendar") return;
     let cancelled = false;
-    setSelectedDayLoading(true);
-    fetchAppointmentsPage({
-      page: selectedDayPage,
-      pageSize: APPOINTMENTS_LIST_PER_PAGE,
-      date: format(selectedDate, "yyyy-MM-dd"),
-    })
-      .then(({ rows, total }) => {
+
+    const loadSelectedDay = async () => {
+      try {
+        setSelectedDayLoading(true);
+        const { rows, total } = await fetchAppointmentsPage({
+          page: selectedDayPage,
+          pageSize: APPOINTMENTS_LIST_PER_PAGE,
+          date: format(selectedDate, "yyyy-MM-dd"),
+        })
         if (!cancelled) {
-          setSelectedDayRows(rows);
-          setSelectedDayTotal(total);
+          setSelectedDayRows(rows)
+          setSelectedDayTotal(total)
         }
-      })
-      .catch(() => {
+      } catch (err) {
+        console.error('Failed to load selected day appointments:', err)
         if (!cancelled) {
-          setSelectedDayRows([]);
-          setSelectedDayTotal(0);
+          setSelectedDayRows([])
+          setSelectedDayTotal(0)
         }
-      })
-      .finally(() => {
-        if (!cancelled) setSelectedDayLoading(false);
-      });
+      } finally {
+        if (!cancelled) setSelectedDayLoading(false)
+      }
+    }
+
+    loadSelectedDay()
     return () => {
-      cancelled = true;
-    };
+      cancelled = true
+    }
   }, [
     activeTab,
     selectedDate,
@@ -303,17 +307,25 @@ export default function AppointmentsModule() {
   // Load just the date window the weekly/today/doctor-slot tabs need (the List
   // tab fetches its own paginated data separately).
   useEffect(() => {
-    let from, to;
-    if (activeTab === "weekly" || activeTab === "doctor-slots") {
-      from = currentWeek;
-      to = addDays(currentWeek, 6);
-    } else if (activeTab === "today") {
-      from = new Date();
-      to = new Date();
-    } else {
-      return;
+    const loadRange = async () => {
+      try {
+        let from, to;
+        if (activeTab === "weekly" || activeTab === "doctor-slots") {
+          from = currentWeek;
+          to = addDays(currentWeek, 6);
+        } else if (activeTab === "today") {
+          from = new Date();
+          to = new Date();
+        } else {
+          return;
+        }
+        await loadAppointmentsRange(from.toISOString(), to.toISOString())
+      } catch (err) {
+        console.error('Failed to load appointments range:', err)
+      }
     }
-    loadAppointmentsRange(from.toISOString(), to.toISOString()).catch(() => {});
+
+    loadRange()
   }, [activeTab, currentWeek, loadAppointmentsRange, mutationCount, refreshCount]);
 
   // Today's appointments split by lifecycle stage and sorted by time. Computed
@@ -354,28 +366,28 @@ export default function AppointmentsModule() {
   useEffect(() => {
     if (activeTab !== "list") return;
     let cancelled = false;
-    const timer = setTimeout(() => {
-      fetchAppointmentsPage({
-        page: appointmentsListPage,
-        pageSize: APPOINTMENTS_LIST_PER_PAGE,
-        date: format(selectedDate, "yyyy-MM-dd"),
-        search: searchQuery,
-        status: statusFilter,
-        doctorId: doctorFilter,
-        department: departmentFilter,
-      })
-        .then(({ rows, total }) => {
-          if (!cancelled) {
-            setListRows(rows);
-            setListTotal(total);
-          }
+    const timer = setTimeout(async () => {
+      try {
+        const { rows, total } = await fetchAppointmentsPage({
+          page: appointmentsListPage,
+          pageSize: APPOINTMENTS_LIST_PER_PAGE,
+          date: format(selectedDate, "yyyy-MM-dd"),
+          search: searchQuery,
+          status: statusFilter,
+          doctorId: doctorFilter,
+          department: departmentFilter,
         })
-        .catch(() => {
-          if (!cancelled) {
-            setListRows([]);
-            setListTotal(0);
-          }
-        });
+        if (!cancelled) {
+          setListRows(rows)
+          setListTotal(total)
+        }
+      } catch (err) {
+        console.error('Failed to load appointments list:', err)
+        if (!cancelled) {
+          setListRows([])
+          setListTotal(0)
+        }
+      }
     }, 300);
     return () => {
       cancelled = true;
