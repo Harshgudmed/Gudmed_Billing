@@ -46,15 +46,57 @@ const paymentSchema = z.object({
   notes: z.string().optional(),
 })
 
+// SECURITY: explicit whitelists — never z.record(z.any()) on financial records.
+// Client-derived fields (amountPaid, balanceDue, totalAmount, organizationId,
+// paymentStatus) are intentionally NOT updatable here; they are computed from
+// payments inside a transaction.
 const invoiceUpdateSchema = z.object({
   id: z.string().min(1),
-  updates: z.record(z.any()),
+  updates: z.object({
+    status: z.enum(['draft', 'sent', 'overdue', 'paid', 'cancelled']).optional(),
+    notes: z.string().optional(),
+    termsAndConditions: z.string().optional(),
+    dueDate: z.string().optional(),
+    cancellationReason: z.string().optional(),
+  }),
 })
 
 const serviceUpdateSchema = z.object({
   id: z.string().min(1),
-  updates: z.record(z.any()),
+  updates: z.object({
+    serviceName: z.string().min(1).optional(),
+    serviceCode: z.string().min(1).optional(),
+    serviceCategory: z.string().min(1).optional(),
+    department: z.string().min(1).optional(),
+    unitPrice: z.number().nonnegative().optional(),
+    isTaxable: z.boolean().optional(),
+    taxPercentage: z.number().nonnegative().optional(),
+    isCoveredByInsurance: z.boolean().optional(),
+    insuranceCopayPercentage: z.number().nonnegative().optional(),
+    description: z.string().optional(),
+    isActive: z.boolean().optional(),
+  }),
 })
+
+// Indian financial year (Apr 1 – Mar 31), e.g. "2026-27".
+function financialYear(d = new Date()) {
+  const y = d.getFullYear()
+  const startYear = d.getMonth() >= 3 ? y : y - 1
+  return `${startYear}-${String((startYear + 1) % 100).padStart(2, '0')}`
+}
+
+// Atomic, gap-free, per-org invoice number. The upsert+increment runs inside the
+// caller's transaction so two concurrent invoices can never collide on the
+// @unique invoiceNumber column. Format: INV-2026-27-000123
+async function nextInvoiceNumber(tx, organizationId) {
+  const year = financialYear()
+  const counter = await tx.billCounter.upsert({
+    where: { organizationId_series_year: { organizationId, series: 'INV', year } },
+    create: { organizationId, series: 'INV', year, value: 1 },
+    update: { value: { increment: 1 } },
+  })
+  return `INV-${year}-${String(counter.value).padStart(6, '0')}`
+}
 
 export async function getAll(req, res) {
   try {
@@ -256,40 +298,44 @@ export async function create(req, res) {
       const subtotal = items.reduce((sum, item) => sum + item.total, 0)
       const taxAmount = items.reduce((sum, item) => sum + (item.tax || 0), 0)
       const totalAmount = subtotal - discountAmount + taxAmount
-      const invoiceNumber = 'INV' + Date.now()
 
-      const invoice = await db.invoice.create({
-        data: {
-          organizationId: ORGANIZATION_ID,
-          invoiceNumber,
-          patientId,
-          consultationId: consultationId || null,
-          items: JSON.stringify(items),
-          subtotal,
-          taxAmount,
-          discountAmount,
-          discountPercentage,
-          totalAmount,
-          notes: notes || null,
-          status: 'draft',
-          paymentStatus: 'unpaid',
-          balanceDue: totalAmount,
-          amountPaid: 0,
-          invoiceDate: new Date(),
-        },
-        include: {
-          patient: {
-            select: {
-              id: true,
-              mrn: true,
-              firstName: true,
-              lastName: true,
-              phonePrimary: true,
-              hasInsurance: true,
-              insuranceProvider: true,
+      // Transaction: the invoice number is drawn from a per-org counter inside
+      // the same tx, so concurrent creates cannot collide on the @unique column.
+      const invoice = await db.$transaction(async (tx) => {
+        const invoiceNumber = await nextInvoiceNumber(tx, ORGANIZATION_ID)
+        return tx.invoice.create({
+          data: {
+            organizationId: ORGANIZATION_ID,
+            invoiceNumber,
+            patientId,
+            consultationId: consultationId || null,
+            items: JSON.stringify(items),
+            subtotal,
+            taxAmount,
+            discountAmount,
+            discountPercentage,
+            totalAmount,
+            notes: notes || null,
+            status: 'draft',
+            paymentStatus: 'unpaid',
+            balanceDue: totalAmount,
+            amountPaid: 0,
+            invoiceDate: new Date(),
+          },
+          include: {
+            patient: {
+              select: {
+                id: true,
+                mrn: true,
+                firstName: true,
+                lastName: true,
+                phonePrimary: true,
+                hasInsurance: true,
+                insuranceProvider: true,
+              },
             },
           },
-        },
+        })
       })
 
       return res.status(201).json({ success: true, data: invoice })
@@ -315,52 +361,72 @@ export async function create(req, res) {
 
       const receiptNumber = 'RCP' + Date.now()
 
-      const payment = await db.payment.create({
-        data: {
-          organizationId: ORGANIZATION_ID,
-          invoiceId,
-          patientId: patientId || null,
-          amount,
-          paymentMethod,
-          paymentReference: paymentReference || null,
-          mobileMoneyProvider: mobileMoneyProvider || null,
-          bankName: bankName || null,
-          chequeNumber: chequeNumber || null,
-          notes: notes || null,
-          receiptNumber,
-          paymentDate: new Date(),
-          isRefund: false,
-        },
-      })
+      // MONEY = ACID. Everything below runs in ONE transaction:
+      //   1. verify the invoice exists AND belongs to this org (no cross-tenant write)
+      //   2. write the payment
+      //   3. atomically INCREMENT amountPaid in the DB (no read-modify-write in JS,
+      //      so two concurrent cashiers can never lose an update)
+      //   4. recompute balance/status from the post-increment value
+      //   5. write the audit row INSIDE the tx — if audit fails, the whole
+      //      payment rolls back (a hospital's money trail must be provable)
+      const payment = await db.$transaction(async (tx) => {
+        const invoice = await tx.invoice.findFirst({
+          where: { id: invoiceId, organizationId: ORGANIZATION_ID },
+          select: { id: true },
+        })
+        if (!invoice) {
+          const err = new Error('Invoice not found')
+          err.status = 404
+          throw err
+        }
 
-      const invoice = await db.invoice.findUnique({
-        where: { id: invoiceId },
-        select: { totalAmount: true, amountPaid: true },
-      })
+        const created = await tx.payment.create({
+          data: {
+            organizationId: ORGANIZATION_ID,
+            invoiceId,
+            patientId: patientId || null,
+            amount,
+            paymentMethod,
+            paymentReference: paymentReference || null,
+            mobileMoneyProvider: mobileMoneyProvider || null,
+            bankName: bankName || null,
+            chequeNumber: chequeNumber || null,
+            notes: notes || null,
+            receiptNumber,
+            paymentDate: new Date(),
+            isRefund: false,
+          },
+        })
 
-      const newAmountPaid = (invoice.amountPaid || 0) + amount
-      const paymentStatus =
-        newAmountPaid >= invoice.totalAmount ? 'paid' : 'partially_paid'
+        // Atomic increment — the database performs the addition.
+        const updated = await tx.invoice.update({
+          where: { id: invoiceId },
+          data: { amountPaid: { increment: amount } },
+          select: { totalAmount: true, amountPaid: true },
+        })
 
-      await db.invoice.update({
-        where: { id: invoiceId },
-        data: {
-          amountPaid: newAmountPaid,
-          balanceDue: invoice.totalAmount - newAmountPaid,
-          paymentStatus,
-          status: paymentStatus === 'paid' ? 'paid' : 'active',
-        },
-      })
+        const paymentStatus =
+          updated.amountPaid >= updated.totalAmount ? 'paid' : 'partially_paid'
 
-      try {
-        await db.auditLog.create({
+        await tx.invoice.update({
+          where: { id: invoiceId },
+          data: {
+            balanceDue: updated.totalAmount - updated.amountPaid,
+            paymentStatus,
+            // Valid schema statuses: draft|sent|overdue|paid|cancelled.
+            // (Previously set the phantom value 'active'.)
+            status: paymentStatus === 'paid' ? 'paid' : 'sent',
+          },
+        })
+
+        await tx.auditLog.create({
           data: {
             organizationId: ORGANIZATION_ID,
             action: 'PAYMENT_RECORDED',
             entityType: 'Invoice',
             entityId: invoiceId,
             details: JSON.stringify({
-              paymentId: payment.id,
+              paymentId: created.id,
               amount,
               paymentMethod,
               receiptNumber,
@@ -369,15 +435,18 @@ export async function create(req, res) {
             createdAt: new Date(),
           },
         })
-      } catch (auditError) {
-        console.warn('Audit log creation failed (non-fatal):', auditError)
-      }
+
+        return created
+      })
 
       return res.status(201).json({ success: true, data: payment })
     }
 
     return res.status(400).json({ success: false, error: 'Invalid resource type' })
   } catch (error) {
+    if (error.status) {
+      return res.status(error.status).json({ success: false, error: error.message })
+    }
     console.error('Billing create error:', error)
     return res.status(500).json({ success: false, error: 'Internal server error' })
   }
@@ -396,29 +465,38 @@ export async function update(req, res) {
 
       const { id, updates } = parsed.data
       const updateData = { ...updates }
+      if (updateData.dueDate) updateData.dueDate = new Date(updateData.dueDate)
 
-      if (updates.status === 'cancelled') {
-        updateData.cancelledAt = new Date()
+      const invoice = await db.$transaction(async (tx) => {
+        // Tenant guard: only touch an invoice that belongs to this org.
+        const existing = await tx.invoice.findFirst({
+          where: { id, organizationId: ORGANIZATION_ID },
+          select: { id: true },
+        })
+        if (!existing) {
+          const err = new Error('Invoice not found')
+          err.status = 404
+          throw err
+        }
 
-        try {
-          await db.auditLog.create({
+        if (updates.status === 'cancelled') {
+          updateData.cancelledAt = new Date()
+          await tx.auditLog.create({
             data: {
               organizationId: ORGANIZATION_ID,
               action: 'INVOICE_CANCELLED',
               entityType: 'Invoice',
               entityId: id,
-              details: JSON.stringify({ cancelledAt: updateData.cancelledAt }),
+              details: JSON.stringify({
+                cancelledAt: updateData.cancelledAt,
+                reason: updates.cancellationReason || null,
+              }),
               createdAt: new Date(),
             },
           })
-        } catch (auditError) {
-          console.warn('Audit log creation failed (non-fatal):', auditError)
         }
-      }
 
-      const invoice = await db.invoice.update({
-        where: { id },
-        data: updateData,
+        return tx.invoice.update({ where: { id }, data: updateData })
       })
 
       return res.json({ success: true, data: invoice })
@@ -432,6 +510,15 @@ export async function update(req, res) {
 
       const { id, updates } = parsed.data
 
+      // Tenant guard: don't let one org edit another org's service catalogue.
+      const existing = await db.billingService.findFirst({
+        where: { id, organizationId: ORGANIZATION_ID },
+        select: { id: true },
+      })
+      if (!existing) {
+        return res.status(404).json({ success: false, error: 'Service not found' })
+      }
+
       const service = await db.billingService.update({
         where: { id },
         data: updates,
@@ -442,6 +529,9 @@ export async function update(req, res) {
 
     return res.status(400).json({ success: false, error: 'Invalid resource type' })
   } catch (error) {
+    if (error.status) {
+      return res.status(error.status).json({ success: false, error: error.message })
+    }
     console.error('Billing update error:', error)
     return res.status(500).json({ success: false, error: 'Internal server error' })
   }
