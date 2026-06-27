@@ -65,34 +65,33 @@ export default function BarcodeScanner({ open, onClose, onScan }) {
       experimentalFeatures: { useBarCodeDetectorIfSupported: true },
     };
 
-    const stop = () => {
+    const stop = async () => {
       const inst = scannerRef.current;
       scannerRef.current = null;
-      if (!inst) return Promise.resolve();
-      // stop() throws synchronously if the camera isn't running — guard it.
-      let p;
+      if (!inst) return;
+
       try {
-        p = inst.stop();
-      } catch {
-        p = Promise.resolve();
+        // stop() throws synchronously if the camera isn't running — guard it.
+        await inst.stop();
+      } catch (err) {
+        console.warn('Failed to stop scanner:', err);
+      } finally {
+        try {
+          inst.clear();
+        } catch {
+          // element already gone
+        }
       }
-      return Promise.resolve(p)
-        .catch(() => {})
-        .finally(() => {
-          try {
-            inst.clear();
-          } catch {
-            /* element already gone */
-          }
-        });
     };
 
-    const handleSuccess = (decodedText) => {
+    const handleSuccess = async (decodedText) => {
       // Stop on first read so we don't fire repeatedly for the same code.
-      stop().finally(() => {
+      try {
+        await stop();
+      } finally {
         onScanRef.current?.(decodedText?.trim());
         onCloseRef.current?.();
-      });
+      }
     };
 
     // Defer to the next frame so the Dialog's portalled content (and our target

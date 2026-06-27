@@ -652,12 +652,12 @@ export default function PharmacyModule() {
   };
 
   // Bill + print + reset after a successful (full or partial) dispense.
-  const afterDispense = (rx) => {
+  const afterDispense = async (rx) => {
     const items = rx.items || [];
     const totalCost = items.reduce((s, i) => s + (i.unitPrice || 0) * i.quantity, 0);
     if (rx.patientId && totalCost > 0) {
-      client
-        .post("/billing", {
+      try {
+        await client.post("/billing", {
           resource: "invoice",
           patientId: rx.patientId,
           items: items.map((i) => ({
@@ -670,7 +670,10 @@ export default function PharmacyModule() {
             total: (i.unitPrice || 0) * i.quantity,
           })),
         })
-        .catch(() => {});
+      } catch (err) {
+        console.error('Failed to create billing invoice:', err)
+        toast.error('Could not create invoice (but prescription was dispensed)')
+      }
     }
     handlePrintLabel(rx);
     setShowDispenseDialog(false);

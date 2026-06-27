@@ -84,14 +84,21 @@ function useBranding() {
   const [modulesEnabled, setModulesEnabled] = useState({})
 
   useEffect(() => {
-    client.get('/settings').then(res => {
-      const s = res.data?.settings || {}
-      const orgName = res.data?.name || s.hospitalName
-      if (s.navbarColor)   setNavbarColor(s.navbarColor)
-      if (orgName)         setHospitalName(orgName)
-      if (res.data?.modulesEnabled) setModulesEnabled(res.data.modulesEnabled)
-      applyBranding({ ...s, hospitalName: orgName })
-    }).catch(() => {})
+    const loadSettings = async () => {
+      try {
+        const res = await client.get('/settings')
+        const s = res.data?.settings || {}
+        const orgName = res.data?.name || s.hospitalName
+        if (s.navbarColor)   setNavbarColor(s.navbarColor)
+        if (orgName)         setHospitalName(orgName)
+        if (res.data?.modulesEnabled) setModulesEnabled(res.data.modulesEnabled)
+        applyBranding({ ...s, hospitalName: orgName })
+      } catch (err) {
+        console.error('Failed to load settings:', err)
+      }
+    }
+
+    loadSettings()
 
     const onColorChange = (e) => { setNavbarColor(e.detail.navbarColor || e.detail); applyBranding(e.detail) }
     const onNameChange  = (e) => setHospitalName(e.detail)
