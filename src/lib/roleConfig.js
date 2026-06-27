@@ -18,7 +18,6 @@ export const MODULES = {
   patients:             { path: 'patients',              label: 'Patients',             toggle: 'patients' },
   appointments:         { path: 'appointments',          label: 'Appointments',         toggle: null },
   opd:                  { path: 'opd',                   label: 'OPD Consultations',    toggle: 'opd' },
-  consultations:        { path: 'consultations',         label: 'Consultations',        toggle: 'consultations' },
   pharmacy:             { path: 'pharmacy',              label: 'Pharmacy',             toggle: 'pharmacy' },
   billing:              { path: 'billing',               label: 'Billing',              toggle: null },
   doctorAccountability: { path: 'doctor-accountability', label: 'Doctor Accountability', toggle: 'doctorAccountability' },
@@ -31,7 +30,7 @@ export const ROLES = {
     label: 'Administrator',
     home: 'dashboard',
     modules: [
-      'dashboard', 'patients', 'appointments', 'opd', 'consultations',
+      'dashboard', 'patients', 'appointments', 'opd',
       'pharmacy', 'billing',
       'doctorAccountability', 'settings',
     ],
@@ -39,7 +38,7 @@ export const ROLES = {
   doctor: {
     label: 'Doctor',
     home: 'opd',
-    modules: ['dashboard', 'opd', 'consultations', 'patients', 'doctorAccountability'],
+    modules: ['dashboard', 'opd', 'patients', 'doctorAccountability'],
   },
   receptionist: {
     label: 'Receptionist',

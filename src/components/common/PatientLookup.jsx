@@ -73,19 +73,20 @@ export default function PatientLookup({
       return
     }
     let cancelled = false
+    const searchTerm = debouncedSearch
     ;(async () => {
       try {
         const res = await client.get('/patients', {
           params: { search: debouncedSearch, limit: 8, status: 'active' },
         })
-        if (!cancelled) {
+        if (!cancelled && searchTerm === debouncedSearch) {
           setResults(res.data ?? [])
           setOpen(true)
         }
       } catch {
-        if (!cancelled) setResults([])
+        if (!cancelled && searchTerm === debouncedSearch) setResults([])
       } finally {
-        if (!cancelled) setLoading(false)
+        if (!cancelled && searchTerm === debouncedSearch) setLoading(false)
       }
     })()
     return () => { cancelled = true }
@@ -96,19 +97,21 @@ export default function PatientLookup({
       toast.error('Enter first and last name (min 2 characters)')
       return
     }
-    if (!/^\d{10,}$/.test(newForm.phonePrimary.replace(/\D/g, ''))) {
-      toast.error('Enter a valid phone number')
+
+    const phoneDigits = newForm.phonePrimary.replace(/\D/g, '')
+    if (!phoneDigits || phoneDigits.length < 10) {
+      toast.error('Enter a valid 10-digit phone number')
       return
     }
-    // Derive an approximate DOB from age (DOB is required by the backend)
-    let dateOfBirth = null
-    if (newForm.age && Number(newForm.age) > 0) {
-      const d = new Date()
-      d.setFullYear(d.getFullYear() - Number(newForm.age))
-      dateOfBirth = d.toISOString()
-    } else {
-      dateOfBirth = new Date().toISOString()
+
+    if (!newForm.age || Number(newForm.age) <= 0 || Number(newForm.age) > 150) {
+      toast.error('Age is required and must be between 1 and 150')
+      return
     }
+
+    const dateOfBirth = new Date()
+    dateOfBirth.setFullYear(dateOfBirth.getFullYear() - Number(newForm.age))
+    dateOfBirth.setHours(0, 0, 0, 0)
     setCreating(true)
     try {
       const res = await client.post('/patients', {
@@ -116,7 +119,7 @@ export default function PatientLookup({
         lastName: newForm.lastName.trim(),
         phonePrimary: newForm.phonePrimary.trim(),
         gender: newForm.gender,
-        dateOfBirth,
+        dateOfBirth: dateOfBirth.toISOString(),
       })
       const created = res.data ?? res
       toast.success(`Patient registered: ${getPatientFullName(created)} (${created.mrn || 'new'})`)

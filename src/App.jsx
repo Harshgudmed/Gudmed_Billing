@@ -25,7 +25,6 @@ function isLightColor(hex) {
 }
 import DashboardPage from './pages/DashboardPage.jsx'
 import AppointmentsPage from './pages/AppointmentsPage.jsx'
-import ConsultationsPage from './pages/ConsultationsPage.jsx'
 import OpdPage from './pages/OpdPage.jsx'
 import PatientsPage from './pages/PatientsPage.jsx'
 import PharmacyPage from './pages/PharmacyPage.jsx'
@@ -39,7 +38,6 @@ const PAGE_BY_MODULE = {
   patients:             PatientsPage,
   appointments:         AppointmentsPage,
   opd:                  OpdPage,
-  consultations:        ConsultationsPage,
   pharmacy:             PharmacyPage,
   billing:              BillingPage,
   doctorAccountability: DoctorAccountabilityPage,
@@ -53,7 +51,6 @@ const LEGACY_NAV = [
   { to: '/',                      label: 'Dashboard' },
   { to: '/appointments',          label: 'Appointments' },
   { to: '/opd',                   label: 'OPD Consultations' },
-  { to: '/consultations',         label: 'Consultations' },
   { to: '/patients',              label: 'Patients' },
   { to: '/pharmacy',              label: 'Pharmacy' },
   { to: '/billing',               label: 'Billing' },
@@ -64,7 +61,6 @@ const LEGACY_NAV = [
 const MODULE_BY_PATH = {
   '/patients':              'patients',
   '/opd':                   'opd',
-  '/consultations':         'consultations',
   '/pharmacy':              'pharmacy',
   '/doctor-accountability': 'doctorAccountability',
 }
@@ -181,7 +177,6 @@ function LegacyApp() {
         <Route path="/" element={<DashboardPage />} />
         <Route path="/appointments"          element={<AppointmentsPage />} />
         <Route path="/opd"                   element={<OpdPage />} />
-        <Route path="/consultations"         element={<ConsultationsPage />} />
         <Route path="/patients"              element={<PatientsPage />} />
         <Route path="/pharmacy"              element={<PharmacyPage />} />
         <Route path="/billing"               element={<BillingPage />} />

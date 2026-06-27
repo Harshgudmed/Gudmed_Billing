@@ -29,7 +29,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, Di
 import client from '@/api/client'
 import { drName, cToF, fToC } from '@/lib/utils'
 import PatientLookup from '@/components/common/PatientLookup'
-
+import { printPrescription } from './utils/printOpd'
 const vitalsSchema = z.object({
   temperature: z.number().min(86).max(113).optional(),
   bloodPressureSystolic: z.number().min(60).max(250).optional(),
@@ -62,60 +62,6 @@ const getAge = (dob) => {
 const initials = (name) => name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2)
 const slug = (s) => String(s).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
 
-function printViaIframe(html) {
-  const iframe = document.createElement('iframe')
-  iframe.style.cssText = 'position:fixed;top:-9999px;left:-9999px;width:210mm;height:297mm;border:none'
-  document.body.appendChild(iframe)
-  iframe.contentDocument.open()
-  iframe.contentDocument.write(html)
-  iframe.contentDocument.close()
-  setTimeout(() => { iframe.contentWindow.focus(); iframe.contentWindow.print(); setTimeout(() => document.body.removeChild(iframe), 1000) }, 500)
-}
-
-function printPrescription(c, patientName, patientMrn, patientAge, patientGender, doctorName, orgInfo = { name: 'Hospital' }) {
-  const visitDate = format(new Date(c.visitDate), 'dd MMMM yyyy HH:mm')
-  const printDate = format(new Date(), 'dd MMM yyyy HH:mm')
-  const followUp = c.followUpDate ? format(new Date(c.followUpDate), 'dd MMM yyyy') : null
-  const rxRows = (c.prescriptions || []).flatMap(rx => {
-    try {
-      return JSON.parse(rx.items).map(item =>
-        `<tr><td>${item.drugName || ''}${item.genericName ? ` <span style="color:#888">(${item.genericName})</span>` : ''}</td><td>${item.dosage || ''}</td><td>${item.frequency || ''}</td><td>${item.duration || ''}</td><td>${item.quantity ?? ''}</td><td>${item.instructions || '—'}</td></tr>`)
-    } catch { return [] }
-  }).join('')
-  const rxBlock = rxRows ? `<div class="section"><div class="section-title">Rx — Medicines</div><table><thead><tr><th>Drug</th><th>Dose</th><th>Frequency</th><th>Duration</th><th>Qty</th><th>Instructions</th></tr></thead><tbody>${rxRows}</tbody></table></div>` : ''
-  const labs = (c.labOrders || []).flatMap(o => { try { return JSON.parse(o.tests || '[]') } catch { return [] } }).map(t => t.testName || t.testCode).filter(Boolean)
-  const rads = (c.radiologyOrders || []).map(o => o.exam?.examName || o.examName).filter(Boolean)
-  const tests = [...labs, ...rads]
-  const testBlock = tests.length ? `<div class="section"><div class="section-title">Investigations Advised</div><div class="section-body">${tests.map(t => `&#9633; ${t}`).join('&nbsp;&nbsp;&nbsp;')}</div></div>` : ''
-  const icd = (() => { try { const a = JSON.parse(c.icd10Codes || '[]'); return Array.isArray(a) ? a.join(', ') : c.icd10Codes } catch { return c.icd10Codes } })()
-
-  const html = `<!DOCTYPE html><html><head><title>OPD Prescription — ${patientMrn}</title>
-<style>*{box-sizing:border-box;margin:0;padding:0}body{font-family:Arial,Helvetica,sans-serif;font-size:10.5pt;color:#000;background:#fff}.page{max-width:210mm;margin:0 auto;padding:12mm 14mm}.hh{display:flex;justify-content:space-between;border-bottom:3px solid #2E4168;padding-bottom:8px;margin-bottom:8px}.hn{font-size:18pt;font-weight:bold;color:#2E4168}.hs{font-size:9pt;color:#555;margin-top:2px}.dr{font-size:8.5pt;color:#555;text-align:right;line-height:1.6}.pt{border:1px solid #333;margin-bottom:10px}.pth{background:#2E4168;color:#fff;padding:3px 10px;font-size:9pt;font-weight:bold;text-transform:uppercase}.g4{display:grid;grid-template-columns:repeat(4,1fr)}.cell{padding:4px 10px;border-right:1px solid #ccc;border-bottom:1px solid #ccc}.cell:last-child{border-right:none}.lbl{font-size:7.5pt;color:#555;font-weight:bold;text-transform:uppercase}.val{font-size:10pt;margin-top:1px}.vitals{display:flex;flex-wrap:wrap;gap:14px;font-size:9.5pt;border:1px solid #ddd;padding:8px 10px;border-radius:6px;margin-bottom:10px}.vitals b{color:#2E4168}.section{margin-bottom:10px}.section-title{font-weight:bold;font-size:10pt;color:#2E4168;border-bottom:1.5px solid #2E4168;padding-bottom:2px;margin-bottom:5px;text-transform:uppercase}.section-body{font-size:10.5pt;line-height:1.7}.dx{border:2px solid #2E4168;padding:10px;background:#ecfeff;margin-bottom:10px}.dxt{font-weight:bold;font-size:10.5pt;color:#2E4168;text-transform:uppercase}.dxb{font-size:11.5pt;font-weight:600;margin-top:3px}.rxsym{font-size:22pt;font-weight:bold;color:#2E4168}.fu{border-left:4px solid #10b981;background:#f0fdf4;padding:7px 10px;margin-bottom:10px}table{width:100%;border-collapse:collapse;font-size:10pt;margin-bottom:8px}th{background:#2E4168;color:#fff;padding:5px 8px;text-align:left;font-size:9pt}td{padding:5px 8px;border-bottom:1px solid #e8e8e8}tr:nth-child(even) td{background:#f9f9f9}.sig{display:grid;grid-template-columns:1fr 1fr;gap:30px;margin-top:22px;padding-top:10px}.sl{border-top:1px solid #000;padding-top:4px}.slb{font-size:9pt;color:#444;line-height:1.6}.ft{margin-top:12px;border-top:1px solid #ccc;padding-top:4px;font-size:8pt;color:#888;text-align:center}@media print{.page{padding:8mm}}</style></head><body>
-<div class="page">
-<div class="hh"><div><div class="hn">${orgInfo.name}</div><div class="hs">OPD — Outpatient Prescription</div></div><div class="dr">Date: <strong>${visitDate}</strong><br/>Attending: <strong>${drName(doctorName)}</strong><br/>Printed: ${printDate}</div></div>
-<div class="pt"><div class="pth">Patient</div><div class="g4">
-<div class="cell"><div class="lbl">Name</div><div class="val"><strong>${patientName}</strong></div></div>
-<div class="cell"><div class="lbl">UHID</div><div class="val">${patientMrn}</div></div>
-<div class="cell"><div class="lbl">Age / Sex</div><div class="val">${patientAge} yrs / ${patientGender}</div></div>
-<div class="cell"><div class="lbl">Visit</div><div class="val">Outpatient</div></div>
-</div></div>
-${(c.temperature || c.pulseRate || c.bloodPressureSystolic || c.oxygenSaturation || c.weight) ? `<div class="vitals">
-${c.temperature ? `<span>Temp <b>${cToF(c.temperature)}°F</b></span>` : ''}
-${c.bloodPressureSystolic ? `<span>BP <b>${c.bloodPressureSystolic}/${c.bloodPressureDiastolic || '—'}</b> mmHg</span>` : ''}
-${c.pulseRate ? `<span>Pulse <b>${c.pulseRate}</b> bpm</span>` : ''}
-${c.oxygenSaturation ? `<span>SpO₂ <b>${c.oxygenSaturation}%</b></span>` : ''}
-${c.weight ? `<span>Weight <b>${c.weight}</b> kg</span>` : ''}
-</div>` : ''}
-${c.chiefComplaint ? `<div class="section"><div class="section-title">Complaint</div><div class="section-body">${c.chiefComplaint}</div></div>` : ''}
-<div class="dx"><div class="dxt">Diagnosis</div><div class="dxb">${c.diagnosis || '—'}</div></div>
-${rxRows ? `<div class="rxsym">℞</div>` : ''}${rxBlock}${testBlock}
-${c.notes ? `<div class="section"><div class="section-title">Advice</div><div class="section-body">${c.notes}</div></div>` : ''}
-${followUp ? `<div class="fu"><strong>Follow-up:</strong> ${followUp}</div>` : ''}
-<div class="sig"><div></div><div class="sl"><div class="slb"><strong>${drName(doctorName)}</strong><br/>Signature & Stamp</div></div></div>
-<div class="ft">${orgInfo.name} — OPD &nbsp;|&nbsp; Confidential Medical Record &nbsp;|&nbsp; Printed: ${printDate}</div>
-</div></body></html>`
-  printViaIframe(html)
-}
 
 function GuidanceField({ label, value }) {
   if (!value || /not specified/i.test(value)) return null
@@ -164,6 +110,10 @@ export default function OpdModule() {
   const [isDeleting, setIsDeleting] = useState(false)
   const [filterSearch, setFilterSearch] = useState('')
   const [filterDoctor, setFilterDoctor] = useState('all')
+  const [filterDate, setFilterDate] = useState('all')
+  const [specificDate, setSpecificDate] = useState('')
+  const [customStart, setCustomStart] = useState('')
+  const [customEnd, setCustomEnd] = useState('')
   const [currentPage, setCurrentPage] = useState(1)
 
   const [selectedPatientId, setSelectedPatientId] = useState('')
@@ -270,9 +220,27 @@ export default function OpdModule() {
     const q = filterSearch.toLowerCase()
     const matchSearch = !filterSearch || name.includes(q) || (c.patient?.mrn || '').toLowerCase().includes(q) || (c.diagnosis || '').toLowerCase().includes(q)
     const matchDoctor = filterDoctor === 'all' || c.doctorId === filterDoctor
-    return matchSearch && matchDoctor
+    let matchDate = true
+    if (filterDate !== 'all') {
+      const cDate = new Date(c.visitDate)
+      const today = new Date()
+      if (filterDate === 'today') {
+        matchDate = cDate.toDateString() === today.toDateString()
+      } else if (filterDate === 'week') {
+        matchDate = (today.getTime() - cDate.getTime()) < 7 * 86400000
+      } else if (filterDate === 'month') {
+        matchDate = cDate.getMonth() === today.getMonth() && cDate.getFullYear() === today.getFullYear()
+      } else if (filterDate === 'specific' && specificDate) {
+        matchDate = cDate.toDateString() === new Date(specificDate).toDateString()
+      } else if (filterDate === 'custom') {
+        const dStr = cDate.toISOString().split('T')[0]
+        if (customStart && dStr < customStart) matchDate = false
+        if (customEnd && dStr > customEnd) matchDate = false
+      }
+    }
+    return matchSearch && matchDoctor && matchDate
   })
-  useEffect(() => { setCurrentPage(1) }, [filterSearch, filterDoctor])
+  useEffect(() => { setCurrentPage(1) }, [filterSearch, filterDoctor, filterDate, specificDate, customStart, customEnd])
 
   const addDrug = () => {
     const drug = drugs.find(d => d.id === selectedDrug)
@@ -430,29 +398,34 @@ export default function OpdModule() {
     const paginated = filteredConsultations.slice(startIdx, startIdx + ITEMS_PER_PAGE)
     return (
       <div className="space-y-6">
-        {/* Premium gradient header */}
-        <div className="rounded-2xl bg-gradient-to-r from-[#2E4168] via-[#34497a] to-[#24344f] p-6 text-white shadow-lg">
-          <div className="flex items-center justify-between flex-wrap gap-4">
+        {/* Clean white header matching the old Consultations module */}
+        <div>
+          <div className="flex items-center justify-between flex-wrap gap-4 mb-6">
             <div>
-              <h1 className="text-2xl font-bold flex items-center gap-2"><Stethoscope className="h-7 w-7" />OPD Consultations</h1>
-              <p className="text-white/85 text-sm mt-1">Outpatient prescriptions — Department → Problem → suggested tests &amp; medicines</p>
+              <h1 className="text-2xl font-bold flex items-center gap-2 text-gray-900"><Stethoscope className="h-6 w-6 text-blue-600" />OPD Consultations</h1>
+              <p className="text-gray-500 text-sm mt-1">View, manage and print patient consultation records</p>
             </div>
             <div className="flex gap-2">
-              <Button variant="secondary" size="sm" className="bg-white/15 text-white hover:bg-white/25 border-0" onClick={fetchAll}><RefreshCw className="h-4 w-4 mr-1" />Refresh</Button>
-              <Button size="sm" className="bg-white text-[#2E4168] hover:bg-[#2E4168]/5" onClick={() => { resetForm(); setView('form') }}><Plus className="h-4 w-4 mr-2" />New Prescription</Button>
+              <Button variant="outline" size="sm" onClick={fetchAll}><RefreshCw className="h-4 w-4 mr-1" />Refresh</Button>
+              <Button size="sm" className="bg-blue-600 hover:bg-blue-700" onClick={() => { resetForm(); setView('form') }}><Plus className="h-4 w-4 mr-2" />New Consultation</Button>
             </div>
           </div>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mt-5">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
             {[
-              { label: 'Total', value: consultations.length },
-              { label: 'Today', value: consultations.filter(c => new Date(c.visitDate).toDateString() === new Date().toDateString()).length },
-              { label: 'This Week', value: consultations.filter(c => (Date.now() - new Date(c.visitDate).getTime()) < 7 * 86400000).length },
-              { label: 'With Rx', value: consultations.filter(c => c.prescriptions && c.prescriptions.length > 0).length },
+              { label: 'Total', value: consultations.length, color: 'text-blue-600', bg: 'bg-blue-50' },
+              { label: 'Today', value: consultations.filter(c => new Date(c.visitDate).toDateString() === new Date().toDateString()).length, color: 'text-green-600', bg: 'bg-green-50' },
+              { label: 'This Week', value: consultations.filter(c => (Date.now() - new Date(c.visitDate).getTime()) < 7 * 86400000).length, color: 'text-purple-600', bg: 'bg-purple-50' },
+              { label: 'With Rx', value: consultations.filter(c => c.prescriptions && c.prescriptions.length > 0).length, color: 'text-orange-600', bg: 'bg-orange-50' },
             ].map(s => (
-              <div key={s.label} className="rounded-xl bg-white/10 backdrop-blur px-4 py-3">
-                <p className="text-white/75 text-xs">{s.label}</p>
-                <p className="text-2xl font-bold">{s.value}</p>
-              </div>
+              <Card key={s.label} className={`${s.bg} border-0 shadow-sm`}>
+                <CardContent className="p-4 flex justify-between items-center">
+                  <div>
+                    <p className="text-sm text-gray-500">{s.label}</p>
+                    <p className={`text-2xl font-bold ${s.color}`}>{s.value}</p>
+                  </div>
+                  <ClipboardList className={`h-8 w-8 ${s.color} opacity-40`} />
+                </CardContent>
+              </Card>
             ))}
           </div>
         </div>
@@ -469,8 +442,29 @@ export default function OpdModule() {
               {doctors.map(d => <SelectItem key={d.id} value={d.id}>{drName(d.fullName)}</SelectItem>)}
             </SelectContent>
           </Select>
-          {(filterDoctor !== 'all' || filterSearch) && (
-            <Button variant="ghost" size="sm" className="text-gray-500" onClick={() => { setFilterDoctor('all'); setFilterSearch('') }}><X className="h-4 w-4 mr-1" />Clear</Button>
+          <Select value={filterDate} onValueChange={setFilterDate}>
+            <SelectTrigger className="w-40 rounded-xl"><SelectValue placeholder="Date" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Dates</SelectItem>
+              <SelectItem value="today">Today</SelectItem>
+              <SelectItem value="week">This Week</SelectItem>
+              <SelectItem value="month">This Month</SelectItem>
+              <SelectItem value="specific">Specific Date</SelectItem>
+              <SelectItem value="custom">Custom Range</SelectItem>
+            </SelectContent>
+          </Select>
+          {filterDate === 'specific' && (
+            <Input type="date" className="w-44 rounded-xl" value={specificDate} onChange={e => setSpecificDate(e.target.value)} />
+          )}
+          {filterDate === 'custom' && (
+            <>
+              <Input type="date" className="w-40 rounded-xl" value={customStart} max={customEnd || undefined} onChange={e => setCustomStart(e.target.value)} />
+              <span className="text-gray-400 text-sm">to</span>
+              <Input type="date" className="w-40 rounded-xl" value={customEnd} min={customStart || undefined} onChange={e => setCustomEnd(e.target.value)} />
+            </>
+          )}
+          {(filterDoctor !== 'all' || filterSearch || filterDate !== 'all') && (
+            <Button variant="ghost" size="sm" className="text-gray-500" onClick={() => { setFilterDoctor('all'); setFilterSearch(''); setFilterDate('all'); setSpecificDate(''); setCustomStart(''); setCustomEnd('') }}><X className="h-4 w-4 mr-1" />Clear</Button>
           )}
         </div>
 
@@ -501,7 +495,7 @@ export default function OpdModule() {
                 <Card key={c.id} className="rounded-2xl border-slate-200/70 shadow-sm hover:shadow-md hover:border-[#2E4168]/25 transition-all">
                   <CardContent className="p-4">
                     <div className="flex items-start gap-4">
-                      <div className="h-11 w-11 rounded-xl bg-gradient-to-br from-[#2E4168] to-[#3b5488] flex items-center justify-center text-white text-sm font-bold shrink-0">{initials(patName)}</div>
+                      <div className="h-11 w-11 rounded-full bg-blue-600 flex items-center justify-center text-white text-sm font-bold shrink-0">{initials(patName)}</div>
                       <div className="flex-1 min-w-0">
                         <div className="flex items-start justify-between gap-2">
                           <div>
@@ -510,20 +504,41 @@ export default function OpdModule() {
                           </div>
                           <div className="text-sm text-gray-500 shrink-0">{format(new Date(c.visitDate), 'dd MMM yyyy HH:mm')}</div>
                         </div>
-                        <div className="mt-2 flex flex-wrap items-center gap-2">
-                          {c.diagnosis && <Badge className="bg-[#2E4168]/10 text-[#2E4168] hover:bg-[#2E4168]/10">{c.diagnosis}</Badge>}
-                          {c.temperature && <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 text-amber-700 border border-amber-200 px-2 py-0.5 text-xs"><Thermometer className="h-3 w-3" />{cToF(c.temperature)}°F</span>}
-                          {c.bloodPressureSystolic && <span className="inline-flex items-center gap-1 rounded-full bg-rose-50 text-rose-700 border border-rose-200 px-2 py-0.5 text-xs"><Heart className="h-3 w-3" />{c.bloodPressureSystolic}/{c.bloodPressureDiastolic}</span>}
-                          {c.pulseRate && <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 px-2 py-0.5 text-xs"><Activity className="h-3 w-3" />{c.pulseRate} bpm</span>}
-                          {c.followUpDate && <span className="inline-flex items-center gap-1 rounded-full bg-green-50 text-green-700 border border-green-300 px-2.5 py-0.5 text-xs font-medium"><CalendarClock className="h-3.5 w-3.5" />Follow-up: {format(new Date(c.followUpDate), 'dd MMM yyyy')}</span>}
+                        <div className="mt-2 grid grid-cols-1 md:grid-cols-2 gap-1">
+                          {c.chiefComplaint && <p className="text-sm"><span className="font-medium text-gray-600">Chief Complaint:</span> {c.chiefComplaint}</p>}
+                          {c.diagnosis && <p className="text-sm"><span className="font-medium text-gray-600">Diagnosis:</span> {c.diagnosis}</p>}
+                        </div>
+                        <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            {c.temperature && <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 text-amber-700 border border-amber-200 px-2 py-0.5 text-xs"><Thermometer className="h-3 w-3" />{cToF(c.temperature)}°F</span>}
+                            {c.bloodPressureSystolic && <span className="inline-flex items-center gap-1 rounded-full bg-rose-50 text-rose-700 border border-rose-200 px-2 py-0.5 text-xs"><Heart className="h-3 w-3" />{c.bloodPressureSystolic}/{c.bloodPressureDiastolic}</span>}
+                            {c.pulseRate && <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 px-2 py-0.5 text-xs"><Activity className="h-3 w-3" />{c.pulseRate} bpm</span>}
+                            {c.oxygenSaturation && <span className="inline-flex items-center gap-1 rounded-full bg-sky-50 text-sky-700 border border-sky-200 px-2 py-0.5 text-xs"><Droplet className="h-3 w-3" />{c.oxygenSaturation}%</span>}
+                            {c.weight && c.height && (() => {
+                               const m = c.height / 100
+                               const bmi = (c.weight / (m * m)).toFixed(1)
+                               return <span className="inline-flex items-center gap-1 rounded-full bg-violet-50 text-violet-700 border border-violet-200 px-2 py-0.5 text-xs"><Scale className="h-3 w-3" />BMI {bmi}</span>
+                            })()}
+                          </div>
+                          {c.followUpDate && (() => {
+                            const fu = new Date(c.followUpDate)
+                            const today = new Date(); today.setHours(0, 0, 0, 0)
+                            const upcoming = fu >= today
+                            return (
+                              <span className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-medium border ${upcoming ? 'bg-white text-green-700 border-green-300' : 'bg-white text-gray-500 border-gray-200'}`}>
+                                <CalendarClock className="h-3.5 w-3.5" />
+                                {upcoming ? `Follow-up: ${format(fu, 'dd MMM yyyy')}` : `Follow-up was: ${format(fu, 'dd MMM yyyy')}`}
+                              </span>
+                            )
+                          })()}
                         </div>
                         <div className="mt-2 flex items-center justify-between">
-                          <span className="text-xs text-gray-500">{drName(docName)}</span>
+                          <span className="text-xs text-gray-500">Dr. {drName(docName).replace('Dr. ', '')}</span>
                           <div className="flex gap-1">
-                            <Button size="sm" variant="ghost" className="h-8 px-2 text-gray-600" onClick={() => setViewing(c)}><Eye className="h-4 w-4 mr-1" />View</Button>
-                            <Button size="sm" variant="ghost" className="h-8 px-2 text-[#2E4168]" onClick={() => openEdit(c)}><Edit className="h-4 w-4 mr-1" />Edit</Button>
-                            <Button size="sm" variant="ghost" className="h-8 px-2 text-green-600" onClick={() => printPrescription(c, patName, patMrn, patAge, patGender, docName, orgInfo)}><Printer className="h-4 w-4 mr-1" />Print</Button>
-                            <Button size="sm" variant="ghost" className="h-8 px-2 text-red-600" onClick={() => setDeleting(c)}><Trash2 className="h-4 w-4 mr-1" />Delete</Button>
+                            <Button size="sm" variant="ghost" className="h-8 px-2 text-gray-600 hover:text-blue-600" onClick={() => setViewing(c)}><Eye className="h-4 w-4 mr-1" />View</Button>
+                            <Button size="sm" variant="ghost" className="h-8 px-2 text-blue-600 hover:text-blue-700" onClick={() => openEdit(c)}><Edit className="h-4 w-4 mr-1" />Edit</Button>
+                            <Button size="sm" variant="ghost" className="h-8 px-2 text-green-600 hover:text-green-700" onClick={() => printPrescription(c, patName, patMrn, patAge, patGender, docName, orgInfo)}><Printer className="h-4 w-4 mr-1" />Print</Button>
+                            <Button size="sm" variant="ghost" className="h-8 px-2 text-red-600 hover:text-red-700" onClick={() => setDeleting(c)}><Trash2 className="h-4 w-4 mr-1" />Delete</Button>
                           </div>
                         </div>
                       </div>

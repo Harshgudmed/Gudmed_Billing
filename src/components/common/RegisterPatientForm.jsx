@@ -13,6 +13,7 @@ import { SearchableSelect } from '@/components/ui/searchable-select'
 import { DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog'
 import client from '@/api/client'
 import { drName } from '@/lib/utils'
+import { useDoctorTimetable } from './hooks/useDoctorTimetable'
 
 const INDIAN_STATES = [
   'Andhra Pradesh', 'Arunachal Pradesh', 'Assam', 'Bihar', 'Chhattisgarh',
@@ -73,70 +74,13 @@ export default function RegisterPatientForm({ onSuccess, onCancel }) {
   const [savingPatient, setSavingPatient] = useState(false)
   const [doctors, setDoctors] = useState([])
   const [departments, setDepartments] = useState([])
-    const [doctorTimetable, setDoctorTimetable] = useState(null)
-  const [availableTimeSlots, setAvailableTimeSlots] = useState([])
-  const [timetableLoading, setTimetableLoading] = useState(false)
-
-  // Compute available time slots based on selected date & doctor timetable
-  useEffect(() => {
-    if (!patientForm.appointmentDate || !doctorTimetable) {
-      setAvailableTimeSlots([])
-      return
+  const { availableTimeSlots, timetableLoading } = useDoctorTimetable(
+    patientForm.doctor,
+    patientForm.appointmentDate,
+    (slots) => {
+      setPatientForm(prev => ({ ...prev, appointmentTime: slots.length > 0 ? slots[0] : '' }))
     }
-
-    const dateObj = new Date(patientForm.appointmentDate)
-    if (isNaN(dateObj.getTime())) {
-      setAvailableTimeSlots([])
-      return
-    }
-
-    const yyyy = dateObj.getFullYear()
-    const mm = String(dateObj.getMonth() + 1).padStart(2, '0')
-    const dd = String(dateObj.getDate()).padStart(2, '0')
-    const dateStr = `${yyyy}-${mm}-${dd}`
-
-    const isException = doctorTimetable.exceptions?.some(ex => ex.date === dateStr)
-    if (isException) {
-      setAvailableTimeSlots([])
-      toast.error("Doctor is on leave/vacation on this date")
-      return
-    }
-
-    const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
-    const dayName = days[dateObj.getDay()]
-
-    const dayConfig = doctorTimetable.weeklySlots?.[dayName]
-    if (!dayConfig || !dayConfig.active || !dayConfig.shifts || dayConfig.shifts.length === 0) {
-      setAvailableTimeSlots([])
-      return
-    }
-
-    const duration = doctorTimetable.slotDuration || 15
-    const slots = []
-
-    dayConfig.shifts.forEach(shift => {
-      const [startH, startM] = shift.start.split(':').map(Number)
-      const [endH, endM] = shift.end.split(':').map(Number)
-
-      let currentMinutes = startH * 60 + startM
-      const endMinutes = endH * 60 + endM
-
-      while (currentMinutes + duration <= endMinutes) {
-        const h = Math.floor(currentMinutes / 60)
-        const m = currentMinutes % 60
-        const timeStr = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`
-        slots.push(timeStr)
-        currentMinutes += duration
-      }
-    })
-
-    setAvailableTimeSlots(slots)
-    if (slots.length > 0) {
-      setPatientForm(prev => ({ ...prev, appointmentTime: slots[0] }))
-    } else {
-      setPatientForm(prev => ({ ...prev, appointmentTime: '' }))
-    }
-  }, [patientForm.appointmentDate, doctorTimetable])
+  )
 
   useEffect(() => {
     client.get('/settings?resource=users')
@@ -445,19 +389,6 @@ export default function RegisterPatientForm({ onSuccess, onCancel }) {
                     appointmentDate: '',
                     appointmentTime: ''
                   }))
-                  setDoctorTimetable(null)
-                  setAvailableTimeSlots([])
-                  if (v) {
-                    setTimetableLoading(true)
-                    client.get(`/doctor-accountability?resource=timetable&doctorId=${v}`)
-                      .then(res => {
-                        if (res.success) {
-                          setDoctorTimetable(res.data.timetable)
-                        }
-                      })
-                      .catch(() => {})
-                      .finally(() => setTimetableLoading(false))
-                  }
                 }}
                 placeholder={availableDoctors.length ? 'Select doctor' : (patientForm.department ? 'No doctors in department' : 'Select doctor')}
                 searchPlaceholder="Search doctors..."
