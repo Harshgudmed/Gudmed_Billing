@@ -83,7 +83,8 @@ export async function getAll(req, res, next) {
   try {
     const organizationId = getOrgId(req)
     if (!organizationId) {
-      return res.status(401).json({ success: false, error: 'Organization context required' })
+      console.error('Missing organizationId in getAll request - authentication middleware failure')
+      return res.status(500).json({ success: false, error: 'Server configuration error' })
     }
     const search = req.query.search || ''
     // Default to active only so soft-deleted (deactivated) patients drop out of
@@ -163,8 +164,16 @@ export async function getAll(req, res, next) {
 
 export async function getOne(req, res, next) {
   try {
+    const organizationId = getOrgId(req)
+    if (!organizationId) {
+      console.error('Missing organizationId in getOne request - authentication middleware failure')
+      return res.status(500).json({ success: false, error: 'Server configuration error' })
+    }
+
     const patient = await db.patient.findUnique({ where: { id: req.params.id } })
-    if (!patient) return res.status(404).json({ success: false, error: 'Patient not found' })
+    if (!patient || patient.organizationId !== organizationId) {
+      return res.status(404).json({ success: false, error: 'Patient not found' })
+    }
 
     // A doctor may only view their own patients — treat others as not found so we
     // don't reveal that the record exists.
@@ -186,7 +195,8 @@ export async function getRecords(req, res, next) {
   try {
     const organizationId = getOrgId(req)
     if (!organizationId) {
-      return res.status(401).json({ success: false, error: 'Organization context required' })
+      console.error('Missing organizationId in getRecords request - authentication middleware failure')
+      return res.status(500).json({ success: false, error: 'Server configuration error' })
     }
     const { id } = req.params
     const patient = await db.patient.findUnique({ where: { id } })
@@ -269,6 +279,10 @@ export async function getRecords(req, res, next) {
 export async function create(req, res, next) {
   try {
     const organizationId = getOrgId(req)
+    if (!organizationId) {
+      console.error('Missing organizationId in create request - authentication middleware failure')
+      return res.status(500).json({ success: false, error: 'Server configuration error' })
+    }
     const validatedData = patientSchema.parse(req.body)
 
     const patientData = {
@@ -353,6 +367,10 @@ export async function create(req, res, next) {
 export async function update(req, res, next) {
   try {
     const organizationId = getOrgId(req)
+    if (!organizationId) {
+      console.error('Missing organizationId in update request - authentication middleware failure')
+      return res.status(500).json({ success: false, error: 'Server configuration error' })
+    }
     const { id } = req.params
     const body = req.body
 
@@ -406,6 +424,10 @@ export async function update(req, res, next) {
 export async function remove(req, res, next) {
   try {
     const organizationId = getOrgId(req)
+    if (!organizationId) {
+      console.error('Missing organizationId in remove request - authentication middleware failure')
+      return res.status(500).json({ success: false, error: 'Server configuration error' })
+    }
     const { id } = req.params
     // SOFT DELETE: a patient's medical/legal record must never be erased
     // (record-retention; admissions/bills/results point to it). We mark the
