@@ -83,12 +83,23 @@ export default function RegisterPatientForm({ onSuccess, onCancel }) {
   )
 
   useEffect(() => {
-    client.get('/settings?resource=users')
-      .then(res => { if (res.success) setDoctors((res.data ?? []).filter(u => u.role === 'doctor')) })
-      .catch(() => {})
-    client.get('/settings?resource=departments')
-      .then(res => { if (res.success) setDepartments(res.data ?? []) })
-      .catch(() => {})
+    const loadSettings = async () => {
+      try {
+        const doctorsRes = await client.get('/settings?resource=users')
+        if (doctorsRes.success) {
+          setDoctors((doctorsRes.data ?? []).filter(u => u.role === 'doctor'))
+        }
+
+        const deptsRes = await client.get('/settings?resource=departments')
+        if (deptsRes.success) {
+          setDepartments(deptsRes.data ?? [])
+        }
+      } catch (err) {
+        console.error('Failed to load doctors and departments:', err)
+      }
+    }
+
+    loadSettings()
   }, [])
 
   const setField = (field, value) => setPatientForm(prev => ({ ...prev, [field]: value }))

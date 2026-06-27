@@ -30,7 +30,19 @@ import PatientProfile from './components/PatientProfile';
 
 export default function PatientsModule() {
   const [orgInfo, setOrgInfo] = useState({ name: 'Hospital', address: '', city: '', phone: '', email: '' });
-  useEffect(() => { getOrgSettings().then(setOrgInfo) }, []);
+
+  useEffect(() => {
+    const loadOrgSettings = async () => {
+      try {
+        const settings = await getOrgSettings()
+        setOrgInfo(settings)
+      } catch (err) {
+        console.error('Failed to load organization settings:', err)
+      }
+    }
+
+    loadOrgSettings()
+  }, []);
 
   const location = useLocation();
   const dateFilter = useDateFilter();
