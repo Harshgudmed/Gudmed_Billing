@@ -13,22 +13,26 @@ export function useDoctorTimetable(doctorId, appointmentDate, onSlotsGenerated) 
 
   // 1. Fetch the doctor's timetable when the selected doctor changes
   useEffect(() => {
-    setDoctorTimetable(null)
-    setAvailableTimeSlots([])
-    
-    if (!doctorId) return
+    const fetchTimetable = async () => {
+      try {
+        setDoctorTimetable(null)
+        setAvailableTimeSlots([])
 
-    setTimetableLoading(true)
-    client.get(`/doctor-accountability?resource=timetable&doctorId=${doctorId}`)
-      .then(res => {
+        if (!doctorId) return
+
+        setTimetableLoading(true)
+        const res = await client.get(`/doctor-accountability?resource=timetable&doctorId=${doctorId}`)
         if (res.success) {
           setDoctorTimetable(res.data.timetable)
         }
-      })
-      .catch(() => {})
-      .finally(() => {
+      } catch (err) {
+        console.error('Failed to load doctor timetable:', err)
+      } finally {
         setTimetableLoading(false)
-      })
+      }
+    }
+
+    fetchTimetable()
   }, [doctorId])
 
   // 2. Compute available time slots based on selected date & doctor timetable
