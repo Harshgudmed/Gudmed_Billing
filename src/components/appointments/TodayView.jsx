@@ -9,9 +9,9 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { CalendarDays, Clock, CheckCircle, Bell, BellOff } from "lucide-react";
+import { Clock, CheckCircle, Bell, BellOff } from "lucide-react";
 import { getPatientFullName } from "./appointmentHelpers";
-import { STATUS_CONFIG, APPOINTMENT_TYPE_CONFIG } from "./appointmentConstants";
+import { StatusBadge, TypeBadge } from "./AppointmentBadges";
 
 export default function TodayView({
   upcomingAppointments,
@@ -47,8 +47,6 @@ export default function TodayView({
               upcomingAppointments.map((appointment) => {
                 const patient = appointment.patient || getPatient(appointment.patientId);
                 const doctor = appointment.doctor;
-                const statusInfo = STATUS_CONFIG[appointment.status];
-                const StatusIcon = statusInfo?.icon || CalendarDays;
                 return (
                   <div
                     key={appointment.id}
@@ -82,12 +80,7 @@ export default function TodayView({
                         </div>
                       </div>
                       <div className="text-right">
-                        <Badge
-                          className={`${statusInfo?.bgColor} ${statusInfo?.color} border-0`}
-                        >
-                          <StatusIcon className="h-3 w-3 mr-1" />
-                          {statusInfo?.label}
-                        </Badge>
+                        <StatusBadge status={appointment.status} />
                         <div className="mt-2 flex flex-col gap-1">
                           {appointment.status === "scheduled" && (
                             <>
@@ -125,20 +118,7 @@ export default function TodayView({
                       </div>
                     </div>
                     <div className="mt-3 flex gap-2 flex-wrap">
-                      <Badge
-                        variant="outline"
-                        className={
-                          APPOINTMENT_TYPE_CONFIG[
-                            appointment.appointmentType || "new_patient"
-                          ]?.color
-                        }
-                      >
-                        {
-                          APPOINTMENT_TYPE_CONFIG[
-                            appointment.appointmentType || "new_patient"
-                          ]?.label
-                        }
-                      </Badge>
+                      <TypeBadge type={appointment.appointmentType} />
                       {appointment.reminderSent ? (
                         <Badge
                           variant="outline"
@@ -189,8 +169,6 @@ export default function TodayView({
               completedAppointments.map((appointment) => {
                 const patient = appointment.patient || getPatient(appointment.patientId);
                 const doctor = appointment.doctor;
-                const statusInfo = STATUS_CONFIG[appointment.status];
-                const StatusIcon = statusInfo?.icon || CalendarDays;
                 return (
                   <div
                     key={appointment.id}
@@ -224,12 +202,7 @@ export default function TodayView({
                           </div>
                         </div>
                       </div>
-                      <Badge
-                        className={`${statusInfo?.bgColor} ${statusInfo?.color} border-0`}
-                      >
-                        <StatusIcon className="h-3 w-3 mr-1" />
-                        {statusInfo?.label}
-                      </Badge>
+                      <StatusBadge status={appointment.status} />
                     </div>
                     {appointment.cancellationReason && (
                       <div className="mt-2 text-sm text-red-600 bg-red-50 p-2 rounded">
