@@ -8,17 +8,20 @@ import {
   addWeeks,
   subWeeks,
   startOfWeek,
-  isSameDay,
   isToday,
 } from "date-fns";
 import { drName } from "@/lib/utils";
-import { parseDate } from "./appointmentHelpers";
 import { STATUS_CONFIG } from "./appointmentConstants";
+
+// weekData is keyed by day ("yyyy-MM-dd") → { rows, total }. rows is a bounded
+// preview (first N) the server already returns sorted by time; total is the real
+// per-day count used for the "+N more" footer and the bottom summary.
+const emptyDay = { rows: [], total: 0 };
 
 export default function WeeklyView({
   currentWeek,
   setCurrentWeek,
-  appointments,
+  weekData,
   getPatient,
 }) {
   return (
@@ -85,20 +88,16 @@ export default function WeeklyView({
           <div className="grid grid-cols-7 min-h-[400px]">
             {Array.from({ length: 7 }).map((_, i) => {
               const day = addDays(currentWeek, i);
-              const dayAppointments = appointments
-                .filter((appointment) =>
-                  isSameDay(parseDate(appointment.appointmentDate), day),
-                )
-                .sort((a, b) =>
-                  a.appointmentTime.localeCompare(b.appointmentTime),
-                );
+              const { rows: dayAppointments, total } =
+                weekData[format(day, "yyyy-MM-dd")] || emptyDay;
+              const hidden = total - dayAppointments.length;
               const isCurrentDay = isToday(day);
               return (
                 <div
                   key={i}
                   className={`border-r last:border-r-0 p-2 space-y-1 ${isCurrentDay ? "bg-blue-50/30" : ""}`}
                 >
-                  {dayAppointments.length === 0 && (
+                  {total === 0 && (
                     <p className="text-xs text-gray-300 text-center mt-4">—</p>
                   )}
                   {dayAppointments.map((appointment) => {
@@ -131,6 +130,11 @@ export default function WeeklyView({
                       </div>
                     );
                   })}
+                  {hidden > 0 && (
+                    <p className="text-[10px] text-gray-400 text-center pt-1">
+                      +{hidden} more
+                    </p>
+                  )}
                 </div>
               );
             })}
@@ -140,9 +144,7 @@ export default function WeeklyView({
       <div className="grid grid-cols-2 lg:grid-cols-7 gap-4">
         {Array.from({ length: 7 }).map((_, i) => {
           const day = addDays(currentWeek, i);
-          const count = appointments.filter((appointment) =>
-            isSameDay(parseDate(appointment.appointmentDate), day),
-          ).length;
+          const count = (weekData[format(day, "yyyy-MM-dd")] || emptyDay).total;
           return (
             <div
               key={i}
