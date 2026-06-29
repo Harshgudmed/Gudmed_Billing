@@ -1,6 +1,5 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import {
   format,
@@ -12,6 +11,7 @@ import {
 } from "date-fns";
 import { drName } from "@/lib/utils";
 import { STATUS_CONFIG } from "./appointmentConstants";
+import { StatusBadge } from "./AppointmentBadges";
 
 // weekData is keyed by day ("yyyy-MM-dd") → { rows, total }. rows is a bounded
 // preview (first N) the server already returns sorted by time; total is the real
@@ -122,11 +122,11 @@ export default function WeeklyView({
                             {drName(appointment.doctor.fullName)}
                           </div>
                         )}
-                        <Badge
-                          className={`text-[9px] px-1 py-0 ${statusConfig.bgColor} ${statusConfig.color} border-0`}
-                        >
-                          {statusConfig.label}
-                        </Badge>
+                        <StatusBadge
+                          status={appointment.status}
+                          showIcon={false}
+                          className="text-[9px] px-1 py-0"
+                        />
                       </div>
                     );
                   })}
