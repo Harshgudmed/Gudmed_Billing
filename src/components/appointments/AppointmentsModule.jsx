@@ -405,32 +405,32 @@ export default function AppointmentsModule() {
   // Today's appointments split by lifecycle stage and sorted by time. Computed
   // once here so the "Today" tab's empty-check and its list render share one
   // source instead of filtering + sorting the same data twice.
-  const todaysUpcomingAppointments = useMemo(
-    () =>
-      appointments
-        .filter(
-          (appointment) =>
-            isSameDay(parseDate(appointment.appointmentDate), new Date()) &&
-            ["scheduled", "confirmed", "checked_in", "in_progress"].includes(
-              appointment.status,
-            ),
-        )
-        .sort(byTime),
-    [appointments],
-  );
-  const todaysCompletedAppointments = useMemo(
-    () =>
-      appointments
-        .filter(
-          (appointment) =>
-            isSameDay(parseDate(appointment.appointmentDate), new Date()) &&
-            ["completed", "cancelled", "no_show", "rescheduled"].includes(
-              appointment.status,
-            ),
-        )
-        .sort(byTime),
-    [appointments],
-  );
+  const APPOINTMENT_STATUSES = {
+    upcoming: ["scheduled", "confirmed", "checked_in", "in_progress"],
+    completed: ["completed", "cancelled", "no_show", "rescheduled"],
+  };
+
+  const { todaysUpcomingAppointments, todaysCompletedAppointments } = useMemo(() => {
+    const today = new Date();
+
+    const upcoming = appointments
+      .filter(
+        (apt) =>
+          isSameDay(parseDate(apt.appointmentDate), today) &&
+          APPOINTMENT_STATUSES.upcoming.includes(apt.status),
+      )
+      .sort(byTime);
+
+    const completed = appointments
+      .filter(
+        (apt) =>
+          isSameDay(parseDate(apt.appointmentDate), today) &&
+          APPOINTMENT_STATUSES.completed.includes(apt.status),
+      )
+      .sort(byTime);
+
+    return { todaysUpcomingAppointments: upcoming, todaysCompletedAppointments: completed };
+  }, [appointments]);
 
   // List view data — fetched from the server (paginated + filtered) instead of
   // filtering the whole table in the browser. Debounced so typing in the search
@@ -487,7 +487,24 @@ export default function AppointmentsModule() {
     return eachDayOfInterval({ start, end });
   }, [dates.currentMonth]);
 
-  // ── Action handlers ──
+  // Dialog helpers: openDialog sets which dialog is active plus any data it
+  // needs (appointment / editing). closeDialog resets every transient field at
+  // once, so each handler just calls closeDialog() instead of spelling out the
+  // reset every time.
+  const openDialog = (type, extra = {}) =>
+    setDialog((prev) => ({ ...prev, active: type, ...extra }));
+
+  const closeDialog = () =>
+    setDialog((prev) => ({
+      ...prev,
+      active: null,
+      appointment: null,
+      patient: null,
+      reason: "",
+      rescheduleDate: null,
+      rescheduleTime: "",
+      editing: null,
+    }));
 
   // One status-change path for all the simple lifecycle actions, instead of
   // five near-identical handlers.
@@ -517,12 +534,7 @@ export default function AppointmentsModule() {
         status: "cancelled",
         cancellationReason: dialog.reason,
       });
-      setDialog((prev) => ({
-        ...prev,
-        active: null,
-        appointment: null,
-        reason: "",
-      }));
+      closeDialog();
       toast.success("Appointment cancelled");
     } catch {
       toast.error("Failed to cancel appointment");
@@ -544,13 +556,7 @@ export default function AppointmentsModule() {
         appointmentDate: dialog.rescheduleDate.toISOString(),
         appointmentTime: dialog.rescheduleTime,
       });
-      setDialog((prev) => ({
-        ...prev,
-        active: null,
-        appointment: null,
-        rescheduleDate: null,
-        rescheduleTime: "",
-      }));
+      closeDialog();
       toast.success("Appointment rescheduled");
     } catch {
       toast.error("Failed to reschedule appointment");
@@ -570,7 +576,7 @@ export default function AppointmentsModule() {
       chiefComplaint: appointment.chiefComplaint || "",
       notes: appointment.notes || "",
     });
-    setDialog((prev) => ({ ...prev, active: "edit", editing: appointment }));
+    openDialog("edit", { editing: appointment });
   };
 
   const handleEditSubmit = async (data) => {
@@ -587,7 +593,7 @@ export default function AppointmentsModule() {
         notes: data.notes,
         status: data.status,
       });
-      setDialog((prev) => ({ ...prev, active: null, editing: null }));
+      closeDialog();
       toast.success("Appointment updated successfully");
     } catch {
       toast.error("Failed to update appointment");
@@ -678,7 +684,7 @@ export default function AppointmentsModule() {
         priority: data.priority,
         // Fee is decided by the doctor on the backend — not sent from the form
       });
-      setDialog((prev) => ({ ...prev, active: null, patient: null }));
+      closeDialog();
       form.reset();
       const patientName = getPatientFullName(patient || null);
       if (result?.draftInvoiceNumber) {
@@ -724,7 +730,6 @@ export default function AppointmentsModule() {
 
   return (
     <div className="space-y-6">
-      {/* Header */}
       <div className="flex items-center justify-between flex-wrap gap-4">
         <div>
           <h1 className="text-3xl font-bold flex items-center gap-2">
@@ -744,9 +749,10 @@ export default function AppointmentsModule() {
           <NewAppointmentDialog
             open={dialog.active === "new"}
             onOpenChange={(open) => {
-              setDialog((prev) => ({ ...prev, active: open ? "new" : null }));
-              if (!open) {
-                setDialog((prev) => ({ ...prev, patient: null }));
+              if (open) {
+                openDialog("new");
+              } else {
+                closeDialog();
                 form.reset();
               }
             }}
@@ -763,15 +769,13 @@ export default function AppointmentsModule() {
             feeCalculation={feeCalculation}
             feeCalculationLoading={loadingState.feeCalculation}
             isSubmitting={loadingState.submitting}
-            onCancel={() => setDialog((prev) => ({ ...prev, active: null }))}
+            onCancel={closeDialog}
           />
         </div>
       </div>
 
-      {/* Statistics Cards */}
       <StatisticsCards stats={stats} />
 
-      {/* Main Tabs */}
       <Tabs value={activeTab} onValueChange={setActiveTab}>
         <TabsList className="grid w-full grid-cols-5 max-w-3xl">
            <TabsTrigger value="today">Today</TabsTrigger>
@@ -783,7 +787,6 @@ export default function AppointmentsModule() {
           <TabsTrigger value="doctor-slots">Doctor Slots</TabsTrigger>
         </TabsList>
 
-        {/* ── Monthly Calendar ── */}
         <TabsContent value="calendar" className="space-y-4">
           <MonthlyView
             currentMonth={dates.currentMonth}
@@ -810,11 +813,10 @@ export default function AppointmentsModule() {
               }))
             }
             getPatient={getPatient}
-            onScheduleNew={() => setDialog((prev) => ({ ...prev, active: "new" }))}
+            onScheduleNew={() => openDialog("new")}
           />
         </TabsContent>
 
-        {/* ── Weekly View ── */}
         <TabsContent value="weekly" className="space-y-4">
           <WeeklyView
             currentWeek={dates.currentWeek}
@@ -826,7 +828,6 @@ export default function AppointmentsModule() {
           />
         </TabsContent>
 
-        {/* ── List View ── */}
         <TabsContent value="list" className="space-y-4">
           <AppointmentsListView
             searchQuery={filters.search}
@@ -868,7 +869,7 @@ export default function AppointmentsModule() {
                 list: typeof value === "function" ? value(prev.list) : value,
               }))
             }
-            onScheduleNew={() => setDialog((prev) => ({ ...prev, active: "new" }))}
+            onScheduleNew={() => openDialog("new")}
             onEdit={openEditDialog}
             onConfirm={handleConfirm}
             onCheckIn={handleCheckIn}
@@ -876,25 +877,12 @@ export default function AppointmentsModule() {
             onComplete={handleComplete}
             onNoShow={handleNoShow}
             onSendReminder={handleSendReminder}
-            onReschedule={(appointment) => {
-              setDialog((prev) => ({
-                ...prev,
-                active: "reschedule",
-                appointment,
-              }));
-            }}
-            onCancelAppointment={(appointment) => {
-              setDialog((prev) => ({
-                ...prev,
-                active: "cancel",
-                appointment,
-              }));
-            }}
+            onReschedule={(appointment) => openDialog("reschedule", { appointment })}
+            onCancelAppointment={(appointment) => openDialog("cancel", { appointment })}
             onPrint={handlePrintAppointmentCard}
           />
         </TabsContent>
 
-        {/* ── Today's Schedule ── */}
         <TabsContent value="today" className="space-y-4">
           <TodayView
             upcomingAppointments={todaysUpcomingAppointments}
@@ -908,7 +896,6 @@ export default function AppointmentsModule() {
           />
         </TabsContent>
 
-        {/* ── Doctor Slots ── */}
         <TabsContent value="doctor-slots" className="space-y-4">
           <DoctorSlotsView
             selectedDoctor={selectedDoctor}
@@ -927,11 +914,7 @@ export default function AppointmentsModule() {
       <EditAppointmentDialog
         open={dialog.active === "edit"}
         onOpenChange={(open) => {
-          setDialog((prev) => ({
-            ...prev,
-            active: open ? "edit" : null,
-            editing: open ? prev.editing : null,
-          }));
+          if (!open) closeDialog();
         }}
         form={editForm}
         onSubmit={handleEditSubmit}
@@ -939,43 +922,30 @@ export default function AppointmentsModule() {
         getPatient={getPatient}
         doctors={doctors}
         isSubmitting={loadingState.editSubmitting}
-        onCancel={() => setDialog((prev) => ({ ...prev, active: null }))}
+        onCancel={closeDialog}
       />
 
       <CancelAppointmentDialog
         open={dialog.active === "cancel"}
-        onOpenChange={(open) =>
-          setDialog((prev) => ({
-            ...prev,
-            active: open ? "cancel" : null,
-          }))
-        }
+        onOpenChange={(open) => {
+          if (!open) closeDialog();
+        }}
         appointment={dialog.appointment}
         getPatient={getPatient}
         reason={dialog.reason}
         onReasonChange={(reason) =>
           setDialog((prev) => ({ ...prev, reason }))
         }
-        onKeep={() => {
-          setDialog((prev) => ({
-            ...prev,
-            active: null,
-            appointment: null,
-            reason: "",
-          }));
-        }}
+        onKeep={closeDialog}
         onConfirm={handleCancel}
         isSubmitting={loadingState.submitting}
       />
 
       <RescheduleAppointmentDialog
         open={dialog.active === "reschedule"}
-        onOpenChange={(open) =>
-          setDialog((prev) => ({
-            ...prev,
-            active: open ? "reschedule" : null,
-          }))
-        }
+        onOpenChange={(open) => {
+          if (!open) closeDialog();
+        }}
         appointment={dialog.appointment}
         getPatient={getPatient}
         date={dialog.rescheduleDate}
@@ -986,15 +956,7 @@ export default function AppointmentsModule() {
         onTimeChange={(time) =>
           setDialog((prev) => ({ ...prev, rescheduleTime: time }))
         }
-        onCancel={() => {
-          setDialog((prev) => ({
-            ...prev,
-            active: null,
-            appointment: null,
-            rescheduleDate: null,
-            rescheduleTime: "",
-          }));
-        }}
+        onCancel={closeDialog}
         onConfirm={handleReschedule}
         isSubmitting={loadingState.submitting}
       />

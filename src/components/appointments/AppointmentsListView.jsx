@@ -1,7 +1,6 @@
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Badge } from "@/components/ui/badge";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
@@ -48,9 +47,9 @@ import { format } from "date-fns";
 import { getPatientFullName } from "./appointmentHelpers";
 import {
   STATUS_CONFIG,
-  APPOINTMENT_TYPE_CONFIG,
   APPOINTMENTS_LIST_PER_PAGE,
 } from "./appointmentConstants";
+import { StatusBadge, TypeBadge } from "./AppointmentBadges";
 
 export default function AppointmentsListView({
   searchQuery,
@@ -225,8 +224,6 @@ export default function AppointmentsListView({
                   {filteredAppointments.map((appointment) => {
                     const patient = appointment.patient || getPatient(appointment.patientId);
                     const doctor = appointment.doctor;
-                    const statusInfo = STATUS_CONFIG[appointment.status];
-                    const StatusIcon = statusInfo?.icon || CalendarDays;
                     return (
                       <TableRow
                         key={appointment.id}
@@ -284,28 +281,10 @@ export default function AppointmentsListView({
                           </div>
                         </TableCell>
                         <TableCell>
-                          <Badge
-                            variant="outline"
-                            className={
-                              APPOINTMENT_TYPE_CONFIG[
-                                appointment.appointmentType || "new_patient"
-                              ]?.color
-                            }
-                          >
-                            {
-                              APPOINTMENT_TYPE_CONFIG[
-                                appointment.appointmentType || "new_patient"
-                              ]?.label
-                            }
-                          </Badge>
+                          <TypeBadge type={appointment.appointmentType} />
                         </TableCell>
                         <TableCell>
-                          <Badge
-                            className={`${statusInfo?.bgColor} ${statusInfo?.color} border-0`}
-                          >
-                            <StatusIcon className="h-3 w-3 mr-1" />
-                            {statusInfo?.label}
-                          </Badge>
+                          <StatusBadge status={appointment.status} />
                         </TableCell>
                         <TableCell className="text-right">
                           <DropdownMenu>

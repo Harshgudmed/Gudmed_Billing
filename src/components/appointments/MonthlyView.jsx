@@ -6,7 +6,6 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   CalendarDays,
@@ -19,9 +18,9 @@ import { format, addMonths, subMonths, isSameDay, isToday } from "date-fns";
 import { getPatientFullName } from "./appointmentHelpers";
 import {
   STATUS_CONFIG,
-  APPOINTMENT_TYPE_CONFIG,
   APPOINTMENTS_LIST_PER_PAGE,
 } from "./appointmentConstants";
+import { StatusBadge, TypeBadge } from "./AppointmentBadges";
 
 const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const STATUS_DOT_CLASS = {
@@ -178,7 +177,6 @@ export default function MonthlyView({
                     const patient = appointment.patient || getPatient(appointment.patientId);
                     const doctor = appointment.doctor;
                     const statusInfo = STATUS_CONFIG[appointment.status];
-                    const StatusIcon = statusInfo?.icon || CalendarDays;
                     return (
                       <div
                         key={appointment.id}
@@ -190,12 +188,7 @@ export default function MonthlyView({
                               {appointment.appointmentTime}
                             </span>
                           </div>
-                          <Badge
-                            className={`${statusInfo?.bgColor} ${statusInfo?.color} border-0`}
-                          >
-                            <StatusIcon className="h-3 w-3 mr-1" />
-                            {statusInfo?.label}
-                          </Badge>
+                          <StatusBadge status={appointment.status} />
                         </div>
                         <div className="mt-2 font-medium">
                           {getPatientFullName(patient || null)}
@@ -206,16 +199,7 @@ export default function MonthlyView({
                         <div className="mt-2 text-sm text-gray-600">
                           {appointment.chiefComplaint}
                         </div>
-                        <Badge
-                          variant="outline"
-                          className={`mt-2 ${APPOINTMENT_TYPE_CONFIG[appointment.appointmentType || "new_patient"]?.color}`}
-                        >
-                          {
-                            APPOINTMENT_TYPE_CONFIG[
-                              appointment.appointmentType || "new_patient"
-                            ]?.label
-                          }
-                        </Badge>
+                        <TypeBadge type={appointment.appointmentType} className="mt-2" />
                       </div>
                     );
                   })}
