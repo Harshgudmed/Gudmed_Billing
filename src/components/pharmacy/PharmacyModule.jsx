@@ -1,9 +1,9 @@
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, lazy, Suspense } from "react";
 import { useOrgSettings } from '@/lib/useOrgSettings'
 import { format, addDays, startOfDay, startOfWeek, startOfMonth } from "date-fns";
 import { toast } from "sonner";
 import { ChevronLeft, ChevronRight, ScanLine } from "lucide-react";
-import BarcodeScanner from "./BarcodeScanner";
+const BarcodeScanner = lazy(() => import("./BarcodeScanner"));
 import {
   Pill,
   Search,
@@ -2303,11 +2303,13 @@ export default function PharmacyModule() {
         </DialogContent>
       </Dialog>
 
-      <BarcodeScanner
-        open={showScanner}
-        onClose={() => setShowScanner(false)}
-        onScan={handleBarcodeLookup}
-      />
+      <Suspense fallback={null}>
+        <BarcodeScanner
+          open={showScanner}
+          onClose={() => setShowScanner(false)}
+          onScan={handleBarcodeLookup}
+        />
+      </Suspense>
 
       <ImportMedicinesDialog
         open={showImport}

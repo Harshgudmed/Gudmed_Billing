@@ -1,5 +1,5 @@
 // Deployment: 2026-06-05 19:45:00 - Secrets configured
-import { useState, useEffect } from 'react'
+import { useState, useEffect, lazy, Suspense } from 'react'
 import { Routes, Route, NavLink, Navigate, useParams, Link } from 'react-router-dom'
 import { Toaster } from 'sonner'
 import { LogOut, ShieldCheck, Stethoscope, ConciergeBell, HeartPulse, ChevronRight, ClipboardList } from 'lucide-react'
@@ -23,14 +23,16 @@ function isLightColor(hex) {
   const b = parseInt(h.slice(4, 6), 16)
   return (r * 299 + g * 587 + b * 114) / 1000 > 128
 }
-import DashboardPage from './pages/DashboardPage.jsx'
-import AppointmentsPage from './pages/AppointmentsPage.jsx'
-import OpdPage from './pages/OpdPage.jsx'
-import PatientsPage from './pages/PatientsPage.jsx'
-import PharmacyPage from './pages/PharmacyPage.jsx'
-import BillingPage from './pages/BillingPage.jsx'
-import SettingsPage from './pages/SettingsPage.jsx'
-import DoctorAccountabilityPage from './pages/DoctorAccountabilityPage.jsx'
+// Each page is lazy-loaded so the browser only downloads the chunk for the
+// route the user actually visits — not the entire app up front.
+const DashboardPage            = lazy(() => import('./pages/DashboardPage.jsx'))
+const AppointmentsPage         = lazy(() => import('./pages/AppointmentsPage.jsx'))
+const OpdPage                  = lazy(() => import('./pages/OpdPage.jsx'))
+const PatientsPage             = lazy(() => import('./pages/PatientsPage.jsx'))
+const PharmacyPage             = lazy(() => import('./pages/PharmacyPage.jsx'))
+const BillingPage              = lazy(() => import('./pages/BillingPage.jsx'))
+const SettingsPage             = lazy(() => import('./pages/SettingsPage.jsx'))
+const DoctorAccountabilityPage = lazy(() => import('./pages/DoctorAccountabilityPage.jsx'))
 
 // Module key → page component. Shared by both legacy and role-based routing.
 const PAGE_BY_MODULE = {
@@ -42,6 +44,14 @@ const PAGE_BY_MODULE = {
   billing:              BillingPage,
   doctorAccountability: DoctorAccountabilityPage,
   settings:             SettingsPage,
+}
+
+function PageLoader() {
+  return (
+    <div className="flex h-64 items-center justify-center text-gray-400 text-sm">
+      Loading…
+    </div>
+  )
 }
 
 // Legacy sidebar order (used when AUTH_ENFORCED is off). Mirrors the historical nav.
@@ -180,16 +190,18 @@ function LegacyApp() {
 
   return (
     <Shell navItems={navItems} navbarColor={navbarColor} hospitalName={hospitalName} homeTo="/">
-      <Routes>
-        <Route path="/" element={<DashboardPage />} />
-        <Route path="/appointments"          element={<AppointmentsPage />} />
-        <Route path="/opd"                   element={<OpdPage />} />
-        <Route path="/patients"              element={<PatientsPage />} />
-        <Route path="/pharmacy"              element={<PharmacyPage />} />
-        <Route path="/billing"               element={<BillingPage />} />
-        <Route path="/doctor-accountability" element={<DoctorAccountabilityPage />} />
-        <Route path="/settings"              element={<SettingsPage />} />
-      </Routes>
+      <Suspense fallback={<PageLoader />}>
+        <Routes>
+          <Route path="/" element={<DashboardPage />} />
+          <Route path="/appointments"          element={<AppointmentsPage />} />
+          <Route path="/opd"                   element={<OpdPage />} />
+          <Route path="/patients"              element={<PatientsPage />} />
+          <Route path="/pharmacy"              element={<PharmacyPage />} />
+          <Route path="/billing"               element={<BillingPage />} />
+          <Route path="/doctor-accountability" element={<DoctorAccountabilityPage />} />
+          <Route path="/settings"              element={<SettingsPage />} />
+        </Routes>
+      </Suspense>
     </Shell>
   )
 }
@@ -229,18 +241,20 @@ function RoleLayout() {
 
   return (
     <Shell navItems={navItems} navbarColor={navbarColor} hospitalName={hospitalName} homeTo={homePathFor(role)} footer={footer}>
-      <Routes>
-        {allowed.map((key) => {
-          const m = MODULES[key]
-          const Page = PAGE_BY_MODULE[key]
-          if (!Page) return null
-          return m.path
-            ? <Route key={key} path={m.path} element={<Page />} />
-            : <Route key={key} index element={<Page />} />
-        })}
-        {/* Any path not allowed for this role → role home */}
-        <Route path="*" element={<Navigate to={homePathFor(role)} replace />} />
-      </Routes>
+      <Suspense fallback={<PageLoader />}>
+        <Routes>
+          {allowed.map((key) => {
+            const m = MODULES[key]
+            const Page = PAGE_BY_MODULE[key]
+            if (!Page) return null
+            return m.path
+              ? <Route key={key} path={m.path} element={<Page />} />
+              : <Route key={key} index element={<Page />} />
+          })}
+          {/* Any path not allowed for this role → role home */}
+          <Route path="*" element={<Navigate to={homePathFor(role)} replace />} />
+        </Routes>
+      </Suspense>
     </Shell>
   )
 }
