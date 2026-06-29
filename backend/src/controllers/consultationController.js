@@ -137,15 +137,16 @@ export async function create(req, res, next) {
       // Create Radiology Orders
       let radiologyOrderId = null
       if (radiologyExams && radiologyExams.length > 0) {
-        for (const exam of radiologyExams) {
+        const ts = Date.now()
+        for (let i = 0; i < radiologyExams.length; i++) {
           await tx.radiologyOrder.create({
             data: {
               organizationId,
               patientId: consultationData.patientId,
               consultationId: newConsultation.id,
               requestedById: consultationData.doctorId,
-              examId: exam.examId,
-              orderNumber: `RAD${Date.now()}`,
+              examId: radiologyExams[i].examId,
+              orderNumber: `RAD${ts}-${i}`,
               clinicalIndication: consultationData.diagnosis,
               urgency: 'routine',
               status: 'pending',
@@ -206,8 +207,9 @@ export async function update(req, res, next) {
       return res.status(400).json({ success: false, error: 'Consultation ID is required' })
     }
 
-    // Verify consultation exists
-    const existingConsultation = await db.consultation.findUnique({ where: { id } })
+    // Tenant guard: verify the consultation exists AND belongs to this org.
+    // findUnique with bare id would let Org-A update Org-B's consultation.
+    const existingConsultation = await db.consultation.findFirst({ where: { id, organizationId } })
     if (!existingConsultation) {
       return res.status(404).json({ success: false, error: 'Consultation not found' })
     }
@@ -301,16 +303,18 @@ export async function update(req, res, next) {
           where: { consultationId: id }
         })
 
-        // Create new radiology orders
-        for (const exam of radiologyExams) {
+        // Create new radiology orders — stamp ts once so exams in the same
+        // loop iteration don't share the same ms and collide on @unique.
+        const ts = Date.now()
+        for (let i = 0; i < radiologyExams.length; i++) {
           await tx.radiologyOrder.create({
             data: {
               organizationId,
               patientId: currentConsultation.patientId,
               consultationId: currentConsultation.id,
               requestedById: currentConsultation.doctorId,
-              examId: exam.examId,
-              orderNumber: `RAD${Date.now()}`,
+              examId: radiologyExams[i].examId,
+              orderNumber: `RAD${ts}-${i}`,
               clinicalIndication: updateData.diagnosis,
               urgency: 'routine',
               status: 'pending',

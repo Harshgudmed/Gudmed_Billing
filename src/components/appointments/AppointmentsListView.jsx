@@ -89,7 +89,6 @@ export default function AppointmentsListView({
 }) {
   // `filteredAppointments` is already the current server-fetched page (sorted by
   // the backend); `total` is the full match count used for pagination.
-  const paginatedAppointments = filteredAppointments;
   const totalPages = Math.ceil(total / APPOINTMENTS_LIST_PER_PAGE);
 
   return (
@@ -223,7 +222,7 @@ export default function AppointmentsListView({
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {paginatedAppointments.map((appointment) => {
+                  {filteredAppointments.map((appointment) => {
                     const patient = appointment.patient || getPatient(appointment.patientId);
                     const doctor = appointment.doctor;
                     const statusInfo = STATUS_CONFIG[appointment.status];

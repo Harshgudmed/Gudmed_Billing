@@ -29,7 +29,8 @@ export async function handleGet(req, res, next) {
     }
 
     if (resource === 'commissions') {
-      const where = {}
+      // Always scope to the caller's org — never start with an empty where.
+      const where = { organizationId: ORG_ID }
       if (doctorId) where.doctorId = doctorId
       if (status) where.status = status
       if (period) where.period = period
@@ -222,12 +223,15 @@ export async function handlePost(req, res, next) {
 
 export async function handlePatch(req, res, next) {
   try {
+    const ORG_ID = getOrgId(req)
     const { resource } = req.query
 
     if (resource === 'settle') {
       const { commissionIds, settlementNote, settlementRef } = req.body
+      // Tenant guard: restrict the bulk-settle to commissions belonging to
+      // this org only — a caller cannot settle another org's commissions.
       await db.doctorCommission.updateMany({
-        where: { id: { in: commissionIds }, status: 'pending' },
+        where: { id: { in: commissionIds }, status: 'pending', organizationId: ORG_ID },
         data: {
           status: 'settled',
           settledAt: new Date(),
@@ -246,8 +250,17 @@ export async function handlePatch(req, res, next) {
 
 export async function handleDelete(req, res, next) {
   try {
+    const ORG_ID = getOrgId(req)
     const { resource, id } = req.query
     if (resource === 'commission') {
+      // Tenant guard: verify the commission belongs to this org before deleting.
+      const existing = await db.doctorCommission.findFirst({
+        where: { id, organizationId: ORG_ID },
+        select: { id: true },
+      })
+      if (!existing) {
+        return res.status(404).json({ success: false, error: 'Commission not found' })
+      }
       await db.doctorCommission.delete({ where: { id } })
       return res.json({ success: true })
     }

@@ -1,3 +1,4 @@
+import { useMemo } from "react";
 import { Card, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import {
@@ -8,7 +9,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { User, ChevronLeft, ChevronRight } from "lucide-react";
-import { format, addDays, addWeeks, subWeeks, isSameDay, isToday } from "date-fns";
+import { format, addDays, addWeeks, subWeeks, isToday } from "date-fns";
 import { drName } from "@/lib/utils";
 import { parseDate } from "./appointmentHelpers";
 import { TIME_SLOTS } from "./appointmentConstants";
@@ -22,6 +23,22 @@ export default function DoctorSlotsView({
   appointments,
   getPatient,
 }) {
+  // Build a "yyyy-MM-dd|HH:mm" → appointments[] lookup ONCE per render (filtered
+  // by the selected doctor), instead of re-scanning the whole list in every one
+  // of the 28×7 grid cells.
+  const slotMap = useMemo(() => {
+    const map = new Map();
+    for (const appointment of appointments) {
+      if (selectedDoctor !== "all" && appointment.doctorId !== selectedDoctor)
+        continue;
+      const key = `${format(parseDate(appointment.appointmentDate), "yyyy-MM-dd")}|${appointment.appointmentTime}`;
+      const list = map.get(key);
+      if (list) list.push(appointment);
+      else map.set(key, [appointment]);
+    }
+    return map;
+  }, [appointments, selectedDoctor]);
+
   return (
     <>
       <Card>
@@ -100,17 +117,8 @@ export default function DoctorSlotsView({
                 </td>
                 {Array.from({ length: 7 }).map((_, i) => {
                   const day = addDays(currentWeek, i);
-                  const slotAppointments = appointments.filter((appointment) => {
-                    const matchesDay = isSameDay(
-                      parseDate(appointment.appointmentDate),
-                      day,
-                    );
-                    const matchesSlot = appointment.appointmentTime === slot;
-                    const doctorMatch =
-                      selectedDoctor === "all" ||
-                      appointment.doctorId === selectedDoctor;
-                    return matchesDay && matchesSlot && doctorMatch;
-                  });
+                  const slotAppointments =
+                    slotMap.get(`${format(day, "yyyy-MM-dd")}|${slot}`) || [];
                   const isBooked = slotAppointments.length > 0;
                   return (
                     <td

@@ -173,11 +173,8 @@ export default function MonthlyView({
               </div>
             ) : (
               <div className="space-y-3">
-                {[...selectedDayAppointments]
-                  .sort((a, b) =>
-                    a.appointmentTime.localeCompare(b.appointmentTime),
-                  )
-                  .map((appointment) => {
+                {/* Already sorted by appointmentTime on the server */}
+                {selectedDayAppointments.map((appointment) => {
                     const patient = appointment.patient || getPatient(appointment.patientId);
                     const doctor = appointment.doctor;
                     const statusInfo = STATUS_CONFIG[appointment.status];

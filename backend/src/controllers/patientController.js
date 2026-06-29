@@ -79,19 +79,28 @@ const patientSchema = z.object({
   notes: z.string().optional(),
 })
 
+// Whitelist of fields a client may change via update. System/identity fields
+// (organizationId, mrn, isActive, assignedCrmUserId, id, timestamps) are NEVER
+// here, so a request body can't overwrite them (mass-assignment protection).
+const PATIENT_EDITABLE_FIELDS = [
+  'firstName', 'middleName', 'lastName', 'dateOfBirth', 'gender',
+  'phonePrimary', 'phoneSecondary', 'email', 'region', 'zone', 'woreda',
+  'kebele', 'houseNumber', 'postalCode', 'emergencyContactName',
+  'emergencyContactPhone', 'emergencyContactRelationship', 'bloodGroup',
+  'allergies', 'chronicConditions', 'currentMedications', 'hasInsurance',
+  'insuranceProvider', 'insuranceId', 'insuranceExpiryDate', 'maritalStatus',
+  'referredBy', 'mlcNumber', 'occupation', 'isVip', 'notes',
+]
+
 export async function getAll(req, res, next) {
   try {
     const organizationId = getOrgId(req)
-    if (!organizationId) {
-      console.error('Missing organizationId in getAll request - authentication middleware failure')
-      return res.status(500).json({ success: false, error: 'Server configuration error' })
-    }
     const search = req.query.search || ''
     // Default to active only so soft-deleted (deactivated) patients drop out of
     // the main list. Pass ?status=inactive or ?status=all to see deactivated ones.
     const status = req.query.status || 'active'
-    const limit = parseInt(req.query.limit || '50')
-    const offset = parseInt(req.query.offset || '0')
+    const limit = Math.min(Number(req.query.limit) || 50, 1000) // NaN-safe + hard cap
+    const offset = Math.max(Number(req.query.offset) || 0, 0)   // NaN/negative → 0
 
     const where = { organizationId }
     if (status === 'active') where.isActive = true
@@ -165,10 +174,6 @@ export async function getAll(req, res, next) {
 export async function getOne(req, res, next) {
   try {
     const organizationId = getOrgId(req)
-    if (!organizationId) {
-      console.error('Missing organizationId in getOne request - authentication middleware failure')
-      return res.status(500).json({ success: false, error: 'Server configuration error' })
-    }
 
     const patient = await db.patient.findUnique({ where: { id: req.params.id } })
     if (!patient || patient.organizationId !== organizationId) {
@@ -194,10 +199,6 @@ export async function getOne(req, res, next) {
 export async function getRecords(req, res, next) {
   try {
     const organizationId = getOrgId(req)
-    if (!organizationId) {
-      console.error('Missing organizationId in getRecords request - authentication middleware failure')
-      return res.status(500).json({ success: false, error: 'Server configuration error' })
-    }
     const { id } = req.params
     const patient = await db.patient.findUnique({ where: { id } })
     if (!patient || patient.organizationId !== organizationId) {
@@ -246,17 +247,15 @@ export async function getRecords(req, res, next) {
     ])
 
     // Billing summary using Database Aggregation
-    const [billingStats] = await Promise.all([
-      db.invoice.aggregate({
-        where: {
-          patientId: id,
-          status: { not: 'cancelled' },
-          paymentStatus: { not: 'cancelled' },
-        },
-        _sum: { totalAmount: true, amountPaid: true, balanceDue: true },
-        _count: { _all: true },
-      }),
-    ])
+    const billingStats = await db.invoice.aggregate({
+      where: {
+        patientId: id,
+        status: { not: 'cancelled' },
+        paymentStatus: { not: 'cancelled' },
+      },
+      _sum: { totalAmount: true, amountPaid: true, balanceDue: true },
+      _count: { _all: true },
+    })
 
     const totalBilled = billingStats._sum.totalAmount || 0;
     const totalPaid = billingStats._sum.amountPaid || 0;
@@ -279,10 +278,6 @@ export async function getRecords(req, res, next) {
 export async function create(req, res, next) {
   try {
     const organizationId = getOrgId(req)
-    if (!organizationId) {
-      console.error('Missing organizationId in create request - authentication middleware failure')
-      return res.status(500).json({ success: false, error: 'Server configuration error' })
-    }
     const validatedData = patientSchema.parse(req.body)
 
     const patientData = {
@@ -367,10 +362,6 @@ export async function create(req, res, next) {
 export async function update(req, res, next) {
   try {
     const organizationId = getOrgId(req)
-    if (!organizationId) {
-      console.error('Missing organizationId in update request - authentication middleware failure')
-      return res.status(500).json({ success: false, error: 'Server configuration error' })
-    }
     const { id } = req.params
     const body = req.body
 
@@ -396,7 +387,11 @@ export async function update(req, res, next) {
       return res.status(403).json({ success: false, error: 'Unauthorized' })
     }
 
-    const updateData = { ...body }
+    // Only copy whitelisted fields — ignore anything else the client sends.
+    const updateData = {}
+    for (const key of PATIENT_EDITABLE_FIELDS) {
+      if (body[key] !== undefined) updateData[key] = body[key]
+    }
     if (updateData.dateOfBirth) updateData.dateOfBirth = new Date(updateData.dateOfBirth)
     if (updateData.insuranceExpiryDate) updateData.insuranceExpiryDate = new Date(updateData.insuranceExpiryDate)
     if (Array.isArray(updateData.allergies)) updateData.allergies = JSON.stringify(updateData.allergies)
@@ -424,10 +419,6 @@ export async function update(req, res, next) {
 export async function remove(req, res, next) {
   try {
     const organizationId = getOrgId(req)
-    if (!organizationId) {
-      console.error('Missing organizationId in remove request - authentication middleware failure')
-      return res.status(500).json({ success: false, error: 'Server configuration error' })
-    }
     const { id } = req.params
     // SOFT DELETE: a patient's medical/legal record must never be erased
     // (record-retention; admissions/bills/results point to it). We mark the

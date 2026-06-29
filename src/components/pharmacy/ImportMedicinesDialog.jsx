@@ -1,5 +1,4 @@
 import { useRef, useState } from "react";
-import * as XLSX from "xlsx";
 import {
   Dialog,
   DialogContent,
@@ -74,6 +73,7 @@ export default function ImportMedicinesDialog({ open, onClose, onImported }) {
     setCommitted(false);
     setFileName(file.name);
     try {
+      const XLSX = await import("xlsx");
       const buf = await file.arrayBuffer();
       const wb = XLSX.read(buf, { cellDates: true });
       const ws = wb.Sheets[wb.SheetNames[0]];
@@ -114,7 +114,8 @@ export default function ImportMedicinesDialog({ open, onClose, onImported }) {
     }
   };
 
-  const downloadTemplate = () => {
+  const downloadTemplate = async () => {
+    const XLSX = await import("xlsx");
     const ws = XLSX.utils.json_to_sheet(SAMPLE_ROWS, { header: TEMPLATE_COLUMNS });
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "Medicines");

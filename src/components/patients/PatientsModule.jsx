@@ -20,13 +20,22 @@ import RegisterPatientForm from '@/components/common/RegisterPatientForm';
 import { useDateFilter } from '@/components/common/DateFilter';
 
 // Extracted Patients Components & Hooks
-import { getFullName, calculateAge, patientSchema } from './utils/patientUtils';
+import { getFullName, patientSchema } from './utils/patientUtils';
 import { printOpdPrescription } from './utils/printPrescription';
 import { usePatients } from './hooks/usePatients';
 import { usePatientRecords } from './hooks/usePatientRecords';
 import PatientListTable from './components/PatientListTable';
 import PatientForm from './components/PatientForm';
 import PatientProfile from './components/PatientProfile';
+
+// Full, literal class strings so Tailwind keeps them at build time. Dynamic
+// strings like `bg-${color}-50` get purged in production and the colors vanish.
+const STAT_STYLES = {
+  blue:   { card: 'bg-blue-50 border-blue-200',     label: 'text-blue-600',   val: 'text-blue-700',   icon: 'text-blue-400' },
+  green:  { card: 'bg-green-50 border-green-200',   label: 'text-green-600',  val: 'text-green-700',  icon: 'text-green-400' },
+  purple: { card: 'bg-purple-50 border-purple-200', label: 'text-purple-600', val: 'text-purple-700', icon: 'text-purple-400' },
+  amber:  { card: 'bg-amber-50 border-amber-200',   label: 'text-amber-600',  val: 'text-amber-700',  icon: 'text-amber-400' },
+};
 
 export default function PatientsModule() {
   const [orgInfo, setOrgInfo] = useState({ name: 'Hospital', address: '', city: '', phone: '', email: '' });
@@ -184,17 +193,20 @@ export default function PatientsModule() {
           { label: 'Loaded', val: patients.length, color: 'green' },
           { label: 'Insured', val: patients.filter(p => p.hasInsurance).length, color: 'purple' },
           { label: 'VIP', val: patients.filter(p => p.isVip).length, color: 'amber' },
-        ].map(({ label, val, color }) => (
-          <Card key={label} className={`bg-${color}-50 border-${color}-200`}>
-            <CardContent className="p-4 flex items-center justify-between">
-              <div>
-                <p className={`text-sm text-${color}-600 font-medium`}>{label}</p>
-                <p className={`text-2xl font-bold text-${color}-700`}>{val}</p>
-              </div>
-              <Users className={`h-8 w-8 text-${color}-400`} />
-            </CardContent>
-          </Card>
-        ))}
+        ].map(({ label, val, color }) => {
+          const s = STAT_STYLES[color];
+          return (
+            <Card key={label} className={s.card}>
+              <CardContent className="p-4 flex items-center justify-between">
+                <div>
+                  <p className={`text-sm font-medium ${s.label}`}>{label}</p>
+                  <p className={`text-2xl font-bold ${s.val}`}>{val}</p>
+                </div>
+                <Users className={`h-8 w-8 ${s.icon}`} />
+              </CardContent>
+            </Card>
+          );
+        })}
       </div>
 
       {/* Filters */}

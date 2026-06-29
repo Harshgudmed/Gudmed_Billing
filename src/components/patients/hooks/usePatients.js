@@ -39,14 +39,25 @@ export function usePatients({ dfStart, dfEnd, limit = 10 }) {
     }
   }, [search, status, offset, dfStart, dfEnd, limit]);
 
-  useEffect(() => { 
-    fetchPatients(); 
+  useEffect(() => {
+    fetchPatients();
   }, [fetchPatients]);
 
-  // Reset offset when filters change
-  useEffect(() => { 
-    setOffset(0); 
-  }, [search, status, dfStart, dfEnd]);
+  // The external date filter is a prop, so reset the page from an effect.
+  useEffect(() => {
+    setOffset(0);
+  }, [dfStart, dfEnd]);
+
+  // Search/status setters reset the page in the SAME update, so changing a
+  // filter from a later page fetches once (not twice: old page + reset).
+  const changeSearch = useCallback((value) => {
+    setSearch(value);
+    setOffset(0);
+  }, []);
+  const changeStatus = useCallback((value) => {
+    setStatus(value);
+    setOffset(0);
+  }, []);
 
   return {
     patients,
@@ -54,9 +65,9 @@ export function usePatients({ dfStart, dfEnd, limit = 10 }) {
     loading,
     error,
     search,
-    setSearch,
+    setSearch: changeSearch,
     status,
-    setStatus,
+    setStatus: changeStatus,
     offset,
     setOffset,
     limit,

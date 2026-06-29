@@ -9,8 +9,8 @@ export async function getAll(req, res, next) {
   try {
     const organizationId = getOrgId(req)
     const { date, dateFrom, dateTo, status, doctorId, patientId, department, search } = req.query
-    const limit = Math.min(parseInt(req.query.limit || '50'), 1000) // hard cap
-    const offset = parseInt(req.query.offset || '0')
+    const limit = Math.min(Number(req.query.limit) || 50, 1000) // hard cap, NaN-safe
+    const offset = Math.max(Number(req.query.offset) || 0, 0)   // NaN/negative → 0
 
     const where = { organizationId }
 
