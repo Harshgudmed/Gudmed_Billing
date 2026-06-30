@@ -17,6 +17,13 @@ import { router as feeSlabRoutes } from './feeSlabRoutes.js'
 import notificationRoutes from './notificationRoutes.js'
 import paymentRoutes from './paymentRoutes.js'
 import importRoutes from './importRoutes.js'
+import preTriageRoutes from './preTriageRoutes.js'
+import triageRoutes from './triageRoutes.js'
+import dayCareRoutes from './dayCareRoutes.js'
+import ambulanceRoutes from './ambulanceRoutes.js'
+import insuranceRoutes from './insuranceRoutes.js'
+import { router as deathCertificateRoutes } from './deathCertificateRoutes.js'
+import inpatientRoutes from './inpatientRoutes.js'
 
 export const router = Router()
 
@@ -55,3 +62,10 @@ router.use('/doctor-accountability', authorize(), doctorAccountabilityRoutes)
 router.use('/fee-slabs',             authorize(), feeSlabRoutes)
 router.use('/notifications',         authorize(), notificationRoutes)
 router.use('/payments',              authorize(), paymentRoutes)
+router.use('/pre-triage',            authorize(), preTriageRoutes)
+router.use('/triage',                authorize(), triageRoutes)
+router.use('/day-care',              authorize(), dayCareRoutes)
+router.use('/ambulance',             authorize(), ambulanceRoutes)
+router.use('/insurance',             authorize(), insuranceRoutes)
+router.use('/death-certificates',    authorize(), deathCertificateRoutes)
+router.use('/inpatient',             authorize(), inpatientRoutes)

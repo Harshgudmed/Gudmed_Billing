@@ -104,6 +104,14 @@ model Organization {
   orderTasks          OrderTask[]
 
   ipdConsultations    IpdConsultation[]
+
+  preTriages          PreTriage[]
+  queues              QueueManagement[]
+  dayCareCases        DayCareCase[]
+  ambulanceTrips      AmbulanceTrip[]
+  insuranceCases      InsuranceCase[]
+  insuranceClaims     InsuranceClaim[]
+  deathCertificates   DeathCertificate[]
 }
 
 /// User (Staff)
@@ -186,6 +194,20 @@ model User {
   attendingAdmissions Admission[] @relation("AttendingDoctor")
   admittingAdmissions Admission[] @relation("AdmittingDoctor")
   dischargeAdmissions Admission[] @relation("DischargeDoctor")
+
+  // Pre-Triage screening
+  preTriagesScreened  PreTriage[] @relation("ScreenedBy")
+  preTriagesRouted    PreTriage[] @relation("RoutedBy")
+
+  // Queue management
+  queueAssigned       QueueManagement[] @relation("QueueAssignedTo")
+
+  // Day-care cases (as treating doctor)
+  dayCareCases        DayCareCase[]     @relation("DayCareDoctor")
+
+  // Death certificates
+  deathCertificatesCertified DeathCertificate[] @relation("CertifiedBy")
+  deathCertificatesIssued    DeathCertificate[] @relation("IssuedBy")
 
   @@index([organizationId])
   @@index([role])
@@ -298,6 +320,12 @@ model Patient {
   admissions          Admission[]
   machineResultsQueue MachineResultsQueue[]
   patientDocuments    PatientDocument[]
+  preTriages          PreTriage[]
+  queues              QueueManagement[]
+  dayCareCases        DayCareCase[]
+  ambulanceTrips      AmbulanceTrip[]
+  insuranceCases      InsuranceCase[]
+  deathCertificates   DeathCertificate[]
 
   @@index([organizationId])
   @@index([mrn])
@@ -2327,4 +2355,310 @@ model RadiologyReport {
   reportedBy User?          @relation("RadiologyReports", fields: [reportedById], references: [id])
 
   @@index([hasCriticalFindings])
+}
+
+/// Pre-Triage Screening (initial screening before formal triage / registration)
+model PreTriage {
+  id             String @id @default(cuid())
+  organizationId String
+
+  // Screening Information
+  screeningNumber String @unique
+
+  // Basic Demographics
+  firstName String?
+  lastName  String?
+  age       Int?
+  gender    String?
+  phone     String?
+
+  // Screening Assessment
+  chiefComplaint String?
+  briefHistory   String?
+
+  // Vital Signs
+  temperature            Float?
+  bloodPressureSystolic  Int?
+  bloodPressureDiastolic Int?
+  pulseRate              Int?
+  respiratoryRate        Int?    // breaths per minute
+  spo2                   Float?  // oxygen saturation %
+  weight                 Float?  // kg
+  height                 Float?  // cm
+  bmi                    Float?  // auto-calculated from weight/height
+  fbs                    Float?  // fasting blood sugar mg/dL
+  ppbs                   Float?  // post-prandial blood sugar mg/dL
+
+  // Triage Routing Decision
+  routedTo String? // adult_triage, mch_triage, psychiatric_triage
+
+  // Status
+  status String @default("screening") // screening, routed, registered_as_patient
+
+  // If patient is registered after screening
+  patientId String?
+
+  screenedAt   DateTime  @default(now())
+  screenedById String?
+  routedAt     DateTime?
+  routedById   String?
+
+  // Relations
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  patient      Patient?     @relation(fields: [patientId], references: [id])
+  screenedBy   User?        @relation("ScreenedBy", fields: [screenedById], references: [id])
+  routedBy     User?        @relation("RoutedBy", fields: [routedById], references: [id])
+
+  @@index([organizationId])
+  @@index([screeningNumber])
+  @@index([status])
+}
+
+/// Queue Management (unified patient queue across service areas)
+model QueueManagement {
+  id             String @id @default(cuid())
+  organizationId String
+
+  // Patient & Service
+  patientId   String?
+  serviceArea String // opd, emergency, mch, psychiatric, etc.
+  serviceType String? // consultation, procedure, etc.
+
+  // Queue Information
+  queueNumber String
+  priority    String @default("normal") // urgent, normal, low
+
+  // Assignment
+  assignedToId String?
+  assignedRoom String?
+
+  // Status
+  status String @default("waiting") // waiting, called, in_service, completed, cancelled, no_show
+
+  // Timestamps
+  joinedQueueAt      DateTime  @default(now())
+  calledAt           DateTime?
+  serviceStartedAt   DateTime?
+  serviceCompletedAt DateTime?
+
+  // Wait Time
+  estimatedWaitMinutes Int?
+
+  // Digital Display
+  displayMessage String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  patient      Patient?     @relation(fields: [patientId], references: [id])
+  assignedTo   User?        @relation("QueueAssignedTo", fields: [assignedToId], references: [id])
+
+  @@index([organizationId])
+  @@index([serviceArea, status])
+  @@index([assignedToId])
+}
+
+/// Day-Care Case (same-day admission/procedure with same-day discharge)
+model DayCareCase {
+  id             String @id @default(cuid())
+  organizationId String
+  patientId      String
+
+  caseNumber String // per-org sequential, e.g. DC0001
+  doctorId   String?
+  doctorName String? // snapshot for display even if user record changes
+  procedure  String?
+
+  admissionDate DateTime @default(now())
+  dischargeTime String? // HH:mm — same-day discharge
+
+  fee           Float  @default(0)
+  paymentStatus String @default("pending") // pending | paid | partial
+  amountPaid    Float  @default(0)
+
+  status String  @default("admitted") // admitted | in_procedure | observation | discharged | cancelled
+  notes  String?
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  createdById String?
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  patient      Patient      @relation(fields: [patientId], references: [id])
+  doctor       User?        @relation("DayCareDoctor", fields: [doctorId], references: [id])
+
+  @@unique([organizationId, caseNumber])
+  @@index([organizationId])
+  @@index([patientId])
+  @@index([admissionDate])
+  @@index([status])
+}
+
+/// Ambulance Trip — patient transport (BLS/ALS/ICU/etc.) with per-trip charge.
+model AmbulanceTrip {
+  id             String @id @default(cuid())
+  organizationId String
+  patientId      String?
+
+  tripNumber    String // per-org sequential, e.g. AM0001
+  ambulanceType String  @default("BLS") // BLS | ALS | ICU | NEONATAL | PTV | MORTUARY
+  fromLocation  String?
+  toLocation    String? @default("Hospital")
+  distanceKm    Float?
+  charge        Float   @default(0)
+
+  status  String   @default("completed") // scheduled | enroute | completed | cancelled
+  tripDate DateTime @default(now())
+
+  driverName    String?
+  vehicleNumber String?
+  contactPhone  String?
+  notes         String?
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  createdById String?
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  patient      Patient?     @relation(fields: [patientId], references: [id])
+
+  @@unique([organizationId, tripNumber])
+  @@index([organizationId])
+  @@index([patientId])
+  @@index([tripDate])
+  @@index([status])
+}
+
+/// One insurance/TPA policy attached to a patient. `amountUsed`/balance derive
+/// from approved+settled claims (computed on read), so the ledger stays truthful.
+model InsuranceCase {
+  id             String @id @default(cuid())
+  organizationId String
+  patientId      String
+
+  payerType   String  @default("INSURANCE") // INSURANCE | TPA
+  insurerName String // e.g. Star Health, HDFC Ergo
+  tpaName     String? // third-party administrator, if any
+
+  policyNumber  String?
+  coverageLimit Float   @default(0)
+
+  status    String    @default("Active") // Active | Expired | Inactive
+  validFrom DateTime?
+  validTo   DateTime?
+  notes     String?
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  createdById String?
+
+  organization Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  patient      Patient          @relation(fields: [patientId], references: [id])
+  claims       InsuranceClaim[]
+
+  @@index([organizationId])
+  @@index([patientId])
+  @@index([payerType])
+}
+
+model InsuranceClaim {
+  id             String @id @default(cuid())
+  organizationId String
+  caseId         String
+
+  claimNumber    String // per-org sequential, e.g. CLM0001
+  claimAmount    Float   @default(0)
+  approvedAmount Float?
+
+  status    String  @default("pending") // pending | submitted | approved | rejected | settled
+  diagnosis String?
+  remarks   String?
+
+  submittedAt DateTime?
+  settledAt   DateTime?
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  createdById String?
+
+  organization Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  case         InsuranceCase @relation(fields: [caseId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, claimNumber])
+  @@index([organizationId])
+  @@index([caseId])
+  @@index([status])
+}
+
+/// Death Certificate (Ethiopian standard)
+model DeathCertificate {
+  id                String @id @default(cuid())
+  organizationId    String
+  patientId         String
+  certificateNumber String @unique // DC-YYYY-XXXX
+
+  // Death Details
+  dateOfDeath     DateTime
+  timeOfDeath     String? // HH:mm
+  placeOfDeath    String // inpatient, emergency, doa, home, other
+  locationDetails String?
+
+  // Deceased Demographics (Snapshotted from patient at time of death)
+  ageAtDeathYears  Int?
+  ageAtDeathMonths Int?
+  ageAtDeathDays   Int?
+  sex              String
+  maritalStatus    String?
+  occupation       String?
+  address          String?
+
+  // Cause of Death (Ethiopian Format)
+  // Part I: Chain of events
+  immediateCause   String // (a)
+  antecedentCauseB String? // (b)
+  antecedentCauseC String? // (c)
+  antecedentCauseD String? // (d)
+
+  // Part II: Other significant conditions
+  otherConditions String?
+
+  mannerOfDeath String // natural, accident, suicide, homicide, pending, undetermined
+
+  // Autopsy
+  autopsyPerformed Boolean @default(false)
+  autopsyFindings  String?
+
+  // Maternal Death (If applicable)
+  isMaternalDeath  Boolean @default(false)
+  pregnancyRelated String? // pregnant, within_42_days, within_1_year, not_related
+
+  // Certification
+  certifiedById          String?
+  certificationDate      DateTime @default(now())
+  certifierQualification String? // MD, Nurse, etc.
+  licenseNumber          String?
+  signatureUrl           String?
+
+  // Issuance Tracking
+  issuedTo             String?
+  issuedToRelationship String?
+  issuedToNationalId   String?
+  issuedAt             DateTime?
+  issuedById           String?
+
+  // System
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  patient      Patient      @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  certifiedBy  User?        @relation("CertifiedBy", fields: [certifiedById], references: [id])
+  issuedBy     User?        @relation("IssuedBy", fields: [issuedById], references: [id])
+
+  @@index([organizationId])
+  @@index([patientId])
+  @@index([certificateNumber])
 }

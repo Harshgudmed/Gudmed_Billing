@@ -64,6 +64,15 @@ const userSchema = z.object({
 const ALL_MODULES = [
   { key: 'patients',             label: 'Patients',             description: 'Patient records and registration' },
   { key: 'consultations',        label: 'Consultations',        description: 'Doctor consultations and notes' },
+  { key: 'preTriage',            label: 'Pre-Triage',           description: 'Initial screening before registration/triage' },
+  { key: 'queue',                label: 'Queue',                description: 'Unified patient queue across service areas' },
+  { key: 'laboratory',           label: 'Laboratory',           description: 'Lab test catalog, orders, and results' },
+  { key: 'radiology',            label: 'Radiology',            description: 'Radiology exam catalog, orders, and reports' },
+  { key: 'dayCare',              label: 'Day Care',             description: 'Same-day procedures with same-day discharge' },
+  { key: 'ambulance',            label: 'Ambulance',            description: 'Patient transport trips and charges' },
+  { key: 'insurance',            label: 'Insurance / TPA',      description: 'Payer policies and claim tracking' },
+  { key: 'deathCertificate',     label: 'Death Certificates',   description: 'Issue and track death certificates' },
+  { key: 'inpatient',            label: 'Inpatient (IPD)',      description: 'Admissions, wards/beds, IPD billing, and discharge' },
   { key: 'pharmacy',             label: 'Pharmacy',             description: 'Drug inventory, dispensing, and sales' },
   { key: 'doctorAccountability', label: 'Doctor Accountability', description: 'Doctor commissions and settlements' },
   { key: 'inventory',            label: 'Inventory',            description: 'Stock management across departments' },
@@ -629,7 +638,7 @@ export default function SettingsModule() {
               <CardDescription>Enable or disable system modules</CardDescription>
             </CardHeader>
             <CardContent>
-              <div className="space-y-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 {ALL_MODULES.map(({ key, label, description }) => {
                   const enabled = modules[key] !== false
                   return (

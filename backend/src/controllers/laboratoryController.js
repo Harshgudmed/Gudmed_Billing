@@ -1,44 +1,379 @@
 import { db } from '../config/db.js'
-import { getOrgId } from '../lib/reqContext.js'
+import { getOrgId } from "../lib/reqContext.js";
+import { z } from 'zod'
 
-// GET /api/laboratory?resource=tests|orders|results
-// The standalone Laboratory page was removed; this endpoint backs the lab-test
-// catalog + order lookups used by the Consultations screen.
-export async function get(req, res, next) {
+async function resolveRequestedById(organizationId) {
+  const fromEnv = process.env.DEFAULT_REQUESTED_BY_ID
+  if (fromEnv) {
+    const user = await db.user.findUnique({ where: { id: fromEnv } })
+    if (user) return fromEnv
+  }
+  const orgId = organizationId || process.env.ORGANIZATION_ID || 'org-demo'
+  const admin = await db.user.findFirst({
+    where: { organizationId: orgId, isActive: true },
+    orderBy: { createdAt: 'asc' },
+  })
+  if (!admin) {
+    throw Object.assign(
+      new Error('No active user found to assign lab orders. Create a user in Settings or set DEFAULT_REQUESTED_BY_ID in .env'),
+      { status: 400 }
+    )
+  }
+  return admin.id
+}
+
+// ── Zod schemas ────────────────────────────────────────────────────────────────
+
+const createTestSchema = z.object({
+  testName: z.string().min(1),
+  testCode: z.string().optional(),
+  testCategory: z.string().optional(),
+  testType: z.string().optional(),
+  specimenType: z.string().optional(),
+  specimenVolume: z.string().optional(),
+  specimenContainer: z.string().optional(),
+  unit: z.string().optional(),
+  referenceRanges: z.string().optional(),
+  price: z.number().optional(),
+  turnaroundTime: z.number().int().optional(),
+  department: z.string().optional(),
+  preparationInstructions: z.string().optional(),
+  clinicalSignificance: z.string().optional(),
+})
+
+const createOrderSchema = z.object({
+  patientId: z.string().min(1),
+  consultationId: z.string().optional(),
+  tests: z.array(z.any()).min(1),
+  clinicalIndication: z.string().optional(),
+  provisionalDiagnosis: z.string().optional(),
+  priority: z.string().optional(),
+  notes: z.string().optional(),
+})
+
+const createResultSchema = z.object({
+  orderId: z.string().min(1),
+  testId: z.string().min(1),
+  resultValue: z.string().optional(),
+  resultUnit: z.string().optional(),
+  isAbnormal: z.boolean().optional(),
+  isCritical: z.boolean().optional(),
+  flag: z.string().optional(),
+  comment: z.string().optional(),
+})
+
+const updateOrderSchema = z.object({
+  id: z.string().min(1),
+}).passthrough()
+
+const updateResultSchema = z.object({
+  id: z.string().min(1),
+}).passthrough()
+
+const updateTestSchema = z.object({
+  id: z.string().min(1),
+}).passthrough()
+
+// ── Helpers ────────────────────────────────────────────────────────────────────
+
+function todayRange() {
+  const start = new Date()
+  start.setHours(0, 0, 0, 0)
+  const end = new Date()
+  end.setHours(23, 59, 59, 999)
+  return { gte: start, lte: end }
+}
+
+// ── Controllers ────────────────────────────────────────────────────────────────
+
+export const getAll = async (req, res, next) => {
   try {
-    const organizationId = getOrgId(req)
-    const resource = req.query.resource || 'tests'
+    const ORGANIZATION_ID = getOrgId(req)
+    const { resource, testCategory, status, priority, orderId } = req.query
+
+    // Parse and validate pagination parameters
+    let limit = parseInt(req.query.limit) || 10
+    let offset = parseInt(req.query.offset) || 0
+
+    // Ensure valid values
+    limit = Math.max(1, Math.min(limit, 1000)) // min 1, max 1000
+    offset = Math.max(0, offset) // min 0
 
     if (resource === 'tests') {
-      const tests = await db.labTest.findMany({
-        where: { organizationId },
-        orderBy: { testName: 'asc' },
+      const where = { organizationId: ORGANIZATION_ID, isActive: true }
+      if (testCategory) where.testCategory = testCategory
+
+      const [data, total] = await Promise.all([
+        db.labTest.findMany({
+          where,
+          orderBy: [{ testCategory: 'asc' }, { testName: 'asc' }],
+          take: limit,
+          skip: offset,
+        }),
+        db.labTest.count({ where }),
+      ])
+
+      const hasMore = (offset + limit) < total
+      const page = Math.floor(offset / limit) + 1
+      const totalPages = Math.ceil(total / limit)
+
+      return res.json({
+        success: true,
+        data,
+        meta: {
+          total,
+          limit,
+          offset,
+          page,
+          totalPages,
+          hasMore
+        },
       })
-      return res.json({ success: true, data: tests })
     }
 
     if (resource === 'orders') {
-      const orders = await db.labOrder.findMany({
-        where: { organizationId },
-        orderBy: { createdAt: 'desc' },
-        include: {
-          patient: { select: { id: true, mrn: true, firstName: true, lastName: true } },
-          results: { include: { test: true } },
-        },
+      const where = { organizationId: ORGANIZATION_ID }
+      if (status) where.status = status
+      if (priority) where.priority = priority
+
+      const [data, total] = await Promise.all([
+        db.labOrder.findMany({
+          where,
+          include: {
+            patient: {
+              select: {
+                id: true,
+                mrn: true,
+                firstName: true,
+                lastName: true,
+                gender: true,
+                dateOfBirth: true,
+                phonePrimary: true,
+              },
+            },
+            results: {
+              include: { test: true },
+            },
+          },
+          orderBy: { createdAt: 'desc' },
+          take: limit,
+          skip: offset,
+        }),
+        db.labOrder.count({ where }),
+      ])
+
+      const hasMore = (offset + limit) < total
+      const page = Math.floor(offset / limit) + 1
+      const totalPages = Math.ceil(total / limit)
+
+      return res.json({
+        success: true,
+        data,
+        meta: { total, limit, offset, page, totalPages, hasMore },
       })
-      return res.json({ success: true, data: orders })
     }
 
     if (resource === 'results') {
-      const results = await db.labResult.findMany({
-        where: { order: { organizationId } },
-        orderBy: { createdAt: 'desc' },
-        include: { test: true },
+      const where = {}
+      if (orderId) where.orderId = orderId
+
+      const [data, total] = await Promise.all([
+        db.labResult.findMany({
+          where,
+          include: {
+            test: true,
+            order: {
+              include: {
+                patient: {
+                  select: {
+                    id: true,
+                    mrn: true,
+                    firstName: true,
+                    lastName: true,
+                    gender: true,
+                    dateOfBirth: true,
+                    phonePrimary: true,
+                  },
+                },
+              },
+            },
+          },
+          orderBy: { createdAt: 'desc' },
+          take: limit,
+          skip: offset,
+        }),
+        db.labResult.count({ where }),
+      ])
+
+      const hasMore = (offset + limit) < total
+      const page = Math.floor(offset / limit) + 1
+      const totalPages = Math.ceil(total / limit)
+
+      return res.json({
+        success: true,
+        data,
+        meta: { total, limit, offset, page, totalPages, hasMore },
       })
-      return res.json({ success: true, data: results })
     }
 
-    return res.json({ success: true, data: [] })
+    if (resource === 'stats') {
+      const baseWhere = { organizationId: ORGANIZATION_ID }
+
+      const [pending, sampleCollected, inProgress, completedToday, criticalResults, totalTests] =
+        await Promise.all([
+          db.labOrder.count({ where: { ...baseWhere, status: 'pending' } }),
+          db.labOrder.count({ where: { ...baseWhere, status: 'sample_collected' } }),
+          db.labOrder.count({ where: { ...baseWhere, status: 'in_progress' } }),
+          db.labOrder.count({
+            where: { ...baseWhere, status: 'completed', resultsReportedAt: todayRange() },
+          }),
+          db.labResult.count({ where: { isCritical: true, verifiedAt: null } }),
+          db.labTest.count({ where: { organizationId: ORGANIZATION_ID, isActive: true } }),
+        ])
+
+      return res.json({
+        success: true,
+        data: { pending, sampleCollected, inProgress, completedToday, criticalResults, totalTests },
+      })
+    }
+
+    return res.status(400).json({ success: false, error: 'Invalid resource parameter' })
+  } catch (err) {
+    next(err)
+  }
+}
+
+export const create = async (req, res, next) => {
+  try {
+    const ORGANIZATION_ID = getOrgId(req)
+    const { resource } = req.body
+
+    if (resource === 'test') {
+      const parsed = createTestSchema.safeParse(req.body)
+      if (!parsed.success) {
+        return res.status(400).json({ success: false, error: 'Validation error', details: parsed.error.issues })
+      }
+
+      const data = await db.labTest.create({
+        data: {
+          ...parsed.data,
+          organizationId: ORGANIZATION_ID,
+          isActive: true,
+        },
+      })
+      return res.json({ success: true, data })
+    }
+
+    if (resource === 'order') {
+      const parsed = createOrderSchema.safeParse(req.body)
+      if (!parsed.success) {
+        return res.status(400).json({ success: false, error: 'Validation error', details: parsed.error.issues })
+      }
+
+      const { patientId, consultationId, tests, clinicalIndication, provisionalDiagnosis, priority, notes } =
+        parsed.data
+
+      const orderNumber = `LAB${Date.now()}`
+      const requestedById = await resolveRequestedById(ORGANIZATION_ID)
+
+      const data = await db.labOrder.create({
+        data: {
+          orderNumber,
+          organizationId: ORGANIZATION_ID,
+          patientId,
+          consultationId: consultationId || null,
+          requestedById,
+          tests: JSON.stringify(tests),
+          clinicalIndication,
+          provisionalDiagnosis,
+          priority,
+          notes,
+          status: 'pending',
+        },
+      })
+      return res.json({ success: true, data })
+    }
+
+    if (resource === 'result') {
+      const parsed = createResultSchema.safeParse(req.body)
+      if (!parsed.success) {
+        return res.status(400).json({ success: false, error: 'Validation error', details: parsed.error.issues })
+      }
+
+      const { orderId, testId, resultValue, resultUnit, isAbnormal, isCritical, flag, comment } =
+        parsed.data
+
+      const data = await db.labResult.create({
+        data: {
+          orderId,
+          testId,
+          resultValue,
+          resultUnit,
+          isAbnormal,
+          isCritical,
+          flag,
+          comment,
+        },
+      })
+      return res.json({ success: true, data })
+    }
+
+    return res.status(400).json({ success: false, error: 'Invalid resource value' })
+  } catch (err) {
+    next(err)
+  }
+}
+
+export const update = async (req, res, next) => {
+  try {
+    const { resource } = req.body
+
+    if (resource === 'order') {
+      const parsed = updateOrderSchema.safeParse(req.body)
+      if (!parsed.success) {
+        return res.status(400).json({ success: false, error: 'Validation error', details: parsed.error.issues })
+      }
+
+      const { id, resource: _r, ...updates } = parsed.data
+
+      const data = await db.labOrder.update({
+        where: { id },
+        data: { ...updates },
+      })
+      return res.json({ success: true, data })
+    }
+
+    if (resource === 'result') {
+      const parsed = updateResultSchema.safeParse(req.body)
+      if (!parsed.success) {
+        return res.status(400).json({ success: false, error: 'Validation error', details: parsed.error.issues })
+      }
+
+      const { id, resource: _r, ...updates } = parsed.data
+
+      const data = await db.labResult.update({
+        where: { id },
+        data: { ...updates },
+      })
+      return res.json({ success: true, data })
+    }
+
+    if (resource === 'test') {
+      const parsed = updateTestSchema.safeParse(req.body)
+      if (!parsed.success) {
+        return res.status(400).json({ success: false, error: 'Validation error', details: parsed.error.issues })
+      }
+
+      const { id, resource: _r, ...updates } = parsed.data
+
+      const data = await db.labTest.update({
+        where: { id },
+        data: { ...updates },
+      })
+      return res.json({ success: true, data })
+    }
+
+    return res.status(400).json({ success: false, error: 'Invalid resource value' })
   } catch (err) {
     next(err)
   }
