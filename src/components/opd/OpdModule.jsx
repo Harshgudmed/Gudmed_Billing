@@ -167,8 +167,8 @@ export default function OpdModule() {
       client.get('/patients?status=active&limit=500'),
       client.get('/settings?resource=users'),
       client.get('/pharmacy/drugs?limit=5000'),
-      client.get('/laboratory?resource=tests'),
-      client.get('/radiology?resource=exams'),
+      client.get('/laboratory?resource=tests&limit=1000'),
+      client.get('/radiology?resource=exams&limit=1000'),
       client.get('/clinical-kb/specialties'),
     ])
     if (cRes.status === 'fulfilled') setConsultations(cRes.value?.data ?? [])

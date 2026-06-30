@@ -30,7 +30,7 @@ export async function list(req, res, next) {
       ? { [sortBy]: sortOrder === 'asc' ? 'asc' : 'desc' }
       : { createdAt: 'desc' }
 
-    const [data, total] = await Promise.all([
+    const [data, total, sumAgg] = await Promise.all([
       db.pharmacySale.findMany({
         where,
         include: {
@@ -41,9 +41,17 @@ export async function list(req, res, next) {
         take: limit,
       }),
       db.pharmacySale.count({ where }),
+      // Sum across the WHOLE filtered set (not just this page) so the UI can show
+      // the period's true revenue even though it only loads one page of rows.
+      db.pharmacySale.aggregate({ where, _sum: { totalAmount: true } }),
     ])
 
-    res.json({ success: true, data, pagination: paginationMeta(page, limit, total) })
+    res.json({
+      success: true,
+      data,
+      pagination: paginationMeta(page, limit, total),
+      summary: { totalAmount: sumAgg._sum.totalAmount ?? 0, totalCount: total },
+    })
   } catch (err) {
     next(err)
   }

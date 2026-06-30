@@ -33,13 +33,31 @@ const PharmacyPage             = lazy(() => import('./pages/PharmacyPage.jsx'))
 const BillingPage              = lazy(() => import('./pages/BillingPage.jsx'))
 const SettingsPage             = lazy(() => import('./pages/SettingsPage.jsx'))
 const DoctorAccountabilityPage = lazy(() => import('./pages/DoctorAccountabilityPage.jsx'))
+const PreTriagePage            = lazy(() => import('./pages/PreTriagePage.jsx'))
+const QueuePage                = lazy(() => import('./pages/QueuePage.jsx'))
+const LaboratoryPage           = lazy(() => import('./pages/LaboratoryPage.jsx'))
+const RadiologyPage            = lazy(() => import('./pages/RadiologyPage.jsx'))
+const DayCarePage              = lazy(() => import('./pages/DayCarePage.jsx'))
+const AmbulancePage            = lazy(() => import('./pages/AmbulancePage.jsx'))
+const InsurancePage            = lazy(() => import('./pages/InsurancePage.jsx'))
+const DeathCertificatePage     = lazy(() => import('./pages/DeathCertificatePage.jsx'))
+const InpatientPage            = lazy(() => import('./pages/InpatientPage.jsx'))
 
 // Module key → page component. Shared by both legacy and role-based routing.
 const PAGE_BY_MODULE = {
   dashboard:            DashboardPage,
   patients:             PatientsPage,
   appointments:         AppointmentsPage,
+  preTriage:            PreTriagePage,
+  queue:                QueuePage,
   opd:                  OpdPage,
+  laboratory:           LaboratoryPage,
+  radiology:            RadiologyPage,
+  dayCare:              DayCarePage,
+  ambulance:            AmbulancePage,
+  insurance:            InsurancePage,
+  deathCertificate:     DeathCertificatePage,
+  inpatient:            InpatientPage,
   pharmacy:             PharmacyPage,
   billing:              BillingPage,
   doctorAccountability: DoctorAccountabilityPage,
@@ -60,8 +78,17 @@ function PageLoader() {
 const LEGACY_NAV = [
   { to: '/',                      label: 'Dashboard' },
   { to: '/appointments',          label: 'Appointments' },
+  { to: '/pre-triage',            label: 'Pre-Triage' },
+  { to: '/queue',                 label: 'Queue' },
   { to: '/opd',                   label: 'OPD Consultations' },
   { to: '/patients',              label: 'Patients' },
+  { to: '/laboratory',            label: 'Laboratory' },
+  { to: '/radiology',             label: 'Radiology' },
+  { to: '/day-care',              label: 'Day Care' },
+  { to: '/ambulance',             label: 'Ambulance' },
+  { to: '/insurance',             label: 'Insurance / TPA' },
+  { to: '/death-certificates',    label: 'Death Certificates' },
+  { to: '/inpatient',             label: 'Inpatient (IPD)' },
   { to: '/pharmacy',              label: 'Pharmacy' },
   { to: '/billing',               label: 'Billing' },
   { to: '/doctor-accountability', label: 'Doctor Accountability' },
@@ -70,7 +97,16 @@ const LEGACY_NAV = [
 
 const MODULE_BY_PATH = {
   '/patients':              'patients',
+  '/pre-triage':            'preTriage',
+  '/queue':                 'queue',
   '/opd':                   'opd',
+  '/laboratory':            'laboratory',
+  '/radiology':             'radiology',
+  '/day-care':              'dayCare',
+  '/ambulance':             'ambulance',
+  '/insurance':             'insurance',
+  '/death-certificates':    'deathCertificate',
+  '/inpatient':             'inpatient',
   '/pharmacy':              'pharmacy',
   '/doctor-accountability': 'doctorAccountability',
 }
@@ -194,8 +230,17 @@ function LegacyApp() {
         <Routes>
           <Route path="/" element={<DashboardPage />} />
           <Route path="/appointments"          element={<AppointmentsPage />} />
+          <Route path="/pre-triage"            element={<PreTriagePage />} />
+          <Route path="/queue"                 element={<QueuePage />} />
           <Route path="/opd"                   element={<OpdPage />} />
           <Route path="/patients"              element={<PatientsPage />} />
+          <Route path="/laboratory"            element={<LaboratoryPage />} />
+          <Route path="/radiology"             element={<RadiologyPage />} />
+          <Route path="/day-care"              element={<DayCarePage />} />
+          <Route path="/ambulance"             element={<AmbulancePage />} />
+          <Route path="/insurance"             element={<InsurancePage />} />
+          <Route path="/death-certificates"    element={<DeathCertificatePage />} />
+          <Route path="/inpatient"             element={<InpatientPage />} />
           <Route path="/pharmacy"              element={<PharmacyPage />} />
           <Route path="/billing"               element={<BillingPage />} />
           <Route path="/doctor-accountability" element={<DoctorAccountabilityPage />} />
