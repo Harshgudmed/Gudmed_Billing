@@ -17,7 +17,16 @@ export const MODULES = {
   dashboard:            { path: '',                      label: 'Dashboard',            toggle: null },
   patients:             { path: 'patients',              label: 'Patients',             toggle: 'patients' },
   appointments:         { path: 'appointments',          label: 'Appointments',         toggle: null },
+  preTriage:            { path: 'pre-triage',            label: 'Pre-Triage',           toggle: 'preTriage' },
+  queue:                { path: 'queue',                 label: 'Queue',                toggle: 'queue' },
   opd:                  { path: 'opd',                   label: 'OPD Consultations',    toggle: 'opd' },
+  laboratory:           { path: 'laboratory',            label: 'Laboratory',           toggle: 'laboratory' },
+  radiology:            { path: 'radiology',             label: 'Radiology',            toggle: 'radiology' },
+  dayCare:              { path: 'day-care',              label: 'Day Care',             toggle: 'dayCare' },
+  ambulance:            { path: 'ambulance',             label: 'Ambulance',            toggle: 'ambulance' },
+  insurance:            { path: 'insurance',             label: 'Insurance / TPA',      toggle: 'insurance' },
+  deathCertificate:     { path: 'death-certificates',    label: 'Death Certificates',   toggle: 'deathCertificate' },
+  inpatient:            { path: 'inpatient',             label: 'Inpatient (IPD)',      toggle: 'inpatient' },
   pharmacy:             { path: 'pharmacy',              label: 'Pharmacy',             toggle: 'pharmacy' },
   billing:              { path: 'billing',               label: 'Billing',              toggle: null },
   doctorAccountability: { path: 'doctor-accountability', label: 'Doctor Accountability', toggle: 'doctorAccountability' },
@@ -30,8 +39,8 @@ export const ROLES = {
     label: 'Administrator',
     home: 'dashboard',
     modules: [
-      'dashboard', 'patients', 'appointments', 'opd',
-      'pharmacy', 'billing',
+      'dashboard', 'patients', 'appointments', 'preTriage', 'queue', 'opd',
+      'laboratory', 'radiology', 'dayCare', 'ambulance', 'insurance', 'deathCertificate', 'inpatient', 'pharmacy', 'billing',
       'doctorAccountability', 'settings',
     ],
   },
@@ -43,7 +52,7 @@ export const ROLES = {
   receptionist: {
     label: 'Receptionist',
     home: 'appointments',
-    modules: ['dashboard', 'appointments', 'patients', 'billing'],
+    modules: ['dashboard', 'appointments', 'preTriage', 'queue', 'patients', 'billing'],
   },
 
   // ── Phase 3.0: clinical-orders roles. Mapped in backend rbac.js already; these
@@ -51,7 +60,7 @@ export const ROLES = {
   nurse: {
     label: 'Nurse',
     home: 'dashboard',
-    modules: ['dashboard', 'patients'],
+    modules: ['dashboard', 'preTriage', 'patients'],
   },
   pharmacist: {
     label: 'Pharmacist',

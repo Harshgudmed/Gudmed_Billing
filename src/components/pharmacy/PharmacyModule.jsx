@@ -1,5 +1,7 @@
 import { useState, useEffect, useCallback, useMemo, lazy, Suspense } from "react";
 import { useOrgSettings } from '@/lib/useOrgSettings'
+import { useServerPagination } from '@/lib/useServerPagination'
+import { useDebounce } from '@/lib/useDebounce'
 import { format, addDays, startOfDay, startOfWeek, startOfMonth } from "date-fns";
 import { toast } from "sonner";
 import { ChevronLeft, ChevronRight, ScanLine } from "lucide-react";
@@ -56,196 +58,26 @@ import {
 import { Checkbox } from "@/components/ui/checkbox";
 import client from "@/api/client";
 import { drName } from "@/lib/utils";
-
-const DRUG_CATEGORIES = [
-  "Antibiotics",
-  "Analgesics",
-  "Antimalarials",
-  "Antiretrovirals (ARV)",
-  "Cardiovascular",
-  "Respiratory",
-  "Gastrointestinal",
-  "Vitamins",
-  "Antidiabetics",
-  "Antihelminthics",
-  "Antifungals",
-  "Topical",
-  "Antihistamines",
-  "Vaccines",
-  "IV Fluids",
-  "Other",
-];
-const DRUG_FORMS = [
-  "Tablet",
-  "Capsule",
-  "Syrup",
-  "Injection",
-  "Cream",
-  "Ointment",
-  "Drops",
-  "Inhaler",
-  "Suppository",
-  "Solution",
-  "Suspension",
-];
-const SCHEDULE_TYPES = ["none", "G", "H", "H1", "X"];
-
-const DRUGS_PER_PAGE = 15
-const PHARMACY_BATCHES_PER_PAGE = 10
-const PHARMACY_PO_PER_PAGE = 10
-const PHARMACY_SALES_PER_PAGE = 10
-
-const DRUG_INTERACTIONS = [
-  {
-    drugs: ["warfarin", "aspirin"],
-    severity: "high",
-    message:
-      "Warfarin + Aspirin: increased bleeding risk — monitor INR closely.",
-  },
-  {
-    drugs: ["warfarin", "ibuprofen"],
-    severity: "high",
-    message: "Warfarin + Ibuprofen: increased bleeding risk — avoid NSAIDs.",
-  },
-  {
-    drugs: ["metformin", "alcohol"],
-    severity: "moderate",
-    message: "Metformin + Alcohol: risk of lactic acidosis — counsel patient.",
-  },
-  {
-    drugs: ["amoxicillin", "methotrexate"],
-    severity: "high",
-    message: "Amoxicillin + Methotrexate: elevated methotrexate toxicity.",
-  },
-  {
-    drugs: ["ciprofloxacin", "antacid"],
-    severity: "moderate",
-    message: "Ciprofloxacin + Antacid: reduced absorption — space by 2 h.",
-  },
-  {
-    drugs: ["ssri", "tramadol"],
-    severity: "high",
-    message: "SSRI + Tramadol: serotonin syndrome risk — use with caution.",
-  },
-  {
-    drugs: ["fluoxetine", "tramadol"],
-    severity: "high",
-    message: "Fluoxetine + Tramadol: serotonin syndrome risk.",
-  },
-  {
-    drugs: ["simvastatin", "clarithromycin"],
-    severity: "high",
-    message:
-      "Simvastatin + Clarithromycin: severe myopathy / rhabdomyolysis risk.",
-  },
-  {
-    drugs: ["clopidogrel", "omeprazole"],
-    severity: "moderate",
-    message: "Clopidogrel + Omeprazole: reduced antiplatelet effect.",
-  },
-  {
-    drugs: ["digoxin", "amiodarone"],
-    severity: "high",
-    message: "Digoxin + Amiodarone: digoxin toxicity — reduce digoxin dose.",
-  },
-  {
-    drugs: ["lithium", "ibuprofen"],
-    severity: "high",
-    message: "Lithium + Ibuprofen: elevated lithium levels — monitor closely.",
-  },
-  {
-    drugs: ["metronidazole", "alcohol"],
-    severity: "high",
-    message:
-      "Metronidazole + Alcohol: disulfiram-like reaction — alcohol contraindicated.",
-  },
-];
-
-function checkDrugInteractions(drugNames) {
-  const lower = drugNames.map((n) => n.toLowerCase());
-  const warnings = [];
-  for (const rule of DRUG_INTERACTIONS) {
-    const [a, b] = rule.drugs;
-    if (lower.some((n) => n.includes(a)) && lower.some((n) => n.includes(b)))
-      warnings.push({ severity: rule.severity, message: rule.message });
-  }
-  return warnings;
-}
-
-function printViaIframe(html) {
-  const iframe = document.createElement("iframe");
-  iframe.style.cssText =
-    "position:fixed;top:-9999px;left:-9999px;width:210mm;height:297mm;border:none";
-  document.body.appendChild(iframe);
-  iframe.contentDocument.open();
-  iframe.contentDocument.write(html);
-  iframe.contentDocument.close();
-  setTimeout(() => {
-    iframe.contentWindow.focus();
-    iframe.contentWindow.print();
-    setTimeout(() => document.body.removeChild(iframe), 1000);
-  }, 1000);
-}
-
-function stockBadge(drug) {
-  const stock = drug.quantityInStock || 0;
-  const min = drug.reorderLevel || 10;
-  if (stock === 0) return <Badge variant="destructive">Out of Stock</Badge>;
-  if (stock < min)
-    return <Badge className="bg-yellow-100 text-yellow-800">Low Stock</Badge>;
-  return <Badge className="bg-green-100 text-green-800">In Stock</Badge>;
-}
-
-function statusBadge(status) {
-  const map = {
-    pending: "bg-blue-100 text-blue-800",
-    dispensed: "bg-green-100 text-green-800",
-    fully_dispensed: "bg-green-100 text-green-800",
-    partially_dispensed: "bg-yellow-100 text-yellow-800",
-    cancelled: "bg-red-100 text-red-800",
-    draft: "bg-purple-100 text-purple-800",
-    submitted: "bg-blue-100 text-blue-800",
-    approved: "bg-teal-100 text-teal-800",
-    received: "bg-green-100 text-green-800",
-    paid: "bg-green-100 text-green-800",
-  };
-  return (
-    <Badge className={map[status] || "bg-gray-100 text-gray-800"}>
-      {(status || "").replace(/_/g, " ")}
-    </Badge>
-  );
-}
-
-const emptyDrug = {
-  name: "",
-  saltName: "",
-  companyName: "",
-  category: "",
-  form: "",
-  strength: "",
-  mrp: 0,
-  rate: 0,
-  discountPercentage: 0,
-  scheme: "",
-  scheduleType: "none",
-  initialQty: 0,
-  minStock: 10,
-  batchNumber: "",
-  expiryDate: "",
-  manufacturingDate: "",
-  barcode: "",
-};
-const emptyBatch = {
-  drugId: "",
-  batchNumber: "",
-  expiryDate: "",
-  manufactureDate: "",
-  quantityReceived: 1,
-  costPricePerUnit: 0,
-  supplierName: "",
-  supplierInvoice: "",
-  purchaseOrderNumber: "",
-};
+import {
+  DRUG_CATEGORIES,
+  DRUG_FORMS,
+  SCHEDULE_TYPES,
+  DRUGS_PER_PAGE,
+  PHARMACY_BATCHES_PER_PAGE,
+  PHARMACY_PO_PER_PAGE,
+  PHARMACY_SALES_PER_PAGE,
+  emptyDrug,
+  emptyBatch,
+  checkDrugInteractions,
+  printViaIframe,
+} from "./pharmacyConstants";
+import { stockBadge, statusBadge } from "./pharmacyHelpers";
+import DashboardTab from "./tabs/DashboardTab";
+import InventoryTab from "./tabs/InventoryTab";
+import PrescriptionsTab from "./tabs/PrescriptionsTab";
+import BatchesTab from "./tabs/BatchesTab";
+import PurchaseOrdersTab from "./tabs/PurchaseOrdersTab";
+import SalesReportsTab from "./tabs/SalesReportsTab";
 
 export default function PharmacyModule() {
   const [activeTab, setActiveTab] = useState("dashboard");
@@ -254,19 +86,53 @@ export default function PharmacyModule() {
   const [prescriptions, setPrescriptions] = useState([]);
   const [batches, setBatches] = useState([]);
   const [purchaseOrders, setPurchaseOrders] = useState([]);
-  const [sales, setSales] = useState([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("all");
-  const [drugInventoryPage, setDrugInventoryPage] = useState(1)
-  const [prescriptionsPage, setPrescriptionsPage] = useState(1)
+  // Drug inventory is SERVER-paged (scales to lakhs of drugs): the DB applies
+  // search/category + slices the page; the browser only holds one page.
+  const debouncedDrugSearch = useDebounce(searchQuery, 300);
+  const drugPage = useServerPagination("/pharmacy/drugs", {
+    perPage: DRUGS_PER_PAGE,
+    params: { search: debouncedDrugSearch, category: categoryFilter },
+  });
   const [lowStockPage, setLowStockPage] = useState(1);
   const [batchesPage, setBatchesPage] = useState(1);
   const [poPage, setPoPage] = useState(1);
-  const [salesPage, setSalesPage] = useState(1);
   const [prescriptionFilter, setPrescriptionFilter] = useState("all");
   const [poStatusFilter, setPoStatusFilter] = useState("all");
   const [salesPeriod, setSalesPeriod] = useState("month"); // today | week | month | all
+
+  // Prescriptions are SERVER-paged (status filter applied in the DB).
+  const rxPage = useServerPagination("/pharmacy/prescriptions", {
+    perPage: DRUGS_PER_PAGE,
+    params: { status: prescriptionFilter === "all" ? "" : prescriptionFilter },
+  });
+
+  // Sales are SERVER-paged with the period as a date filter; `summary` carries
+  // the period's true revenue (summed in the DB across every matching row).
+  const saleStartDate = useMemo(() => {
+    if (salesPeriod === "all") return "";
+    const d =
+      salesPeriod === "today" ? startOfDay(new Date())
+      : salesPeriod === "week" ? startOfWeek(new Date(), { weekStartsOn: 1 })
+      : startOfMonth(new Date());
+    return format(d, "yyyy-MM-dd");
+  }, [salesPeriod]);
+  const salePage = useServerPagination("/pharmacy/sales", {
+    perPage: PHARMACY_SALES_PER_PAGE,
+    params: { startDate: saleStartDate },
+  });
+
+  // Dashboard KPI counts come from a DB-computed stats endpoint, so they're
+  // correct even with hundreds of thousands of drugs/sales.
+  const [stats, setStats] = useState(null);
+  const fetchStats = useCallback(async () => {
+    try {
+      const res = await client.get("/pharmacy/stats");
+      if (res.success) setStats(res.data);
+    } catch { /* ignore */ }
+  }, []);
 
   // Drug dialog
   const [showDrugDialog, setShowDrugDialog] = useState(false);
@@ -417,32 +283,12 @@ export default function PharmacyModule() {
     setLoading(false);
   }, []);
 
-  const fetchSales = useCallback(async () => {
-    try {
-      const res = await client.get("/pharmacy/sales");
-      if (res.success) {
-        setSales(
-          (res.data || []).map((s) => ({
-            ...s,
-            items:
-              typeof s.items === "string" ? JSON.parse(s.items) : s.items || [],
-          })),
-        );
-      }
-    } catch {
-      /* ignore */
-    }
-  }, []);
-
   useEffect(() => {
     fetchAll();
-    fetchSales(); // also load sales on mount so dashboard Today's Sales is populated
-  }, [fetchAll, fetchSales]);
+    fetchStats(); // DB-computed dashboard KPIs (correct at any scale)
+  }, [fetchAll, fetchStats]);
   const { orgInfo: hookOrgInfo } = useOrgSettings()
   useEffect(() => { setOrgInfo(hookOrgInfo) }, [hookOrgInfo])
-  useEffect(() => {
-    if (activeTab === "sales") fetchSales();
-  }, [activeTab, fetchSales]);
 
   // ── Drug CRUD ──────────────────────────────────────────────────────────────
 
@@ -511,6 +357,7 @@ export default function PharmacyModule() {
         setDrugForm(emptyDrug);
         setEditingDrugId(null);
         fetchAll();
+        drugPage.refresh();
       } else toast.error(res.error || "Failed to save");
     } catch {
       toast.error("Failed to save drug");
@@ -525,6 +372,7 @@ export default function PharmacyModule() {
         toast.success("Drug deleted");
         setDeleteConfirm(null);
         fetchAll();
+        drugPage.refresh();
       } else toast.error(res.error || "Failed to delete");
     } catch {
       toast.error("Failed to delete");
@@ -550,6 +398,7 @@ export default function PharmacyModule() {
         setSelectedDrug(null);
         setStockAdjust({ type: "add", amount: 0 });
         fetchAll();
+        drugPage.refresh();
       } else toast.error(res.error || "Failed");
     } catch {
       toast.error("Failed to adjust stock");
@@ -680,6 +529,9 @@ export default function PharmacyModule() {
     setSelectedPrescription(null);
     setDispenseWarnings([]);
     fetchAll();
+    rxPage.refresh();   // dispensed prescription left the pending list
+    drugPage.refresh(); // stock decremented
+    fetchStats();
   };
 
   // Stock-aware dispensing. The backend validates stock and decrements
@@ -900,6 +752,9 @@ export default function PharmacyModule() {
         setShowSaleDialog(false);
         setSaleItems([{ drugId: "", quantity: 1 }]);
         fetchAll();
+        salePage.refresh(); // new sale appears in the list + period total
+        drugPage.refresh(); // stock decremented
+        fetchStats();
       } else toast.error(res.error || "Failed");
     } catch {
       toast.error("Failed to record sale");
@@ -907,15 +762,8 @@ export default function PharmacyModule() {
     setSavingSale(false);
   };
 
-  // Reset pagination when filters change
-  useEffect(() => {
-    setDrugInventoryPage(1);
-  }, [searchQuery, categoryFilter]);
-
-  useEffect(() => {
-    setPrescriptionsPage(1);
-  }, [prescriptionFilter]);
-
+  // Reset pagination when filters change. (Drug inventory, prescriptions and
+  // sales reset themselves inside useServerPagination, so they aren't here.)
   useEffect(() => {
     setLowStockPage(1);
   }, [drugs]);
@@ -924,48 +772,19 @@ export default function PharmacyModule() {
     setPoPage(1);
   }, [poStatusFilter]);
 
-  useEffect(() => {
-    setSalesPage(1);
-  }, [salesPeriod]);
-
   // ── Derived values ─────────────────────────────────────────────────────────
 
-  const filteredDrugs = drugs.filter((d) => {
-    const q = searchQuery.toLowerCase();
-    const matchSearch =
-      !q ||
-      (d.drugName || "").toLowerCase().includes(q) ||
-      (d.genericName || "").toLowerCase().includes(q) ||
-      (d.drugCode || "").toLowerCase().includes(q);
-    const matchCat =
-      categoryFilter === "all" || d.drugCategory === categoryFilter;
-    return matchSearch && matchCat;
-  });
-  const filteredRx = prescriptions.filter(
-    (p) => prescriptionFilter === "all" || p.status === prescriptionFilter,
-  );
-  const expiringBatches = batches.filter(
-    (b) =>
-      new Date(b.expiryDate) <= addDays(new Date(), 90) &&
-      (b.quantityRemaining || 0) > 0,
-  );
-  const totalStockValue = drugs.reduce(
-    (s, d) => s + (d.quantityInStock || 0) * (d.sellingPrice || 0),
-    0,
-  );
-
-  // Dashboard derived values
-  const inStockCount  = drugs.filter(d => (d.quantityInStock || 0) > (d.reorderLevel || 10)).length;
-  const lowStockCount = drugs.filter(d => (d.quantityInStock || 0) > 0 && (d.quantityInStock || 0) <= (d.reorderLevel || 10)).length;
-  const outStockCount = drugs.filter(d => (d.quantityInStock || 0) === 0).length;
-  const lowStockDrugs = drugs.filter(d => (d.quantityInStock || 0) <= (d.reorderLevel || 10));
+  // Dashboard summary values all come from the DB stats endpoint, so they are
+  // correct no matter how many drugs/batches exist (never derived from a capped
+  // in-browser list). lowStockCount is the strictly-low (yellow) band.
+  const expiringBatches = stats?.expiringBatches ?? [];
+  const totalStockValue = stats?.stockValue ?? 0;
+  const inStockCount  = stats?.inStock ?? 0;
+  const lowStockCount = stats ? Math.max(0, stats.lowStock - stats.outOfStock) : 0;
+  const outStockCount = stats?.outOfStock ?? 0;
+  const lowStockDrugs = stats?.lowStockDrugs ?? [];
   const pendingRx     = prescriptions.filter(p => p.status === "pending");
-  const todaySalesTotal = useMemo(() => {
-    const todayStart = startOfDay(new Date());
-    return sales
-      .filter(s => { const d = s.saleDate || s.createdAt; return d && new Date(d) >= todayStart; })
-      .reduce((sum, s) => sum + (s.totalAmount || 0), 0);
-  }, [sales]);
+  const todaySalesTotal = stats?.todaySalesTotal ?? 0;
 
   // Live pricing calc for drug form
   const mrp = parseFloat(drugForm.mrp) || 0;
@@ -985,25 +804,6 @@ export default function PharmacyModule() {
   const filteredPOs = useMemo(
     () => poStatusFilter === "all" ? purchaseOrders : purchaseOrders.filter(po => po.status === poStatusFilter),
     [purchaseOrders, poStatusFilter],
-  );
-
-  // Filtered sales by period
-  const filteredSales = useMemo(() => {
-    if (salesPeriod === "all") return sales;
-    const cutoff =
-      salesPeriod === "today" ? startOfDay(new Date()) :
-      salesPeriod === "week"  ? startOfWeek(new Date(), { weekStartsOn: 1 }) :
-                                startOfMonth(new Date());
-    return sales.filter(s => {
-      const d = s.saleDate || s.createdAt;
-      return d && new Date(d) >= cutoff;
-    });
-  }, [sales, salesPeriod]);
-
-  // Sales summary for period
-  const salesTotal = useMemo(
-    () => filteredSales.reduce((s, sale) => s + (sale.totalAmount || 0), 0),
-    [filteredSales],
   );
 
   // ── Render ─────────────────────────────────────────────────────────────────
@@ -1057,1033 +857,104 @@ export default function PharmacyModule() {
         </TabsList>
 
         {/* ── DASHBOARD ── */}
-        <TabsContent value="dashboard" className="space-y-4">
-          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
-            {[
-              {
-                label: "Total Drugs",
-                value: drugs.length,
-                color: "text-blue-600",
-              },
-              {
-                label: "Low Stock",
-                value: drugs.filter(
-                  (d) =>
-                    (d.quantityInStock || 0) > 0 &&
-                    (d.quantityInStock || 0) < (d.reorderLevel || 10),
-                ).length,
-                color: "text-yellow-600",
-              },
-              {
-                label: "Out of Stock",
-                value: drugs.filter((d) => (d.quantityInStock || 0) === 0)
-                  .length,
-                color: "text-red-600",
-              },
-              {
-                label: "Pending Rx",
-                value: prescriptions.filter((p) => p.status === "pending")
-                  .length,
-                color: "text-purple-600",
-              },
-              {
-                label: "Expiring (90d)",
-                value: expiringBatches.length,
-                color: "text-orange-600",
-              },
-              {
-                label: "Stock Value",
-                value: `₹${totalStockValue.toLocaleString()}`,
-                color: "text-green-600",
-              },
-            ].map((s) => (
-              <Card key={s.label}>
-                <CardContent className="pt-4">
-                  <p className="text-xs text-gray-500 font-medium">{s.label}</p>
-                  <p className={`text-2xl font-bold ${s.color}`}>{s.value}</p>
-                </CardContent>
-              </Card>
-            ))}
-          </div>
-          {/* ── Stock Overview + Pending Prescriptions ── */}
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            {/* Stock Overview */}
-            <Card>
-              <CardHeader><CardTitle className="text-base">Stock Overview</CardTitle></CardHeader>
-              <CardContent className="space-y-3">
-                <div className="flex justify-between items-center">
-                  <span className="text-sm text-gray-500">Total Stock Value</span>
-                  <span className="font-bold text-green-700 text-lg">₹{totalStockValue.toLocaleString()}</span>
-                </div>
-                <div className="flex justify-between items-center">
-                  <span className="text-sm text-gray-500">Today's Sales</span>
-                  <span className="font-bold text-gray-800">₹{todaySalesTotal.toLocaleString()}</span>
-                </div>
-                <div className="pt-2 border-t">
-                  <p className="text-sm font-semibold mb-2">Stock Status Distribution</p>
-                  <div className="flex items-center gap-5 text-sm">
-                    <span className="flex items-center gap-1.5">
-                      <span className="h-2.5 w-2.5 rounded-full bg-green-500 inline-block" />
-                      In Stock: <strong>{inStockCount}</strong>
-                    </span>
-                    <span className="flex items-center gap-1.5">
-                      <span className="h-2.5 w-2.5 rounded-full bg-yellow-500 inline-block" />
-                      Low: <strong>{lowStockCount}</strong>
-                    </span>
-                    <span className="flex items-center gap-1.5">
-                      <span className="h-2.5 w-2.5 rounded-full bg-red-500 inline-block" />
-                      Out: <strong>{outStockCount}</strong>
-                    </span>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-
-            {/* Pending Prescriptions */}
-            <Card>
-              <CardHeader>
-                <div className="flex items-center justify-between">
-                  <CardTitle className="text-base">Pending Prescriptions</CardTitle>
-                  <Button variant="outline" size="sm" onClick={() => setActiveTab("prescriptions")}>
-                    View All
-                  </Button>
-                </div>
-              </CardHeader>
-              <CardContent>
-                {pendingRx.length === 0 ? (
-                  <p className="text-sm text-gray-400 text-center py-4">No pending prescriptions</p>
-                ) : (
-                  <div className="space-y-2">
-                    {pendingRx.slice(0, 5).map(rx => {
-                      let items = [];
-                      try { items = typeof rx.items === "string" ? JSON.parse(rx.items) : (rx.items || []) } catch { items = [] }
-                      const name = rx.patient ? `${rx.patient.firstName} ${rx.patient.lastName || ""}`.trim() : "Unknown";
-                      const initials = name.split(" ").map(n => n[0]).join("").slice(0, 2).toUpperCase();
-                      const time = rx.prescriptionDate ? format(new Date(rx.prescriptionDate), "HH:mm") : "—";
-                      return (
-                        <div key={rx.id} className="flex items-center gap-3 p-2 rounded-lg bg-gray-50 hover:bg-gray-100 transition-colors">
-                          <div className="h-9 w-9 rounded-full bg-gray-800 text-white flex items-center justify-center text-xs font-bold shrink-0">
-                            {initials}
-                          </div>
-                          <div className="flex-1 min-w-0">
-                            <p className="font-medium text-sm truncate">{name}</p>
-                            <p className="text-xs text-gray-500">{items.length} item{items.length !== 1 ? "s" : ""} · {time}</p>
-                          </div>
-                          <Button size="sm" onClick={() => openDispenseDialog(rx)}>
-                            Dispense
-                          </Button>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-          </div>
-
-          {/* ── Low Stock Drugs ── */}
-          {lowStockDrugs.length > 0 && (
-            <Card>
-              <CardHeader>
-                <div className="flex items-center justify-between">
-                  <CardTitle className="text-yellow-700 flex items-center gap-2 text-base">
-                    <AlertTriangle className="h-5 w-5" /> Low Stock Drugs
-                  </CardTitle>
-                  <Button variant="outline" size="sm" onClick={() => setActiveTab("inventory")}>
-                    Manage Inventory
-                  </Button>
-                </div>
-              </CardHeader>
-              <CardContent className="p-0">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Drug Name</TableHead>
-                      <TableHead>Category</TableHead>
-                      <TableHead>Current Stock</TableHead>
-                      <TableHead>Min. Stock</TableHead>
-                      <TableHead>Status</TableHead>
-                      <TableHead>Actions</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {(() => {
-                      const ITEMS_PER_PAGE = 10
-                      const totalPages = Math.ceil(lowStockDrugs.length / ITEMS_PER_PAGE)
-                      const startIdx = (lowStockPage - 1) * ITEMS_PER_PAGE
-                      const endIdx = startIdx + ITEMS_PER_PAGE
-                      const paginatedLowStock = lowStockDrugs.slice(startIdx, endIdx)
-                      return paginatedLowStock.map(d => (
-                        <TableRow key={d.id}>
-                          <TableCell className="font-medium">{d.drugName}</TableCell>
-                          <TableCell>{d.drugCategory || "—"}</TableCell>
-                          <TableCell className={`font-semibold ${(d.quantityInStock || 0) === 0 ? "text-red-600" : "text-yellow-600"}`}>
-                            {d.quantityInStock || 0}
-                          </TableCell>
-                          <TableCell>{d.reorderLevel || 10}</TableCell>
-                          <TableCell>{stockBadge(d)}</TableCell>
-                          <TableCell>
-                            <Button
-                              size="sm" variant="outline"
-                              onClick={() => { setSelectedDrug(d); setStockAdjust({ type: "add", amount: 0 }); setShowStockDialog(true); }}
-                            >
-                              <Package className="h-3 w-3 mr-1" /> Restock
-                            </Button>
-                          </TableCell>
-                        </TableRow>
-                      ))
-                    })()}
-                  </TableBody>
-                </Table>
-                {lowStockDrugs.length > 10 && (() => {
-                  const ITEMS_PER_PAGE = 10
-                  const totalPages = Math.ceil(lowStockDrugs.length / ITEMS_PER_PAGE)
-                  return (
-                    <div className="flex items-center justify-end gap-2 p-4 border-t">
-                      <Button variant="outline" size="sm" onClick={() => setLowStockPage(p => Math.max(1, p - 1))} disabled={lowStockPage === 1}>
-                        <ChevronLeft className="h-4 w-4 mr-1" />Previous
-                      </Button>
-                      <span className="text-sm text-gray-600">Page {lowStockPage} of {totalPages}</span>
-                      <Button variant="outline" size="sm" onClick={() => setLowStockPage(p => Math.min(totalPages, p + 1))} disabled={lowStockPage === totalPages}>
-                        Next<ChevronRight className="h-4 w-4 ml-1" />
-                      </Button>
-                    </div>
-                  )
-                })()}
-              </CardContent>
-            </Card>
-          )}
-
-          {/* ── Expiring Batches ── */}
-          {expiringBatches.length > 0 && (
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-orange-600 flex items-center gap-2">
-                  <AlertTriangle className="h-5 w-5" />
-                  Expiring Batches
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Drug</TableHead>
-                      <TableHead>Batch</TableHead>
-                      <TableHead>Qty</TableHead>
-                      <TableHead>Expiry</TableHead>
-                      <TableHead>Days Left</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {expiringBatches.slice(0, 10).map((b) => {
-                      const dl = Math.ceil(
-                        (new Date(b.expiryDate) - new Date()) / 86400000,
-                      );
-                      return (
-                        <TableRow key={b.id}>
-                          <TableCell>{b.drug?.drugName || "—"}</TableCell>
-                          <TableCell className="font-mono">
-                            {b.batchNumber}
-                          </TableCell>
-                          <TableCell>{b.quantityRemaining}</TableCell>
-                          <TableCell>
-                            {format(new Date(b.expiryDate), "dd MMM yyyy")}
-                          </TableCell>
-                          <TableCell>
-                            <Badge
-                              className={
-                                dl <= 30
-                                  ? "bg-red-100 text-red-800"
-                                  : "bg-yellow-100 text-yellow-800"
-                              }
-                            >
-                              {dl}d
-                            </Badge>
-                          </TableCell>
-                        </TableRow>
-                      );
-                    })}
-                  </TableBody>
-                </Table>
-              </CardContent>
-            </Card>
-          )}
-        </TabsContent>
+        <DashboardTab
+          stats={stats}
+          drugs={drugs}
+          prescriptions={prescriptions}
+          expiringBatches={expiringBatches}
+          totalStockValue={totalStockValue}
+          todaySalesTotal={todaySalesTotal}
+          inStockCount={inStockCount}
+          lowStockCount={lowStockCount}
+          outStockCount={outStockCount}
+          pendingRx={pendingRx}
+          lowStockDrugs={lowStockDrugs}
+          lowStockPage={lowStockPage}
+          setLowStockPage={setLowStockPage}
+          setActiveTab={setActiveTab}
+          openDispenseDialog={openDispenseDialog}
+          setSelectedDrug={setSelectedDrug}
+          setStockAdjust={setStockAdjust}
+          setShowStockDialog={setShowStockDialog}
+        />
 
         {/* ── INVENTORY ── */}
-        <TabsContent value="inventory" className="space-y-4">
-          <div className="flex gap-3">
-            <div className="relative flex-1">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
-              <Input
-                className="pl-9"
-                placeholder="Search drugs..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-              />
-            </div>
-            <Select value={categoryFilter} onValueChange={setCategoryFilter}>
-              <SelectTrigger className="w-44">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Categories</SelectItem>
-                {DRUG_CATEGORIES.map((c) => (
-                  <SelectItem key={c} value={c}>
-                    {c}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-          <Card>
-            <CardContent className="p-0">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Drug Name</TableHead>
-                    <TableHead>Generic</TableHead>
-                    <TableHead>Category</TableHead>
-                    <TableHead>Form / Strength</TableHead>
-                    <TableHead>MRP (₹)</TableHead>
-                    <TableHead>Stock</TableHead>
-                    <TableHead>Status</TableHead>
-                    <TableHead>Actions</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {loading ? (
-                    <TableRow>
-                      <TableCell colSpan={8} className="text-center py-10">
-                        <Loader2 className="h-6 w-6 animate-spin text-gray-400 mx-auto" />
-                      </TableCell>
-                    </TableRow>
-                  ) : filteredDrugs.length === 0 ? (
-                    <TableRow>
-                      <TableCell
-                        colSpan={8}
-                        className="text-center py-8 text-gray-400"
-                      >
-                        No drugs found
-                      </TableCell>
-                    </TableRow>
-                  ) : (() => {
-                    const totalPages = Math.ceil(filteredDrugs.length / DRUGS_PER_PAGE);
-                    const startIdx = (drugInventoryPage - 1) * DRUGS_PER_PAGE;
-                    const endIdx = startIdx + DRUGS_PER_PAGE;
-                    const paginatedDrugs = filteredDrugs.slice(startIdx, endIdx);
-                    return paginatedDrugs.map((d) => (
-                      <TableRow key={d.id}>
-                        <TableCell className="font-medium">
-                          {d.drugName}
-                        </TableCell>
-                        <TableCell className="text-gray-500">
-                          {d.genericName || "—"}
-                        </TableCell>
-                        <TableCell>{d.drugCategory || "—"}</TableCell>
-                        <TableCell>
-                          {d.dosageForm} {d.strength}
-                        </TableCell>
-                        <TableCell>
-                          ₹{(d.sellingPrice || 0).toFixed(2)}
-                        </TableCell>
-                        <TableCell>{d.quantityInStock || 0}</TableCell>
-                        <TableCell>{stockBadge(d)}</TableCell>
-                        <TableCell>
-                          <div className="flex gap-1">
-                            <Button
-                              size="sm"
-                              variant="ghost"
-                              title="View"
-                              onClick={() => {
-                                setViewingDrug(d);
-                                setShowViewDrugDialog(true);
-                              }}
-                            >
-                              <Eye className="h-4 w-4" />
-                            </Button>
-                            <Button
-                              size="sm"
-                              variant="ghost"
-                              title="Edit"
-                              onClick={() => {
-                                setDrugForm({
-                                  name: d.drugName,
-                                  saltName: d.genericName || "",
-                                  companyName: d.brandName || "",
-                                  category: d.drugCategory || "",
-                                  form: d.dosageForm || "",
-                                  strength: d.strength || "",
-                                  mrp: d.sellingPrice || 0,
-                                  rate: d.costPrice || 0,
-                                  discountPercentage: d.markupPercentage || 0,
-                                  scheme: "",
-                                  scheduleType: "none",
-                                  initialQty: 0,
-                                  minStock: d.reorderLevel || 10,
-                                  batchNumber: "",
-                                  expiryDate: "",
-                                  manufacturingDate: "",
-                                  barcode: d.drugCode || "",
-                                });
-                                setEditingDrugId(d.id);
-                                setShowDrugDialog(true);
-                              }}
-                            >
-                              <Edit className="h-4 w-4" />
-                            </Button>
-                            <Button
-                              size="sm"
-                              variant="ghost"
-                              title="Adjust Stock"
-                              onClick={() => {
-                                setSelectedDrug(d);
-                                setStockAdjust({ type: "add", amount: 0 });
-                                setShowStockDialog(true);
-                              }}
-                            >
-                              <Package className="h-4 w-4" />
-                            </Button>
-                            <Button
-                              size="sm"
-                              variant="ghost"
-                              className="text-red-500"
-                              onClick={() => setDeleteConfirm(d)}
-                            >
-                              <Trash2 className="h-4 w-4" />
-                            </Button>
-                          </div>
-                        </TableCell>
-                      </TableRow>
-                    ));
-                  })()}
-                </TableBody>
-              </Table>
-              {filteredDrugs.length > DRUGS_PER_PAGE && (() => {
-                const totalPages = Math.ceil(filteredDrugs.length / DRUGS_PER_PAGE);
-                return (
-                  <div className="flex items-center justify-end gap-2 p-4 border-t">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => setDrugInventoryPage(p => Math.max(1, p - 1))}
-                      disabled={drugInventoryPage === 1}
-                    >
-                      <ChevronLeft className="h-4 w-4 mr-1" />
-                      Previous
-                    </Button>
-                    <span className="text-sm text-gray-600">
-                      Page {drugInventoryPage} of {totalPages}
-                    </span>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => setDrugInventoryPage(p => Math.min(totalPages, p + 1))}
-                      disabled={drugInventoryPage === totalPages}
-                    >
-                      Next
-                      <ChevronRight className="h-4 w-4 ml-1" />
-                    </Button>
-                  </div>
-                );
-              })()}
-            </CardContent>
-          </Card>
-        </TabsContent>
+        <InventoryTab
+          searchQuery={searchQuery}
+          setSearchQuery={setSearchQuery}
+          categoryFilter={categoryFilter}
+          setCategoryFilter={setCategoryFilter}
+          drugs={drugPage.rows}
+          loading={drugPage.loading}
+          page={drugPage.page}
+          setPage={drugPage.setPage}
+          totalPages={drugPage.totalPages}
+          total={drugPage.total}
+          setViewingDrug={setViewingDrug}
+          setShowViewDrugDialog={setShowViewDrugDialog}
+          setDrugForm={setDrugForm}
+          setEditingDrugId={setEditingDrugId}
+          setShowDrugDialog={setShowDrugDialog}
+          setSelectedDrug={setSelectedDrug}
+          setStockAdjust={setStockAdjust}
+          setShowStockDialog={setShowStockDialog}
+          setDeleteConfirm={setDeleteConfirm}
+        />
 
         {/* ── PRESCRIPTIONS ── */}
-        <TabsContent value="prescriptions" className="space-y-4">
-          <Select
-            value={prescriptionFilter}
-            onValueChange={setPrescriptionFilter}
-          >
-            <SelectTrigger className="w-52">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All</SelectItem>
-              <SelectItem value="pending">Pending</SelectItem>
-              <SelectItem value="fully_dispensed">Dispensed</SelectItem>
-              <SelectItem value="partially_dispensed">Partial</SelectItem>
-              <SelectItem value="cancelled">Cancelled</SelectItem>
-            </SelectContent>
-          </Select>
-          <Card>
-            <CardContent className="p-0">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Patient</TableHead>
-                    <TableHead>UHID</TableHead>
-                    <TableHead>Doctor</TableHead>
-                    <TableHead>Date</TableHead>
-                    <TableHead>Items</TableHead>
-                    <TableHead>Status</TableHead>
-                    <TableHead>Actions</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {filteredRx.length === 0 ? (
-                    <TableRow>
-                      <TableCell
-                        colSpan={7}
-                        className="text-center py-8 text-gray-400"
-                      >
-                        No prescriptions
-                      </TableCell>
-                    </TableRow>
-                  ) : (() => {
-                    const totalPages = Math.ceil(filteredRx.length / DRUGS_PER_PAGE)
-                    const startIdx = (prescriptionsPage - 1) * DRUGS_PER_PAGE
-                    const endIdx = startIdx + DRUGS_PER_PAGE
-                    const paginatedRx = filteredRx.slice(startIdx, endIdx)
-                    return paginatedRx.map((rx) => {
-                      let items = [];
-                      try {
-                        items =
-                          typeof rx.items === "string"
-                            ? JSON.parse(rx.items)
-                            : rx.items || [];
-                      } catch {
-                        items = [];
-                      }
-                      const name = rx.patient
-                        ? `${rx.patient.firstName} ${rx.patient.lastName || ""}`.trim()
-                        : "Unknown";
-                      return (
-                        <TableRow key={rx.id}>
-                          <TableCell className="font-medium">{name}</TableCell>
-                          <TableCell className="font-mono">
-                            {rx.patient?.mrn || "—"}
-                          </TableCell>
-                          <TableCell>{rx.doctor?.fullName || "—"}</TableCell>
-                          <TableCell>
-                            {rx.prescriptionDate
-                              ? format(
-                                  new Date(rx.prescriptionDate),
-                                  "dd MMM yyyy",
-                                )
-                              : "—"}
-                          </TableCell>
-                          <TableCell>{items.length} item(s)</TableCell>
-                          <TableCell>{statusBadge(rx.status)}</TableCell>
-                          <TableCell>
-                            <div className="flex gap-1">
-                              {rx.status === "pending" && (
-                                <Button
-                                  size="sm"
-                                  onClick={() => openDispenseDialog(rx)}
-                                >
-                                  <CheckCircle className="h-4 w-4 mr-1" />
-                                  Dispense
-                                </Button>
-                              )}
-                              <Button
-                                size="sm"
-                                variant="ghost"
-                                title="Print label"
-                                onClick={() => handlePrintLabel(rx)}
-                              >
-                                <Printer className="h-4 w-4" />
-                              </Button>
-                            </div>
-                          </TableCell>
-                        </TableRow>
-                      );
-                    })
-                  })()}
-                </TableBody>
-              </Table>
-              {filteredRx.length > DRUGS_PER_PAGE && (() => {
-                const totalPages = Math.ceil(filteredRx.length / DRUGS_PER_PAGE)
-                return (
-                  <div className="flex items-center justify-end gap-2 p-4 border-t">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => setPrescriptionsPage(p => Math.max(1, p - 1))}
-                      disabled={prescriptionsPage === 1}
-                    >
-                      <ChevronLeft className="h-4 w-4 mr-1" />Previous
-                    </Button>
-                    <span className="text-sm text-gray-600">
-                      Page {prescriptionsPage} of {totalPages}
-                    </span>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => setPrescriptionsPage(p => Math.min(totalPages, p + 1))}
-                      disabled={prescriptionsPage === totalPages}
-                    >
-                      Next<ChevronRight className="h-4 w-4 ml-1" />
-                    </Button>
-                  </div>
-                )
-              })()}
-            </CardContent>
-          </Card>
-        </TabsContent>
+        <PrescriptionsTab
+          prescriptionFilter={prescriptionFilter}
+          setPrescriptionFilter={setPrescriptionFilter}
+          prescriptions={rxPage.rows}
+          loading={rxPage.loading}
+          page={rxPage.page}
+          setPage={rxPage.setPage}
+          totalPages={rxPage.totalPages}
+          openDispenseDialog={openDispenseDialog}
+          handlePrintLabel={handlePrintLabel}
+        />
 
         {/* ── BATCHES ── */}
-        <TabsContent value="batches" className="space-y-4">
-          <div className="flex justify-end">
-            <Button
-              onClick={() => {
-                setBatchForm(emptyBatch);
-                setEditingBatchId(null);
-                setShowBatchDialog(true);
-              }}
-            >
-              <Plus className="h-4 w-4 mr-1" />
-              Add Batch
-            </Button>
-          </div>
-          <Card>
-            <CardContent className="p-0">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Drug</TableHead>
-                    <TableHead>Batch #</TableHead>
-                    <TableHead>Received</TableHead>
-                    <TableHead>Remaining</TableHead>
-                    <TableHead>Expiry</TableHead>
-                    <TableHead>Supplier</TableHead>
-                    <TableHead>Status</TableHead>
-                    <TableHead>Actions</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {batches.length === 0 ? (
-                    <TableRow>
-                      <TableCell
-                        colSpan={8}
-                        className="text-center py-8 text-gray-400"
-                      >
-                        No batches
-                      </TableCell>
-                    </TableRow>
-                  ) : (() => {
-                    const totalPages = Math.ceil(batches.length / PHARMACY_BATCHES_PER_PAGE);
-                    const startIdx = (batchesPage - 1) * PHARMACY_BATCHES_PER_PAGE;
-                    const endIdx = startIdx + PHARMACY_BATCHES_PER_PAGE;
-                    const paginatedBatches = batches.slice(startIdx, endIdx);
-                    return paginatedBatches.map((b) => {
-                      const dl = Math.ceil(
-                        (new Date(b.expiryDate) - new Date()) / 86400000,
-                      );
-                      return (
-                        <TableRow key={b.id}>
-                          <TableCell>{b.drug?.drugName || "—"}</TableCell>
-                          <TableCell className="font-mono">
-                            {b.batchNumber}
-                          </TableCell>
-                          <TableCell>{b.quantityReceived}</TableCell>
-                          <TableCell>{b.quantityRemaining}</TableCell>
-                          <TableCell>
-                            {format(new Date(b.expiryDate), "dd MMM yyyy")}
-                          </TableCell>
-                          <TableCell>{b.supplierName || "—"}</TableCell>
-                          <TableCell>
-                            {dl < 0 ? (
-                              <Badge variant="destructive">Expired</Badge>
-                            ) : dl <= 30 ? (
-                              <Badge className="bg-red-100 text-red-800">
-                                {dl}d left
-                              </Badge>
-                            ) : dl <= 90 ? (
-                              <Badge className="bg-yellow-100 text-yellow-800">
-                                {dl}d left
-                              </Badge>
-                            ) : (
-                              <Badge className="bg-green-100 text-green-800">
-                                Active
-                              </Badge>
-                            )}
-                          </TableCell>
-                          <TableCell>
-                            <div className="flex gap-1">
-                              <Button
-                                size="sm"
-                                variant="ghost"
-                                onClick={() => {
-                                  setBatchForm({
-                                    drugId: b.drugId,
-                                    batchNumber: b.batchNumber,
-                                    expiryDate: b.expiryDate
-                                      ? new Date(b.expiryDate)
-                                          .toISOString()
-                                          .split("T")[0]
-                                      : "",
-                                    manufactureDate: b.manufactureDate
-                                      ? new Date(b.manufactureDate)
-                                          .toISOString()
-                                          .split("T")[0]
-                                      : "",
-                                    quantityReceived: b.quantityReceived,
-                                    costPricePerUnit: b.costPricePerUnit || 0,
-                                    supplierName: b.supplierName || "",
-                                    supplierInvoice: b.supplierInvoice || "",
-                                    purchaseOrderNumber:
-                                      b.purchaseOrderNumber || "",
-                                  });
-                                  setEditingBatchId(b.id);
-                                  setShowBatchDialog(true);
-                                }}
-                              >
-                                <Edit className="h-4 w-4" />
-                              </Button>
-                              <Button
-                                size="sm"
-                                variant="ghost"
-                                className="text-red-500"
-                                onClick={() => {
-                                  setSelectedBatch(b);
-                                  setShowDeleteBatchConfirm(true);
-                                }}
-                              >
-                                <Trash2 className="h-4 w-4" />
-                              </Button>
-                            </div>
-                          </TableCell>
-                        </TableRow>
-                      );
-                    });
-                  })()}
-                </TableBody>
-              </Table>
-              {(() => {
-                const totalPages = Math.ceil(batches.length / PHARMACY_BATCHES_PER_PAGE);
-                return totalPages > 1 ? (
-                  <div className="flex items-center justify-end gap-2 p-4 border-t">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => setBatchesPage(p => Math.max(1, p - 1))}
-                      disabled={batchesPage === 1}
-                    >
-                      <ChevronLeft className="h-4 w-4 mr-1" />
-                      Previous
-                    </Button>
-                    <span className="text-sm text-gray-600">
-                      Page {batchesPage} of {totalPages}
-                    </span>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => setBatchesPage(p => Math.min(totalPages, p + 1))}
-                      disabled={batchesPage === totalPages}
-                    >
-                      Next
-                      <ChevronRight className="h-4 w-4 ml-1" />
-                    </Button>
-                  </div>
-                ) : null;
-              })()}
-            </CardContent>
-          </Card>
-        </TabsContent>
+        <BatchesTab
+          batches={batches}
+          batchesPage={batchesPage}
+          setBatchesPage={setBatchesPage}
+          setBatchForm={setBatchForm}
+          setEditingBatchId={setEditingBatchId}
+          setShowBatchDialog={setShowBatchDialog}
+          setSelectedBatch={setSelectedBatch}
+          setShowDeleteBatchConfirm={setShowDeleteBatchConfirm}
+        />
 
         {/* ── PURCHASE ORDERS ── */}
-        <TabsContent value="purchase-orders" className="space-y-4">
-          <div className="flex items-center justify-between gap-3">
-            <Select value={poStatusFilter} onValueChange={setPoStatusFilter}>
-              <SelectTrigger className="w-44"><SelectValue /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Statuses</SelectItem>
-                <SelectItem value="draft">Draft</SelectItem>
-                <SelectItem value="submitted">Submitted</SelectItem>
-                <SelectItem value="approved">Approved</SelectItem>
-                <SelectItem value="received">Received</SelectItem>
-                <SelectItem value="cancelled">Cancelled</SelectItem>
-              </SelectContent>
-            </Select>
-            <Button
-              onClick={() => {
-                setPoForm({
-                  supplierName: "",
-                  supplierContact: "",
-                  expectedDeliveryDate: "",
-                  notes: "",
-                });
-                setPoItems([]);
-                setShowPoDialog(true);
-              }}
-            >
-              <Plus className="h-4 w-4 mr-1" />
-              New PO
-            </Button>
-          </div>
-          <Card>
-            <CardContent className="p-0">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>PO #</TableHead>
-                    <TableHead>Supplier</TableHead>
-                    <TableHead>Order Date</TableHead>
-                    <TableHead>Expected</TableHead>
-                    <TableHead>Total</TableHead>
-                    <TableHead>Status</TableHead>
-                    <TableHead>Actions</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {filteredPOs.length === 0 ? (
-                    <TableRow>
-                      <TableCell
-                        colSpan={7}
-                        className="text-center py-8 text-gray-400"
-                      >
-                        No purchase orders
-                      </TableCell>
-                    </TableRow>
-                  ) : (() => {
-                    const totalPages = Math.ceil(filteredPOs.length / PHARMACY_PO_PER_PAGE);
-                    const startIdx = (poPage - 1) * PHARMACY_PO_PER_PAGE;
-                    const endIdx = startIdx + PHARMACY_PO_PER_PAGE;
-                    const paginatedPOs = filteredPOs.slice(startIdx, endIdx);
-                    return paginatedPOs.map((po) => (
-                      <TableRow key={po.id}>
-                        <TableCell className="font-mono">
-                          {po.poNumber}
-                        </TableCell>
-                        <TableCell>{po.supplierName}</TableCell>
-                        <TableCell>
-                          {po.orderDate
-                            ? format(new Date(po.orderDate), "dd MMM yyyy")
-                            : "—"}
-                        </TableCell>
-                        <TableCell>
-                          {po.expectedDeliveryDate
-                            ? format(
-                                new Date(po.expectedDeliveryDate),
-                                "dd MMM yyyy",
-                              )
-                            : "—"}
-                        </TableCell>
-                        <TableCell>
-                          ₹{(po.totalAmount || 0).toLocaleString()}
-                        </TableCell>
-                        <TableCell>{statusBadge(po.status)}</TableCell>
-                        <TableCell>
-                          <div className="flex gap-1">
-                            <Button
-                              size="sm"
-                              variant="ghost"
-                              onClick={() => {
-                                setViewingPo(po);
-                                setShowPoViewDialog(true);
-                              }}
-                            >
-                              <Eye className="h-4 w-4" />
-                            </Button>
-                            {po.status === "draft" && (
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                onClick={() =>
-                                  handleUpdatePO(po.id, "submitted")
-                                }
-                              >
-                                Submit
-                              </Button>
-                            )}
-                            {po.status === "submitted" && (
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                onClick={() =>
-                                  handleUpdatePO(po.id, "approved")
-                                }
-                              >
-                                Approve
-                              </Button>
-                            )}
-                            {po.status === "approved" && (
-                              <Button
-                                size="sm"
-                                onClick={() => openReceivePO(po)}
-                              >
-                                Receive
-                              </Button>
-                            )}
-                            {(po.status === "draft" ||
-                              po.status === "submitted") && (
-                              <Button
-                                size="sm"
-                                variant="ghost"
-                                className="text-red-500"
-                                onClick={() =>
-                                  handleUpdatePO(po.id, "cancelled")
-                                }
-                              >
-                                <XCircle className="h-4 w-4" />
-                              </Button>
-                            )}
-                          </div>
-                        </TableCell>
-                      </TableRow>
-                    ));
-                  })()}
-                </TableBody>
-              </Table>
-              {(() => {
-                const totalPages = Math.ceil(filteredPOs.length / PHARMACY_PO_PER_PAGE);
-                return totalPages > 1 ? (
-                  <div className="flex items-center justify-end gap-2 p-4 border-t">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => setPoPage(p => Math.max(1, p - 1))}
-                      disabled={poPage === 1}
-                    >
-                      <ChevronLeft className="h-4 w-4 mr-1" />
-                      Previous
-                    </Button>
-                    <span className="text-sm text-gray-600">
-                      Page {poPage} of {totalPages}
-                    </span>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => setPoPage(p => Math.min(totalPages, p + 1))}
-                      disabled={poPage === totalPages}
-                    >
-                      Next
-                      <ChevronRight className="h-4 w-4 ml-1" />
-                    </Button>
-                  </div>
-                ) : null;
-              })()}
-            </CardContent>
-          </Card>
-        </TabsContent>
+        <PurchaseOrdersTab
+          poStatusFilter={poStatusFilter}
+          setPoStatusFilter={setPoStatusFilter}
+          filteredPOs={filteredPOs}
+          poPage={poPage}
+          setPoPage={setPoPage}
+          setPoForm={setPoForm}
+          setPoItems={setPoItems}
+          setShowPoDialog={setShowPoDialog}
+          setViewingPo={setViewingPo}
+          setShowPoViewDialog={setShowPoViewDialog}
+          handleUpdatePO={handleUpdatePO}
+          openReceivePO={openReceivePO}
+        />
 
         {/* ── SALES ── */}
-        <TabsContent value="sales" className="space-y-4">
-          <div className="flex items-center justify-between gap-3">
-            <div className="flex items-center gap-3">
-              <Select value={salesPeriod} onValueChange={setSalesPeriod}>
-                <SelectTrigger className="w-36"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="today">Today</SelectItem>
-                  <SelectItem value="week">This Week</SelectItem>
-                  <SelectItem value="month">This Month</SelectItem>
-                  <SelectItem value="all">All Time</SelectItem>
-                </SelectContent>
-              </Select>
-              {filteredSales.length > 0 && (
-                <span className="text-sm text-gray-600">
-                  <span className="font-semibold">{filteredSales.length}</span> sales ·{" "}
-                  <span className="font-semibold text-green-700">₹{salesTotal.toLocaleString()}</span>
-                </span>
-              )}
-            </div>
-            <Button variant="outline" onClick={fetchSales}>
-              <RefreshCw className="h-4 w-4 mr-1" />
-              Refresh
-            </Button>
-          </div>
-          <Card>
-            <CardContent className="p-0">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Receipt #</TableHead>
-                    <TableHead>Patient</TableHead>
-                    <TableHead>Items</TableHead>
-                    <TableHead>Total</TableHead>
-                    <TableHead>Payment</TableHead>
-                    <TableHead>Status</TableHead>
-                    <TableHead>Date</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {filteredSales.length === 0 ? (
-                    <TableRow>
-                      <TableCell
-                        colSpan={7}
-                        className="text-center py-8 text-gray-400"
-                      >
-                        No sales records
-                      </TableCell>
-                    </TableRow>
-                  ) : (() => {
-                    const totalPages = Math.ceil(filteredSales.length / PHARMACY_SALES_PER_PAGE);
-                    const startIdx = (salesPage - 1) * PHARMACY_SALES_PER_PAGE;
-                    const endIdx = startIdx + PHARMACY_SALES_PER_PAGE;
-                    const paginatedSales = filteredSales.slice(startIdx, endIdx);
-                    return paginatedSales.map((s) => {
-                      const name = s.patient
-                        ? `${s.patient.firstName} ${s.patient.lastName || ""}`.trim()
-                        : "Walk-in";
-                      return (
-                        <TableRow key={s.id}>
-                          <TableCell className="font-mono text-xs">
-                            {s.receiptNumber}
-                          </TableCell>
-                          <TableCell>{name}</TableCell>
-                          <TableCell>
-                            {(s.items || []).length} item(s)
-                          </TableCell>
-                          <TableCell className="font-semibold">
-                            ₹{(s.totalAmount || 0).toFixed(2)}
-                          </TableCell>
-                          <TableCell className="capitalize">
-                            {s.paymentMethod || "—"}
-                          </TableCell>
-                          <TableCell>{statusBadge(s.paymentStatus)}</TableCell>
-                          <TableCell>
-                            {s.saleDate
-                              ? format(
-                                  new Date(s.saleDate),
-                                  "dd MMM yyyy HH:mm",
-                                )
-                              : s.createdAt
-                                ? format(
-                                    new Date(s.createdAt),
-                                    "dd MMM yyyy HH:mm",
-                                  )
-                                : "—"}
-                          </TableCell>
-                        </TableRow>
-                      );
-                    });
-                  })()}
-                </TableBody>
-              </Table>
-              {(() => {
-                const totalPages = Math.ceil(filteredSales.length / PHARMACY_SALES_PER_PAGE);
-                return totalPages > 1 ? (
-                  <div className="flex items-center justify-end gap-2 p-4 border-t">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => setSalesPage(p => Math.max(1, p - 1))}
-                      disabled={salesPage === 1}
-                    >
-                      <ChevronLeft className="h-4 w-4 mr-1" />
-                      Previous
-                    </Button>
-                    <span className="text-sm text-gray-600">
-                      Page {salesPage} of {totalPages}
-                    </span>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => setSalesPage(p => Math.min(totalPages, p + 1))}
-                      disabled={salesPage === totalPages}
-                    >
-                      Next
-                      <ChevronRight className="h-4 w-4 ml-1" />
-                    </Button>
-                  </div>
-                ) : null;
-              })()}
-            </CardContent>
-          </Card>
-        </TabsContent>
+        <SalesReportsTab
+          salesPeriod={salesPeriod}
+          setSalesPeriod={setSalesPeriod}
+          sales={salePage.rows}
+          loading={salePage.loading}
+          page={salePage.page}
+          setPage={salePage.setPage}
+          totalPages={salePage.totalPages}
+          salesCount={salePage.total}
+          salesTotal={salePage.summary?.totalAmount ?? 0}
+          refresh={salePage.refresh}
+        />
       </Tabs>
 
       {/* ── ADD/EDIT DRUG DIALOG ── */}
