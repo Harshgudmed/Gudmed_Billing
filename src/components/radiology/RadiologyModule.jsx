@@ -1,8 +1,9 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { getOrgSettings } from '@/lib/orgSettings'
 import { sendRadiologyNotification } from '@/lib/whatsapp'
-import { format } from 'date-fns'
+import { format, differenceInYears } from 'date-fns'
 import { toast } from 'sonner'
+import { printRadiologyReceipt } from '@/components/billing/utils/printBilling'
 import {
   Scan, Plus, Edit, Trash2, Search, Eye, CheckCircle, XCircle,
   RefreshCw, FileText, Printer, AlertTriangle, Upload, X, ChevronLeft, ChevronRight,
@@ -259,17 +260,21 @@ export default function RadiologyModule() {
         setOrderForm(emptyOrder)
         fetchStats()
 
-        // Auto-billing (non-fatal)
+        // Auto-billing (non-fatal). Item must use `serviceName` (not `description`) —
+        // that's what invoiceItemSchema on the backend requires; the old shape here
+        // failed validation on every order, so no invoice was ever actually created.
+        // `notes` is tagged `[Radiology]` so the Billing module recognizes the
+        // department, same as Laboratory's auto-invoice (LaboratoryModule.jsx).
         const exam = exams.find(e => e.id === orderForm.examId)
         if (exam && exam.price > 0) {
           client.post('/billing', {
             resource: 'invoice',
             patientId: orderForm.patientId,
             items: [{
-              type: 'radiology',
-              description: `${exam.examName} (${(exam.examCategory || '').toUpperCase()})`,
-              quantity: 1, unitPrice: exam.price, discount: 0, tax: 0, total: exam.price,
+              serviceName: `${exam.examName} (${(exam.examCategory || '').toUpperCase()})`,
+              quantity: 1, unitPrice: exam.price, tax: 0, total: exam.price,
             }],
+            notes: `[Radiology] Radiology Order ${res.data.orderNumber || ''}`.trim(),
           }).catch(() => {})
         }
       }
@@ -390,67 +395,38 @@ export default function RadiologyModule() {
 
   // ── Print handlers ────────────────────────────────────────────────────────
 
-  const handlePrintInvoice = (order) => {
-    const exam = exams.find(e => e.id === order.examId)
+  // Radiology receipt uses the SHARED printRadiologyReceipt so the Billing module
+  // and the Radiology module render an IDENTICAL bill — same format as Laboratory
+  // (see handlePrintLabInvoice in LaboratoryModule.jsx).
+  const handlePrintInvoice = (order, payInfo = {}) => {
+    let clinic = {}
+    try { clinic = JSON.parse(localStorage.getItem('gudmed-clinic-profile') || '{}') } catch { clinic = {} }
+    const now = new Date()
+    const exam = order.exam || exams.find(e => e.id === order.examId)
     const price = exam?.price || 0
-    const printDate = format(new Date(), 'dd MMM yyyy HH:mm')
-    const orderDate = order.orderDate ? format(new Date(order.orderDate), 'dd MMM yyyy HH:mm') : '—'
-    const patientName = order.patient ? `${order.patient.firstName} ${order.patient.lastName}` : '—'
-    const html = `<!DOCTYPE html><html><head><title>Radiology Invoice</title><style>
-*{box-sizing:border-box;margin:0;padding:0}body{font-family:Arial,sans-serif;font-size:11pt;padding:30px}
-.header{display:flex;justify-content:space-between;border-bottom:2px solid #1e3a5f;padding-bottom:12px;margin-bottom:20px}
-.hosp-name{font-size:18pt;font-weight:bold;color:#1e3a5f}
-.banner{background:#1e3a5f;color:#fff;text-align:center;padding:6px 0;font-size:13pt;font-weight:bold;letter-spacing:3px;margin-bottom:16px}
-.info-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px}
-.info-box{border:1px solid #ccc;border-radius:4px;padding:10px}
-.info-box h4{font-size:8.5pt;color:#1e3a5f;font-weight:bold;text-transform:uppercase;margin-bottom:6px;border-bottom:1px solid #eee;padding-bottom:4px}
-.row{display:flex;justify-content:space-between;font-size:9.5pt;margin-bottom:3px}
-table{width:100%;border-collapse:collapse;margin-bottom:12px}
-thead th{background:#1e3a5f;color:#fff;padding:7px 10px;text-align:left;font-size:9.5pt}
-tbody td{padding:7px 10px;border-bottom:1px solid #eee}
-.total-wrap{display:flex;justify-content:flex-end}
-.total-box{width:260px;border:2px solid #1e3a5f;border-radius:4px;overflow:hidden}
-.total-row{display:flex;justify-content:space-between;padding:6px 12px;font-size:10.5pt;border-bottom:1px solid #eee}
-.total-final{background:#1e3a5f;color:#fff;font-weight:bold;font-size:12pt}
-.footer{margin-top:24px;border-top:1px solid #ccc;padding-top:8px;font-size:8pt;color:#888;text-align:center}
-@media print{body{padding:10px}}
-</style></head><body>
-<div class="header">
-  <div><div class="hosp-name">${orgInfo.name}</div><div style="font-size:9pt;color:#555">Radiology &amp; Imaging Department</div></div>
-  <div style="text-align:right;font-size:9.5pt;color:#555">Order #: <strong>${order.orderNumber}</strong><br/>Date: ${orderDate}<br/>Print: ${printDate}</div>
-</div>
-<div class="banner">RADIOLOGY INVOICE</div>
-<div class="info-grid">
-  <div class="info-box"><h4>Patient Details</h4>
-    <div class="row"><span style="color:#666">Name</span><span><strong>${patientName}</strong></span></div>
-    <div class="row"><span style="color:#666">UHID</span><span>${order.patient?.mrn || '—'}</span></div>
-    <div class="row"><span style="color:#666">Priority</span><span style="text-transform:uppercase;font-weight:bold">${order.urgency || 'routine'}</span></div>
-  </div>
-  <div class="info-box"><h4>Order Details</h4>
-    <div class="row"><span style="color:#666">Order #</span><span>${order.orderNumber}</span></div>
-    <div class="row"><span style="color:#666">Modality</span><span style="text-transform:uppercase">${order.exam?.examCategory || '—'}</span></div>
-    <div class="row"><span style="color:#666">Exam</span><span>${order.exam?.examName || '—'}</span></div>
-  </div>
-</div>
-<table>
-  <thead><tr><th>#</th><th>Description</th><th>Category</th><th style="text-align:right">Qty</th><th style="text-align:right">Unit Price</th><th style="text-align:right">Total</th></tr></thead>
-  <tbody><tr>
-    <td>1</td>
-    <td><strong>${order.exam?.examName || '—'}</strong>${order.clinicalIndication ? '<br/><span style="font-size:9pt;color:#666">Indication: ' + order.clinicalIndication.substring(0, 60) + '</span>' : ''}</td>
-    <td style="text-transform:uppercase">${order.exam?.examCategory || '—'}</td>
-    <td style="text-align:right">1</td>
-    <td style="text-align:right">&#8377;${price.toLocaleString()}</td>
-    <td style="text-align:right">&#8377;${price.toLocaleString()}</td>
-  </tr></tbody>
-</table>
-<div class="total-wrap"><div class="total-box">
-  <div class="total-row"><span>Subtotal</span><span>&#8377;${price.toLocaleString()}</span></div>
-  <div class="total-row"><span>Discount</span><span>&#8377;0</span></div>
-  <div class="total-row total-final"><span>TOTAL DUE</span><span>&#8377;${price.toLocaleString()}</span></div>
-</div></div>
-<div class="footer">${orgInfo.name} — Radiology &amp; Imaging &nbsp;|&nbsp; System-generated invoice &nbsp;|&nbsp; Printed: ${printDate}</div>
-</body></html>`
-    printViaPopup(html)
+    const items = [{
+      code: exam?.examCode || 'EXAM',
+      name: exam?.examName || 'Exam',
+      price,
+      eta: order.scheduledDate ? format(new Date(order.scheduledDate), 'dd-MM-yyyy HH:mm') : '',
+    }]
+    const orderValue = items.reduce((s, i) => s + i.price, 0)
+    const disc = Number(payInfo.discount || 0)
+    const net = orderValue - disc
+    const paid = payInfo.paid !== undefined ? Number(payInfo.paid) : 0
+    printRadiologyReceipt({
+      invoiceNo: order.orderNumber,
+      labId: order.orderNumber,
+      patientName: order.patient ? `${order.patient.firstName} ${order.patient.lastName}` : '—',
+      uhid: order.patient?.mrn,
+      age: order.patient?.dateOfBirth ? `${differenceInYears(now, new Date(order.patient.dateOfBirth))} year(s)` : '',
+      sex: order.patient?.gender ? order.patient.gender.charAt(0).toUpperCase() + order.patient.gender.slice(1) : '',
+      contact: order.patient?.phonePrimary,
+      dateTime: format(now, 'dd MMM yyyy, hh:mm aa'),
+      refDoctor: 'self',
+      mode: payInfo.mode,
+      items, orderValue, homeCollection: 0, discount: disc, netPayable: net, paid, balance: net - paid,
+    }, orgInfo, clinic)
   }
 
   const handlePrintFullReport = (report, order) => {

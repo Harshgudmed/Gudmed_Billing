@@ -232,7 +232,6 @@ export async function getRecords(req, res, next) {
         where: { patientId: id },
         include: {
           doctor: { select: { id: true, fullName: true, specialization: true } },
-          department: { select: { id: true, name: true } },
         },
         orderBy: { appointmentDate: 'desc' },
       }),

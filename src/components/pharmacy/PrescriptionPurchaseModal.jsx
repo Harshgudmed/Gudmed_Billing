@@ -9,6 +9,7 @@ import { toast } from 'sonner'
 import client from '@/api/client'
 import { sendPrescriptionNotification } from '@/lib/whatsapp'
 import { getOrgSettings } from '@/lib/orgSettings'
+import { printPharmacyReceipt } from '@/components/billing/utils/printBilling'
 
 const PAYMENT_METHODS = [
   { key: 'cash',         label: 'Cash',         icon: Banknote,    color: 'text-green-600'  },
@@ -53,6 +54,7 @@ export default function PrescriptionPurchaseModal({
   const [paymentRef, setPaymentRef]       = useState('')
   const [processing, setProcessing]       = useState(false)
   const [invoice, setInvoice]             = useState(null)
+  const [sale, setSale]                   = useState(null)
   const [orgInfo, setOrgInfo]             = useState({ name: 'Hospital', phone: '', upiId: '' })
 
   useEffect(() => {
@@ -99,7 +101,8 @@ export default function PrescriptionPurchaseModal({
   async function confirmPurchase() {
     setProcessing(true)
     try {
-      // 1. Create pharmacy sale (deducts stock)
+      // 1. Create pharmacy sale (deducts stock, snapshots HSN/GST%/batch/expiry
+      // per item server-side — see sale.controller.js) and print the receipt from.
       const saleItems = enrichedItems
         .filter(i => i.drugCode && i.unitPrice > 0)
         .map(i => ({
@@ -110,8 +113,9 @@ export default function PrescriptionPurchaseModal({
           total: i.unitPrice * (i.quantity || 1),
         }))
 
+      let createdSale = null
       if (saleItems.length > 0) {
-        await client.post('/pharmacy/sales', {
+        const saleRes = await client.post('/pharmacy/sales', {
           patientId,
           prescriptionId,
           items: saleItems,
@@ -119,30 +123,65 @@ export default function PrescriptionPurchaseModal({
           paymentStatus: 'paid',
           amountPaid: medTotal,
         })
+        createdSale = saleRes?.data || null
       }
 
-      // 2. Create billing invoice
+      // 2. Create billing invoice. Must send `items` with `serviceName` — that's
+      // what invoiceItemSchema on the backend requires. The old shape here sent
+      // `invoiceItems`/`description`, which failed validation on EVERY purchase
+      // (400) and threw, landing in the catch below even though the pharmacy
+      // sale above had already succeeded — the patient's payment silently
+      // "failed" on screen while stock was already deducted and no invoice or
+      // receipt was ever produced. `notes` is tagged `[Pharmacy]` so the Billing
+      // module recognizes the department, same convention as Lab/Radiology.
+      //
+      // HSN/GST%/batch/expiry are pulled from the sale we just created (it's
+      // the one that actually knows which batch FIFO drew from) so the Billing
+      // module's pharmacy invoice print can show the same GST breakdown as the
+      // pharmacy counter receipt, not just plain drug names.
+      let saleItemsById = new Map()
+      try {
+        const parsedSaleItems = JSON.parse(createdSale?.items || '[]')
+        saleItemsById = new Map(parsedSaleItems.map((it) => [it.drugId, it]))
+      } catch { /* fall back to plain items below */ }
+
       const invoiceRes = await client.post('/billing', {
         resource: 'invoice',
         patientId,
-        invoiceItems: enrichedItems.map(i => ({
-          type: 'pharmacy',
-          description: `${i.drugName} ${i.strength || ''} (Qty: ${i.quantity || 1})`,
-          quantity: i.quantity || 1,
-          unitPrice: i.unitPrice || 0,
-          discount: 0,
-          tax: 0,
-          total: (i.unitPrice || 0) * (i.quantity || 1),
-        })),
-        paymentMethod,
-        paymentReference: paymentRef || undefined,
-        totalAmount: medTotal,
-        amountPaid: medTotal,
-        paymentStatus: 'paid',
+        items: enrichedItems.map(i => {
+          const saleItem = saleItemsById.get(i.drugCode)
+          return {
+            serviceName: `${i.drugName} ${i.strength || ''} (Qty: ${i.quantity || 1})`.trim(),
+            quantity: i.quantity || 1,
+            unitPrice: i.unitPrice || 0,
+            tax: 0,
+            total: (i.unitPrice || 0) * (i.quantity || 1),
+            hsnCode: saleItem?.hsnCode || undefined,
+            gstRate: saleItem?.gstRate || undefined,
+            batchNumber: saleItem?.batchNumber || undefined,
+            expiryDate: saleItem?.expiryDate || undefined,
+          }
+        }),
+        notes: `[Pharmacy] Prescription ${prescriptionId || ''}`.trim(),
       })
-
       const inv = invoiceRes?.data || { invoiceNumber: `INV${Date.now()}`, totalAmount: medTotal }
+
+      // 3. Record the payment against that invoice — the patient already paid
+      // at the counter, so the invoice must be marked paid, not left as the
+      // 'draft'/'unpaid' default a bare invoice-create leaves it in.
+      if (inv.id) {
+        await client.post('/billing', {
+          resource: 'payment',
+          invoiceId: inv.id,
+          patientId,
+          amount: medTotal,
+          paymentMethod,
+          paymentReference: paymentRef || undefined,
+        }).catch(() => {}) // non-fatal — invoice still exists even if this step fails
+      }
+
       setInvoice(inv)
+      setSale(createdSale)
       setStep(3)
       toast.success('Payment confirmed — invoice created!')
     } catch (err) {
@@ -162,43 +201,29 @@ export default function PrescriptionPurchaseModal({
   }
 
   // ── Print receipt ────────────────────────────────────────────────────────
+  // Same SHARED GST-invoice format as Direct Sale / Sales & Reports — see
+  // printPharmacyReceipt in printBilling.js. Uses the actual created sale (with
+  // server-enriched HSN/GST%/batch/expiry) when available; falls back to the
+  // reviewed items (no batch/HSN) if the sale wasn't created (all-free items).
   function printReceipt() {
-    const now = new Date().toLocaleString('en-IN')
-    const rows = enrichedItems.map(i => `
-      <tr>
-        <td>${i.drugName} ${i.strength || ''}</td>
-        <td style="text-align:center">${i.quantity || 1}</td>
-        <td style="text-align:right">${rupee(i.unitPrice)}</td>
-        <td style="text-align:right">${rupee((i.unitPrice || 0) * (i.quantity || 1))}</td>
-      </tr>`).join('')
-
-    const win = window.open('', '_blank', 'width=480,height=700')
-    if (!win) { toast.error('Allow pop-ups to print'); return }
-    win.document.write(`<!DOCTYPE html><html><head><title>Receipt</title>
-<style>*{box-sizing:border-box;margin:0;padding:0}body{font-family:Arial,sans-serif;font-size:11pt;padding:20px;color:#000}
-.hosp{font-size:16pt;font-weight:bold;color:#1e3a5f;text-align:center}.sub{font-size:9pt;color:#555;text-align:center;margin-bottom:14px}
-.banner{background:#1e3a5f;color:#fff;text-align:center;padding:5px;font-size:11pt;font-weight:bold;margin-bottom:12px}
-table{width:100%;border-collapse:collapse}th{background:#1e3a5f;color:#fff;padding:5px 8px;text-align:left;font-size:9pt}
-td{padding:5px 8px;border-bottom:1px solid #eee}.total-row td{font-weight:bold;background:#f0f4f8;border-top:2px solid #1e3a5f}
-.footer{text-align:center;font-size:8pt;color:#aaa;margin-top:12px}@media print{body{padding:6px}}</style>
-</head><body>
-<div class="hosp">${orgInfo.name}</div>
-<div class="sub">Pharmacy Department${orgInfo.phone ? ' · ' + orgInfo.phone : ''}</div>
-<div class="banner">PRESCRIPTION RECEIPT</div>
-<p style="font-size:10pt;margin-bottom:8px">
-  <strong>Patient:</strong> ${patientName} &nbsp;|&nbsp;
-  <strong>Date:</strong> ${now} &nbsp;|&nbsp;
-  <strong>Invoice:</strong> ${invoice?.invoiceNumber || '—'}<br/>
-  <strong>Payment:</strong> ${paymentMethod.toUpperCase()}${paymentRef ? ' · Ref: ' + paymentRef : ''}
-</p>
-<table><thead><tr><th>Medicine</th><th style="text-align:center">Qty</th><th style="text-align:right">Rate</th><th style="text-align:right">Amount</th></tr></thead>
-<tbody>${rows}
-<tr class="total-row"><td colspan="3" style="text-align:right">TOTAL</td><td style="text-align:right">${rupee(medTotal)}</td></tr>
-</tbody></table>
-<div class="footer">Thank you for visiting ${orgInfo.name}!</div>
-<script>window.onload=function(){window.print()}</script>
-</body></html>`)
-    win.document.close()
+    let clinic = {}
+    try { clinic = JSON.parse(localStorage.getItem('gudmed-clinic-profile') || '{}') } catch { clinic = {} }
+    const data = sale || {
+      receiptNumber: invoice?.invoiceNumber,
+      items: enrichedItems.map(i => ({
+        drugName: `${i.drugName} ${i.strength || ''}`.trim(),
+        quantity: i.quantity || 1,
+        unitPrice: i.unitPrice,
+        total: (i.unitPrice || 0) * (i.quantity || 1),
+      })),
+      totalAmount: medTotal,
+      amountPaid: medTotal,
+    }
+    printPharmacyReceipt(
+      { ...data, patientName, paymentMethod, prescribedBy: 'self' },
+      orgInfo,
+      clinic
+    )
   }
 
   return (

@@ -24,6 +24,7 @@ import ambulanceRoutes from './ambulanceRoutes.js'
 import insuranceRoutes from './insuranceRoutes.js'
 import { router as deathCertificateRoutes } from './deathCertificateRoutes.js'
 import inpatientRoutes from './inpatientRoutes.js'
+import machineIntegrationRoutes from './machineIntegrationRoutes.js'
 
 export const router = Router()
 
@@ -69,3 +70,4 @@ router.use('/ambulance',             authorize(), ambulanceRoutes)
 router.use('/insurance',             authorize(), insuranceRoutes)
 router.use('/death-certificates',    authorize(), deathCertificateRoutes)
 router.use('/inpatient',             authorize(), inpatientRoutes)
+router.use('/machine-integration',   authorize(), machineIntegrationRoutes)

@@ -7,7 +7,6 @@ export const appointmentSchema = z.object({
   patientId: z.string().min(1, "Patient is required"),
   departmentId: z.string().optional(),
   doctorId: z.string().min(1, "Doctor is required"),
-  opdServiceId: z.string().optional(),
   appointmentDate: z.date(),
   appointmentTime: z.string().min(1, "Time is required"),
   appointmentType: z.enum(["new_patient", "follow_up", "emergency"]),
