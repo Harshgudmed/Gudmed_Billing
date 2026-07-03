@@ -1,6 +1,7 @@
 import { useState, useCallback, useEffect } from 'react';
 import { toast } from 'sonner';
 import client from '@/api/client';
+import { useDebounce } from '@/lib/useDebounce';
 
 export function usePatients({ dfStart, dfEnd, limit = 10 }) {
   const [patients, setPatients] = useState([]);
@@ -12,12 +13,16 @@ export function usePatients({ dfStart, dfEnd, limit = 10 }) {
   const [status, setStatus] = useState('all');
   const [offset, setOffset] = useState(0);
 
+  // The input box still updates instantly (uses `search`), but the API call
+  // waits 300ms after typing stops — so we fire ONE request, not one per key.
+  const debouncedSearch = useDebounce(search, 300);
+
   const fetchPatients = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
       const params = new URLSearchParams();
-      if (search) params.set('search', search);
+      if (debouncedSearch) params.set('search', debouncedSearch);
       if (status !== 'all') params.set('status', status);
       if (dfStart) params.set('startDate', dfStart);
       if (dfEnd) params.set('endDate', dfEnd);
@@ -37,7 +42,7 @@ export function usePatients({ dfStart, dfEnd, limit = 10 }) {
     } finally {
       setLoading(false);
     }
-  }, [search, status, offset, dfStart, dfEnd, limit]);
+  }, [debouncedSearch, status, offset, dfStart, dfEnd, limit]);
 
   useEffect(() => {
     fetchPatients();

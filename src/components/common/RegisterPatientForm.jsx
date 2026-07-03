@@ -14,6 +14,7 @@ import { DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/di
 import client from '@/api/client'
 import { drName } from '@/lib/utils'
 import { useDoctorTimetable } from './hooks/useDoctorTimetable'
+import { useCreatePatient } from '@/lib/useCreatePatient'
 
 const INDIAN_STATES = [
   'Andhra Pradesh', 'Arunachal Pradesh', 'Assam', 'Bihar', 'Chhattisgarh',
@@ -71,7 +72,11 @@ const emptyPatientForm = {
  */
 export default function RegisterPatientForm({ onSuccess, onCancel }) {
   const [patientForm, setPatientForm] = useState(emptyPatientForm)
-  const [savingPatient, setSavingPatient] = useState(false)
+  const [bookingAppointment, setBookingAppointment] = useState(false)
+  const { createPatient, creating: creatingPatient } = useCreatePatient()
+  // savingPatient covers the whole flow (patient create + appointment book),
+  // so the submit button stays disabled across both steps.
+  const savingPatient = creatingPatient || bookingAppointment
   const [doctors, setDoctors] = useState([])
   const [departments, setDepartments] = useState([])
   const { availableTimeSlots, timetableLoading } = useDoctorTimetable(
@@ -128,49 +133,44 @@ export default function RegisterPatientForm({ onSuccess, onCancel }) {
       toast.error('Please select a doctor and an appointment date')
       return
     }
-    setSavingPatient(true)
     try {
-      const res = await client.post('/patients', {
+      const patient = await createPatient({
         ...patientForm,
         hasInsurance: patientForm.hasInsurance === true || patientForm.hasInsurance === 'true',
       })
-      if (res.success) {
-        const patientId = res.data?.id
+      const patientId = patient?.id
 
-        // Book the first appointment (best-effort — never lose the patient)
-        let appointmentBooked = false
-        if (patientId && patientForm.doctor && patientForm.appointmentDate) {
-          try {
-            const TYPE_MAP = { 'Follow-up': 'follow_up', Emergency: 'emergency' }
-            const PRIORITY_MAP = { Urgent: 'urgent', Emergency: 'urgent', Critical: 'urgent' }
-            await client.post('/appointments', {
-              patientId,
-              doctorId: patientForm.doctor,
-              ...(patientForm.department ? { departmentId: patientForm.department } : {}),
-              appointmentDate: new Date(patientForm.appointmentDate).toISOString(),
-              appointmentTime: patientForm.appointmentTime || '09:00',
-              appointmentType: TYPE_MAP[patientForm.appointmentType] || 'new_patient',
-              priority: PRIORITY_MAP[patientForm.priority] || 'normal',
-              ...(patientForm.notes.trim() ? { notes: patientForm.notes.trim() } : {}),
-            })
-            appointmentBooked = true
-          } catch (err) {
-            toast.error(`Patient registered, but the appointment booking failed: ${err.message || 'unknown error'}`)
-          }
-        }
+      // Registration and the first appointment must succeed together — a
+      // patient with no appointment is an orphan record (duplicate re-registration
+      // risk, wasted UHID). If the appointment call fails, undo the patient
+      // (soft-delete) instead of leaving a half-finished record behind.
+      setBookingAppointment(true)
+      try {
+        const TYPE_MAP = { 'Follow-up': 'follow_up', Emergency: 'emergency' }
+        const PRIORITY_MAP = { Urgent: 'urgent', Emergency: 'urgent', Critical: 'urgent' }
+        await client.post('/appointments', {
+          patientId,
+          doctorId: patientForm.doctor,
+          ...(patientForm.department ? { departmentId: patientForm.department } : {}),
+          appointmentDate: new Date(patientForm.appointmentDate).toISOString(),
+          appointmentTime: patientForm.appointmentTime || '09:00',
+          appointmentType: TYPE_MAP[patientForm.appointmentType] || 'new_patient',
+          priority: PRIORITY_MAP[patientForm.priority] || 'normal',
+          ...(patientForm.notes.trim() ? { notes: patientForm.notes.trim() } : {}),
+        })
 
-        toast.success(appointmentBooked
-          ? `Patient ${res.data.mrn} registered & appointment booked`
-          : `Patient UHID ${res.data.mrn} registered successfully`)
+        toast.success(`Patient ${patient.mrn} registered & appointment booked`)
         setPatientForm(emptyPatientForm)
-        onSuccess?.(res.data)
-      } else {
-        toast.error(res.error || 'Failed to register patient')
+        onSuccess?.(patient)
+      } catch (err) {
+        // Roll back the orphan patient so nothing is left half-created.
+        await client.delete(`/patients/${patientId}`).catch(() => {})
+        toast.error(`Registration failed — appointment could not be booked (${err.message || 'unknown error'}). Please try again.`)
+      } finally {
+        setBookingAppointment(false)
       }
-    } catch {
-      toast.error('Failed to register patient')
-    } finally {
-      setSavingPatient(false)
+    } catch (err) {
+      toast.error(err.message || 'Failed to register patient')
     }
   }
 

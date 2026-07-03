@@ -6,7 +6,7 @@ import { getOrgSettings, clearOrgCache } from '@/lib/orgSettings'
  * Components should use this instead of manually calling getOrgSettings
  */
 export function useOrgSettings() {
-  const [orgInfo, setOrgInfo] = useState({ name: 'Hospital', address: '', city: '', phone: '', email: '', logoUrl: '' })
+  const [orgInfo, setOrgInfo] = useState({ name: 'Hospital', address: '', city: '', region: '', phone: '', email: '', logoUrl: '', website: '', gstNo: '', cin: '', sacCode: '', labCode: '', homeCollectionCharge: 0, showEmptyReceiptFields: true, receiptFooter: '' })
   const [loading, setLoading] = useState(true)
 
   const fetchSettings = async () => {

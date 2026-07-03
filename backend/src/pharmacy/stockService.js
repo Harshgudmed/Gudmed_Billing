@@ -42,12 +42,16 @@ export async function recordStockChange(
 
 /**
  * Decrement a drug's batches FIFO (soonest expiry first) by `quantity`.
- * Marks a batch `depleted` when it hits zero. Returns the quantity that could
- * NOT be covered by tracked batches (0 when fully covered). Batch tracking is
- * best-effort — `quantityInStock` remains the authority for blocking a sale.
+ * Marks a batch `depleted` when it hits zero. Batch tracking is best-effort —
+ * `quantityInStock` remains the authority for blocking a sale.
+ * @returns {{ remaining: number, consumed: Array<{batchId, batchNumber, expiryDate, quantity}> }}
+ *   `remaining` is the quantity that could NOT be covered by tracked batches (0 when
+ *   fully covered). `consumed` lists which batch(es) were drawn from — the caller
+ *   uses this to snapshot batch/expiry onto the sale record for the printed receipt.
  */
 export async function consumeFromBatches(tx, { drugId, quantity }) {
   let remaining = quantity
+  const consumed = []
   const batches = await tx.pharmacyBatch.findMany({
     where: { drugId, status: 'active', quantityRemaining: { gt: 0 } },
     orderBy: { expiryDate: 'asc' },
@@ -63,10 +67,11 @@ export async function consumeFromBatches(tx, { drugId, quantity }) {
         ...(b.quantityRemaining - take === 0 ? { status: 'depleted' } : {}),
       },
     })
+    consumed.push({ batchId: b.id, batchNumber: b.batchNumber, expiryDate: b.expiryDate, quantity: take })
     remaining -= take
   }
 
-  return remaining
+  return { remaining, consumed }
 }
 
 /**

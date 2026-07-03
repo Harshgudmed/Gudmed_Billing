@@ -36,6 +36,7 @@ import { Progress } from '@/components/ui/progress'
 import client from '@/api/client'
 import { drName } from '@/lib/utils'
 import PatientLookup from '@/components/common/PatientLookup'
+import { printLabReceipt } from '@/components/billing/utils/printBilling'
 
 // ============================================
 // API HELPERS
@@ -99,6 +100,7 @@ function transformApiOrder(apiOrder) {
     patientMrn: patient?.mrn || '',
     patientAge: age,
     patientGender: patient?.gender || 'male',
+    patientPhone: patient?.phonePrimary || '',
     tests: parsedTests.map(t => ({
       testId: t.testId,
       testName: t.testName,
@@ -276,6 +278,7 @@ export default function LaboratoryModule() {
   const [orderTestSearch, setOrderTestSearch] = useState('')
   // Patient search for New Order dialog
   const [selectedPatient, setSelectedPatient] = useState(null)
+  const [orderHcc, setOrderHcc] = useState('') // home-collection charge for this order
   const [showOrderDialog, setShowOrderDialog] = useState(false)
   const [showResultDialog, setShowResultDialog] = useState(false)
   const [showViewOrderDialog, setShowViewOrderDialog] = useState(false)
@@ -468,6 +471,7 @@ export default function LaboratoryModule() {
     try {
       setIsLoading(true)
       const selectedTests = tests.filter(t => data.tests.includes(t.id))
+      const hcc = Number(orderHcc) || 0
 
       const newOrder = await fetchApi('/laboratory', {
         method: 'POST',
@@ -482,36 +486,48 @@ export default function LaboratoryModule() {
           clinicalIndication: data.clinicalIndication,
           provisionalDiagnosis: data.provisionalDiagnosis,
           priority: data.priority,
-          notes: data.notes
+          // Home-collection charge is tagged into notes so the receipt can show it.
+          notes: `${data.notes || ''}${hcc > 0 ? ` [HCC:${hcc}]` : ''}`.trim()
         }),
       })
 
       setOrders(prev => [transformApiOrder(newOrder), ...prev])
 
-      // Auto-create billing invoice for lab tests
+      // Auto-create ONE billing invoice for all tests in this visit.
+      // NOTE: billing requires `serviceName` on each item (not `description`),
+      // else the invoice silently fails validation and no bill is created.
       const billItems = selectedTests.map(t => ({
-        type: 'laboratory',
-        referenceId: t.id,
-        description: t.testName,
+        serviceName: t.testName,
         quantity: 1,
         unitPrice: t.price || 0,
-        discount: 0,
         tax: 0,
         total: t.price || 0,
       }))
+      // Add home-collection as a billable line so the invoice total is correct.
+      if (hcc > 0) billItems.push({ serviceName: 'Home Collection Charges', quantity: 1, unitPrice: hcc, tax: 0, total: hcc })
       const billTotal = billItems.reduce((s, i) => s + i.total, 0)
       if (billTotal > 0 && data.patientId) {
-        fetch('/api/billing', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ resource: 'invoice', patientId: data.patientId, items: billItems }),
-        }).catch(() => {})
+        try {
+          await fetchApi('/billing', {
+            method: 'POST',
+            body: JSON.stringify({
+              resource: 'invoice',
+              patientId: data.patientId,
+              items: billItems,
+              notes: `[Laboratory] Lab Order ${newOrder.orderNumber || ''}`.trim(),
+            }),
+          })
+          toast.success('Invoice generated for this lab order')
+        } catch (e) {
+          toast.error('Order created, but invoice generation failed: ' + (e.message || ''))
+        }
       }
 
       toast.success('Lab order created successfully')
       setShowOrderDialog(false)
       orderForm.reset()
       setSelectedPatient(null)
+      setOrderHcc('')
       fetchStats()
     } catch (error) {
       console.error('Failed to create order:', error)
@@ -758,6 +774,7 @@ tr:nth-child(even) td{background:#f9f9f9}
 <div class="page">
   <div class="hosp-header">
     <div>
+      ${orgInfo.logoUrl ? `<img src="${orgInfo.logoUrl}" alt="" style="height:46px;max-width:170px;object-fit:contain;margin-bottom:4px"/>` : ''}
       <div class="hosp-name">${orgInfo.name}</div>
       <div class="hosp-sub">Laboratory &amp; Pathology Department</div>
       <div class="hosp-sub">Accredited Clinical Laboratory Services</div>
@@ -774,9 +791,10 @@ tr:nth-child(even) td{background:#f9f9f9}
   <div class="info-box">
     <div class="info-box-hdr">Patient Information</div>
     <div class="info-grid">
+     <div class="info-cell"><div class="info-label">UHID</div><div class="info-value">${order.patientMrn}</div></div>
+    
       <div class="info-cell"><div class="info-label">Patient Name</div><div class="info-value"><strong>${order.patientName}</strong></div></div>
-      <div class="info-cell"><div class="info-label">UHID</div><div class="info-value">${order.patientMrn}</div></div>
-      <div class="info-cell"><div class="info-label">Age / Sex</div><div class="info-value">${order.patientAge} yrs / ${order.patientGender.charAt(0).toUpperCase() + order.patientGender.slice(1)}</div></div>
+       <div class="info-cell"><div class="info-label">Age / Sex</div><div class="info-value">${order.patientAge} yrs / ${order.patientGender.charAt(0).toUpperCase() + order.patientGender.slice(1)}</div></div>
       <div class="info-cell"><div class="info-label">Requesting Physician</div><div class="info-value">${order.requestingDoctor ? drName(order.requestingDoctor) : '—'}</div></div>
     </div>
     <div class="info-box-hdr2">Order Details</div>
@@ -868,123 +886,46 @@ tr:nth-child(even) td{background:#f9f9f9}
     toast.success('Data refreshed')
   }
 
-  const handlePrintLabInvoice = (order) => {
-    const win = window.open('', '_blank', 'width=820,height=700')
-    if (!win) { toast.error('Please allow pop-ups to print'); return }
-    const invoiceDate = format(new Date(), 'dd MMM yyyy')
-    const orderDate = format(new Date(order.orderDate), 'dd MMM yyyy HH:mm')
-    const lineItems = order.tests.map(t => {
-      const testDef = tests.find(td => td.id === t.testId)
-      const price = testDef?.price || 0
-      return { name: t.testName, code: t.testCode || t.testName.substring(0, 4).toUpperCase(), price }
+  // Lab receipt uses the SHARED printLabReceipt so the Billing module and the
+  // Laboratory module render an IDENTICAL Dr-Lal-style bill.
+  const handlePrintLabInvoice = (order, payInfo = {}) => {
+    let clinic = {}
+    try { clinic = JSON.parse(localStorage.getItem('gudmed-clinic-profile') || '{}') } catch { clinic = {} }
+    const now = new Date()
+    const items = order.tests.map(t => {
+      const def = tests.find(td => td.id === t.testId)
+      const price = def?.price || 0
+      const tat = def?.turnaroundTime || 24
+      return {
+        code: def?.testCode || t.testCode || (t.testName || 'TEST').substring(0, 6).toUpperCase(),
+        name: t.testName || 'Test',
+        price,
+        eta: format(new Date(now.getTime() + tat * 3600 * 1000), 'dd-MM-yyyy HH:mm'),
+      }
     })
-    const subtotal = lineItems.reduce((s, i) => s + i.price, 0)
-    const tax = Math.round(subtotal * 0.05)
-    const total = subtotal + tax
-    const rowsHtml = lineItems.map((item, idx) => `
-      <tr>
-        <td style="padding:8px 12px;border-bottom:1px solid #e5e7eb">${idx + 1}</td>
-        <td style="padding:8px 12px;border-bottom:1px solid #e5e7eb"><strong>${item.name}</strong></td>
-        <td style="padding:8px 12px;border-bottom:1px solid #e5e7eb;font-family:monospace;color:#555">${item.code}</td>
-        <td style="padding:8px 12px;border-bottom:1px solid #e5e7eb;text-align:right">${item.price.toLocaleString()}</td>
-      </tr>`).join('')
-    win.document.write(`<!DOCTYPE html><html><head><title>Lab Invoice — ${order.orderNumber}</title>
-<style>
-*{box-sizing:border-box;margin:0;padding:0}
-body{font-family:Arial,sans-serif;padding:30px;background:#fff;color:#000;font-size:10pt}
-.header{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:24px;padding-bottom:14px;border-bottom:2.5px solid #1e3a5f}
-.hosp-name{font-size:20pt;font-weight:bold;color:#1e3a5f;line-height:1}
-.hosp-sub{font-size:8.5pt;color:#666;margin-top:3px}
-.inv-label{font-size:22pt;font-weight:bold;color:#1e3a5f;letter-spacing:2px;text-align:right}
-.inv-meta{font-size:9pt;color:#555;margin-top:3px;text-align:right}
-.info-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px}
-.info-box{background:#f8fafc;border:1px solid #e2e8f0;padding:12px 14px;border-radius:4px}
-.info-label{font-size:7.5pt;color:#888;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px;font-weight:700}
-.info-value{font-size:10.5pt;font-weight:700;color:#1e293b}
-.info-sub{font-size:8.5pt;color:#666;margin-top:2px}
-table{width:100%;border-collapse:collapse;margin-bottom:16px}
-thead{background:#1e3a5f;color:#fff}
-thead th{padding:9px 12px;text-align:left;font-size:8.5pt;letter-spacing:0.5px;text-transform:uppercase}
-thead th:last-child{text-align:right}
-tbody tr:hover{background:#f9fafb}
-.total-section{display:flex;justify-content:flex-end;margin-bottom:20px}
-.total-box{width:260px}
-.total-row{display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid #e5e7eb;font-size:10pt;color:#444}
-.total-final{display:flex;justify-content:space-between;padding:10px 0;font-size:13pt;font-weight:bold;color:#1e3a5f;border-top:2px solid #1e3a5f;margin-top:4px}
-.payment-note{margin-bottom:32px;padding:10px 14px;background:#f0fdf4;border:1px solid #86efac;border-radius:4px;font-size:9pt;color:#166534}
-.sig-row{display:flex;justify-content:space-between;margin-top:40px}
-.sig-box{text-align:center;width:200px}
-.sig-line{border-bottom:1px solid #333;height:40px;margin-bottom:5px}
-.sig-lbl{font-size:8.5pt;color:#555}
-.footer{border-top:1px solid #ddd;margin-top:16px;padding-top:8px;text-align:center;font-size:7.5pt;color:#999}
-@media print{body{padding:15px}}
-</style></head><body>
-<div class="header">
-  <div>
-    <div class="hosp-name">${orgInfo.name}</div>
-    <div class="hosp-sub">Laboratory &amp; Pathology Services</div>
-    <div class="hosp-sub">Tel: +1800-XXX-XXXX &nbsp;|&nbsp; www.gudmedhospital.com</div>
-  </div>
-  <div>
-    <div class="inv-label">INVOICE</div>
-    <div class="inv-meta">No: LAB-${order.orderNumber}</div>
-    <div class="inv-meta">Date: ${invoiceDate}</div>
-  </div>
-</div>
-<div class="info-grid">
-  <div class="info-box">
-    <div class="info-label">Bill To (Patient)</div>
-    <div class="info-value">${order.patientName}</div>
-    <div class="info-sub">UHID: ${order.patientMrn}</div>
-    <div class="info-sub">Age / Gender: ${order.patientAge} yrs / ${order.patientGender.charAt(0).toUpperCase() + order.patientGender.slice(1)}</div>
-  </div>
-  <div class="info-box">
-    <div class="info-label">Order Information</div>
-    <div class="info-value">${order.orderNumber}</div>
-    <div class="info-sub">Order Date: ${orderDate}</div>
-    <div class="info-sub">Priority: <strong style="text-transform:uppercase;color:${order.priority === 'stat' ? '#dc2626' : order.priority === 'urgent' ? '#d97706' : '#333'}">${order.priority}</strong></div>
-    ${order.accessionNumber ? `<div class="info-sub">Accession: ${order.accessionNumber}</div>` : ''}
-  </div>
-</div>
-<table>
-  <thead>
-    <tr>
-      <th style="width:36px">#</th>
-      <th>Test Description</th>
-      <th style="width:90px">Code</th>
-      <th style="width:130px;text-align:right">Amount (₹)</th>
-    </tr>
-  </thead>
-  <tbody>${rowsHtml}</tbody>
-</table>
-<div class="total-section">
-  <div class="total-box">
-    <div class="total-row"><span>Subtotal</span><span>₹ ${subtotal.toLocaleString()}</span></div>
-    <div class="total-row"><span>Discount</span><span>₹ 0</span></div>
-    <div class="total-row"><span>Tax (GST 5%)</span><span>₹ ${tax.toLocaleString()}</span></div>
-    <div class="total-final"><span>TOTAL DUE</span><span>₹ ${total.toLocaleString()}</span></div>
-  </div>
-</div>
-<div class="payment-note">
-  <strong>Payment Instructions:</strong> Please make payment at the billing counter. Quote Order No. <strong>${order.orderNumber}</strong> when paying.
-</div>
-<div class="sig-row">
-  <div class="sig-box">
-    <div class="sig-line"></div>
-    <div class="sig-lbl">Patient / Authorised Signature</div>
-  </div>
-  <div class="sig-box">
-    <div class="sig-line"></div>
-    <div class="sig-lbl">Lab In-charge / Cashier</div>
-  </div>
-</div>
-<div class="footer">
-  ${orgInfo.name} — Laboratory &amp; Pathology Department &nbsp;|&nbsp; This is a computer-generated invoice &nbsp;|&nbsp; Printed: ${invoiceDate}
-</div>
-</body></html>`)
-    win.document.close()
-    win.focus()
-    setTimeout(() => win.print(), 400)
+    const orderValue = items.reduce((s2, i) => s2 + i.price, 0)
+    // Home-collection: from the order (tagged as [HCC:150] in notes when the order
+    // was booked) → else the hospital's default from Settings → else 0.
+    const hccTag = String(order.notes || '').match(/\[HCC:(\d+(?:\.\d+)?)\]/)
+    const home = payInfo.homeCollection !== undefined
+      ? Number(payInfo.homeCollection)
+      : (hccTag ? Number(hccTag[1]) : Number(orgInfo.homeCollectionCharge || 0))
+    const disc = Number(payInfo.discount || 0)
+    const net = orderValue + home - disc
+    const paid = payInfo.paid !== undefined ? Number(payInfo.paid) : 0
+    printLabReceipt({
+      invoiceNo: order.orderNumber,
+      labId: order.accessionNumber || order.patientMrn,
+      patientName: order.patientName,
+      uhid: order.patientMrn,
+      age: `${order.patientAge} year(s)`,
+      sex: order.patientGender ? order.patientGender.charAt(0).toUpperCase() + order.patientGender.slice(1) : '',
+      contact: order.patientPhone,
+      dateTime: format(now, 'dd MMM yyyy, hh:mm aa'),
+      refDoctor: order.requestingDoctor ? drName(order.requestingDoctor) : 'self',
+      mode: payInfo.mode,
+      items, orderValue, homeCollection: home, discount: disc, netPayable: net, paid, balance: net - paid,
+    }, orgInfo, clinic)
   }
 
   return (
@@ -1602,7 +1543,7 @@ tbody tr:hover{background:#f9fafb}
                                 <div className="flex flex-wrap gap-1">
                                   {order.tests.slice(0, 2).map((test, idx) => (
                                     <Badge key={idx} className={getCategoryBadgeColor(test.testCategory)} variant="outline">
-                                      {test.testCode || test.testName.substring(0, 4)}
+                                      {test.testCode || test.testName?.substring(0, 4) || 'Test'}
                                     </Badge>
                                   ))}
                                   {order.tests.length > 2 && (
@@ -2453,6 +2394,18 @@ tbody tr:hover{background:#f9fafb}
                   </FormItem>
                 )}
               />
+
+              {/* Home collection charge — optional, added to the bill & shown on receipt */}
+              <div className="space-y-2">
+                <Label>Home Collection Charge (₹)</Label>
+                <Input
+                  type="number"
+                  min="0"
+                  placeholder={`e.g. ${orgInfo.homeCollectionCharge || 150} (leave blank if collected at lab)`}
+                  value={orderHcc}
+                  onChange={e => setOrderHcc(e.target.value)}
+                />
+              </div>
 
               <DialogFooter>
                 <Button type="button" variant="outline" onClick={() => setShowOrderDialog(false)}>

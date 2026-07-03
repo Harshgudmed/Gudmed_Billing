@@ -9,8 +9,10 @@
     "dev:lan": "vite --mode lan --host",
     "tunnel": "cloudflared tunnel --url http://localhost:5173",
     "dev:tunnel": "concurrently -k -n vite,tunnel -c green,cyan \"vite\" \"cloudflared tunnel --url http://localhost:5173\"",
+    "dev:full": "concurrently -k -n api,web,tunnel -c blue,green,cyan \"npm --prefix backend run dev\" \"vite\" \"cloudflared tunnel --url http://localhost:5173\"",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "size-check": "node backend/scripts/storage-report.mjs"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.10.0",

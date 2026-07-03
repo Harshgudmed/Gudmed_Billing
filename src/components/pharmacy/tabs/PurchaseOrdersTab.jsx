@@ -14,6 +14,7 @@ import { format } from "date-fns";
 import { PHARMACY_PO_PER_PAGE } from "../pharmacyConstants";
 import { statusBadge } from "../pharmacyHelpers";
 import { Pagination } from "@/components/common/Pagination";
+import { formatMoney } from "@/lib/format";
 
 export default function PurchaseOrdersTab({
   poStatusFilter,
@@ -107,7 +108,7 @@ export default function PurchaseOrdersTab({
                         : "—"}
                     </TableCell>
                     <TableCell>
-                      ₹{(po.totalAmount || 0).toLocaleString()}
+                      {formatMoney(po.totalAmount)}
                     </TableCell>
                     <TableCell>{statusBadge(po.status)}</TableCell>
                     <TableCell>

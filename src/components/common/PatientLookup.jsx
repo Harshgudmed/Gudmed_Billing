@@ -17,6 +17,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { format } from 'date-fns'
 import { toast } from 'sonner'
 import client from '@/api/client'
+import { useCreatePatient } from '@/lib/useCreatePatient'
 
 export function getPatientFullName(patient) {
   if (!patient) return ''
@@ -54,7 +55,7 @@ export default function PatientLookup({
   const [open, setOpen] = useState(false)
   const [addingNew, setAddingNew] = useState(false)
   const [newForm, setNewForm] = useState(emptyNew)
-  const [creating, setCreating] = useState(false)
+  const { createPatient, creating } = useCreatePatient()
 
   // Debounced search term – API call fires only after 400 ms of no typing
   const debouncedSearch = useDebounce(search, 400)
@@ -112,16 +113,14 @@ export default function PatientLookup({
     const dateOfBirth = new Date()
     dateOfBirth.setFullYear(dateOfBirth.getFullYear() - Number(newForm.age))
     dateOfBirth.setHours(0, 0, 0, 0)
-    setCreating(true)
     try {
-      const res = await client.post('/patients', {
+      const created = await createPatient({
         firstName: newForm.firstName.trim(),
         lastName: newForm.lastName.trim(),
         phonePrimary: newForm.phonePrimary.trim(),
         gender: newForm.gender,
         dateOfBirth: dateOfBirth.toISOString(),
       })
-      const created = res.data ?? res
       toast.success(`Patient registered: ${getPatientFullName(created)} (${created.mrn || 'new'})`)
       onSelect(created)
       setAddingNew(false)
@@ -130,8 +129,6 @@ export default function PatientLookup({
       setOpen(false)
     } catch (err) {
       toast.error('Could not register patient: ' + (err.message || 'try again'))
-    } finally {
-      setCreating(false)
     }
   }
 

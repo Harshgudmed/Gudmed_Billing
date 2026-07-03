@@ -87,7 +87,7 @@ export default function RescheduleAppointmentDialog({
           <Button variant="outline" onClick={onCancel}>
             Cancel
           </Button>
-          <Button onClick={onConfirm} disabled={isSubmitting}>
+          <Button onClick={onConfirm} disabled={isSubmitting || !date || !time}>
             {isSubmitting && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
             Reschedule
           </Button>

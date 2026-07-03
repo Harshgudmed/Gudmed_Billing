@@ -43,3 +43,12 @@ export const APPOINTMENT_TYPE_CONFIG = {
   follow_up:   { label: "Follow-up",   color: "bg-emerald-100 text-emerald-700" },
   emergency:   { label: "Emergency",   color: "bg-red-100 text-red-700" },
 };
+
+// Groups appointment statuses by lifecycle stage, for the Today tab's
+// upcoming/completed split. Module-level (not inside a component) so it's a
+// stable reference — safe to add to a useMemo/useEffect dependency array later
+// without breaking memoization.
+export const APPOINTMENT_STATUSES = {
+  upcoming: ["scheduled", "confirmed", "checked_in", "in_progress"],
+  completed: ["completed", "cancelled", "no_show", "rescheduled"],
+};

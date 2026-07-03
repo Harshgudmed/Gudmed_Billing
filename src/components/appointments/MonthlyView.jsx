@@ -144,7 +144,7 @@ export default function MonthlyView({
       </Card>
 
       {/* Selected day details */}
-      <Card>
+      <Card className="flex flex-col">
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <CalendarDays className="h-5 w-5" />
@@ -154,8 +154,8 @@ export default function MonthlyView({
             {selectedDayLoading ? "Loading appointments..." : `${selectedDayTotal} appointments`}
           </CardDescription>
         </CardHeader>
-        <CardContent>
-          <ScrollArea className="h-[calc(100vh-300px)] min-h-[400px] pr-4">
+        <CardContent className="flex-1 flex flex-col min-h-0">
+          <ScrollArea className="flex-1 min-h-[400px] pr-4">
             {selectedDayLoading ? (
               <div className="flex min-h-[240px] items-center justify-center text-gray-500">
                 <Loader2 className="mr-2 h-5 w-5 animate-spin" />

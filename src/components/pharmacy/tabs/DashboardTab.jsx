@@ -11,6 +11,7 @@ import {
 import { AlertTriangle, Package } from "lucide-react";
 import { format } from "date-fns";
 import { stockBadge } from "../pharmacyHelpers";
+import { formatMoney } from "@/lib/format";
 import { Pagination } from "@/components/common/Pagination";
 
 export default function DashboardTab({
@@ -68,11 +69,11 @@ export default function DashboardTab({
             value: expiringBatches.length,
             color: "text-orange-600",
           },
-          {
-            label: "Stock Value",
-            value: `₹${totalStockValue.toLocaleString()}`,
-            color: "text-green-600",
-          },
+          // {
+          //   label: "Stock Value",
+          //   value: `₹${totalStockValue.toLocaleString()}`,
+          //   color: "text-green-600",
+          // },
         ].map((s) => (
           <Card key={s.label}>
             <CardContent className="pt-4">
@@ -90,11 +91,11 @@ export default function DashboardTab({
           <CardContent className="space-y-3">
             <div className="flex justify-between items-center">
               <span className="text-sm text-gray-500">Total Stock Value</span>
-              <span className="font-bold text-green-700 text-lg">₹{totalStockValue.toLocaleString()}</span>
+              <span className="font-bold text-green-700 text-lg">{formatMoney(totalStockValue)}</span>
             </div>
             <div className="flex justify-between items-center">
               <span className="text-sm text-gray-500">Today's Sales</span>
-              <span className="font-bold text-gray-800">₹{todaySalesTotal.toLocaleString()}</span>
+              <span className="font-bold text-gray-800">{formatMoney(todaySalesTotal)}</span>
             </div>
             <div className="pt-2 border-t">
               <p className="text-sm font-semibold mb-2">Stock Status Distribution</p>

@@ -9,7 +9,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { User, ChevronLeft, ChevronRight } from "lucide-react";
-import { format, addDays, addWeeks, subWeeks, isToday } from "date-fns";
+import { format, addDays, addWeeks, subWeeks, isToday, endOfDay } from "date-fns";
 import { drName } from "@/lib/utils";
 import { parseDate } from "./appointmentHelpers";
 import { TIME_SLOTS } from "./appointmentConstants";
@@ -179,7 +179,9 @@ export default function DoctorSlotsView({
             )
             .map((doctor) => {
               const weekStart = currentWeek;
-              const weekEnd = addDays(currentWeek, 6);
+              // endOfDay, not just addDays: otherwise any appointment on the
+              // last day of the week booked after midnight gets excluded.
+              const weekEnd = endOfDay(addDays(currentWeek, 6));
               const count = appointments.filter((appointment) => {
                 const appointmentDate = parseDate(appointment.appointmentDate);
                 return (
