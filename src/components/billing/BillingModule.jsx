@@ -14,7 +14,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { printInvoice, printReceipt } from './utils/printBilling'
+import { printInvoice, printReceipt, printLabReceipt, printRadiologyReceipt, printPharmacyReceipt } from './utils/printBilling'
 
 // ── Catalogue ─────────────────────────────────────────────────────────────────
 const CATALOGUE = {
@@ -97,6 +97,17 @@ const CAT_META = {
   Vaccine: { color: 'bg-green-100 text-green-800', dot: '#16a34a' },
 }
 
+// Friendly department names shown in the department selector + on the printed
+// invoice. Each department gets its OWN billing form (only its catalogue shows).
+const DEPT_LABEL = {
+  Consultation: 'OPD / Consultation',
+  Lab: 'Laboratory',
+  Pharmacy: 'Pharmacy',
+  Procedure: 'Procedure',
+  Radiology: 'Radiology',
+  Vaccine: 'Vaccination',
+}
+
 const BILLING_ITEMS_PER_PAGE = 10
 
 const DEMO_CLAIMS = [
@@ -169,10 +180,12 @@ export default function BillingModule({ onBack }) {
   const newForm = () => ({
     patientName: '', patientId: '', phone: '', age: '', gender: '', uhid: '',
     date: todayStr(), invoiceNo: newInvNo(), notes: '', payMode: 'Cash',
-    paid: false, items: [], discount: 0, gstPct: 0, sendWhatsApp: true,
+    paid: false, items: [], discount: 0, gstPct: 0, homeCollection: '', sendWhatsApp: true,
   })
   const [form, setForm] = useState(newForm())
-  const [activeCat, setActiveCat] = useState('Consultation')
+  // Department drives the whole New Bill form — no department chosen = nothing shown.
+  const [department, setDepartment] = useState('')
+  const [activeCat, setActiveCat] = useState('')
   const [catSearch, setCatSearch] = useState('')
   const [saving, setSaving] = useState(false)
 
@@ -187,6 +200,15 @@ export default function BillingModule({ onBack }) {
   const [showInvoiceModal, setShowInvoiceModal] = useState(null)
   const [showPayModal, setShowPayModal] = useState(null)
   const [payMethod, setPayMethod] = useState('Cash')
+  const [payAmount, setPayAmount] = useState('') // supports partial payments
+
+  // When the pay modal opens, default the amount to the remaining balance.
+  useEffect(() => {
+    if (showPayModal) {
+      const bal = showPayModal.balanceDue ?? (Number(showPayModal.total || 0) - Number(showPayModal.amountPaid || 0))
+      setPayAmount(bal > 0 ? String(bal) : '')
+    }
+  }, [showPayModal])
 
   // Invoice search/filter
   const [invoiceSearch, setInvoiceSearch] = useState('')
@@ -206,7 +228,8 @@ export default function BillingModule({ onBack }) {
   const subtotal = form.items.reduce((a, i) => a + i.qty * i.amt, 0)
   const discountAmt = Math.round(subtotal * form.discount / 100)
   const gstAmt = Math.round((subtotal - discountAmt) * form.gstPct / 100)
-  const total = subtotal - discountAmt + gstAmt
+  const homeCharge = Number(form.homeCollection) || 0
+  const total = subtotal - discountAmt + gstAmt + homeCharge
 
   // ── Fetch all ─────────────────────────────────────────────────────────────
   const fetchBills = useCallback(async () => {
@@ -219,17 +242,35 @@ export default function BillingModule({ onBack }) {
           let items = []
           try { items = typeof inv.items === 'string' ? JSON.parse(inv.items) : (inv.items || []) } catch { items = [] }
           const patName = inv.patient ? `${inv.patient.firstName} ${inv.patient.lastName}` : 'Unknown'
+          // Normalise DB items ({serviceName,quantity,unitPrice}) to the print shape ({name,qty,amt}).
+          // hsnCode/gstRate/batchNumber/expiryDate ride along when present (Pharmacy
+          // items only) so printPharmacyReceipt can show the real GST breakdown.
+          const normItems = (items || []).map(it => ({
+            name: it.name || it.serviceName || 'Item',
+            qty: it.qty || it.quantity || 1,
+            amt: it.amt ?? it.unitPrice ?? 0,
+            sub: it.sub || '',
+            hsnCode: it.hsnCode,
+            gstRate: it.gstRate,
+            batchNumber: it.batchNumber,
+            expiryDate: it.expiryDate,
+          }))
+          // Department is tagged into notes as "[Laboratory] ..." at creation.
+          const deptMatch = (inv.notes || '').match(/^\[([^\]]+)\]\s*/)
           return {
             id: inv.invoiceNumber, dbId: inv.id,
             patientName: patName, patientId: inv.patientId,
             phone: inv.patient?.phonePrimary || '',
             age: '', gender: '', uhid: inv.patient?.mrn || '',
             date: format(new Date(inv.invoiceDate), 'dd MMM yyyy'),
-            invoiceNo: inv.invoiceNumber, notes: inv.notes || '',
+            invoiceNo: inv.invoiceNumber,
+            notes: (inv.notes || '').replace(/^\[[^\]]+\]\s*/, ''),
+            department: deptMatch ? deptMatch[1] : '',
             payMode: 'Cash', paid: inv.paymentStatus === 'paid',
-            items, discount: inv.discountPercentage || 0, gstPct: 0,
+            items: normItems, discount: inv.discountPercentage || 0, gstPct: 0,
             subtotal: inv.subtotal, discountAmt: inv.discountAmount,
             gstAmt: inv.taxAmount || 0, total: inv.totalAmount,
+            amountPaid: inv.amountPaid || 0, balanceDue: inv.balanceDue ?? (inv.totalAmount - (inv.amountPaid || 0)),
             createdAt: inv.invoiceDate || inv.createdAt,
           }
         })
@@ -354,10 +395,12 @@ export default function BillingModule({ onBack }) {
 
   // ── Save invoice ───────────────────────────────────────────────────────────
   async function saveInvoice() {
+    if (!department) { toast.error('Select a department first'); return }
     if (!form.patientId && !form.patientName) { toast.error('Select a patient'); return }
     if (form.items.length === 0) { toast.error('Add at least one service'); return }
     setSaving(true)
-    const bill = { ...form, subtotal, discountAmt, gstAmt, total, createdAt: new Date().toISOString(), id: form.invoiceNo }
+    const deptLabel = DEPT_LABEL[department] || department
+    const bill = { ...form, department: deptLabel, subtotal, discountAmt, gstAmt, total, createdAt: new Date().toISOString(), id: form.invoiceNo }
     try {
       if (form.patientId) {
         const apiItems = form.items.map(it => ({
@@ -367,9 +410,15 @@ export default function BillingModule({ onBack }) {
           total:       it.qty * it.amt,
           tax:         0,
         }))
+        // Home collection charge → its own line so the invoice total is correct.
+        // Lab-only (see the department gate on the input above) — checked again
+        // here so a stale value can never reach a non-Lab bill either.
+        if (department === 'Lab' && homeCharge > 0) apiItems.push({ serviceName: 'Home Collection Charges', quantity: 1, unitPrice: homeCharge, total: homeCharge, tax: 0 })
         const result = await client.post('/billing', {
           resource: 'invoice', patientId: form.patientId, items: apiItems,
-          discountAmount: discountAmt, discountPercentage: form.discount, notes: form.notes,
+          discountAmount: discountAmt, discountPercentage: form.discount,
+          // Tag the invoice with its department + home-collection so the receipt shows it.
+          notes: `[${deptLabel}] ${form.notes || ''}${department === 'Lab' && homeCharge > 0 ? ` [HCC:${homeCharge}]` : ''}`.trim(),
         })
         if (result.success) {
           bill.dbId = result.data.id
@@ -409,6 +458,7 @@ export default function BillingModule({ onBack }) {
       }
       setShowInvoiceModal(bill)
       setForm(newForm())
+      setDepartment(''); setActiveCat('')
       setPatientSearch('')
       setActiveTab('invoices')
     } catch { toast.error('Failed to save invoice') }
@@ -510,24 +560,64 @@ export default function BillingModule({ onBack }) {
   }
 
   // ── Record payment ─────────────────────────────────────────────────────────
-  async function recordPayment(bill, method) {
+  // Records ONE payment (supports partial + multiple methods). Pass the amount;
+  // an invoice can take many payments (₹500 Cash + ₹700 UPI …) until balance = 0.
+  async function recordPayment(bill, method, amount) {
+    const bal = bill.balanceDue ?? (Number(bill.total || 0) - Number(bill.amountPaid || 0))
+    const amt = Number(amount)
+    if (!Number.isFinite(amt) || amt <= 0) { toast.error('Enter a valid amount'); return }
+    if (amt > bal + 0.01) { toast.error(`Amount cannot exceed balance ₹${bal.toLocaleString('en-IN')}`); return }
     try {
       if (bill.dbId) {
         await client.post('/billing', {
           resource: 'payment', invoiceId: bill.dbId,
-          patientId: bill.patientId, amount: bill.total, paymentMethod: method,
+          patientId: bill.patientId, amount: amt, paymentMethod: method,
         })
       }
-      setBills(bs => bs.map(b => b.id === bill.id ? { ...b, paid: true } : b))
-      setShowPayModal(null)
-      toast.success('Payment recorded!')
-      fetchBills()
-      fetchPayments()
-      fetchStats()
+      const newPaid = Number(bill.amountPaid || 0) + amt
+      const newBal = Math.max(0, bal - amt)
+      const updated = { ...bill, amountPaid: newPaid, balanceDue: newBal, paid: newBal <= 0.009 }
+      setBills(bs => bs.map(b => b.id === bill.id ? updated : b))
+      fetchBills(); fetchPayments(); fetchStats()
+      if (newBal <= 0.009) {
+        setShowPayModal(null)
+        toast.success('Invoice fully paid ✓')
+      } else {
+        // Keep the modal open so the next installment / method can be collected.
+        setShowPayModal(updated)
+        setPayAmount(String(newBal))
+        toast.success(`₹${amt.toLocaleString('en-IN')} received via ${method}. Balance ₹${newBal.toLocaleString('en-IN')}`)
+      }
     } catch { toast.error('Failed to record payment') }
   }
 
-
+  // ── Refund / Credit note ───────────────────────────────────────────────────
+  async function handleRefund(p) {
+    if (p.isRefund) return
+    const maxPaid = p.invoice?.amountPaid ?? p.amount
+    const raw = window.prompt(`Refund amount for receipt ${p.receiptNumber} (max ₹${maxPaid}):`, String(p.amount))
+    if (raw === null) return
+    const amount = Number(raw)
+    if (!Number.isFinite(amount) || amount <= 0) { toast.error('Enter a valid amount'); return }
+    const refundReason = window.prompt('Reason for refund / credit note:')?.trim()
+    if (!refundReason) { toast.error('A reason is required for the audit trail'); return }
+    try {
+      await client.post('/billing', {
+        resource: 'refund',
+        invoiceId: p.invoiceId,
+        amount,
+        refundReason,
+        paymentMethod: p.paymentMethod || 'cash',
+        originalPaymentId: p.id,
+      })
+      toast.success('Refund recorded')
+      fetchPayments()
+      fetchBills()
+      fetchStats()
+    } catch (err) {
+      toast.error(err.message || 'Failed to record refund')
+    }
+  }
 
   // ── Add service to catalog ─────────────────────────────────────────────────
   async function handleAddService() {
@@ -791,26 +881,48 @@ export default function BillingModule({ onBack }) {
               {/* Service catalogue */}
               <Card>
                 <CardHeader className="pb-3">
-                  <CardTitle className="text-sm font-semibold">Service Catalogue <span className="font-normal text-gray-400 text-xs ml-1">— click to add</span></CardTitle>
+                  <CardTitle className="text-sm font-semibold">
+                    {department ? `${DEPT_LABEL[department]} Billing` : 'Department Billing'}
+                    <span className="font-normal text-gray-400 text-xs ml-1">— click to add</span>
+                  </CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-3">
-                  {/* Category tabs */}
-                  <div className="flex flex-wrap gap-1.5">
-                    {Object.keys(CATALOGUE).map(cat => (
-                      <button key={cat} onClick={() => { setActiveCat(cat); setCatSearch('') }}
-                        className={`px-3 py-1 rounded-full text-xs font-medium border transition-colors ${activeCat === cat ? 'bg-gray-900 text-white border-gray-900' : 'border-gray-200 text-gray-600 hover:border-gray-400'}`}>
-                        {cat}
-                      </button>
-                    ))}
+                  {/* Department selector — each department has its OWN form/catalogue */}
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-medium text-gray-500 whitespace-nowrap">Department</span>
+                    <Select
+                      value={department}
+                      onValueChange={(v) => {
+                        // Switching department = a fresh, department-specific bill.
+                        if (department && v !== department && form.items.length > 0) {
+                          if (!window.confirm('Switching department will clear the current cart. Continue?')) return
+                        }
+                        setDepartment(v); setActiveCat(v); setCatSearch('')
+                        // Home Collection only applies to Lab — clear any leftover value so
+                        // switching away from Lab can't silently carry it onto another bill.
+                        setForm(f => ({ ...f, items: [], homeCollection: v === 'Lab' ? f.homeCollection : '' }))
+                      }}
+                    >
+                      <SelectTrigger className="h-8 text-sm"><SelectValue placeholder="Select a department to start…" /></SelectTrigger>
+                      <SelectContent>
+                        {Object.keys(CATALOGUE).map(cat => (
+                          <SelectItem key={cat} value={cat}>{DEPT_LABEL[cat] || cat}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                   </div>
-                  {/* Search within category */}
-                  <div className="relative">
-                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-gray-400" />
-                    <Input className="pl-8 h-8 text-sm" placeholder={`Search ${activeCat}...`} value={catSearch} onChange={e => setCatSearch(e.target.value)} />
-                  </div>
+                  {/* Search within the selected department */}
+                  {department && (
+                    <div className="relative">
+                      <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-gray-400" />
+                      <Input className="pl-8 h-8 text-sm" placeholder={`Search ${DEPT_LABEL[department]}...`} value={catSearch} onChange={e => setCatSearch(e.target.value)} />
+                    </div>
+                  )}
                   {/* Items grid */}
                   <div className="max-h-64 overflow-y-auto space-y-1">
-                    {catItems.length === 0 ? (
+                    {!department ? (
+                      <p className="text-sm text-gray-400 text-center py-6">👆 Select a department above to load its billing form</p>
+                    ) : catItems.length === 0 ? (
                       <p className="text-sm text-gray-400 text-center py-4">No items found</p>
                     ) : catItems.map(it => (
                       <div key={it.name} onClick={() => addToCart(it, activeCat)}
@@ -877,6 +989,20 @@ export default function BillingModule({ onBack }) {
                           <Input type="number" min="0" max="100" className="h-7 w-20 text-sm text-center" value={Number.isNaN(form.discount) ? '' : form.discount} onChange={e => { const v = parseFloat(e.target.value); setForm(f => ({ ...f, discount: Number.isNaN(v) ? 0 : v })) }} />
                           {discountAmt > 0 && <span className="text-sm text-green-600 font-medium">− {fmt(discountAmt)}</span>}
                         </div>
+                        {/* Home collection — Laboratory only (sample pickup). Doesn't apply
+                            to Pharmacy/Radiology/etc., so it no longer shows for them —
+                            it was leaking a "Home Collection Charges" line onto bills for
+                            departments where that charge makes no sense. */}
+                        {department === 'Lab' && (
+                          <div className="flex items-center gap-2">
+                            <span className="text-sm text-gray-600 w-24">Home Coll. ₹</span>
+                            <Input type="number" min="0" className="h-7 w-24 text-sm text-center"
+                              placeholder={String(orgInfo.homeCollectionCharge || 0)}
+                              value={form.homeCollection}
+                              onChange={e => setForm(f => ({ ...f, homeCollection: e.target.value }))} />
+                            {homeCharge > 0 && <span className="text-sm text-gray-600">+ {fmt(homeCharge)}</span>}
+                          </div>
+                        )}
                         <div className="flex justify-between text-base font-bold border-t border-gray-300 pt-2 mt-1"><span>Total</span><span className="text-gray-900">{fmt(total)}</span></div>
                       </div>
 
@@ -904,7 +1030,7 @@ export default function BillingModule({ onBack }) {
                         <Button className="flex-1" onClick={saveInvoice} disabled={saving}>
                           {saving ? 'Saving...' : 'Save Invoice'}
                         </Button>
-                        <Button variant="outline" onClick={() => { setForm(newForm()); setPatientSearch('') }}>Clear</Button>
+                        <Button variant="outline" onClick={() => { setForm(newForm()); setDepartment(''); setActiveCat(''); setPatientSearch('') }}>Clear</Button>
                       </div>
                     </>
                   )}
@@ -960,11 +1086,22 @@ export default function BillingModule({ onBack }) {
                           <TableCell className="font-bold text-green-700">{fmt(p.amount)}</TableCell>
                           <TableCell><Badge className="bg-blue-100 text-blue-800">{p.paymentMethod}</Badge></TableCell>
                           <TableCell className="text-sm text-gray-500">{p.paymentDate ? format(new Date(p.paymentDate), 'dd MMM yyyy') : '—'}</TableCell>
-                          <TableCell><Badge className="bg-green-100 text-green-800">Received</Badge></TableCell>
                           <TableCell>
-                            <Button size="sm" variant="outline" onClick={() => printReceipt(p, orgInfo, clinic)}>
-                              <Printer className="h-3.5 w-3.5 mr-1" />Receipt
-                            </Button>
+                            {p.isRefund
+                              ? <Badge className="bg-red-100 text-red-800">Refund</Badge>
+                              : <Badge className="bg-green-100 text-green-800">Received</Badge>}
+                          </TableCell>
+                          <TableCell>
+                            <div className="flex gap-1">
+                              <Button size="sm" variant="outline" onClick={() => printReceipt(p, orgInfo, clinic)}>
+                                <Printer className="h-3.5 w-3.5 mr-1" />Receipt
+                              </Button>
+                              {!p.isRefund && (
+                                <Button size="sm" variant="outline" className="text-red-600 border-red-200 hover:bg-red-50" onClick={() => handleRefund(p)}>
+                                  Refund
+                                </Button>
+                              )}
+                            </div>
                           </TableCell>
                         </TableRow>
                       ))}
@@ -1138,7 +1275,55 @@ export default function BillingModule({ onBack }) {
             {showInvoiceModal && !showInvoiceModal.paid && (
               <Button onClick={() => { setShowPayModal(showInvoiceModal); setPayMethod('Cash'); setShowInvoiceModal(null) }}>Collect Payment</Button>
             )}
-            <Button variant="outline" onClick={() => showInvoiceModal && printInvoice(showInvoiceModal, orgInfo, clinic)}>Print / PDF</Button>
+            <Button variant="outline" onClick={() => {
+              if (!showInvoiceModal) return
+              const b = showInvoiceModal
+              // Laboratory and Radiology invoices print the SHARED Dr-Lal-style
+              // diagnostic receipt (identical layout for both — see printBilling.js);
+              // every other department uses the standard invoice format.
+              if (/^lab/i.test(b.department || '')) {
+                // Home-collection is tagged in notes; show it as a separate total
+                // line (not a test row) — same as the Laboratory module receipt.
+                const hccTag = String(b.notes || '').match(/\[HCC:(\d+(?:\.\d+)?)\]/)
+                const hcc = hccTag ? Number(hccTag[1]) : 0
+                const testItems = (b.items || []).filter(it => !/home collection/i.test(it.name || ''))
+                const testTotal = testItems.reduce((s, it) => s + (it.amt || 0) * (it.qty || 1), 0)
+                printLabReceipt({
+                  invoiceNo: b.invoiceNo, labId: b.uhid, patientName: b.patientName, uhid: b.uhid,
+                  age: b.age ? `${b.age} year(s)` : '', sex: b.gender, contact: b.phone,
+                  dateTime: b.date, refDoctor: b.refDoctor || 'self', mode: b.payMode,
+                  items: testItems.map(it => ({ code: (it.name || 'TEST').substring(0, 6).toUpperCase(), name: it.name, price: (it.amt || 0) * (it.qty || 1), eta: '' })),
+                  orderValue: testTotal, homeCollection: hcc, discount: b.discountAmt || 0,
+                  netPayable: b.total, paid: b.amountPaid || 0, balance: b.balanceDue ?? (b.total - (b.amountPaid || 0)),
+                }, orgInfo, clinic)
+              } else if (/^radiology/i.test(b.department || '')) {
+                const examItems = b.items || []
+                const examTotal = examItems.reduce((s, it) => s + (it.amt || 0) * (it.qty || 1), 0)
+                printRadiologyReceipt({
+                  invoiceNo: b.invoiceNo, labId: b.uhid, patientName: b.patientName, uhid: b.uhid,
+                  age: b.age ? `${b.age} year(s)` : '', sex: b.gender, contact: b.phone,
+                  dateTime: b.date, refDoctor: b.refDoctor || 'self', mode: b.payMode,
+                  items: examItems.map(it => ({ code: (it.name || 'EXAM').substring(0, 6).toUpperCase(), name: it.name, price: (it.amt || 0) * (it.qty || 1), eta: '' })),
+                  orderValue: examTotal, homeCollection: 0, discount: b.discountAmt || 0,
+                  netPayable: b.total, paid: b.amountPaid || 0, balance: b.balanceDue ?? (b.total - (b.amountPaid || 0)),
+                }, orgInfo, clinic)
+              } else if (/^pharmacy/i.test(b.department || '')) {
+                // Same GST-invoice format as the pharmacy counter receipt — HSN/GST%/
+                // batch/expiry ride on each item when the sale carried them through
+                // (see PrescriptionPurchaseModal.jsx); otherwise those columns show "—".
+                printPharmacyReceipt({
+                  receiptNumber: b.invoiceNo, patientName: b.patientName,
+                  saleDate: b.createdAt || b.date, paymentMethod: b.payMode,
+                  discountAmount: b.discountAmt || 0, amountPaid: b.amountPaid || 0, totalAmount: b.total,
+                  items: (b.items || []).map(it => ({
+                    drugName: it.name, quantity: it.qty, unitPrice: it.amt, total: (it.amt || 0) * (it.qty || 1),
+                    hsnCode: it.hsnCode, gstRate: it.gstRate, batchNumber: it.batchNumber, expiryDate: it.expiryDate,
+                  })),
+                }, orgInfo, clinic)
+              } else {
+                printInvoice(b, orgInfo, clinic)
+              }
+            }}>Print / PDF</Button>
             <Button variant="outline" onClick={() => setShowInvoiceModal(null)}>Close</Button>
           </DialogFooter>
         </DialogContent>
@@ -1150,12 +1335,26 @@ export default function BillingModule({ onBack }) {
           <DialogHeader><DialogTitle>Collect Payment</DialogTitle></DialogHeader>
           {showPayModal && (
             <div className="space-y-4">
-              {/* Invoice summary */}
-              <div className="bg-blue-50 border border-blue-100 rounded-lg p-4">
-                <p className="font-semibold text-gray-900">{showPayModal.patientName}</p>
-                <p className="text-sm text-gray-500">Invoice: {showPayModal.invoiceNo}</p>
-                <p className="text-2xl font-bold text-blue-700 mt-1">{fmt(showPayModal.total)}</p>
-              </div>
+              {/* Invoice summary — Total / Paid / Balance */}
+              {(() => {
+                const paidSoFar = Number(showPayModal.amountPaid || 0)
+                const balance = showPayModal.balanceDue ?? (Number(showPayModal.total || 0) - paidSoFar)
+                return (
+                  <div className="bg-blue-50 border border-blue-100 rounded-lg p-4">
+                    <p className="font-semibold text-gray-900">{showPayModal.patientName}</p>
+                    <p className="text-sm text-gray-500">Invoice: {showPayModal.invoiceNo}</p>
+                    <div className="flex justify-between mt-2 text-sm">
+                      <span className="text-gray-500">Total</span><span className="font-semibold">{fmt(showPayModal.total)}</span>
+                    </div>
+                    <div className="flex justify-between text-sm">
+                      <span className="text-gray-500">Paid so far</span><span className="font-semibold text-green-700">{fmt(paidSoFar)}</span>
+                    </div>
+                    <div className="flex justify-between text-base border-t border-blue-200 mt-1 pt-1">
+                      <span className="font-semibold">Balance Due</span><span className="font-bold text-red-600">{fmt(balance)}</span>
+                    </div>
+                  </div>
+                )
+              })()}
 
               {/* Online payment via Razorpay */}
               <div className="border rounded-lg p-4 space-y-3">
@@ -1173,21 +1372,32 @@ export default function BillingModule({ onBack }) {
                 </div>
               </div>
 
-              {/* Offline payment */}
+              {/* Offline payment — supports PARTIAL amounts & multiple methods */}
               <div className="border rounded-lg p-4 space-y-3">
-                <p className="text-sm font-semibold text-gray-700">🏦 Offline Payment</p>
-                <Select value={payMethod} onValueChange={setPayMethod}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    {['Cash', 'UPI (Manual)', 'Card (Swipe)', 'Bank Transfer', 'Insurance', 'Cheque'].map(m => (
-                      <SelectItem key={m} value={m}>{m}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                <Button variant="outline" className="w-full"
-                  onClick={() => showPayModal && recordPayment(showPayModal, payMethod)}>
-                  Mark as Paid ({payMethod})
+                <p className="text-sm font-semibold text-gray-700">🏦 Collect Payment (Cash / UPI / Card…)</p>
+                <div className="grid grid-cols-2 gap-2">
+                  <div className="space-y-1">
+                    <Label className="text-xs text-gray-500">Amount (₹)</Label>
+                    <Input type="number" min="0" step="0.01" value={payAmount}
+                      onChange={e => setPayAmount(e.target.value)} placeholder="Enter amount" />
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs text-gray-500">Method</Label>
+                    <Select value={payMethod} onValueChange={setPayMethod}>
+                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        {['Cash', 'UPI (Manual)', 'Card (Swipe)', 'Bank Transfer', 'Insurance', 'Cheque'].map(m => (
+                          <SelectItem key={m} value={m}>{m}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+                <Button className="w-full"
+                  onClick={() => showPayModal && recordPayment(showPayModal, payMethod, payAmount)}>
+                  Record {payAmount ? '₹' + Number(payAmount).toLocaleString('en-IN') : ''} ({payMethod})
                 </Button>
+                <p className="text-xs text-gray-400 text-center">Tip: pay part now (e.g. ₹500 Cash), then add another method for the rest — balance updates automatically.</p>
               </div>
             </div>
           )}

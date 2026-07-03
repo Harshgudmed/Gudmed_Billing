@@ -16,6 +16,7 @@ import { Search, Edit, Trash2, Package, Eye, Loader2 } from "lucide-react";
 import { DRUG_CATEGORIES } from "../pharmacyConstants";
 import { stockBadge } from "../pharmacyHelpers";
 import { Pagination } from "@/components/common/Pagination";
+import { formatMoney } from "@/lib/format";
 
 export default function InventoryTab({
   searchQuery,
@@ -109,7 +110,7 @@ export default function InventoryTab({
                       {d.dosageForm} {d.strength}
                     </TableCell>
                     <TableCell>
-                      ₹{(d.sellingPrice || 0).toFixed(2)}
+                      {formatMoney(d.sellingPrice)}
                     </TableCell>
                     <TableCell>{d.quantityInStock || 0}</TableCell>
                     <TableCell>{stockBadge(d)}</TableCell>

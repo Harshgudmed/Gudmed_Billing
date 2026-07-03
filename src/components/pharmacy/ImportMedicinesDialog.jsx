@@ -51,6 +51,7 @@ export default function ImportMedicinesDialog({ open, onClose, onImported }) {
   const [report, setReport] = useState(null);
   const [busy, setBusy] = useState(false);
   const [committed, setCommitted] = useState(false);
+  const [progress, setProgress] = useState(null); // { current, total } while chunk-importing
   const fileRef = useRef(null);
 
   const reset = () => {
@@ -58,6 +59,7 @@ export default function ImportMedicinesDialog({ open, onClose, onImported }) {
     setFileName("");
     setReport(null);
     setCommitted(false);
+    setProgress(null);
     if (fileRef.current) fileRef.current.value = "";
   };
 
@@ -91,26 +93,74 @@ export default function ImportMedicinesDialog({ open, onClose, onImported }) {
     }
   };
 
+  // Big files (e.g. 2 lakh rows) can't be sent in one request — the JSON body
+  // would blow past the server's 50MB / 5000-row limits (413). So we send the
+  // rows in sequential CHUNKS and merge the results. The backend already skips
+  // duplicates, so re-running a chunk is safe.
+  const CHUNK_SIZE = 2000;   // well under the 5000-row backend cap
+  const PROBLEM_CAP = 500;   // keep the on-screen report light for huge files
+
   const run = async (mode) => {
     if (!rows.length) {
       toast.error("Choose a file first");
       return;
     }
     setBusy(true);
+    setReport(null);
+
+    const totalChunks = Math.ceil(rows.length / CHUNK_SIZE);
+    const summary = { total: 0, created: 0, duplicates: 0, errors: 0 };
+    const problems = []; // only non-ok rows, capped
+
     try {
-      const res = await client.post("/pharmacy/import", { rows, mode });
-      setReport(res);
+      for (let c = 0; c < totalChunks; c++) {
+        const start = c * CHUNK_SIZE;
+        const chunk = rows.slice(start, start + CHUNK_SIZE);
+        setProgress({ current: c + 1, total: totalChunks });
+
+        try {
+          const res = await client.post("/pharmacy/import", { rows: chunk, mode });
+          const cs = res.summary || {};
+          summary.total += cs.total || 0;
+          summary.created += cs.created || 0;
+          summary.duplicates += cs.duplicates || 0;
+          summary.errors += cs.errors || 0;
+          for (const r of res.report || []) {
+            // remap the chunk-local row number back to the real file row number
+            if (r.status !== "ok" && problems.length < PROBLEM_CAP) {
+              problems.push({ ...r, rowNo: start + r.rowNo });
+            }
+          }
+        } catch (err) {
+          // one bad chunk shouldn't abort the whole import — record and continue
+          summary.errors += chunk.length;
+          if (problems.length < PROBLEM_CAP) {
+            problems.push({
+              rowNo: start + 2,
+              status: "error",
+              name: null,
+              message: `Batch ${c + 1}/${totalChunks} failed: ${err.message || "request failed"}`,
+            });
+          }
+        }
+      }
+
+      const message =
+        mode === "validate"
+          ? `Validation: ${summary.created} ready, ${summary.duplicates} duplicates, ${summary.errors} errors (of ${summary.total})`
+          : `Imported ${summary.created} medicines (${summary.duplicates} duplicates skipped, ${summary.errors} errors)`;
+
+      setReport({ summary, report: problems, message });
       if (mode === "commit") {
         setCommitted(true);
-        toast.success(res.message);
+        toast.success(message);
         onImported?.();
       } else {
-        toast.info(res.message);
+        toast.info(message);
       }
-    } catch (err) {
-      toast.error(err.message || "Import failed");
     } finally {
       setBusy(false);
+      setProgress(null);
     }
   };
 
@@ -162,13 +212,30 @@ export default function ImportMedicinesDialog({ open, onClose, onImported }) {
 
         {/* Step 2 — actions */}
         {rows.length > 0 && (
-          <div className="flex items-center gap-2 pt-1">
-            <Button variant="secondary" onClick={() => run("validate")} disabled={busy}>
-              {busy ? "Checking…" : "Validate (dry run)"}
-            </Button>
-            <Button onClick={() => run("commit")} disabled={busy || committed}>
-              {busy ? "Importing…" : committed ? "Imported ✓" : `Import ${rows.length} medicines`}
-            </Button>
+          <div className="space-y-2 pt-1">
+            <div className="flex items-center gap-2">
+              <Button variant="secondary" onClick={() => run("validate")} disabled={busy}>
+                {busy ? "Checking…" : "Validate (dry run)"}
+              </Button>
+              <Button onClick={() => run("commit")} disabled={busy || committed}>
+                {busy ? "Importing…" : committed ? "Imported ✓" : `Import ${rows.length} medicines`}
+              </Button>
+            </div>
+            {progress && (
+              <div className="space-y-1">
+                <div className="text-xs text-muted-foreground">
+                  Processing batch {progress.current} of {progress.total}
+                  {" · "}
+                  {Math.min(progress.current * CHUNK_SIZE, rows.length).toLocaleString()} / {rows.length.toLocaleString()} rows
+                </div>
+                <div className="h-2 w-full rounded bg-gray-100 overflow-hidden">
+                  <div
+                    className="h-full bg-blue-600 transition-all"
+                    style={{ width: `${Math.round((progress.current / progress.total) * 100)}%` }}
+                  />
+                </div>
+              </div>
+            )}
           </div>
         )}
 
@@ -189,9 +256,13 @@ export default function ImportMedicinesDialog({ open, onClose, onImported }) {
           </div>
         )}
 
-        {/* Per-row report */}
+        {/* Per-row report — only issues (duplicates/errors), successful rows are counted in the summary above */}
         {report?.report?.length > 0 && (
-          <div className="mt-2 max-h-72 overflow-y-auto rounded border">
+          <>
+          <p className="text-xs text-muted-foreground mt-2">
+            Showing issues only (duplicates / errors){report.report.length >= PROBLEM_CAP ? ` — first ${PROBLEM_CAP}` : ""}. Successful rows are in the summary above.
+          </p>
+          <div className="mt-1 max-h-72 overflow-y-auto rounded border">
             <table className="w-full text-sm">
               <thead className="sticky top-0 bg-gray-50">
                 <tr>
@@ -215,6 +286,7 @@ export default function ImportMedicinesDialog({ open, onClose, onImported }) {
               </tbody>
             </table>
           </div>
+          </>
         )}
 
         <DialogFooter>

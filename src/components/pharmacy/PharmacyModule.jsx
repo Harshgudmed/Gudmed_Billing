@@ -27,6 +27,7 @@ import {
 } from "lucide-react";
 import ImportMedicinesDialog from "./ImportMedicinesDialog";
 import MedicineNameAutocomplete from "./MedicineNameAutocomplete";
+import { printPharmacyReceipt } from "@/components/billing/utils/printBilling";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -700,26 +701,14 @@ export default function PharmacyModule() {
 
   // ── Direct Sale ────────────────────────────────────────────────────────────
 
-  const handlePrintSaleReceipt = (items, total, payment) => {
-    const now = format(new Date(), "dd MMM yyyy HH:mm");
-    const receiptNo = `RCP${Date.now().toString().slice(-8)}`;
-    const rows = items
-      .map((item) => {
-        const drug = drugs.find((d) => d.id === item.drugId);
-        if (!drug) return "";
-        const subtotal = (drug.sellingPrice || 0) * item.quantity;
-        return `<tr><td>${drug.drugName}</td><td style="text-align:center">${item.quantity}</td><td style="text-align:right">₹${(drug.sellingPrice || 0).toFixed(2)}</td><td style="text-align:right">₹${subtotal.toFixed(2)}</td></tr>`;
-      })
-      .join("");
-    printViaIframe(`<!DOCTYPE html><html><head><title>OTC Receipt</title>
-<style>body{font-family:Arial,sans-serif;font-size:11pt;padding:16px}.hosp{font-size:16pt;font-weight:bold;color:#1e3a5f;text-align:center}.banner{background:#1e3a5f;color:#fff;text-align:center;padding:5px;font-size:11pt;font-weight:bold;margin:8px 0}table{width:100%;border-collapse:collapse;font-size:10pt}th{background:#1e3a5f;color:#fff;padding:5px 8px;text-align:left}td{padding:5px 8px;border-bottom:1px solid #eee}.total-row td{font-weight:bold;background:#f0f4f8;border-top:2px solid #1e3a5f}.footer{text-align:center;font-size:8pt;color:#aaa;margin-top:8px}</style></head><body>
-<div class="hosp">${orgInfo.name}</div>
-<div class="banner">SALE RECEIPT</div>
-<p>Receipt: <strong>${receiptNo}</strong> &nbsp;|&nbsp; Date: <strong>${now}</strong> &nbsp;|&nbsp; Payment: <strong>${payment.toUpperCase()}</strong></p>
-<table><thead><tr><th>Drug</th><th style="text-align:center">Qty</th><th style="text-align:right">Rate</th><th style="text-align:right">Amount</th></tr></thead>
-<tbody>${rows}<tr class="total-row"><td colspan="3" style="text-align:right">TOTAL</td><td style="text-align:right">₹${total.toFixed(2)}</td></tr></tbody></table>
-<div class="footer">${orgInfo.name} • Printed: ${now}</div>
-</body></html>`);
+  // Prints the SHARED GST-invoice-style pharmacy receipt (same format used by
+  // PrescriptionPurchaseModal and the Sales & Reports tab) — uses the actual
+  // created sale record (with server-enriched HSN/GST%/batch/expiry per item),
+  // not a client-side guess, since only the backend knows which batch FIFO drew from.
+  const handlePrintSaleReceipt = (sale, paymentMethod) => {
+    let clinic = {}
+    try { clinic = JSON.parse(localStorage.getItem('gudmed-clinic-profile') || '{}') } catch { clinic = {} }
+    printPharmacyReceipt({ ...sale, paymentMethod }, orgInfo, clinic);
   };
 
   const handleSale = async () => {
@@ -747,7 +736,7 @@ export default function PharmacyModule() {
         paymentStatus: "paid",
       });
       if (res.success) {
-        handlePrintSaleReceipt(valid, total, paymentMethod);
+        handlePrintSaleReceipt(res.data, paymentMethod);
         toast.success(`Sale completed — ₹${total.toFixed(2)}`);
         setShowSaleDialog(false);
         setSaleItems([{ drugId: "", quantity: 1 }]);
@@ -954,6 +943,7 @@ export default function PharmacyModule() {
           salesCount={salePage.total}
           salesTotal={salePage.summary?.totalAmount ?? 0}
           refresh={salePage.refresh}
+          orgInfo={orgInfo}
         />
       </Tabs>
 

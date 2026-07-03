@@ -22,7 +22,6 @@ export default defineConfig(({ mode }) => {
       alias: { '@': path.resolve(__dirname, './src') },
     },
     server: {
-      port: 5174,
       host: lan ? true : undefined, // expose on LAN for phone access
       // Allow Cloudflare quick-tunnel hosts (`cloudflared tunnel --url`) for remote demos.
       allowedHosts: ['.trycloudflare.com'],

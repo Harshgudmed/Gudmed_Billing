@@ -12,7 +12,10 @@
     "db:migrate": "prisma migrate dev",
     "db:push": "prisma db push",
     "db:studio": "prisma studio",
-    "db:erd": "node prisma/generate-erd.mjs"
+    "db:erd": "node prisma/generate-erd.mjs",
+    "test:integration": "node --test --test-force-exit src/integration/__tests__/hl7Parser.test.js src/integration/__tests__/listener.test.js",
+    "hl7:simulate": "node scripts/hl7-simulator.js",
+    "hl7:inject": "node scripts/hl7-inject.js"
   },
   "dependencies": {
     "@prisma/client": "^6.11.1",
@@ -27,6 +30,7 @@
     "morgan": "^1.10.0",
     "multer": "^2.1.1",
     "razorpay": "^2.9.6",
+    "simple-hl7": "^3.3.0",
     "uuid": "^11.1.0",
     "zod": "^3.25.28"
   },

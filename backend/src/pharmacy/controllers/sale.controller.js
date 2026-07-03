@@ -81,10 +81,11 @@ export async function create(req, res, next) {
 
     const data = await db.$transaction(async (tx) => {
       // Validate stock for every item before any write
+      const drugsById = new Map()
       for (const item of parsed.items) {
         const drug = await tx.pharmacyDrug.findFirst({
           where: { id: item.drugId, organizationId: ORGANIZATION_ID },
-          select: { id: true, drugName: true, quantityInStock: true },
+          select: { id: true, drugName: true, quantityInStock: true, hsnCode: true, gstRate: true },
         })
         if (!drug) {
           throw makeError(`Drug not found: ${item.drugId}`, 404, 'DRUG_NOT_FOUND')
@@ -97,6 +98,24 @@ export async function create(req, res, next) {
             { drugName: drug.drugName, requested: item.quantity, available: drug.quantityInStock }
           )
         }
+        drugsById.set(item.drugId, drug)
+      }
+
+      // Decrement stock for each item — batches FIFO + ledger row (single source of
+      // truth) — BEFORE building the stored item list, so we can snapshot which
+      // batch/expiry each line actually drew from onto the receipt (a GST invoice
+      // must show the batch/expiry that was true at sale time, not looked up later).
+      const enrichedItems = []
+      for (const item of parsed.items) {
+        const drug = drugsById.get(item.drugId)
+        const { consumed } = await consumeFromBatches(tx, { drugId: item.drugId, quantity: item.quantity })
+        enrichedItems.push({
+          ...item,
+          hsnCode: drug.hsnCode || '',
+          gstRate: drug.gstRate || 0,
+          batchNumber: consumed.map((c) => c.batchNumber).join('/') || '',
+          expiryDate: consumed[0]?.expiryDate || null,
+        })
       }
 
       const subtotal = parsed.items.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0)
@@ -108,7 +127,7 @@ export async function create(req, res, next) {
           organizationId: ORGANIZATION_ID,
           patientId: parsed.patientId ?? null,
           prescriptionId: parsed.prescriptionId ?? null,
-          items: JSON.stringify(parsed.items),
+          items: JSON.stringify(enrichedItems),
           subtotal,
           discountAmount,
           totalAmount,
@@ -119,9 +138,7 @@ export async function create(req, res, next) {
         },
       })
 
-      // Decrement stock for each item — batches FIFO + ledger row (single source of truth)
       for (const item of parsed.items) {
-        await consumeFromBatches(tx, { drugId: item.drugId, quantity: item.quantity })
         await recordStockChange(tx, {
           organizationId: ORGANIZATION_ID,
           drugId: item.drugId,

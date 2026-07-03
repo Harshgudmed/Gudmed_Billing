@@ -10,10 +10,18 @@ import {
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
-import { RefreshCw, Loader2 } from "lucide-react";
+import { RefreshCw, Loader2, Printer } from "lucide-react";
 import { format } from "date-fns";
 import { statusBadge } from "../pharmacyHelpers";
 import { Pagination } from "@/components/common/Pagination";
+import { formatMoney } from "@/lib/format";
+import { printPharmacyReceipt } from "@/components/billing/utils/printBilling";
+
+function printSale(sale, orgInfo) {
+  let clinic = {};
+  try { clinic = JSON.parse(localStorage.getItem("gudmed-clinic-profile") || "{}"); } catch { clinic = {}; }
+  printPharmacyReceipt(sale, orgInfo, clinic);
+}
 
 function itemCount(s) {
   try {
@@ -35,6 +43,7 @@ export default function SalesReportsTab({
   salesCount,   // total rows across the period (DB count)
   salesTotal,   // total revenue across the period (DB sum)
   refresh,
+  orgInfo,
 }) {
   return (
     <TabsContent value="sales" className="space-y-4">
@@ -52,7 +61,7 @@ export default function SalesReportsTab({
           {salesCount > 0 && (
             <span className="text-sm text-gray-600">
               <span className="font-semibold">{salesCount}</span> sales ·{" "}
-              <span className="font-semibold text-green-700">₹{salesTotal.toLocaleString()}</span>
+              <span className="font-semibold text-green-700">{formatMoney(salesTotal)}</span>
             </span>
           )}
         </div>
@@ -73,19 +82,20 @@ export default function SalesReportsTab({
                 <TableHead>Payment</TableHead>
                 <TableHead>Status</TableHead>
                 <TableHead>Date</TableHead>
+                <TableHead className="text-right">Bill</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {loading ? (
                 <TableRow>
-                  <TableCell colSpan={7} className="text-center py-10">
+                  <TableCell colSpan={8} className="text-center py-10">
                     <Loader2 className="h-6 w-6 animate-spin text-gray-400 mx-auto" />
                   </TableCell>
                 </TableRow>
               ) : sales.length === 0 ? (
                 <TableRow>
                   <TableCell
-                    colSpan={7}
+                    colSpan={8}
                     className="text-center py-8 text-gray-400"
                   >
                     No sales records
@@ -106,7 +116,7 @@ export default function SalesReportsTab({
                         {itemCount(s)} item(s)
                       </TableCell>
                       <TableCell className="font-semibold">
-                        ₹{(s.totalAmount || 0).toFixed(2)}
+                        {formatMoney(s.totalAmount)}
                       </TableCell>
                       <TableCell className="capitalize">
                         {s.paymentMethod || "—"}
@@ -124,6 +134,16 @@ export default function SalesReportsTab({
                                 "dd MMM yyyy HH:mm",
                               )
                             : "—"}
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-7 w-7"
+                          onClick={() => printSale(s, orgInfo)}
+                        >
+                          <Printer className="h-4 w-4" />
+                        </Button>
                       </TableCell>
                     </TableRow>
                   );

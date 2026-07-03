@@ -21,10 +21,20 @@ export async function getOrgSettings() {
         name:     org.name     || FALLBACK.name,
         address:  org.address  || '',
         city:     org.city     || '',
+        region:   org.region   || '',
         phone:    org.phone    || '',
         email:    org.email    || '',
         logoUrl:  settings.logoUrl || org.logoUrl || '',
         tagline:  settings.tagline || '',
+        // Hospital-configurable receipt fields (set in Settings → Lab / Receipt).
+        website:              settings.website || '',
+        gstNo:                settings.gstNo || '',
+        cin:                  settings.cin || '',
+        sacCode:              settings.sacCode || '',
+        labCode:              settings.labCode || '',
+        homeCollectionCharge: Number(settings.homeCollectionCharge || 0),
+        showEmptyReceiptFields: settings.showEmptyReceiptFields ?? true,
+        receiptFooter:        settings.receiptFooter || '',
       }
       return _cache
     } catch (err) {

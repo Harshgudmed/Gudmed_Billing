@@ -94,13 +94,27 @@ export async function importDrugs(req, res, next) {
     if (!rawRows) throw makeError('Body must include a "rows" array', 400, 'NO_ROWS')
     if (rawRows.length > 5000) throw makeError('Too many rows (max 5000 per upload)', 400, 'TOO_MANY_ROWS')
 
-    // Pre-load existing barcodes + name|strength keys for duplicate detection.
-    const existing = await db.pharmacyDrug.findMany({
-      where: { organizationId: ORGANIZATION_ID },
-      select: { barcode: true, drugName: true, strength: true },
-    })
-    const existingBarcodes = new Set(existing.filter((d) => d.barcode).map((d) => d.barcode))
+    // Normalize every row once, up front (reused in the loop below).
+    const normRows = rawRows.map(normalizeRow)
+
+    // Duplicate detection must SCALE. Loading the ENTIRE drug table on every
+    // chunk is O(n²) across a 20-lakh import (each of ~1000 chunks re-reading
+    // millions of rows). Instead, load only the existing drugs that could
+    // actually collide with THIS chunk — matched by the chunk's barcodes/names.
+    // (Relies on the @@index([barcode]) and @@index([drugName]) already present.)
     const nameKey = (n, s) => `${(n || '').toLowerCase()}|${(s || '').toLowerCase()}`
+    const chunkBarcodes = [...new Set(normRows.map((r) => r.barcode).filter(Boolean))]
+    const chunkNames = [...new Set(normRows.map((r) => r.drugName).filter(Boolean))]
+    const orClauses = []
+    if (chunkBarcodes.length) orClauses.push({ barcode: { in: chunkBarcodes } })
+    if (chunkNames.length) orClauses.push({ drugName: { in: chunkNames } })
+    const existing = orClauses.length
+      ? await db.pharmacyDrug.findMany({
+          where: { organizationId: ORGANIZATION_ID, OR: orClauses },
+          select: { barcode: true, drugName: true, strength: true },
+        })
+      : []
+    const existingBarcodes = new Set(existing.filter((d) => d.barcode).map((d) => d.barcode))
     const existingNames = new Set(existing.map((d) => nameKey(d.drugName, d.strength)))
 
     // Track duplicates WITHIN the file too.
@@ -112,7 +126,7 @@ export async function importDrugs(req, res, next) {
 
     for (let i = 0; i < rawRows.length; i++) {
       const rowNo = i + 2 // +2: header row is line 1, data starts at line 2
-      const row = normalizeRow(rawRows[i])
+      const row = normRows[i]
 
       if (!row.drugName) {
         errors++

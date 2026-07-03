@@ -9,6 +9,7 @@ import { fileURLToPath } from 'url'
 import { router } from './src/routes/index.js'
 import { errorHandler } from './src/middleware/errorHandler.js'
 import { assertSecurityConfig } from './src/config/security.js'
+import { startAllListeners } from './src/integration/hl7Listener.js'
 
 // Fail-closed: refuse to boot an exploitable server in production (C7).
 assertSecurityConfig()
@@ -89,4 +90,13 @@ app.use(errorHandler)
 // ── Start ─────────────────────────────────────────────────────────────────────
 app.listen(PORT, () => {
   console.log(`[${process.env.NODE_ENV}] Backend running on http://localhost:${PORT}`)
+
+  // HL7 lab-analyzer listeners — opt-in via ENABLE_HL7_LISTENERS=true so this
+  // only runs on a host that actually has analyzers on the LAN (not on
+  // Vercel/Render serverless). Failures here never crash the API.
+  if (process.env.ENABLE_HL7_LISTENERS === 'true') {
+    startAllListeners()
+      .then((started) => console.log(`[HL7] Started ${started.length} analyzer listener(s)`))
+      .catch((e) => console.error('[HL7] Listener bootstrap failed:', e.message))
+  }
 })

@@ -23,6 +23,13 @@ const invoiceItemSchema = z.object({
   unitPrice: z.number().nonnegative(),
   total: z.number().nonnegative(),
   tax: z.number().nonnegative().default(0),
+  // Optional pass-through so a Pharmacy sale's GST invoice details (HSN, GST%,
+  // batch, expiry) survive into the Invoice too — items is stored as opaque
+  // JSON, so these just ride along for the receipt to read back out later.
+  hsnCode: z.string().optional(),
+  gstRate: z.number().nonnegative().optional(),
+  batchNumber: z.string().optional(),
+  expiryDate: z.string().nullish(),
 })
 
 const invoiceSchema = z.object({
@@ -44,6 +51,25 @@ const paymentSchema = z.object({
   bankName: z.string().optional(),
   chequeNumber: z.string().optional(),
   notes: z.string().optional(),
+})
+
+// Refund / Credit Note. A refund is a Payment row with isRefund:true. Using
+// paymentMethod:'credit_note' represents an adjustment (no cash out) vs an
+// actual money refund. amountPaid is DECREMENTED atomically, mirroring payment.
+const refundSchema = z.object({
+  invoiceId: z.string().min(1),
+  amount: z.number().positive(),
+  refundReason: z.string().min(1),
+  paymentMethod: z.string().min(1).default('cash'), // cash | bank_transfer | credit_note | upi ...
+  originalPaymentId: z.string().optional(),
+  notes: z.string().optional(),
+})
+
+// Add-on test after billing: append one line to an existing invoice and
+// recompute the financial summary (spec: "add a new invoice item").
+const addItemSchema = z.object({
+  invoiceId: z.string().min(1),
+  item: invoiceItemSchema,
 })
 
 // SECURITY: explicit whitelists — never z.record(z.any()) on financial records.
@@ -135,6 +161,8 @@ export async function getAll(req, res) {
       const where = { organizationId: ORGANIZATION_ID }
       if (status) where.paymentStatus = status
       if (patientId) where.patientId = patientId
+      // Single-invoice fetch (with its payments) — used to render a receipt.
+      if (invoiceId) where.id = invoiceId
 
       const [invoices, total] = await Promise.all([
         db.invoice.findMany({
@@ -178,11 +206,19 @@ export async function getAll(req, res) {
           skip: offset,
           include: {
             patient: {
+              select: { id: true, mrn: true, firstName: true, lastName: true },
+            },
+            // Include the parent invoice so receipts can show Total / Paid / Balance
+            // (Dr-Lal style) and the payments table can show patient + invoice no.
+            invoice: {
               select: {
-                id: true,
-                mrn: true,
-                firstName: true,
-                lastName: true,
+                invoiceNumber: true,
+                totalAmount: true,
+                amountPaid: true,
+                balanceDue: true,
+                patient: {
+                  select: { id: true, mrn: true, firstName: true, lastName: true },
+                },
               },
             },
           },
@@ -425,14 +461,14 @@ export async function create(req, res) {
             action: 'PAYMENT_RECORDED',
             entityType: 'Invoice',
             entityId: invoiceId,
-            details: JSON.stringify({
+            metadata: JSON.stringify({
               paymentId: created.id,
               amount,
               paymentMethod,
               receiptNumber,
               newPaymentStatus: paymentStatus,
             }),
-            createdAt: new Date(),
+            performedAt: new Date(),
           },
         })
 
@@ -440,6 +476,135 @@ export async function create(req, res) {
       })
 
       return res.status(201).json({ success: true, data: payment })
+    }
+
+    if (resource === 'refund') {
+      const parsed = refundSchema.safeParse(req.body)
+      if (!parsed.success) {
+        return res.status(400).json({ success: false, error: parsed.error.flatten() })
+      }
+      const { invoiceId, amount, refundReason, paymentMethod, originalPaymentId, notes } = parsed.data
+      const receiptNumber = 'REF' + Date.now()
+
+      // MONEY = ACID. Same discipline as a payment, but amountPaid is DECREMENTED.
+      const refund = await db.$transaction(async (tx) => {
+        const invoice = await tx.invoice.findFirst({
+          where: { id: invoiceId, organizationId: ORGANIZATION_ID },
+          select: { id: true, totalAmount: true, amountPaid: true },
+        })
+        if (!invoice) {
+          const err = new Error('Invoice not found'); err.status = 404; throw err
+        }
+        if (amount > invoice.amountPaid) {
+          const err = new Error(`Refund (${amount}) cannot exceed amount paid (${invoice.amountPaid})`)
+          err.status = 400; throw err
+        }
+
+        const created = await tx.payment.create({
+          data: {
+            organizationId: ORGANIZATION_ID,
+            invoiceId,
+            amount,
+            paymentMethod,
+            receiptNumber,
+            isRefund: true,
+            refundReason,
+            originalPaymentId: originalPaymentId || null,
+            notes: notes || null,
+            paymentDate: new Date(),
+          },
+        })
+
+        // Atomic decrement — the database performs the subtraction.
+        const updated = await tx.invoice.update({
+          where: { id: invoiceId },
+          data: { amountPaid: { decrement: amount } },
+          select: { totalAmount: true, amountPaid: true },
+        })
+
+        const paid = updated.amountPaid
+        const paymentStatus =
+          paid <= 0 ? 'refunded' : paid >= updated.totalAmount ? 'paid' : 'partially_paid'
+
+        await tx.invoice.update({
+          where: { id: invoiceId },
+          data: { balanceDue: updated.totalAmount - paid, paymentStatus },
+        })
+
+        await tx.auditLog.create({
+          data: {
+            organizationId: ORGANIZATION_ID,
+            action: 'REFUND_ISSUED',
+            entityType: 'Invoice',
+            entityId: invoiceId,
+            metadata: JSON.stringify({
+              refundId: created.id, amount, paymentMethod, refundReason,
+              receiptNumber, newPaymentStatus: paymentStatus,
+            }),
+            performedAt: new Date(),
+          },
+        })
+
+        return created
+      })
+
+      return res.status(201).json({ success: true, data: refund })
+    }
+
+    if (resource === 'invoiceItem') {
+      const parsed = addItemSchema.safeParse(req.body)
+      if (!parsed.success) {
+        return res.status(400).json({ success: false, error: parsed.error.flatten() })
+      }
+      const { invoiceId, item } = parsed.data
+
+      const updated = await db.$transaction(async (tx) => {
+        const invoice = await tx.invoice.findFirst({
+          where: { id: invoiceId, organizationId: ORGANIZATION_ID },
+        })
+        if (!invoice) {
+          const err = new Error('Invoice not found'); err.status = 404; throw err
+        }
+        if (invoice.status === 'cancelled' || invoice.paymentStatus === 'cancelled') {
+          const err = new Error('Cannot add items to a cancelled invoice'); err.status = 400; throw err
+        }
+
+        let items = []
+        try { items = JSON.parse(invoice.items || '[]') } catch { items = [] }
+        items.push({ ...item, status: 'ordered' })
+
+        const subtotal = items.reduce((s, i) => s + (i.total || 0), 0)
+        const taxAmount = items.reduce((s, i) => s + (i.tax || 0), 0)
+        const totalAmount = subtotal - (invoice.discountAmount || 0) + taxAmount
+        const paid = invoice.amountPaid || 0
+        const paymentStatus =
+          paid <= 0 ? 'unpaid' : paid >= totalAmount ? 'paid' : 'partially_paid'
+
+        const inv = await tx.invoice.update({
+          where: { id: invoiceId },
+          data: {
+            items: JSON.stringify(items),
+            subtotal, taxAmount, totalAmount,
+            balanceDue: totalAmount - paid,
+            paymentStatus,
+          },
+        })
+
+        await tx.auditLog.create({
+          data: {
+            organizationId: ORGANIZATION_ID,
+            action: 'INVOICE_ITEM_ADDED',
+            entityType: 'Invoice',
+            entityId: invoiceId,
+            metadata: JSON.stringify({ item, newTotal: totalAmount }),
+            performedAt: new Date(),
+          },
+        })
+
+        return inv
+      })
+
+      return res.status(201).json({ success: true, data: updated })
     }
 
     return res.status(400).json({ success: false, error: 'Invalid resource type' })
@@ -471,7 +636,7 @@ export async function update(req, res) {
         // Tenant guard: only touch an invoice that belongs to this org.
         const existing = await tx.invoice.findFirst({
           where: { id, organizationId: ORGANIZATION_ID },
-          select: { id: true },
+          select: { id: true, amountPaid: true, paymentStatus: true },
         })
         if (!existing) {
           const err = new Error('Invoice not found')
@@ -480,18 +645,26 @@ export async function update(req, res) {
         }
 
         if (updates.status === 'cancelled') {
+          // Never destroy the money trail: an invoice with live payments must be
+          // refunded / credit-noted down to zero before it can be cancelled.
+          if (existing.amountPaid > 0 && existing.paymentStatus !== 'refunded') {
+            const err = new Error('Invoice has payments — issue a refund/credit note before cancelling.')
+            err.status = 400
+            throw err
+          }
           updateData.cancelledAt = new Date()
+          updateData.paymentStatus = 'cancelled'
           await tx.auditLog.create({
             data: {
               organizationId: ORGANIZATION_ID,
               action: 'INVOICE_CANCELLED',
               entityType: 'Invoice',
               entityId: id,
-              details: JSON.stringify({
+              metadata: JSON.stringify({
                 cancelledAt: updateData.cancelledAt,
                 reason: updates.cancellationReason || null,
               }),
-              createdAt: new Date(),
+              performedAt: new Date(),
             },
           })
         }

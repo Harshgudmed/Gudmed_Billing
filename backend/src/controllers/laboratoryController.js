@@ -290,6 +290,21 @@ export const create = async (req, res, next) => {
           notes,
           status: 'pending',
         },
+        // Return the patient too, so the freshly-created order shows the real
+        // name in the UI immediately (not "Unknown" until the next refresh).
+        include: {
+          patient: {
+            select: {
+              id: true,
+              mrn: true,
+              firstName: true,
+              lastName: true,
+              gender: true,
+              dateOfBirth: true,
+              phonePrimary: true,
+            },
+          },
+        },
       })
       return res.json({ success: true, data })
     }

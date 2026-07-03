@@ -39,8 +39,8 @@ export const ROLES = {
     label: 'Administrator',
     home: 'dashboard',
     modules: [
-      'dashboard', 'patients', 'appointments', 'preTriage', 'queue', 'opd',
-      'laboratory', 'radiology', 'dayCare', 'ambulance', 'insurance', 'deathCertificate', 'inpatient', 'pharmacy', 'billing',
+      'dashboard', 'patients', 'appointments', 'preTriage', 'queue', 'opd', 'pharmacy',
+      'laboratory', 'radiology', 'dayCare', 'ambulance', 'insurance', 'deathCertificate', 'inpatient', 'billing',
       'doctorAccountability', 'settings',
     ],
   },

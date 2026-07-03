@@ -20,7 +20,7 @@ import client from "@/api/client";
 import { drName } from "@/lib/utils";
 import { appointmentSchema, editAppointmentSchema } from "./appointmentSchema";
 import { printAppointmentCard } from "./appointmentPrint";
-import { APPOINTMENTS_LIST_PER_PAGE } from "./appointmentConstants";
+import { APPOINTMENTS_LIST_PER_PAGE, APPOINTMENT_STATUSES } from "./appointmentConstants";
 import { useAppointments } from "./useAppointments";
 import { parseDate, getPatientFullName, byTime } from "./appointmentHelpers";
 import CancelAppointmentDialog from "./CancelAppointmentDialog";
@@ -90,6 +90,11 @@ export default function AppointmentsModule() {
     feeCalculation: false,
   });
 
+  // Toggle one loading flag without losing the others. (Object state replaces,
+  // it doesn't merge — so we spread `prev` here once, instead of at every call.)
+  const setLoading = (key, value) =>
+    setLoadingState((prev) => ({ ...prev, [key]: value }));
+
   const isEditSubmittingRef = useRef(false);
 
   const [selectedAppointmentIds, setSelectedAppointmentIds] = useState(new Set());
@@ -143,11 +148,8 @@ export default function AppointmentsModule() {
     setOrgInfo(hookOrgInfo);
   }, [hookOrgInfo]);
   useEffect(() => {
-    setPagination((prev) => ({ ...prev, list: 1 }));
+    setPaginationField("list", 1);
   }, [dates.selected, filters.status, filters.doctor, filters.department, filters.search]);
-  useEffect(() => {
-    setPagination((prev) => ({ ...prev, selectedDay: 1 }));
-  }, [dates.selected]);
 
   const form = useForm({
     resolver: zodResolver(appointmentSchema),
@@ -190,14 +192,14 @@ export default function AppointmentsModule() {
   useEffect(() => {
     if (!watchDoctorId || !watchPatientId || !watchDate) {
       setFeeCalculation(null);
-      setLoadingState((prev) => ({ ...prev, feeCalculation: false }));
+      setLoading("feeCalculation", false);
       return;
     }
 
     const controller = new AbortController();
 
     const calculateFee = async () => {
-      setLoadingState((prev) => ({ ...prev, feeCalculation: true }));
+      setLoading("feeCalculation", true);
 
       try {
         const response = await client.get("/fee-slabs/calculate", {
@@ -231,7 +233,7 @@ export default function AppointmentsModule() {
         }
       } finally {
         if (!controller.signal.aborted) {
-          setLoadingState((prev) => ({ ...prev, feeCalculation: false }));
+          setLoading("feeCalculation", false);
         }
       }
     };
@@ -301,7 +303,7 @@ export default function AppointmentsModule() {
 
     const loadSelectedDay = async () => {
       try {
-        setLoadingState((prev) => ({ ...prev, selectedDay: true }));
+        setLoading("selectedDay", true);
         const { rows, total } = await fetchAppointmentsPage({
           page: pagination.selectedDay,
           pageSize: APPOINTMENTS_LIST_PER_PAGE,
@@ -316,7 +318,7 @@ export default function AppointmentsModule() {
           setSelectedDayData({ rows: [], total: 0 })
         }
       } finally {
-        if (!cancelled) setLoadingState((prev) => ({ ...prev, selectedDay: false }))
+        if (!cancelled) setLoading("selectedDay", false)
       }
     }
 
@@ -405,11 +407,6 @@ export default function AppointmentsModule() {
   // Today's appointments split by lifecycle stage and sorted by time. Computed
   // once here so the "Today" tab's empty-check and its list render share one
   // source instead of filtering + sorting the same data twice.
-  const APPOINTMENT_STATUSES = {
-    upcoming: ["scheduled", "confirmed", "checked_in", "in_progress"],
-    completed: ["completed", "cancelled", "no_show", "rescheduled"],
-  };
-
   const { todaysUpcomingAppointments, todaysCompletedAppointments } = useMemo(() => {
     const today = new Date();
 
@@ -506,6 +503,46 @@ export default function AppointmentsModule() {
       editing: null,
     }));
 
+  // Update one field on the dialog's transient data (reason, rescheduleDate,
+  // etc.) without touching the rest — same pattern as setLoading above.
+  const setDialogField = (key, value) =>
+    setDialog((prev) => ({ ...prev, [key]: value }));
+
+  // Shared onOpenChange for every Dialog below: closing it (via Esc, overlay
+  // click, or the X button) should behave exactly like pressing Cancel.
+  const handleDialogOpenChange = (open) => {
+    if (!open) closeDialog();
+  };
+
+  // Same one-field-at-a-time pattern as setDialogField, for the other three
+  // grouped state objects used by the views below.
+  const setDatesField = (key, value) =>
+    setDates((prev) => ({ ...prev, [key]: value }));
+
+  const setFiltersField = (key, value) =>
+    setFilters((prev) => ({ ...prev, [key]: value }));
+
+  // Pagination setters are also handed to child views as direct setters, and
+  // some of those views call them with an updater function (prev => next)
+  // instead of a plain value — so this one supports both, same as useState's
+  // own setter would.
+  const setPaginationField = (key, value) =>
+    setPagination((prev) => ({
+      ...prev,
+      [key]: typeof value === "function" ? value(prev[key]) : value,
+    }));
+
+  // Changing the selected date must reset selectedDay's page in the SAME
+  // update, not a separate effect — otherwise the Monthly view's undebounced
+  // day-fetch fires once with the stale page, then again with the reset page
+  // (a real double-request). Same "reset in the same update" fix already
+  // applied to patient search in usePatients.js. Shared by both the Monthly
+  // and List views since they read/write the same `dates.selected`.
+  const handleSelectedDateChange = (date) => {
+    setDatesField("selected", date);
+    setPaginationField("selectedDay", 1);
+  };
+
   // One status-change path for all the simple lifecycle actions, instead of
   // five near-identical handlers.
   const changeStatus = async (appointment, status, successMessage) => {
@@ -529,7 +566,7 @@ export default function AppointmentsModule() {
       return;
     }
     try {
-      setLoadingState((prev) => ({ ...prev, submitting: true }));
+      setLoading("submitting", true);
       await updateAppointment(dialog.appointment.id, {
         status: "cancelled",
         cancellationReason: dialog.reason,
@@ -539,7 +576,7 @@ export default function AppointmentsModule() {
     } catch {
       toast.error("Failed to cancel appointment");
     } finally {
-      setLoadingState((prev) => ({ ...prev, submitting: false }));
+      setLoading("submitting", false);
     }
   };
 
@@ -549,7 +586,7 @@ export default function AppointmentsModule() {
       return;
     }
     try {
-      setLoadingState((prev) => ({ ...prev, submitting: true }));
+      setLoading("submitting", true);
       // Single atomic backend call — creates the new appointment and marks the
       // old one rescheduled together (no orphan-row risk if one half fails).
       await rescheduleAppointment(dialog.appointment.id, {
@@ -561,7 +598,7 @@ export default function AppointmentsModule() {
     } catch {
       toast.error("Failed to reschedule appointment");
     } finally {
-      setLoadingState((prev) => ({ ...prev, submitting: false }));
+      setLoading("submitting", false);
     }
   };
 
@@ -582,7 +619,7 @@ export default function AppointmentsModule() {
   const handleEditSubmit = async (data) => {
     if (!dialog.editing || isEditSubmittingRef.current) return;
     isEditSubmittingRef.current = true;
-    setLoadingState((prev) => ({ ...prev, editSubmitting: true }));
+    setLoading("editSubmitting", true);
     try {
       await updateAppointment(dialog.editing.id, {
         doctorId: data.doctorId,
@@ -598,7 +635,7 @@ export default function AppointmentsModule() {
     } catch {
       toast.error("Failed to update appointment");
     } finally {
-      setLoadingState((prev) => ({ ...prev, editSubmitting: false }));
+      setLoading("editSubmitting", false);
       isEditSubmittingRef.current = false;
     }
   };
@@ -671,7 +708,7 @@ export default function AppointmentsModule() {
 
   const onSubmit = async (data) => {
     try {
-      setLoadingState((prev) => ({ ...prev, submitting: true }));
+      setLoading("submitting", true);
       const patient = dialog.patient; // already chosen in the form
       const result = await createAppointment({
         patientId: data.patientId,
@@ -698,7 +735,7 @@ export default function AppointmentsModule() {
     } catch {
       toast.error("Failed to create appointment");
     } finally {
-      setLoadingState((prev) => ({ ...prev, submitting: false }));
+      setLoading("submitting", false);
     }
   };
 
@@ -759,9 +796,7 @@ export default function AppointmentsModule() {
             form={form}
             onSubmit={onSubmit}
             selectedPatient={dialog.patient}
-            setSelectedPatient={(patient) =>
-              setDialog((prev) => ({ ...prev, patient }))
-            }
+            setSelectedPatient={(patient) => setDialogField("patient", patient)}
             setPatients={setPatients}
             uniqueDepartments={departments}
             availableDoctors={availableDoctors}
@@ -778,40 +813,26 @@ export default function AppointmentsModule() {
 
       <Tabs value={activeTab} onValueChange={setActiveTab}>
         <TabsList className="grid w-full grid-cols-5 max-w-3xl">
-           <TabsTrigger value="today">Today</TabsTrigger>
-                <TabsTrigger value="weekly">Weekly</TabsTrigger>
+          <TabsTrigger value="today">Today</TabsTrigger>
+          <TabsTrigger value="weekly">Weekly</TabsTrigger>
           <TabsTrigger value="calendar">Monthly</TabsTrigger>
-     
           <TabsTrigger value="list">List View</TabsTrigger>
-         
           <TabsTrigger value="doctor-slots">Doctor Slots</TabsTrigger>
         </TabsList>
 
         <TabsContent value="calendar" className="space-y-4">
           <MonthlyView
             currentMonth={dates.currentMonth}
-            setCurrentMonth={(month) =>
-              setDates((prev) => ({ ...prev, currentMonth: month }))
-            }
+            setCurrentMonth={(month) => setDatesField("currentMonth", month)}
             selectedDate={dates.selected}
-            setSelectedDate={(date) =>
-              setDates((prev) => ({ ...prev, selected: date }))
-            }
+            setSelectedDate={handleSelectedDateChange}
             monthDays={monthDays}
             calendarCountsByDay={calendarCountsByDay}
             selectedDayAppointments={selectedDayData.rows}
             selectedDayTotal={selectedDayData.total}
             selectedDayLoading={loadingState.selectedDay}
             selectedDayPage={pagination.selectedDay}
-            setSelectedDayPage={(value) =>
-              setPagination((prev) => ({
-                ...prev,
-                // Support both a direct page and an updater fn (prev => next),
-                // since MonthlyView's pager calls it with `(prev) => prev + 1`.
-                selectedDay:
-                  typeof value === "function" ? value(prev.selectedDay) : value,
-              }))
-            }
+            setSelectedDayPage={(value) => setPaginationField("selectedDay", value)}
             getPatient={getPatient}
             onScheduleNew={() => openDialog("new")}
           />
@@ -820,9 +841,7 @@ export default function AppointmentsModule() {
         <TabsContent value="weekly" className="space-y-4">
           <WeeklyView
             currentWeek={dates.currentWeek}
-            setCurrentWeek={(week) =>
-              setDates((prev) => ({ ...prev, currentWeek: week }))
-            }
+            setCurrentWeek={(week) => setDatesField("currentWeek", week)}
             weekData={weekData}
             getPatient={getPatient}
           />
@@ -831,25 +850,15 @@ export default function AppointmentsModule() {
         <TabsContent value="list" className="space-y-4">
           <AppointmentsListView
             searchQuery={filters.search}
-            setSearchQuery={(search) =>
-              setFilters((prev) => ({ ...prev, search }))
-            }
+            setSearchQuery={(search) => setFiltersField("search", search)}
             selectedDate={dates.selected}
-            setSelectedDate={(date) =>
-              setDates((prev) => ({ ...prev, selected: date }))
-            }
+            setSelectedDate={handleSelectedDateChange}
             statusFilter={filters.status}
-            setStatusFilter={(status) =>
-              setFilters((prev) => ({ ...prev, status }))
-            }
+            setStatusFilter={(status) => setFiltersField("status", status)}
             departmentFilter={filters.department}
-            setDepartmentFilter={(department) =>
-              setFilters((prev) => ({ ...prev, department }))
-            }
+            setDepartmentFilter={(department) => setFiltersField("department", department)}
             doctorFilter={filters.doctor}
-            setDoctorFilter={(doctor) =>
-              setFilters((prev) => ({ ...prev, doctor }))
-            }
+            setDoctorFilter={(doctor) => setFiltersField("doctor", doctor)}
             uniqueDepartments={departments}
             filterDoctors={doctors}
             filteredAppointments={listData.rows}
@@ -861,14 +870,7 @@ export default function AppointmentsModule() {
             clearSelection={() => setSelectedAppointmentIds(new Set())}
             onBulkStatusUpdate={handleBulkStatusUpdate}
             appointmentsListPage={pagination.list}
-            setAppointmentsListPage={(value) =>
-              setPagination((prev) => ({
-                ...prev,
-                // Support both a direct page and an updater fn (prev => next),
-                // since AppointmentsListView's pager calls it with `(prev) => …`.
-                list: typeof value === "function" ? value(prev.list) : value,
-              }))
-            }
+            setAppointmentsListPage={(value) => setPaginationField("list", value)}
             onScheduleNew={() => openDialog("new")}
             onEdit={openEditDialog}
             onConfirm={handleConfirm}
@@ -902,9 +904,7 @@ export default function AppointmentsModule() {
             setSelectedDoctor={setSelectedDoctor}
             doctors={doctors}
             currentWeek={dates.currentWeek}
-            setCurrentWeek={(week) =>
-              setDates((prev) => ({ ...prev, currentWeek: week }))
-            }
+            setCurrentWeek={(week) => setDatesField("currentWeek", week)}
             appointments={appointments}
             getPatient={getPatient}
           />
@@ -913,9 +913,7 @@ export default function AppointmentsModule() {
 
       <EditAppointmentDialog
         open={dialog.active === "edit"}
-        onOpenChange={(open) => {
-          if (!open) closeDialog();
-        }}
+        onOpenChange={handleDialogOpenChange}
         form={editForm}
         onSubmit={handleEditSubmit}
         editingAppointment={dialog.editing}
@@ -927,15 +925,11 @@ export default function AppointmentsModule() {
 
       <CancelAppointmentDialog
         open={dialog.active === "cancel"}
-        onOpenChange={(open) => {
-          if (!open) closeDialog();
-        }}
+        onOpenChange={handleDialogOpenChange}
         appointment={dialog.appointment}
         getPatient={getPatient}
         reason={dialog.reason}
-        onReasonChange={(reason) =>
-          setDialog((prev) => ({ ...prev, reason }))
-        }
+        onReasonChange={(reason) => setDialogField("reason", reason)}
         onKeep={closeDialog}
         onConfirm={handleCancel}
         isSubmitting={loadingState.submitting}
@@ -943,19 +937,13 @@ export default function AppointmentsModule() {
 
       <RescheduleAppointmentDialog
         open={dialog.active === "reschedule"}
-        onOpenChange={(open) => {
-          if (!open) closeDialog();
-        }}
+        onOpenChange={handleDialogOpenChange}
         appointment={dialog.appointment}
         getPatient={getPatient}
         date={dialog.rescheduleDate}
-        onDateChange={(date) =>
-          setDialog((prev) => ({ ...prev, rescheduleDate: date }))
-        }
+        onDateChange={(date) => setDialogField("rescheduleDate", date)}
         time={dialog.rescheduleTime}
-        onTimeChange={(time) =>
-          setDialog((prev) => ({ ...prev, rescheduleTime: time }))
-        }
+        onTimeChange={(time) => setDialogField("rescheduleTime", time)}
         onCancel={closeDialog}
         onConfirm={handleReschedule}
         isSubmitting={loadingState.submitting}

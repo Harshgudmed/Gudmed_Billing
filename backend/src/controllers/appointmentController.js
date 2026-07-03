@@ -1,7 +1,7 @@
 import { db } from '../config/db.js'
 import { Prisma } from '@prisma/client'
 import { getOrgId } from "../lib/reqContext.js";
-import { startOfDay, endOfDay } from '../utils/dates.js'
+import { startOfDay, endOfDay, todayIST } from '../utils/dates.js'
 import { scopedDoctorId } from '../utils/scope.js'
 import { computeConsultationFee } from '../services/appointmentFees.js'
 
@@ -127,7 +127,7 @@ export async function getCalendarCounts(req, res, next) {
 export async function getStats(req, res, next) {
   try {
     const organizationId = getOrgId(req)
-    const day = req.query.date || new Date().toISOString()
+    const day = req.query.date || todayIST()
     const where = { organizationId, appointmentDate: { gte: startOfDay(day), lte: endOfDay(day) } }
     const myDoctorId = scopedDoctorId(req)
     if (myDoctorId) where.doctorId = myDoctorId
@@ -190,12 +190,9 @@ export async function create(req, res, next) {
     let consultationFee = null
     let appliedSlabInfo = null
 
-    // If frontend sends consultationFee (from OPD service selection), use it directly
-    if (validatedData.consultationFee !== null && validatedData.consultationFee !== undefined && validatedData.consultationFee !== '') {
-      consultationFee = parseFloat(validatedData.consultationFee)
-      appliedSlabInfo = { type: 'opd_service_selected' }
-    } else if (validatedData.doctorId) {
-      // Otherwise, derive the fee from the doctor's slabs (shared with the preview endpoint)
+    // Fee is always derived from the doctor's slabs (shared with the preview endpoint) —
+    // createAppointmentSchema doesn't accept a client-supplied consultationFee.
+    if (validatedData.doctorId) {
       const result = await computeConsultationFee({
         organizationId,
         doctorId: validatedData.doctorId,
@@ -326,7 +323,7 @@ export async function update(req, res, next) {
   try {
     const organizationId = getOrgId(req)
     const { id } = req.params
-    const body = req.body
+    const body = req.validatedBody
 
     // Ensure the appointment belongs to this org before mutating it.
     // A doctor may only mutate their own appointments (matches getOne scoping).
@@ -345,6 +342,7 @@ export async function update(req, res, next) {
     if (body.appointmentTime    !== undefined) updates.appointmentTime    = body.appointmentTime
     if (body.appointmentType    !== undefined) updates.appointmentType    = body.appointmentType
     if (body.doctorId           !== undefined) updates.doctorId           = body.doctorId
+    if (body.chiefComplaint     !== undefined) updates.chiefComplaint     = body.chiefComplaint
     if (body.notes              !== undefined) updates.notes              = body.notes
     if (body.cancellationReason !== undefined) updates.cancellationReason = body.cancellationReason
     if (body.consultationFee    !== undefined) updates.consultationFee    = body.consultationFee
@@ -442,10 +440,7 @@ export async function reschedule(req, res, next) {
 export async function bulkUpdateStatus(req, res, next) {
   try {
     const organizationId = getOrgId(req)
-    const { ids, status } = req.body
-    if (!Array.isArray(ids) || ids.length === 0 || !status) {
-      return res.status(400).json({ success: false, error: 'ids[] and status are required' })
-    }
+    const { ids, status } = req.validatedBody
 
     const data = { status }
     if (status === 'checked_in') data.checkedInAt = new Date()
@@ -474,7 +469,33 @@ export async function remove(req, res, next) {
     const deleteWhere = { id, organizationId }
     const myDoctorId = scopedDoctorId(req)
     if (myDoctorId) deleteWhere.doctorId = myDoctorId
-    const { count } = await db.appointment.deleteMany({ where: deleteWhere })
+
+    const count = await db.$transaction(async (tx) => {
+      const appointment = await tx.appointment.findFirst({ where: deleteWhere, select: { id: true } })
+      if (!appointment) return 0
+
+      // create() links its auto-voucher invoice to the appointment only via a
+      // text note (Invoice has no appointmentId FK) — clean it up here too, but
+      // only while it's still untouched (draft + unpaid), so a real invoice a
+      // staff member has since acted on is never silently deleted.
+      const draftInvoice = await tx.invoice.findFirst({
+        where: {
+          organizationId,
+          status: 'draft',
+          paymentStatus: 'unpaid',
+          notes: { contains: appointment.id },
+        },
+        select: { id: true },
+      })
+      if (draftInvoice) {
+        await tx.doctorCommission.deleteMany({ where: { invoiceId: draftInvoice.id } })
+        await tx.invoice.delete({ where: { id: draftInvoice.id } })
+      }
+
+      const { count } = await tx.appointment.deleteMany({ where: deleteWhere })
+      return count
+    })
+
     if (count === 0) {
       return res.status(404).json({ success: false, error: 'Appointment not found' })
     }

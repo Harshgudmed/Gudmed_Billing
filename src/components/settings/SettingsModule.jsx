@@ -25,6 +25,7 @@ import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form'
 import client from '@/api/client'
+import IntegrationsHub from './IntegrationsHub'
 
 const ORG_ID = 'org-demo'
 
@@ -96,6 +97,9 @@ export default function SettingsModule() {
     region: 'Maharashtra', openingTime: '08:00', closingTime: '17:00',
     appointmentDuration: '30', primaryColor: '#2563eb', secondaryColor: '#7c3aed',
     navbarColor: '#ffffff', moduleHeaderColor: '', logoUrl: '',
+    // Lab / receipt settings (hospital-controlled, shown on printed receipts)
+    website: '', gstNo: '', cin: '', sacCode: '', labCode: '',
+    homeCollectionCharge: '', showEmptyReceiptFields: false, receiptFooter: '',
   })
 
   const [modules, setModules] = useState(
@@ -134,6 +138,14 @@ export default function SettingsModule() {
           navbarColor: orgRes.data.settings?.navbarColor || '#ffffff',
           moduleHeaderColor: orgRes.data.settings?.moduleHeaderColor || '',
           logoUrl: orgRes.data.logoUrl || '',
+          website: orgRes.data.settings?.website || '',
+          gstNo: orgRes.data.settings?.gstNo || '',
+          cin: orgRes.data.settings?.cin || '',
+          sacCode: orgRes.data.settings?.sacCode || '',
+          labCode: orgRes.data.settings?.labCode || '',
+          homeCollectionCharge: String(orgRes.data.settings?.homeCollectionCharge || ''),
+          showEmptyReceiptFields: orgRes.data.settings?.showEmptyReceiptFields ?? false,
+          receiptFooter: orgRes.data.settings?.receiptFooter || '',
         })
         if (orgRes.data.modulesEnabled) setModules(prev => ({ ...prev, ...orgRes.data.modulesEnabled }))
       }
@@ -178,10 +190,20 @@ export default function SettingsModule() {
         region: orgForm.region, primaryColor: orgForm.primaryColor,
         secondaryColor: orgForm.secondaryColor, logoUrl: orgForm.logoUrl,
         settings: {
+          ...(organization?.settings || {}), // preserve other keys (integrations, logo, …)
           workingHours: { start: orgForm.openingTime, end: orgForm.closingTime },
           appointmentDuration: parseInt(orgForm.appointmentDuration),
           navbarColor: orgForm.navbarColor,
           moduleHeaderColor: orgForm.moduleHeaderColor,
+          // Lab / receipt settings — hospital controls what shows on receipts
+          website: orgForm.website,
+          gstNo: orgForm.gstNo,
+          cin: orgForm.cin,
+          sacCode: orgForm.sacCode,
+          labCode: orgForm.labCode,
+          homeCollectionCharge: Number(orgForm.homeCollectionCharge) || 0,
+          showEmptyReceiptFields: orgForm.showEmptyReceiptFields,
+          receiptFooter: orgForm.receiptFooter,
         },
       })
       if (res.success) {
@@ -288,12 +310,13 @@ export default function SettingsModule() {
       </div>
 
       <Tabs value={activeTab} onValueChange={setActiveTab}>
-        <TabsList className="grid w-full grid-cols-6">
+        <TabsList className="grid w-full grid-cols-5">
           <TabsTrigger value="organization"><Building2 className="h-4 w-4 mr-2" />Organization</TabsTrigger>
           <TabsTrigger value="users"><Users className="h-4 w-4 mr-2" />Users</TabsTrigger>
           <TabsTrigger value="modules"><Package className="h-4 w-4 mr-2" />Modules</TabsTrigger>
           <TabsTrigger value="integrations"><Link2 className="h-4 w-4 mr-2" />Integrations</TabsTrigger>
-          <TabsTrigger value="notifications"><MessageCircle className="h-4 w-4 mr-2" />Notifications</TabsTrigger>
+          {/* Notifications tab hidden — to show again: uncomment this trigger AND its <TabsContent>, then set grid-cols to 6 */}
+          {/* <TabsTrigger value="notifications"><MessageCircle className="h-4 w-4 mr-2" />Notifications</TabsTrigger> */}
           <TabsTrigger value="backup"><Database className="h-4 w-4 mr-2" />Backup</TabsTrigger>
         </TabsList>
 
@@ -459,6 +482,48 @@ export default function SettingsModule() {
                 <Label>Hospital Logo URL</Label>
                 <Input placeholder="https://example.com/logo.png" value={orgForm.logoUrl} onChange={e => setOrgForm(p => ({ ...p, logoUrl: e.target.value }))} />
               </div>
+            </CardContent>
+          </Card>
+
+          {/* Lab / Receipt settings — hospital decides what appears on printed receipts */}
+          <Card>
+            <CardHeader>
+              <CardTitle>Lab / Receipt Settings</CardTitle>
+              <CardDescription>These appear on lab bills &amp; receipts. Leave blank to hide (pathology is GST-exempt).</CardDescription>
+            </CardHeader>
+            <CardContent className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label>GST No</Label>
+                <Input placeholder="e.g. 06AABC...1Z5" value={orgForm.gstNo} onChange={e => setOrgForm(p => ({ ...p, gstNo: e.target.value }))} />
+              </div>
+              <div className="space-y-2">
+                <Label>CIN No</Label>
+                <Input placeholder="Company Identification No." value={orgForm.cin} onChange={e => setOrgForm(p => ({ ...p, cin: e.target.value }))} />
+              </div>
+              <div className="space-y-2">
+                <Label>SAC Code</Label>
+                <Input placeholder="e.g. 999316 (healthcare)" value={orgForm.sacCode} onChange={e => setOrgForm(p => ({ ...p, sacCode: e.target.value }))} />
+              </div>
+              <div className="space-y-2">
+                <Label>Lab Code / CC Code</Label>
+                <Input placeholder="e.g. S02" value={orgForm.labCode} onChange={e => setOrgForm(p => ({ ...p, labCode: e.target.value }))} />
+              </div>
+              <div className="space-y-2">
+                <Label>Website</Label>
+                <Input placeholder="www.yourhospital.com" value={orgForm.website} onChange={e => setOrgForm(p => ({ ...p, website: e.target.value }))} />
+              </div>
+              <div className="space-y-2">
+                <Label>Default Home Collection Charge (₹)</Label>
+                <Input type="number" min="0" placeholder="e.g. 150" value={orgForm.homeCollectionCharge} onChange={e => setOrgForm(p => ({ ...p, homeCollectionCharge: e.target.value }))} />
+              </div>
+              <div className="space-y-2 md:col-span-2">
+                <Label>Receipt Footer Note (optional)</Label>
+                <Input placeholder="Extra note printed at bottom of receipts" value={orgForm.receiptFooter} onChange={e => setOrgForm(p => ({ ...p, receiptFooter: e.target.value }))} />
+              </div>
+              <label className="flex items-center gap-2 md:col-span-2 text-sm cursor-pointer">
+                <input type="checkbox" checked={orgForm.showEmptyReceiptFields} onChange={e => setOrgForm(p => ({ ...p, showEmptyReceiptFields: e.target.checked }))} />
+                Show empty fields as "NA" on receipts  Unchecked = hide empty fields (cleaner).
+              </label>
             </CardContent>
           </Card>
 
@@ -661,38 +726,18 @@ export default function SettingsModule() {
           </Card>
         </TabsContent>
 
-        {/* Integrations Tab */}
+        {/* Integrations Tab — 4-card launcher; click a card to open its screen */}
         <TabsContent value="integrations" className="space-y-4">
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2"><Link2 className="h-5 w-5" />System Integrations</CardTitle>
-              <CardDescription>Configure connections to external systems and devices</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {[
-                  { name: 'Lab Analyzer Integration', status: 'Connected', statusClass: 'bg-green-100 text-green-700' },
-                  { name: 'PACS Integration', status: 'Not Configured', statusClass: '' },
-                  { name: 'eAPTS (Pharmacy)', status: 'Not Configured', statusClass: '' },
-                  { name: 'SMS Gateway', status: 'Pending', statusClass: 'bg-yellow-100 text-yellow-700' },
-                ].map(item => (
-                  <div key={item.name} className="p-4 border rounded-lg">
-                    <div className="flex items-center justify-between mb-2">
-                      <span className="font-medium">{item.name}</span>
-                      <Badge className={item.statusClass || undefined} variant={item.statusClass ? undefined : 'secondary'}>{item.status}</Badge>
-                    </div>
-                    <Button variant="outline" size="sm" className="mt-2">Configure</Button>
-                  </div>
-                ))}
-              </div>
-            </CardContent>
-          </Card>
+          <IntegrationsHub
+            settings={organization?.settings || {}}
+            onSaved={(newSettings) => setOrganization((o) => ({ ...o, settings: newSettings }))}
+          />
         </TabsContent>
 
         {/* Notifications Tab */}
         <TabsContent value="notifications" className="space-y-4">
           <Card>
-            <CardHeader>
+            {/* <CardHeader>
               <CardTitle className="flex items-center gap-2">
                 <MessageCircle className="h-5 w-5 text-green-600" />
                 WhatsApp Notifications
@@ -702,17 +747,17 @@ export default function SettingsModule() {
                 Currently uses <strong>wa.me links</strong> (free). Set an API key below to enable
                 fully automatic sending without any staff action.
               </CardDescription>
-            </CardHeader>
+            </CardHeader> */}
             <CardContent className="space-y-5">
 
               {/* wa.me mode info */}
-              <div className="rounded-lg border border-blue-200 bg-blue-50 p-3 text-sm text-blue-800">
+              {/* <div className="rounded-lg border border-blue-200 bg-blue-50 p-3 text-sm text-blue-800">
                 <strong>Current mode: wa.me links</strong> — After each action a WhatsApp chat opens
                 with the message pre-filled. Staff clicks Send. No cost, no API needed.
-              </div>
+              </div> */}
 
               {/* Pharmacy team number */}
-              <div className="space-y-1.5">
+              {/* <div className="space-y-1.5">
                 <Label className="text-sm font-medium">Pharmacy Team WhatsApp Number</Label>
                 <Input
                   placeholder="e.g. 9876543210 (without +91)"
@@ -723,10 +768,10 @@ export default function SettingsModule() {
                   Used to notify pharmacy staff when a new prescription is created.
                   Also set <code>WHATSAPP_PHARMACY_TEAM_PHONE</code> in backend .env for server-side sending.
                 </p>
-              </div>
+              </div> */}
 
               {/* Post-consultation auto-prompt */}
-              <div className="flex items-center justify-between border rounded-lg p-3">
+              {/* <div className="flex items-center justify-between border rounded-lg p-3">
                 <div>
                   <p className="text-sm font-medium">Post-consultation workflow prompt</p>
                   <p className="text-xs text-gray-500">Show WhatsApp & purchase options after every consultation is saved</p>
@@ -735,10 +780,10 @@ export default function SettingsModule() {
                   defaultChecked={typeof window !== 'undefined' ? localStorage.getItem('wa_post_consultation') !== 'false' : true}
                   onCheckedChange={v => localStorage.setItem('wa_post_consultation', String(v))}
                 />
-              </div>
+              </div> */}
 
               {/* WhatsApp API section */}
-              <div className="space-y-3 pt-2 border-t">
+              {/* <div className="space-y-3 pt-2 border-t">
                 <div className="flex items-center gap-2">
                   <Bell className="h-4 w-4 text-orange-500" />
                   <p className="text-sm font-semibold">Upgrade to Automatic Sending (WhatsApp Business API)</p>
@@ -765,7 +810,7 @@ export default function SettingsModule() {
                   and <code>WHATSAPP_PROVIDER</code> to <code>backend/.env</code> then restart the server.
                   The system will automatically switch from wa.me links to direct API sending.
                 </div>
-              </div>
+              </div> */}
             </CardContent>
           </Card>
         </TabsContent>

@@ -1,16 +1,25 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { HOSPITAL_LOGO, HOSPITAL_NAME } from '@/lib/brand'
+import { useOrgSettings } from '@/lib/useOrgSettings'
 
-// Renders the hospital logo image. If the image fails to load (e.g. the
-// provided data is invalid), it falls back to a clean monogram so the UI
-// never shows a broken-image icon.
+// Renders the hospital logo. It is now DYNAMIC: the logo + name come from the
+// organisation Settings (logoUrl the user pastes in Settings → shows everywhere).
+// Fallback order:  Settings logoUrl  →  bundled brand logo  →  initials monogram.
+// The logo auto-refreshes when Settings are saved (useOrgSettings listens for
+// the brandingChange / organizationSettingsChange events).
 export default function Logo({ size = 44, rounded = 'rounded-lg', className = '' }) {
-  const [failed, setFailed] = useState(!HOSPITAL_LOGO)
+  const { orgInfo } = useOrgSettings()
+  const logoSrc = orgInfo?.logoUrl || HOSPITAL_LOGO
+  const name = orgInfo?.name || HOSPITAL_NAME
+
+  const [failed, setFailed] = useState(false)
+  // Reset the error state whenever the source changes (e.g. user saves a new URL).
+  useEffect(() => { setFailed(!logoSrc) }, [logoSrc])
 
   const dim = { width: size, height: size }
 
-  if (failed) {
-    const initials = HOSPITAL_NAME.split(' ').filter(Boolean).slice(0, 2).map(w => w[0]).join('').toUpperCase()
+  if (failed || !logoSrc) {
+    const initials = (name || 'H').split(' ').filter(Boolean).slice(0, 2).map(w => w[0]).join('').toUpperCase()
     return (
       <div
         style={dim}
@@ -23,8 +32,8 @@ export default function Logo({ size = 44, rounded = 'rounded-lg', className = ''
 
   return (
     <img
-      src={HOSPITAL_LOGO}
-      alt={HOSPITAL_NAME}
+      src={logoSrc}
+      alt={name}
       style={dim}
       onError={() => setFailed(true)}
       className={`${rounded} object-contain shrink-0 bg-white p-1 shadow-sm ring-1 ring-black/5 ${className}`}
