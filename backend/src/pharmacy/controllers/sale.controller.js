@@ -85,7 +85,7 @@ export async function create(req, res, next) {
       for (const item of parsed.items) {
         const drug = await tx.pharmacyDrug.findFirst({
           where: { id: item.drugId, organizationId: ORGANIZATION_ID },
-          select: { id: true, drugName: true, quantityInStock: true, hsnCode: true, gstRate: true },
+          select: { id: true, drugName: true, quantityInStock: true, gstRate: true },
         })
         if (!drug) {
           throw makeError(`Drug not found: ${item.drugId}`, 404, 'DRUG_NOT_FOUND')
@@ -111,7 +111,6 @@ export async function create(req, res, next) {
         const { consumed } = await consumeFromBatches(tx, { drugId: item.drugId, quantity: item.quantity })
         enrichedItems.push({
           ...item,
-          hsnCode: drug.hsnCode || '',
           gstRate: drug.gstRate || 0,
           batchNumber: consumed.map((c) => c.batchNumber).join('/') || '',
           expiryDate: consumed[0]?.expiryDate || null,

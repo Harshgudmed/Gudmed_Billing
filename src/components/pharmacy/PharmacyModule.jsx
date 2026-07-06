@@ -703,7 +703,7 @@ export default function PharmacyModule() {
 
   // Prints the SHARED GST-invoice-style pharmacy receipt (same format used by
   // PrescriptionPurchaseModal and the Sales & Reports tab) — uses the actual
-  // created sale record (with server-enriched HSN/GST%/batch/expiry per item),
+  // created sale record (with server-enriched GST%/batch/expiry per item),
   // not a client-side guess, since only the backend knows which batch FIFO drew from.
   const handlePrintSaleReceipt = (sale, paymentMethod) => {
     let clinic = {}

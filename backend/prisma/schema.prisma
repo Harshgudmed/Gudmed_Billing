@@ -650,7 +650,6 @@ model PharmacyDrug {
   purchasePrice    Float? // explicit purchase price (costPrice kept for back-compat)
   mrp              Float? // printed maximum retail price
   gstRate          Float? // GST percentage
-  hsnCode          String?
 
   // Identification
   barcode      String? // EAN-13 / UPC / Code128 / QR payload scanned at the counter

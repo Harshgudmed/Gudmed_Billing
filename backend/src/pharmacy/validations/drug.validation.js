@@ -7,7 +7,6 @@ export const createDrugSchema = z.object({
   drugCode: z.string().optional(),
   barcode: z.string().optional(),
   manufacturer: z.string().optional(),
-  hsnCode: z.string().optional(),
   drugCategory: z.string().optional(),
   dosageForm: z.string().optional(),
   strength: z.string().optional(),

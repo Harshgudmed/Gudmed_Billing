@@ -243,14 +243,13 @@ export default function BillingModule({ onBack }) {
           try { items = typeof inv.items === 'string' ? JSON.parse(inv.items) : (inv.items || []) } catch { items = [] }
           const patName = inv.patient ? `${inv.patient.firstName} ${inv.patient.lastName}` : 'Unknown'
           // Normalise DB items ({serviceName,quantity,unitPrice}) to the print shape ({name,qty,amt}).
-          // hsnCode/gstRate/batchNumber/expiryDate ride along when present (Pharmacy
+          // gstRate/batchNumber/expiryDate ride along when present (Pharmacy
           // items only) so printPharmacyReceipt can show the real GST breakdown.
           const normItems = (items || []).map(it => ({
             name: it.name || it.serviceName || 'Item',
             qty: it.qty || it.quantity || 1,
             amt: it.amt ?? it.unitPrice ?? 0,
             sub: it.sub || '',
-            hsnCode: it.hsnCode,
             gstRate: it.gstRate,
             batchNumber: it.batchNumber,
             expiryDate: it.expiryDate,
@@ -1308,7 +1307,7 @@ export default function BillingModule({ onBack }) {
                   netPayable: b.total, paid: b.amountPaid || 0, balance: b.balanceDue ?? (b.total - (b.amountPaid || 0)),
                 }, orgInfo, clinic)
               } else if (/^pharmacy/i.test(b.department || '')) {
-                // Same GST-invoice format as the pharmacy counter receipt — HSN/GST%/
+                // Same GST-invoice format as the pharmacy counter receipt — GST%/
                 // batch/expiry ride on each item when the sale carried them through
                 // (see PrescriptionPurchaseModal.jsx); otherwise those columns show "—".
                 printPharmacyReceipt({
@@ -1317,7 +1316,7 @@ export default function BillingModule({ onBack }) {
                   discountAmount: b.discountAmt || 0, amountPaid: b.amountPaid || 0, totalAmount: b.total,
                   items: (b.items || []).map(it => ({
                     drugName: it.name, quantity: it.qty, unitPrice: it.amt, total: (it.amt || 0) * (it.qty || 1),
-                    hsnCode: it.hsnCode, gstRate: it.gstRate, batchNumber: it.batchNumber, expiryDate: it.expiryDate,
+                    gstRate: it.gstRate, batchNumber: it.batchNumber, expiryDate: it.expiryDate,
                   })),
                 }, orgInfo, clinic)
               } else {

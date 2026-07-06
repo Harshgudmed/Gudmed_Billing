@@ -23,10 +23,9 @@ const invoiceItemSchema = z.object({
   unitPrice: z.number().nonnegative(),
   total: z.number().nonnegative(),
   tax: z.number().nonnegative().default(0),
-  // Optional pass-through so a Pharmacy sale's GST invoice details (HSN, GST%,
+  // Optional pass-through so a Pharmacy sale's GST invoice details (GST%,
   // batch, expiry) survive into the Invoice too — items is stored as opaque
   // JSON, so these just ride along for the receipt to read back out later.
-  hsnCode: z.string().optional(),
   gstRate: z.number().nonnegative().optional(),
   batchNumber: z.string().optional(),
   expiryDate: z.string().nullish(),

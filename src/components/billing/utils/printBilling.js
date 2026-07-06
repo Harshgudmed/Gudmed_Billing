@@ -471,14 +471,14 @@ export function printRadiologyReceipt(r, orgInfo = {}, clinic = {}) {
 
 // ── SHARED Indian pharmacy GST retail-invoice receipt ───────────────────────────
 // Matches the standard "medical store" bill format: Bill No/Date/Time header,
-// Qty/Particulars/HSN/GST%/Batch/Expiry/Amount item table, tax-slab breakdown by
+// Qty/Particulars/GST%/Batch/Expiry/Amount item table, tax-slab breakdown by
 // GST rate with CGST+SGST split, MRP Total/Discount/Paid footer. One shared
 // renderer so Direct Sale, Prescription Purchase, and the Sales & Reports tab all
 // print an IDENTICAL bill — same "one shared function" pattern as the Lab/
 // Radiology receipt above.
 //   sale = { receiptNumber, saleDate, patientName (or patient:{firstName,lastName}),
 //            patientAddress, prescribedBy, paymentMethod, discountAmount, amountPaid,
-//            totalAmount, items: [{drugName, hsnCode, gstRate, batchNumber,
+//            totalAmount, items: [{drugName, gstRate, batchNumber,
 //            expiryDate, quantity, unitPrice, total}] }
 export function printPharmacyReceipt(sale, orgInfo = {}, clinic = {}) {
   const win = window.open('', '_blank', 'width=820,height=780')
@@ -500,7 +500,7 @@ export function printPharmacyReceipt(sale, orgInfo = {}, clinic = {}) {
   const bySlab = Object.fromEntries(SLABS.map((s) => [s, { taxable: 0, tax: 0 }]))
   let taxFree = 0
 
-  const rows = items.map((it) => {
+  const rows = items.map((it, i) => {
     const total = Number(it.total || 0)
     const gstRate = Number(it.gstRate || 0)
     const expiry = it.expiryDate ? format(new Date(it.expiryDate), 'MM/yy') : ''
@@ -513,13 +513,13 @@ export function printPharmacyReceipt(sale, orgInfo = {}, clinic = {}) {
       taxFree += total
     }
     return `<tr>
-      <td>${Number(it.quantity || 0)}</td>
+      <td class="sno">${i + 1}</td>
+      <td class="qty">${Number(it.quantity || 0)}</td>
       <td>${esc(it.drugName)}</td>
-      <td>${esc(it.hsnCode || '—')}</td>
-      <td style="text-align:right">${gstRate ? gstRate.toFixed(1) : '—'}</td>
+      <td class="gst">${gstRate ? gstRate.toFixed(1) : '—'}</td>
       <td>${esc(it.batchNumber || '—')}</td>
       <td>${esc(expiry || '—')}</td>
-      <td style="text-align:right">${total.toFixed(2)}</td>
+      <td style="text-align:right">₹${total.toFixed(2)}</td>
     </tr>`
   }).join('')
 
@@ -529,14 +529,6 @@ export function printPharmacyReceipt(sale, orgInfo = {}, clinic = {}) {
   const discount = Number(sale.discountAmount || 0)
   const paid = Number(sale.amountPaid ?? sale.totalAmount ?? (mrpTotal - discount))
   const fileName = `${(patientName || 'Patient').replace(/\s+/g, '_')}_${sale.receiptNumber || sale.invoiceNumber || ''}`
-
-  // One compact tax-slab table (Slab | Taxable | CGST | SGST per row) instead of
-  // three separate boxes — matches the dense, single-block layout of a real
-  // pharmacy GST bill instead of spreading a few numbers across a lot of page.
-  const taxRows = SLABS.map((slab) => `
-    <tr><td>${slab}%</td><td>${bySlab[slab].taxable.toFixed(2)}</td>
-    <td>${(bySlab[slab].tax / 2).toFixed(2)}</td><td>${(bySlab[slab].tax / 2).toFixed(2)}</td></tr>`).join('')
-    + `<tr><td>Tax-free</td><td>${taxFree.toFixed(2)}</td><td>—</td><td>—</td></tr>`
 
   const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${esc(fileName)}</title>
 <style>
@@ -553,13 +545,19 @@ body{font-family:'Segoe UI',Arial,Helvetica,sans-serif;font-size:9pt;color:#1f29
 .cell:nth-child(4n+1),.cell:nth-child(4n+2){background:#fafbfc}
 .cell .l{min-width:90px;color:#64748b;font-weight:600}.cell .v{flex:1;font-weight:700;color:#1f2937}
 table{width:100%;border-collapse:collapse;border:1px solid #e2e8f0;border-radius:5px;overflow:hidden}
-thead th{background:#f1f5f9;color:#1a3e6f;border-bottom:2px solid #1a3e6f;padding:6px 8px;text-align:left;font-size:7.5pt;letter-spacing:.3px;text-transform:uppercase;font-weight:700}
+thead th{background:#f1f5f9;color:#1a3e6f;border-bottom:2px solid #1a3e6f;padding:7px 10px;text-align:left;font-size:7.5pt;letter-spacing:.3px;text-transform:uppercase;font-weight:700;white-space:nowrap}
 thead th:last-child,tbody td:last-child{text-align:right}
-tbody td{padding:6px 8px;border-bottom:1px solid #eef1f4;font-size:8.5pt}
+tbody td{padding:7px 10px;border-bottom:1px solid #eef1f4;font-size:8.5pt}
+tbody td.sno,tbody td.qty{padding-left:6px;padding-right:6px}
 tbody tr:nth-child(even){background:#fafbfc}
+thead th:first-child,tbody td.sno{text-align:center}
+tbody td.sno{color:#94a3b8;font-weight:700}
+tbody td.qty{text-align:center}
+tbody td.gst{text-align:left}
 .items{margin-bottom:8px}
 .contact{text-align:center;font-size:8.5pt;color:#1a3e6f;font-weight:700;margin:6px 0 10px;letter-spacing:.3px}
-.taxwrap{display:flex;gap:12px;align-items:flex-start;margin-bottom:10px}
+.taxwrap{display:flex;gap:16px;align-items:flex-start;justify-content:space-between;margin-bottom:10px}
+.words{flex:1;font-size:9pt;color:#475569;padding-top:6px;line-height:1.5}.words b{color:#1f2937}
 .taxtable{flex:1}
 .taxtable th:not(:first-child),.taxtable td:not(:first-child){text-align:right}
 .totals{width:190px;border:1px solid #e2e8f0;border-radius:6px;overflow:hidden;flex-shrink:0}
@@ -591,21 +589,20 @@ tbody tr:nth-child(even){background:#fafbfc}
   <div class="cell"><span class="l">Payment</span><span class="v">${esc((sale.paymentMethod || 'cash').toUpperCase())}</span></div>
 </div>
 <table class="items"><thead><tr>
-  <th style="width:32px">Qty</th><th>Particulars</th><th style="width:70px">HSN</th>
-  <th style="width:44px">GST%</th><th style="width:70px">Batch</th><th style="width:50px">Expiry</th><th style="width:70px">Amount</th>
+  <th style="width:52px">S.No</th><th style="width:46px">Qty</th><th>Particulars</th>
+  <th style="width:54px">GST%</th><th style="width:74px">Batch</th><th style="width:56px">Expiry</th><th style="width:90px">Amount</th>
 </tr></thead><tbody>${rows}</tbody></table>
-<div class="contact">${(clinic.phone || orgInfo.phone) ? 'CALL &amp; WHATSAPP ON ' + esc(clinic.phone || orgInfo.phone) : ''}</div>
 <div class="taxwrap">
-  <table class="taxtable"><thead><tr><th>Tax Slab</th><th>Taxable</th><th>CGST</th><th>SGST</th></tr></thead>
-  <tbody>${taxRows}</tbody></table>
+  <div class="words">Amount in Words:<br/><b>${amountInWords(paid || (mrpTotal - discount))} Rupee(s) Only</b></div>
   <div class="totals">
-    <div class="trow2"><span>CGST Total</span><span>${cgstTotal.toFixed(2)}</span></div>
-    <div class="trow2"><span>SGST Total</span><span>${sgstTotal.toFixed(2)}</span></div>
-    <div class="trow2"><span>MRP Total</span><span>${mrpTotal.toFixed(2)}</span></div>
-    ${discount > 0 ? `<div class="trow2" style="color:#16a34a"><span>Discount</span><span>-${discount.toFixed(2)}</span></div>` : ''}
-    <div class="trow2 paid"><span>Paid Amount</span><span>${paid.toFixed(2)}</span></div>
+    <div class="trow2"><span>CGST Total</span><span>₹${cgstTotal.toFixed(2)}</span></div>
+    <div class="trow2"><span>SGST Total</span><span>₹${sgstTotal.toFixed(2)}</span></div>
+    <div class="trow2"><span>MRP Total</span><span>₹${mrpTotal.toFixed(2)}</span></div>
+    ${discount > 0 ? `<div class="trow2" style="color:#16a34a"><span>Discount</span><span>-₹${discount.toFixed(2)}</span></div>` : ''}
+    <div class="trow2 paid"><span>Paid Amount</span><span>₹${paid.toFixed(2)}</span></div>
   </div>
 </div>
+<div class="contact">${(clinic.phone || orgInfo.phone) ? 'CALL &amp; WHATSAPP ON ' + esc(clinic.phone || orgInfo.phone) : ''}</div>
 <div class="foot">This is a computer generated GST invoice and does not require signature/stamp.<br/>${esc(gh)} — Pharmacy Department &nbsp;|&nbsp; Printed: ${dateStr}, ${timeStr}</div>
 </div></body></html>`
   win.document.open(); win.document.write(html); win.document.close(); win.focus()

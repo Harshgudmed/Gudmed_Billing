@@ -101,7 +101,7 @@ export default function PrescriptionPurchaseModal({
   async function confirmPurchase() {
     setProcessing(true)
     try {
-      // 1. Create pharmacy sale (deducts stock, snapshots HSN/GST%/batch/expiry
+      // 1. Create pharmacy sale (deducts stock, snapshots GST%/batch/expiry
       // per item server-side — see sale.controller.js) and print the receipt from.
       const saleItems = enrichedItems
         .filter(i => i.drugCode && i.unitPrice > 0)
@@ -135,7 +135,7 @@ export default function PrescriptionPurchaseModal({
       // receipt was ever produced. `notes` is tagged `[Pharmacy]` so the Billing
       // module recognizes the department, same convention as Lab/Radiology.
       //
-      // HSN/GST%/batch/expiry are pulled from the sale we just created (it's
+      // GST%/batch/expiry are pulled from the sale we just created (it's
       // the one that actually knows which batch FIFO drew from) so the Billing
       // module's pharmacy invoice print can show the same GST breakdown as the
       // pharmacy counter receipt, not just plain drug names.
@@ -156,7 +156,6 @@ export default function PrescriptionPurchaseModal({
             unitPrice: i.unitPrice || 0,
             tax: 0,
             total: (i.unitPrice || 0) * (i.quantity || 1),
-            hsnCode: saleItem?.hsnCode || undefined,
             gstRate: saleItem?.gstRate || undefined,
             batchNumber: saleItem?.batchNumber || undefined,
             expiryDate: saleItem?.expiryDate || undefined,
@@ -203,8 +202,8 @@ export default function PrescriptionPurchaseModal({
   // ── Print receipt ────────────────────────────────────────────────────────
   // Same SHARED GST-invoice format as Direct Sale / Sales & Reports — see
   // printPharmacyReceipt in printBilling.js. Uses the actual created sale (with
-  // server-enriched HSN/GST%/batch/expiry) when available; falls back to the
-  // reviewed items (no batch/HSN) if the sale wasn't created (all-free items).
+  // server-enriched GST%/batch/expiry) when available; falls back to the
+  // reviewed items (no batch) if the sale wasn't created (all-free items).
   function printReceipt() {
     let clinic = {}
     try { clinic = JSON.parse(localStorage.getItem('gudmed-clinic-profile') || '{}') } catch { clinic = {} }
