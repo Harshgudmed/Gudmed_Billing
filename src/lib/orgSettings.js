@@ -1,3 +1,5 @@
+import client from '@/api/client'
+
 // Module-level cache — one fetch per session, shared across all print functions.
 // Call clearOrgCache() from SettingsModule after saving org details.
 let _cache = null
@@ -11,8 +13,9 @@ export async function getOrgSettings() {
 
   _pending = (async () => {
     try {
-      const response = await fetch('/api/settings')
-      const res = await response.json()
+      // Use the shared axios client (not raw fetch) so this respects VITE_API_URL
+      // in production instead of always hitting a same-origin relative path.
+      const res = await client.get('/settings')
       const org = res?.data || {}
       const settings = typeof org.settings === 'string'
         ? (() => { try { return JSON.parse(org.settings) } catch { return {} } })()
