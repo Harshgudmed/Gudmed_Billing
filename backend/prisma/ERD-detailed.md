@@ -481,7 +481,6 @@ cancelled cancelled
     Float purchasePrice "❓"
     Float mrp "❓"
     Float gstRate "❓"
-    String hsnCode "❓"
     String barcode "❓"
     String manufacturer "❓"
     String storageLocation "❓"

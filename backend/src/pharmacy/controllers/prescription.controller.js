@@ -123,7 +123,7 @@ export async function dispense(req, res, next) {
       // dispense has no price in its request body, unlike a Direct Sale).
       const drugs = await tx.pharmacyDrug.findMany({
         where: { id: { in: stockItems.map((i) => i.drugId) }, organizationId: ORGANIZATION_ID },
-        select: { id: true, drugName: true, quantityInStock: true, sellingPrice: true, hsnCode: true, gstRate: true },
+        select: { id: true, drugName: true, quantityInStock: true, sellingPrice: true, gstRate: true },
       })
       const drugById = new Map(drugs.map((d) => [d.id, d]))
 
@@ -155,7 +155,6 @@ export async function dispense(req, res, next) {
           quantity: qty,
           unitPrice,
           total: unitPrice * qty,
-          hsnCode: drug?.hsnCode || '',
           gstRate: drug?.gstRate || 0,
           batchNumber: consumed.map((c) => c.batchNumber).join('/') || '',
           expiryDate: consumed[0]?.expiryDate || null,
