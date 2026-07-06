@@ -18,7 +18,7 @@ import client from "@/api/client";
 // validates (dry run) or commits (creates medicine + batch + opening stock).
 const TEMPLATE_COLUMNS = [
   "Medicine Name", "Generic Name", "Brand Name", "Manufacturer", "Category",
-  "Dosage Form", "Strength", "Barcode", "HSN Code", "MRP", "Selling Price",
+  "Dosage Form", "Strength", "Barcode", "MRP", "Selling Price",
   "Purchase Price", "GST", "Reorder Level", "Current Stock", "Batch Number",
   "Expiry Date", "Mfg Date", "Supplier",
 ];
@@ -26,14 +26,14 @@ const SAMPLE_ROWS = [
   {
     "Medicine Name": "Paracetamol 500mg", "Generic Name": "Paracetamol", "Brand Name": "Calpol",
     Manufacturer: "GSK", Category: "analgesic", "Dosage Form": "tablet", Strength: "500mg",
-    Barcode: "8901234567890", "HSN Code": "3004", MRP: 25, "Selling Price": 25,
+    Barcode: "8901234567890", MRP: 25, "Selling Price": 25,
     "Purchase Price": 15, GST: 12, "Reorder Level": 20, "Current Stock": 100,
     "Batch Number": "PCM-001", "Expiry Date": "12/2027", "Mfg Date": "01/2026", Supplier: "MedSupply Co",
   },
   {
     "Medicine Name": "Amoxicillin 250mg", "Generic Name": "Amoxicillin", "Brand Name": "Mox",
     Manufacturer: "Cipla", Category: "antibiotic", "Dosage Form": "capsule", Strength: "250mg",
-    Barcode: "8907654321098", "HSN Code": "3004", MRP: 55, "Selling Price": 55,
+    Barcode: "8907654321098", MRP: 55, "Selling Price": 55,
     "Purchase Price": 32, GST: 12, "Reorder Level": 30, "Current Stock": 200,
     "Batch Number": "AMX-07", "Expiry Date": "06/2027", "Mfg Date": "06/2025", Supplier: "Cipla Distributors",
   },

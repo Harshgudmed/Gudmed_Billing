@@ -18,12 +18,6 @@ function doctorPatientFilter(req) {
   }
 }
 
-// Patient CRM users see only patients assigned to them.
-function crmScopeId(req) {
-  if (req.user?.role !== 'patient_crm') return null
-  return req.user.userId
-}
-
 // True when this doctor is linked to the given patient. Used to gate single-patient reads.
 async function doctorOwnsPatient(doctorId, patientId) {
   const match = await db.patient.findFirst({
@@ -54,12 +48,6 @@ const patientSchema = z.object({
   phonePrimary: z.string().optional(),
   phoneSecondary: z.string().optional(),
   email: z.string().email().optional().or(z.literal('')),
-  region: z.string().optional(),
-  zone: z.string().optional(),
-  woreda: z.string().optional(),
-  kebele: z.string().optional(),
-  houseNumber: z.string().optional(),
-  postalCode: z.string().optional(),
   emergencyContactName: z.string().optional(),
   emergencyContactPhone: z.string().optional(),
   emergencyContactRelationship: z.string().optional(),
@@ -80,12 +68,11 @@ const patientSchema = z.object({
 })
 
 // Whitelist of fields a client may change via update. System/identity fields
-// (organizationId, mrn, isActive, assignedCrmUserId, id, timestamps) are NEVER
-// here, so a request body can't overwrite them (mass-assignment protection).
+// (organizationId, mrn, isActive, id, timestamps) are NEVER here, so a
+// request body can't overwrite them (mass-assignment protection).
 const PATIENT_EDITABLE_FIELDS = [
   'firstName', 'middleName', 'lastName', 'dateOfBirth', 'gender',
-  'phonePrimary', 'phoneSecondary', 'email', 'region', 'zone', 'woreda',
-  'kebele', 'houseNumber', 'postalCode', 'emergencyContactName',
+  'phonePrimary', 'phoneSecondary', 'email', 'emergencyContactName',
   'emergencyContactPhone', 'emergencyContactRelationship', 'bloodGroup',
   'allergies', 'chronicConditions', 'currentMedications', 'hasInsurance',
   'insuranceProvider', 'insuranceId', 'insuranceExpiryDate', 'maritalStatus',
@@ -129,10 +116,6 @@ export async function getAll(req, res, next) {
     if (docFilter) {
       where.AND = [...(where.AND || []), docFilter]
     }
-
-    // Patient CRM users see only the patients assigned to them.
-    const crmId = crmScopeId(req)
-    if (crmId) where.assignedCrmUserId = crmId
 
     const [patients, total] = await Promise.all([
       db.patient.findMany({
@@ -185,10 +168,6 @@ export async function getOne(req, res, next) {
     if (doctorPatientFilter(req) && !(await doctorOwnsPatient(req.user.userId, patient.id))) {
       return res.status(404).json({ success: false, error: 'Patient not found' })
     }
-    // CRM users may only view patients assigned to them.
-    if (crmScopeId(req) && patient.assignedCrmUserId !== req.user.userId) {
-      return res.status(404).json({ success: false, error: 'Patient not found' })
-    }
 
     res.json({ success: true, data: patient })
   } catch (err) {
@@ -206,9 +185,6 @@ export async function getRecords(req, res, next) {
     }
 
     if (doctorPatientFilter(req) && !(await doctorOwnsPatient(req.user.userId, id))) {
-      return res.status(404).json({ success: false, error: 'Patient not found' })
-    }
-    if (crmScopeId(req) && patient.assignedCrmUserId !== req.user.userId) {
       return res.status(404).json({ success: false, error: 'Patient not found' })
     }
 
@@ -290,12 +266,6 @@ export async function create(req, res, next) {
       phonePrimary: validatedData.phonePrimary,
       phoneSecondary: validatedData.phoneSecondary,
       email: validatedData.email || null,
-      region: validatedData.region,
-      zone: validatedData.zone,
-      woreda: validatedData.woreda,
-      kebele: validatedData.kebele,
-      houseNumber: validatedData.houseNumber,
-      postalCode: validatedData.postalCode,
       emergencyContactName: validatedData.emergencyContactName,
       emergencyContactPhone: validatedData.emergencyContactPhone,
       emergencyContactRelationship: validatedData.emergencyContactRelationship,
@@ -377,12 +347,6 @@ export async function update(req, res, next) {
     // Doctors may only update their own patients
     const docFilter = doctorPatientFilter(req)
     if (docFilter && !(await doctorOwnsPatient(req.user.userId, id))) {
-      return res.status(403).json({ success: false, error: 'Unauthorized' })
-    }
-
-    // CRM users may only update patients assigned to them
-    const crmId = crmScopeId(req)
-    if (crmId && patient.assignedCrmUserId !== req.user.userId) {
       return res.status(403).json({ success: false, error: 'Unauthorized' })
     }
 
