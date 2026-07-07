@@ -627,8 +627,17 @@ export async function create(req, res) {
     if (error.status) {
       return res.status(error.status).json({ success: false, error: error.message })
     }
-    console.error('Billing create error:', error)
-    return res.status(500).json({ success: false, error: 'Internal server error' })
+    // Surface the REAL failure instead of a blanket "Internal server error", so a
+    // live incident is diagnosable from the client. Prisma errors carry a `code`
+    // (e.g. P2003 = FK violation, P2021 = table missing, P2002 = unique) and
+    // `meta` (which field/table). Without this, every DB failure looked identical.
+    console.error('Billing create error:', error?.code, error?.meta, error?.message)
+    return res.status(500).json({
+      success: false,
+      error: error?.message || 'Internal server error',
+      code: error?.code,
+      meta: error?.meta,
+    })
   }
 }
 
