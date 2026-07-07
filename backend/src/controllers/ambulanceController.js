@@ -92,6 +92,10 @@ export async function update(req, res, next) {
     const { id } = req.body
     if (!id) return res.status(400).json({ success: false, error: 'id is required' })
 
+    // Tenant guard: only touch a trip that belongs to this org (no cross-tenant write).
+    const owned = await db.ambulanceTrip.findFirst({ where: { id, organizationId: ORG_ID }, select: { id: true } })
+    if (!owned) return res.status(404).json({ success: false, error: 'Ambulance trip not found' })
+
     const data = {}
     const allowed = ['ambulanceType', 'fromLocation', 'toLocation', 'status', 'driverName', 'vehicleNumber', 'contactPhone', 'notes']
     for (const k of allowed) if (req.body[k] !== undefined) data[k] = req.body[k] || null
@@ -120,9 +124,12 @@ export async function update(req, res, next) {
 
 export async function remove(req, res, next) {
   try {
+    const ORG_ID = getOrgId(req)
     const { id } = req.query
     if (!id) return res.status(400).json({ success: false, error: 'id is required' })
-    await db.ambulanceTrip.delete({ where: { id } })
+    // Tenant-scoped delete: deleteMany with the org filter only removes OUR row.
+    const { count } = await db.ambulanceTrip.deleteMany({ where: { id, organizationId: ORG_ID } })
+    if (count === 0) return res.status(404).json({ success: false, error: 'Ambulance trip not found' })
     res.json({ success: true })
   } catch (err) {
     next(err)
