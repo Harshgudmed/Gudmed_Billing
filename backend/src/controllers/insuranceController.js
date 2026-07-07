@@ -84,6 +84,9 @@ async function createCase(req, res, ORG_ID) {
 async function updateCase(req, res, ORG_ID) {
   const { id } = req.body
   if (!id) return res.status(400).json({ success: false, error: 'id is required' })
+  // Tenant guard: only touch a case that belongs to this org (no cross-tenant write).
+  const owned = await db.insuranceCase.findFirst({ where: { id, organizationId: ORG_ID }, select: { id: true } })
+  if (!owned) return res.status(404).json({ success: false, error: 'Insurance case not found' })
   const data = {}
   const allowed = ['insurerName', 'tpaName', 'policyNumber', 'status', 'notes']
   for (const k of allowed) if (req.body[k] !== undefined) data[k] = req.body[k] || null
@@ -127,9 +130,13 @@ async function createClaim(req, res, ORG_ID) {
   res.json({ success: true, data: claim })
 }
 
-async function updateClaim(req, res) {
+async function updateClaim(req, res, ORG_ID) {
   const { id } = req.body
   if (!id) return res.status(400).json({ success: false, error: 'id is required' })
+  // Tenant guard: only touch a claim that belongs to this org (blocks cross-tenant
+  // tampering with claimAmount / approvedAmount / status).
+  const owned = await db.insuranceClaim.findFirst({ where: { id, organizationId: ORG_ID }, select: { id: true } })
+  if (!owned) return res.status(404).json({ success: false, error: 'Insurance claim not found' })
   const data = {}
   if (req.body.diagnosis !== undefined) data.diagnosis = req.body.diagnosis || null
   if (req.body.remarks !== undefined) data.remarks = req.body.remarks || null
@@ -164,17 +171,21 @@ export async function create(req, res, next) {
 export async function update(req, res, next) {
   try {
     const ORG_ID = getOrgId(req)
-    if (req.query.resource === 'claims') return updateClaim(req, res)
+    if (req.query.resource === 'claims') return updateClaim(req, res, ORG_ID)
     return updateCase(req, res, ORG_ID)
   } catch (err) { next(err) }
 }
 
 export async function remove(req, res, next) {
   try {
+    const ORG_ID = getOrgId(req)
     const { id, resource } = req.query
     if (!id) return res.status(400).json({ success: false, error: 'id is required' })
-    if (resource === 'claims') await db.insuranceClaim.delete({ where: { id } })
-    else await db.insuranceCase.delete({ where: { id } }) // claims cascade
+    // Tenant-scoped delete: the org filter ensures we can only delete OUR rows.
+    const { count } = resource === 'claims'
+      ? await db.insuranceClaim.deleteMany({ where: { id, organizationId: ORG_ID } })
+      : await db.insuranceCase.deleteMany({ where: { id, organizationId: ORG_ID } }) // claims cascade
+    if (count === 0) return res.status(404).json({ success: false, error: 'Not found' })
     res.json({ success: true })
   } catch (err) { next(err) }
 }
