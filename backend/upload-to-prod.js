@@ -9,7 +9,10 @@ import axios from 'axios'
 
 const LOCAL_URL = 'postgresql://postgres:password@localhost:5432/hospital_db'
 const PROD_API  = 'https://gudmed-api.onrender.com/api/import'
-const SECRET    = 'GudMedImport2026!'
+// Read the secret from the environment — never hardcode it.
+// Run as:  IMPORT_SECRET="<value>" node upload-to-prod.js
+const SECRET    = process.env.IMPORT_SECRET
+if (!SECRET) { console.error('Set IMPORT_SECRET env var before running.'); process.exit(1) }
 
 const local = new PrismaClient({ datasources: { db: { url: LOCAL_URL } } })
 

@@ -1,17 +1,27 @@
 import { db } from '../config/db.js'
+import crypto from 'crypto'
 
 // Full data import endpoint — runs the FK-ordered, self-healing migration
-// server-side (where the DB is reachable internally). Protected by secret.
+// server-side (where the DB is reachable internally). Protected by a secret that
+// lives ONLY in the IMPORT_SECRET env var (the old hardcoded 'GudMed…' fallback was
+// a repo-visible master key — able to create admins / wipe data — and is removed).
 //
 // POST /api/import  with header x-import-secret
-// Body: { organizations, departments, users, patients, wards, beds,
-//   admissions, appointments, consultations, preTriages, triageAssessments,
-//   queueItems, pharmacyDrugs, prescriptions, pharmacySales, labOrders,
-//   labResults, radiologyOrders, radiologyReports, invoices, payments,
-//   deathCertificates, doctorCommissionConfigs, doctorCommissions }
+// Body: { organizations, departments, users, patients, wards, beds, ... }
+//
+// Fails CLOSED: if IMPORT_SECRET is not configured, every request is rejected.
+// Uses a constant-time comparison so the secret can't be guessed by timing.
+function importSecretValid(provided) {
+  const expected = process.env.IMPORT_SECRET
+  if (!expected || !provided) return false
+  const a = Buffer.from(String(provided))
+  const b = Buffer.from(String(expected))
+  if (a.length !== b.length) return false
+  return crypto.timingSafeEqual(a, b)
+}
+
 export async function importData(req, res) {
-  const secret = req.headers['x-import-secret']
-  if (secret !== process.env.IMPORT_SECRET && secret !== 'GudMedImport2026!') {
+  if (!importSecretValid(req.headers['x-import-secret'])) {
     return res.status(403).json({ error: 'Forbidden' })
   }
 

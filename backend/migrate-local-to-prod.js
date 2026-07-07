@@ -21,7 +21,10 @@ const localDb = new PrismaClient({
 })
 
 const PROD_API = 'https://gudmed-api.onrender.com/api'
-const IMPORT_SECRET = 'GudMedImport2026!'
+// Read the secret from the environment — never hardcode it (it was a repo-visible
+// master key). Run as:  IMPORT_SECRET="<value>" node migrate-local-to-prod.js
+const IMPORT_SECRET = process.env.IMPORT_SECRET
+if (!IMPORT_SECRET) { console.error('Set IMPORT_SECRET env var before running.'); process.exit(1) }
 
 async function main() {
   console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━')
