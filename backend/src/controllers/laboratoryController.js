@@ -318,6 +318,7 @@ export const create = async (req, res, next) => {
 
 export const update = async (req, res, next) => {
   try {
+    const ORGANIZATION_ID = getOrgId(req)
     const { resource } = req.body
 
     if (resource === 'order') {
@@ -327,6 +328,10 @@ export const update = async (req, res, next) => {
       }
 
       const { id, resource: _r, ...updates } = parsed.data
+
+      // Tenant guard: only touch an order that belongs to this org.
+      const owned = await db.labOrder.findFirst({ where: { id, organizationId: ORGANIZATION_ID }, select: { id: true } })
+      if (!owned) return res.status(404).json({ success: false, error: 'Lab order not found' })
 
       const data = await db.labOrder.update({
         where: { id },
@@ -343,6 +348,15 @@ export const update = async (req, res, next) => {
 
       const { id, resource: _r, ...updates } = parsed.data
 
+      // Tenant guard via the parent order's org (LabResult.organizationId is nullable,
+      // so verify ownership through the order it belongs to). Blocks cross-tenant
+      // tampering with clinical result values.
+      const owned = await db.labResult.findFirst({
+        where: { id, order: { organizationId: ORGANIZATION_ID } },
+        select: { id: true },
+      })
+      if (!owned) return res.status(404).json({ success: false, error: 'Lab result not found' })
+
       const data = await db.labResult.update({
         where: { id },
         data: { ...updates },
@@ -357,6 +371,10 @@ export const update = async (req, res, next) => {
       }
 
       const { id, resource: _r, ...updates } = parsed.data
+
+      // Tenant guard: only touch a test catalog entry that belongs to this org.
+      const owned = await db.labTest.findFirst({ where: { id, organizationId: ORGANIZATION_ID }, select: { id: true } })
+      if (!owned) return res.status(404).json({ success: false, error: 'Lab test not found' })
 
       const data = await db.labTest.update({
         where: { id },

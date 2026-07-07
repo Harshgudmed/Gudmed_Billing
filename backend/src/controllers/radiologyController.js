@@ -366,6 +366,7 @@ export const create = async (req, res, next) => {
 
 export const update = async (req, res, next) => {
   try {
+    const ORGANIZATION_ID = getOrgId(req)
     const { resource } = req.body
 
     if (resource === 'order') {
@@ -376,6 +377,10 @@ export const update = async (req, res, next) => {
       const { id, resource: _r, ...fields } = parsed.data
 
       if (fields.scheduledDate) fields.scheduledDate = new Date(fields.scheduledDate)
+
+      // Tenant guard: only touch an order that belongs to this org.
+      const owned = await db.radiologyOrder.findFirst({ where: { id, organizationId: ORGANIZATION_ID }, select: { id: true } })
+      if (!owned) return res.status(404).json({ success: false, error: 'Radiology order not found' })
 
       const data = await db.radiologyOrder.update({
         where: { id },
@@ -398,6 +403,14 @@ export const update = async (req, res, next) => {
 
       if (fields.verifiedAt) fields.verifiedAt = new Date(fields.verifiedAt)
 
+      // Tenant guard via the parent order's org (RadiologyReport.organizationId is
+      // nullable). Blocks cross-tenant tampering with radiology report content.
+      const owned = await db.radiologyReport.findFirst({
+        where: { id, order: { organizationId: ORGANIZATION_ID } },
+        select: { id: true },
+      })
+      if (!owned) return res.status(404).json({ success: false, error: 'Radiology report not found' })
+
       const data = await db.radiologyReport.update({
         where: { id },
         data: fields,
@@ -411,6 +424,10 @@ export const update = async (req, res, next) => {
         return res.status(400).json({ success: false, error: 'Validation error', details: parsed.error.issues })
       }
       const { id, resource: _r, ...fields } = parsed.data
+
+      // Tenant guard: only touch an exam catalog entry that belongs to this org.
+      const owned = await db.radiologyExam.findFirst({ where: { id, organizationId: ORGANIZATION_ID }, select: { id: true } })
+      if (!owned) return res.status(404).json({ success: false, error: 'Radiology exam not found' })
 
       const data = await db.radiologyExam.update({
         where: { id },
