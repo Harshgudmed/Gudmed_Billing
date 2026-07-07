@@ -1,6 +1,7 @@
 import { db } from '../config/db.js'
 import { getOrgId } from "../lib/reqContext.js";
 import { z } from 'zod'
+import { PATIENT_SNAPSHOT_SELECT } from '../utils/patientSnapshot.js'
 
 // ── Zod Schemas ────────────────────────────────────────────────────────────────
 
@@ -93,15 +94,8 @@ const examUpdateSchema = z.object({
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
-const patientSelect = {
-  id: true,
-  mrn: true,
-  firstName: true,
-  lastName: true,
-  gender: true,
-  dateOfBirth: true,
-  phonePrimary: true,
-}
+// Shared patient snapshot fields — single source of truth (see utils/patientSnapshot).
+const patientSelect = PATIENT_SNAPSHOT_SELECT
 
 function todayRange() {
   const start = new Date()

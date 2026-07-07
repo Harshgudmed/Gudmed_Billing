@@ -402,11 +402,12 @@ model Appointment {
   createdById String?
 
   // Relations
-  organization  Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  patient       Patient        @relation(fields: [patientId], references: [id], onDelete: Cascade)
-  doctor        User?          @relation("DoctorAppointments", fields: [doctorId], references: [id])
-  checkedInBy   User?          @relation("CheckedInBy", fields: [checkedInById], references: [id])
+  organization  Organization        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  patient       Patient             @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  doctor        User?               @relation("DoctorAppointments", fields: [doctorId], references: [id])
+  checkedInBy   User?               @relation("CheckedInBy", fields: [checkedInById], references: [id])
   consultations Consultation[]
+  queueEntry    QueueManagement?
 
   @@index([organizationId])
   @@index([patientId])
@@ -783,8 +784,15 @@ model PharmacySale {
   servedById     String?
 
   // Sale Details
-  saleDate DateTime @default(now())
-  saleType String? // prescription, otc
+  saleDate     DateTime @default(now())
+  saleType     String? // prescription, otc
+  customerName String? // walk-in / OTC buyer name (no patient record)
+
+  // Patient Information (snapshot for receipt)
+  phone          String? // Patient contact number for receipt
+  uhid           String? // UHID if available
+  mrn            String? // MRN snapshot
+  referenceDoctor String? // Referring doctor name
 
   // Items (JSON array)
   items String // JSON: [{drugId, batchId, drugName, quantity, unitPrice, total}]
@@ -800,6 +808,9 @@ model PharmacySale {
   paymentMethod String?
   amountPaid    Float   @default(0)
   amountDue     Float?
+  // Multi-payment ledger (JSON): a bill can be settled across several receipts
+  // and methods, e.g. [{receiptNumber, paymentDate, amount, paymentMethod, reference}]
+  payments      String? // JSON array of payment records for the receipt's Payment table
 
   // Receipt
   receiptNumber String @unique
@@ -2419,9 +2430,10 @@ model QueueManagement {
   organizationId String
 
   // Patient & Service
-  patientId   String?
-  serviceArea String // opd, emergency, mch, psychiatric, etc.
-  serviceType String? // consultation, procedure, etc.
+  patientId     String?
+  appointmentId String? @unique // set when this queue entry came from an Appointment check-in (vs a walk-in)
+  serviceArea   String // opd, emergency, mch, psychiatric, etc.
+  serviceType   String? // consultation, procedure, etc.
 
   // Queue Information
   queueNumber String
@@ -2453,6 +2465,7 @@ model QueueManagement {
   organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   patient      Patient?     @relation(fields: [patientId], references: [id])
   assignedTo   User?        @relation("QueueAssignedTo", fields: [assignedToId], references: [id])
+  appointment  Appointment? @relation(fields: [appointmentId], references: [id])
 
   @@index([organizationId])
   @@index([serviceArea, status])

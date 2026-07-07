@@ -8,6 +8,70 @@ import { toast } from 'sonner'
 const esc = (s) => String(s ?? '').replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]))
 // Names arrive in whatever case the front-desk typed them in — title-case them.
 const titleCase = (s) => String(s ?? '').trim().toLowerCase().replace(/\b\p{L}/gu, (c) => c.toUpperCase())
+// Indian-rupee money formatter — ₹ symbol + en-IN grouping + 2 decimals. Used by
+// EVERY receipt (Pharmacy, Lab, Radiology, Payment table) so amounts look the same.
+const inr = (n) => '₹' + Number(n || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+
+// ── SHARED multi-payment "Payment" table (Pharmacy / Lab / Radiology / Billing) ──
+// One bill can be settled across several receipts and methods (e.g. ₹3000 Cash +
+// ₹2000 UPI). This renders the DRLOGY-style Payment ledger block used by EVERY
+// receipt renderer below, so the layout is identical everywhere. Pass the list of
+// payment records; returns '' when there are 0/1 payments (no ledger needed — the
+// single "Paid Amount" line in the totals box already says everything).
+//   payments = [{ receiptNumber, paymentDate|date, invoiceNumber|invoiceNo,
+//                 amount, paymentMethod|method|paymode, reference }]
+// opts.force = true  → always render even for a single payment (some hospitals
+//                      want the ledger printed even when there's one row).
+export function renderPaymentTable(payments, opts = {}) {
+  const list = Array.isArray(payments) ? payments.filter(Boolean) : []
+  if (list.length === 0) return ''
+  if (list.length === 1 && !opts.force) return ''
+
+  const rows = list.map((p, i) => {
+    const rcpt = p.receiptNumber || p.receiptNo || '—'
+    const when = p.paymentDate || p.date || p.paidAt || p.createdAt
+    const dateStr = when ? format(new Date(when), 'dd MMM yyyy, hh:mm aa') : '—'
+    const inv = p.invoiceNumber || p.invoiceNo || p.invoice || '—'
+    const amt = Number(p.amount || 0)
+    const mode = p.paymentMethod || p.method || p.paymode || p.mode || '—'
+    return `<tr>
+      <td class="sno">${i + 1}</td>
+      <td>${esc(rcpt)}</td>
+      <td>${esc(dateStr)}</td>
+      <td>${esc(inv)}</td>
+      <td style="text-align:right">${inr(amt)}</td>
+      <td>${esc(String(mode).charAt(0).toUpperCase() + String(mode).slice(1))}</td>
+    </tr>`
+  }).join('')
+
+  const totalPaid = list.reduce((s, p) => s + Number(p.amount || 0), 0)
+  const words = amountInWords(totalPaid)
+
+  return `
+<div class="paytitle">Payment</div>
+<table class="paytable"><thead><tr>
+  <th style="width:38px">SN</th><th style="width:110px">Receipt No</th><th style="width:110px">Date</th>
+  <th>Invoice No</th><th style="width:110px">Amount (Rs)</th><th style="width:90px">Paymode</th>
+</tr></thead><tbody>${rows}
+  <tr class="paytotal">
+    <td colspan="4" style="text-align:right">Total</td>
+    <td style="text-align:right">${inr(totalPaid)}</td>
+    <td></td>
+  </tr>
+</tbody></table>
+<div class="paythanks">Received with Thanks: Rs. ${esc(words)} Only</div>`
+}
+
+// CSS for the shared Payment table — injected into each receipt's <style> block.
+const PAYMENT_TABLE_CSS = `
+.paytitle{text-align:center;font-weight:700;font-size:11pt;color:#1a3e6f;margin:14px 0 6px;letter-spacing:.5px}
+.paytable{width:100%;border-collapse:collapse;margin-bottom:6px;border:1px solid #e2e8f0;border-radius:5px;overflow:hidden}
+.paytable thead th{background:#f1f5f9;color:#1a3e6f;border-bottom:2px solid #1a3e6f;padding:7px 10px;text-align:left;font-size:8pt;letter-spacing:.3px;text-transform:uppercase;font-weight:700}
+.paytable tbody td{padding:7px 10px;border-bottom:1px solid #eef1f4;font-size:9pt}
+.paytable tbody tr:nth-child(even){background:#fafbfc}
+.paytable td.sno{text-align:center;color:#94a3b8;font-weight:700}
+.paytable tr.paytotal td{background:#eef2f8;font-weight:800;color:#1a3e6f;font-size:9.5pt}
+.paythanks{font-size:8.5pt;color:#475569;margin-bottom:12px}`
 
 export function printInvoice(bill, orgInfo, clinic) {
   const win = window.open('', '_blank', 'width=900,height=780')
@@ -40,6 +104,7 @@ thead th{background:#1e3a5f;color:#fff;padding:7px 10px;text-align:left;font-siz
 .total-final{background:#1e3a5f;color:#fff;font-weight:700;font-size:12pt;border-bottom:none}
 .status-badge{display:inline-block;padding:2px 12px;border-radius:20px;font-size:10pt;font-weight:700}
 .footer{border-top:1px solid #ccc;padding-top:8px;margin-top:14px;font-size:8pt;color:#888;text-align:center}
+${PAYMENT_TABLE_CSS}
 @media print{body{padding:10px}}</style></head><body>
 <div class="header">
   <div>
@@ -73,6 +138,7 @@ thead th{background:#1e3a5f;color:#fff;padding:7px 10px;text-align:left;font-siz
   ${bill.amountPaid !== undefined ? `<div class="total-row" style="color:#065f46"><span>Amount Paid</span><span>₹${Number(bill.amountPaid || 0).toLocaleString('en-IN')}</span></div>` : ''}
   ${bill.balanceDue !== undefined ? `<div class="total-row" style="${(bill.balanceDue || 0) > 0 ? 'color:#b91c1c' : 'color:#065f46'}"><span>Balance Due</span><span>₹${Number(bill.balanceDue || 0).toLocaleString('en-IN')}</span></div>` : ''}
 </div></div>
+${renderPaymentTable(bill.payments, { force: true })}
 ${bill.notes ? `<div style="background:#f8fafc;border:1px solid #eee;border-radius:4px;padding:8px 12px;font-size:10pt;margin-bottom:12px">Notes: ${bill.notes}</div>` : ''}
 <div class="footer">${orgInfo.name || clinic.clinicName} · Computer-generated invoice · gudmed.in</div>
 </body></html>`
@@ -278,19 +344,18 @@ const LAB_DEPT = {
   reportsDownloadLabel: 'Pathology Lab reports',
   timingLine: 'Sample Collection Timing: 07:00 - 16:00 &nbsp;|&nbsp; Report Timing: As per test schedule.',
   newIdNote: 'A new Lab ID will be issued for any sample submitted after the above registration date.',
-  cumulativeNote: 'Cumulative / comparative reports for the last 3 visits are available online — applicable only for quantitative tests when the same test(s) / panel(s) are ordered at the same laboratory location.',
 }
 
 const RADIOLOGY_DEPT = {
   idFieldLabel: 'Order ID',
   labCodeFieldLabel: 'Radiology Code / CC Code',
-  itemCodeHeader: 'Exam Code',
-  itemNameHeader: 'Exam / Study Name',
+  itemCodeHeader: 'Test Code',
+  itemNameHeader: 'Test Name',
   footerDept: 'Radiology & Imaging Department',
   reportsDownloadLabel: 'Radiology reports',
   timingLine: 'Scan Timing: 07:00 - 20:00 &nbsp;|&nbsp; Report Timing: As per exam schedule.',
   newIdNote: 'A new Order ID will be issued for any exam scheduled after the above registration date.',
-  cumulativeNote: 'Comparative reports for the last 3 visits are available online — applicable only when the same exam(s) are ordered at the same facility.',
+  
 }
 
 function printDiagnosticReceipt(r, orgInfo = {}, clinic = {}, dept = LAB_DEPT) {
@@ -304,7 +369,7 @@ function printDiagnosticReceipt(r, orgInfo = {}, clinic = {}, dept = LAB_DEPT) {
   const rows = (r.items || []).map((it, i) => `
     <tr><td>${i + 1}</td><td class="code">${esc(it.code)}</td>
     <td><strong>${esc(it.name)}</strong></td><td>${esc(it.eta || '')}</td>
-    <td>${Number(it.price || 0).toLocaleString('en-IN')}</td></tr>`).join('')
+    <td>${inr(it.price)}</td></tr>`).join('')
   const orderValue = Number(r.orderValue || 0)
   const home = r.homeCollection !== undefined ? Number(r.homeCollection) : Number(orgInfo.homeCollectionCharge || clinic.homeCollectionCharge || 0)
   const disc = Number(r.discount || 0)
@@ -410,6 +475,7 @@ tbody td:last-child{text-align:right;font-weight:700}
 .note{background:#f9fafb;border:1px solid #e2e8f0;border-radius:6px;padding:10px 12px;font-size:7.5pt;color:#64748b;line-height:1.7}.note b{color:#334155}
 .foot{text-align:center;font-size:7.5pt;color:#94a3b8;margin-top:28px}
 .pbtn{position:fixed;top:12px;right:12px;background:#1a3e6f;color:#fff;border:0;padding:8px 16px;border-radius:5px;font-size:10pt;cursor:pointer;box-shadow:0 2px 6px rgba(0,0,0,.2)}
+${PAYMENT_TABLE_CSS}
 @media print{body{background:#fff;padding:0}.page{box-shadow:none;border:none;border-radius:0}.pbtn{display:none}@page{size:A4;margin:10mm}}
 </style></head><body>
 <button class="pbtn" onclick="window.print()">Print</button>
@@ -429,25 +495,26 @@ tbody td:last-child{text-align:right;font-weight:700}
 <div class="grid">${gridCells}</div>
 <table><thead><tr>
   <th style="width:34px">S.No.</th><th style="width:90px">${esc(dept.itemCodeHeader)}</th><th>${esc(dept.itemNameHeader)}</th>
-  <th style="width:130px">Estimate of report by (#)</th><th style="width:80px">Price</th>
+  <th style="width:130px">Estimate of report by</th><th style="width:80px">Price</th>
 </tr></thead><tbody>${rows}</tbody></table>
 <div class="totwrap">
   <div class="words">Amount Paid In Words : <b>${amountInWords(paid || net)} Rupee(s) Only</b></div>
   <div class="totals">
-    <div class="trow"><span>Order Value</span><span>${orderValue.toLocaleString('en-IN')}</span></div>
-    ${home ? `<div class="trow"><span>Home Collection Charges</span><span>${home.toLocaleString('en-IN')}</span></div>` : ''}
-    ${disc ? `<div class="trow"><span>Discount</span><span>-${disc.toLocaleString('en-IN')}</span></div>` : ''}
-    <div class="trow sub"><span>Total Order Value</span><span>${(orderValue + home).toLocaleString('en-IN')}</span></div>
-    <div class="trow net"><span>Net Payable Amount</span><span>${net.toLocaleString('en-IN')}</span></div>
-    <div class="trow"><span>Paid Amount</span><span>${paid.toLocaleString('en-IN')}</span></div>
-    <div class="trow" style="color:${bal > 0 ? '#b91c1c' : '#065f46'}"><span>Balance Amount</span><span>${bal.toLocaleString('en-IN')}</span></div>
+    <div class="trow"><span>Order Value</span><span>${inr(orderValue)}</span></div>
+    ${home ? `<div class="trow"><span>Home Collection Charges</span><span>${inr(home)}</span></div>` : ''}
+    ${disc ? `<div class="trow"><span>Discount</span><span>-${inr(disc)}</span></div>` : ''}
+    <div class="trow sub"><span>Total Order Value</span><span>${inr(orderValue + home)}</span></div>
+    <div class="trow net"><span>Net Payable Amount</span><span>${inr(net)}</span></div>
+    <div class="trow"><span>Paid Amount</span><span>${inr(paid)}</span></div>
+    <div class="trow" style="color:${bal > 0 ? '#b91c1c' : '#065f46'}"><span>Balance Amount</span><span>${inr(bal)}</span></div>
   </div>
 </div>
+${renderPaymentTable(r.payments, { force: true })}
 <div class="note">
   This is a computer generated receipt and does not require signature/stamp.<br/>
   <b>*${esc(gh)} is exempt from GST being a health care services provider.</b>
   <div style="margin-top:5px"><b>Note:</b></div>
-  # "Estimate of report by" is on a best-effort basis and tentative in nature. Delays may occur due to complexity of each case, diagnostic procedures and other unforeseen circumstances.<br/>
+   "Estimate of report by" is on a best-effort basis and tentative in nature. Delays may occur due to complexity of each case, diagnostic procedures and other unforeseen circumstances.<br/>
   ${dept.newIdNote}<br/>
   ${dept.timingLine}<br/>
   ${esc(dept.reportsDownloadLabel)} can be downloaded from our website${val('website') ? ' (' + esc(val('website')) + ')' : ''} or Mobile App (Android / iOS). Online reports can be downloaded only after complete payment.<br/>
@@ -481,17 +548,22 @@ export function printRadiologyReceipt(r, orgInfo = {}, clinic = {}) {
 //            totalAmount, items: [{drugName, gstRate, batchNumber,
 //            expiryDate, quantity, unitPrice, total}] }
 export function printPharmacyReceipt(sale, orgInfo = {}, clinic = {}) {
-  const win = window.open('', '_blank', 'width=820,height=780')
+  const win = window.open('', '_blank', 'width=880,height=780')
   if (!win) { toast.error('Allow pop-ups to print'); return }
 
   const items = (typeof sale.items === 'string' ? JSON.parse(sale.items || '[]') : sale.items) || []
+  // payments is stored as a JSON string on PharmacySale — normalize to an array
+  // so the shared renderPaymentTable() can build the multi-payment ledger.
+  const payments = (typeof sale.payments === 'string' ? JSON.parse(sale.payments || '[]') : sale.payments) || []
   const gh = orgInfo.name || clinic.clinicName || 'Hospital'
+  const val = (k) => clinic[k] || orgInfo[k] || ''
   const patientName = titleCase(
-    sale.patientName || (sale.patient ? `${sale.patient.firstName || ''} ${sale.patient.lastName || ''}`.trim() : '')
+    sale.patientName || sale.customerName || (sale.patient ? `${sale.patient.firstName || ''} ${sale.patient.lastName || ''}`.trim() : '')
   ) || 'Walk-in'
   const saleDate = sale.saleDate || sale.createdAt || new Date()
   const dateStr = format(new Date(saleDate), 'dd MMM yyyy')
   const timeStr = format(new Date(saleDate), 'hh:mm aa')
+  const invoiceNo = sale.receiptNumber || sale.invoiceNumber || '—'
 
   // Prices are treated as GST-inclusive (the standard for MRP-based pharmacy
   // billing in India) — taxable value and tax are backed OUT of each line's
@@ -515,11 +587,11 @@ export function printPharmacyReceipt(sale, orgInfo = {}, clinic = {}) {
     return `<tr>
       <td class="sno">${i + 1}</td>
       <td class="qty">${Number(it.quantity || 0)}</td>
-      <td>${esc(it.drugName)}</td>
+      <td><strong>${esc(it.drugName)}</strong></td>
       <td class="gst">${gstRate ? gstRate.toFixed(1) : '—'}</td>
-      <td>${esc(it.batchNumber || '—')}</td>
+      <td class="batch">${esc(it.batchNumber || '—')}</td>
       <td>${esc(expiry || '—')}</td>
-      <td style="text-align:right">₹${total.toFixed(2)}</td>
+      <td style="text-align:right">${inr(total)}</td>
     </tr>`
   }).join('')
 
@@ -528,82 +600,134 @@ export function printPharmacyReceipt(sale, orgInfo = {}, clinic = {}) {
   const mrpTotal = items.reduce((s, it) => s + Number(it.total || 0), 0)
   const discount = Number(sale.discountAmount || 0)
   const paid = Number(sale.amountPaid ?? sale.totalAmount ?? (mrpTotal - discount))
-  const fileName = `${(patientName || 'Patient').replace(/\s+/g, '_')}_${sale.receiptNumber || sale.invoiceNumber || ''}`
+  const netPayable = mrpTotal - discount
+  const balance = netPayable - paid
+  const fileName = `${(patientName || 'Patient').replace(/\s+/g, '_')}_${invoiceNo}`
+
+  // ── Header address / registration lines (identical build to Lab/Radiology) ──
+  const baseAddr = clinic.address || orgInfo.address || ''
+  const lower = baseAddr.toLowerCase()
+  const addrParts = [baseAddr]
+  if (orgInfo.city && !lower.includes(orgInfo.city.toLowerCase())) addrParts.push(orgInfo.city)
+  if (orgInfo.region && !lower.includes(orgInfo.region.toLowerCase())) addrParts.push(orgInfo.region)
+  const fullAddr = addrParts.filter(Boolean).join(', ')
+  const regLines = [
+    ['Address', fullAddr],
+    ['Phone', orgInfo.phone || clinic.phone],
+    ['Email', orgInfo.email],
+    ['Website', val('website')],
+  ].filter(([, v]) => v && String(v).trim() !== '')
+    .map(([k, v]) => `<span class="k">${k}</span><span class="c">:</span><span class="v">${esc(v)}</span>`).join('')
+
+  // ── Patient detail grid (same two-column layout as Lab/Radiology) ──
+  const isBlank = v => v === undefined || v === null || String(v).trim() === ''
+  const leftFields = [
+    ['Invoice Number', invoiceNo],
+    ['Date & Time', `${dateStr} ${timeStr}`],
+    ['Reference Doctor', sale.referenceDoctor || 'self'],
+    ['Mode of Payment', (sale.paymentMethod || 'cash').charAt(0).toUpperCase() + (sale.paymentMethod || 'cash').slice(1)],
+  ]
+  const rightFields = [
+    ['Patient ID / UHID', sale.uhid],
+    ['Patient Name', patientName],
+    ['Contact Number', sale.phone || sale.contactNumber],
+    ['GST No', val('gstNo')],
+  ]
+  const cellHtml = ([l, v]) => `<div class="cell"><span class="l">${l}</span><span class="v">${esc(isBlank(v) ? 'NA' : v)}</span></div>`
+  const rowCount = Math.max(leftFields.length, rightFields.length)
+  let gridCells = ''
+  for (let i = 0; i < rowCount; i++) {
+    gridCells += leftFields[i] ? cellHtml(leftFields[i]) : '<div class="cell"></div>'
+    gridCells += rightFields[i] ? cellHtml(rightFields[i]) : '<div class="cell"></div>'
+  }
 
   const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${esc(fileName)}</title>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:'Segoe UI',Arial,Helvetica,sans-serif;font-size:9pt;color:#1f2937;background:#eef1f5;padding:16px}
-.page{max-width:190mm;margin:0 auto;background:#fff;padding:20px 24px;border:1px solid #d7dce3;border-radius:6px;box-shadow:0 1px 6px rgba(0,0,0,.08)}
-.top{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2px solid #1a3e6f;padding-bottom:10px;margin-bottom:12px}
-.brand{font-size:16pt;font-weight:700;color:#1a3e6f;line-height:1.1}
-.sub{font-size:8pt;color:#64748b;margin-top:3px;max-width:400px;line-height:1.5}
-.banner{background:#1a3e6f;color:#fff;text-align:center;padding:5px;font-size:11pt;font-weight:700;letter-spacing:1px;border-radius:4px;margin-bottom:10px}
-.meta{display:grid;grid-template-columns:1fr 1fr;border:1px solid #e2e8f0;border-radius:5px;overflow:hidden;margin-bottom:10px}
+.page{max-width:200mm;margin:0 auto;background:#fff;padding:24px 26px 34px;border:1px solid #d7dce3;border-radius:6px;box-shadow:0 1px 6px rgba(0,0,0,.08)}
+.top{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2px solid #1a3e6f;padding-bottom:12px;margin-bottom:14px}
+.left{max-width:72%}
+.namerow{display:flex;align-items:center;gap:12px;margin-bottom:4px}
+.brand{font-size:17pt;font-weight:700;color:#1a3e6f;line-height:1.1}
+.reg{display:grid;grid-template-columns:auto auto 1fr;column-gap:6px;row-gap:3px;font-size:7.5pt;line-height:1.45;margin-top:4px;max-width:520px}
+.reg .k{font-weight:700;color:#334155;white-space:nowrap}
+.reg .c{color:#334155}
+.reg .v{color:#64748b}
+.labid{text-align:right;min-width:200px}
+.labnum{font-size:13pt;font-weight:700;letter-spacing:3px;text-align:right;margin-top:3px;color:#111827}
+.title{text-align:center;font-weight:700;font-size:12pt;letter-spacing:1px;color:#1a3e6f;background:#f1f5f9;border:1px solid #e2e8f0;border-radius:4px;padding:6px;margin-bottom:2px}
+.subtitle{text-align:center;font-size:7.5pt;color:#64748b;letter-spacing:.5px;margin:4px 0 12px}
+.grid{display:grid;grid-template-columns:1fr 1fr;border:1px solid #e2e8f0;border-radius:5px;overflow:hidden;margin-bottom:12px}
 .cell{display:flex;padding:5px 12px;border-bottom:1px solid #eef1f4;font-size:8.5pt}
-.cell:nth-child(odd){border-right:1px solid #eef1f4}
 .cell:nth-child(4n+1),.cell:nth-child(4n+2){background:#fafbfc}
-.cell .l{min-width:90px;color:#64748b;font-weight:600}.cell .v{flex:1;font-weight:700;color:#1f2937}
-table{width:100%;border-collapse:collapse;border:1px solid #e2e8f0;border-radius:5px;overflow:hidden}
-thead th{background:#f1f5f9;color:#1a3e6f;border-bottom:2px solid #1a3e6f;padding:7px 10px;text-align:left;font-size:7.5pt;letter-spacing:.3px;text-transform:uppercase;font-weight:700;white-space:nowrap}
-thead th:last-child,tbody td:last-child{text-align:right}
-tbody td{padding:7px 10px;border-bottom:1px solid #eef1f4;font-size:8.5pt}
-tbody td.sno,tbody td.qty{padding-left:6px;padding-right:6px}
+.cell:nth-child(odd){border-right:1px solid #eef1f4}
+.cell .l{min-width:132px;color:#64748b;font-weight:600}.cell .v{flex:1;font-weight:700;color:#1f2937}
+table{width:100%;border-collapse:collapse;margin-bottom:14px;border:1px solid #e2e8f0;border-radius:5px;overflow:hidden}
+thead th{background:#f1f5f9;color:#1a3e6f;border-bottom:2px solid #1a3e6f;padding:10px 12px;text-align:left;font-size:9pt;letter-spacing:.3px;text-transform:uppercase;font-weight:700}
+thead th:last-child{text-align:right}
+tbody td{padding:9px 12px;border-bottom:1px solid #eef1f4;font-size:9.5pt}
 tbody tr:nth-child(even){background:#fafbfc}
-thead th:first-child,tbody td.sno{text-align:center}
-tbody td.sno{color:#94a3b8;font-weight:700}
+tbody td:last-child{text-align:right;font-weight:700}
+tbody td.sno{text-align:center;color:#94a3b8;font-weight:700}
 tbody td.qty{text-align:center}
-tbody td.gst{text-align:left}
-.items{margin-bottom:8px}
-.contact{text-align:center;font-size:8.5pt;color:#1a3e6f;font-weight:700;margin:6px 0 10px;letter-spacing:.3px}
-.taxwrap{display:flex;gap:16px;align-items:flex-start;justify-content:space-between;margin-bottom:10px}
-.words{flex:1;font-size:9pt;color:#475569;padding-top:6px;line-height:1.5}.words b{color:#1f2937}
-.taxtable{flex:1}
-.taxtable th:not(:first-child),.taxtable td:not(:first-child){text-align:right}
-.totals{width:190px;border:1px solid #e2e8f0;border-radius:6px;overflow:hidden;flex-shrink:0}
-.trow2{display:flex;justify-content:space-between;padding:6px 12px;font-size:9pt;color:#475569;border-bottom:1px solid #eef1f4}
-.trow2.paid{background:#eef2f8;color:#1a3e6f;font-weight:800;font-size:10.5pt;border-bottom:none}
-.foot{text-align:center;font-size:7.5pt;color:#94a3b8;margin-top:12px}
+tbody td.gst{text-align:center}
+tbody td.batch{white-space:nowrap;font-size:8.5pt}
+thead th:first-child,thead th:nth-child(2),thead th:nth-child(4){text-align:center}
+.totwrap{display:flex;justify-content:space-between;align-items:flex-end;gap:18px;margin-bottom:16px}
+.words{font-size:9pt;color:#475569;padding-bottom:4px}.words b{color:#1f2937}
+.totals{width:300px;border:1px solid #e2e8f0;border-radius:6px;overflow:hidden}
+.trow{display:flex;justify-content:space-between;padding:7px 16px;font-size:10pt;color:#475569}
+.trow.sub{background:#fafbfc;font-weight:700;color:#1f2937}
+.trow.net{background:#eef2f8;color:#1a3e6f;font-weight:800;font-size:11.5pt;border-top:1px solid #cdd7e5;border-bottom:1px solid #cdd7e5}
+.note{background:#f9fafb;border:1px solid #e2e8f0;border-radius:6px;padding:10px 12px;font-size:7.5pt;color:#64748b;line-height:1.7}.note b{color:#334155}
+.foot{text-align:center;font-size:7.5pt;color:#94a3b8;margin-top:28px}
 .pbtn{position:fixed;top:12px;right:12px;background:#1a3e6f;color:#fff;border:0;padding:8px 16px;border-radius:5px;font-size:10pt;cursor:pointer;box-shadow:0 2px 6px rgba(0,0,0,.2)}
+${PAYMENT_TABLE_CSS}
 @media print{body{background:#fff;padding:0}.page{box-shadow:none;border:none;border-radius:0}.pbtn{display:none}@page{size:A4;margin:10mm}}
 </style></head><body>
 <button class="pbtn" onclick="window.print()">Print</button>
 <div class="page">
 <div class="top">
-  <div>
-    ${orgInfo.logoUrl ? `<img src="${esc(orgInfo.logoUrl)}" alt="" style="height:44px;max-width:130px;object-fit:contain;margin-bottom:4px"/>` : ''}
-    <div class="brand">${esc(gh)}</div>
-    <div class="sub">${esc(clinic.address || orgInfo.address || '')}${(clinic.phone || orgInfo.phone) ? ' · Ph: ' + esc(clinic.phone || orgInfo.phone) : ''}</div>
+  <div class="left">
+    <div class="namerow">
+      ${orgInfo.logoUrl ? `<img src="${esc(orgInfo.logoUrl)}" alt="" style="height:52px;max-width:130px;object-fit:contain"/>` : ''}
+      <div class="brand">${esc(gh)}</div>
+    </div>
+    ${regLines ? `<div class="reg">${regLines}</div>` : ''}
   </div>
-  <div style="text-align:right;font-size:8pt;color:#64748b">
-    <div>Bill No: <strong style="color:#1f2937">${esc(sale.receiptNumber || sale.invoiceNumber || '—')}</strong></div>
-    <div>Date: <strong style="color:#1f2937">${dateStr}</strong></div>
-    <div>Time: <strong style="color:#1f2937">${timeStr}</strong></div>
-  </div>
+  <div class="labid">${barcode39(invoiceNo)}<div class="labnum">${esc(invoiceNo)}</div></div>
 </div>
-<div class="banner">GST INVOICE — PHARMACY</div>
-<div class="meta">
-  <div class="cell"><span class="l">Patient</span><span class="v">${esc(patientName)}</span></div>
-  <div class="cell"><span class="l">Address</span><span class="v">${esc(sale.patientAddress || 'NA')}</span></div>
-  <div class="cell"><span class="l">Prescribed By</span><span class="v">${esc(sale.prescribedBy || 'self')}</span></div>
-  <div class="cell"><span class="l">Payment</span><span class="v">${esc((sale.paymentMethod || 'cash').toUpperCase())}</span></div>
-</div>
-<table class="items"><thead><tr>
-  <th style="width:52px">S.No</th><th style="width:46px">Qty</th><th>Particulars</th>
-  <th style="width:54px">GST%</th><th style="width:74px">Batch</th><th style="width:56px">Expiry</th><th style="width:90px">Amount</th>
+<div class="title">Bill Of Supply / Cash Receipt</div>
+<div class="subtitle">(PLEASE BRING THIS RECEIPT FOR NEXT COLLECTION)</div>
+<div class="grid">${gridCells}</div>
+<table><thead><tr>
+  <th style="width:44px">S.No</th><th style="width:46px">Qty</th><th>Particulars</th>
+  <th style="width:60px">GST%</th><th style="width:100px">Batch</th><th style="width:64px">Expiry</th><th style="width:100px">Amount</th>
 </tr></thead><tbody>${rows}</tbody></table>
-<div class="taxwrap">
-  <div class="words">Amount in Words:<br/><b>${amountInWords(paid || (mrpTotal - discount))} Rupee(s) Only</b></div>
+<div class="totwrap">
+  <div class="words">Amount Paid In Words : <b>${amountInWords(paid || netPayable)} Rupee(s) Only</b></div>
   <div class="totals">
-    <div class="trow2"><span>CGST Total</span><span>₹${cgstTotal.toFixed(2)}</span></div>
-    <div class="trow2"><span>SGST Total</span><span>₹${sgstTotal.toFixed(2)}</span></div>
-    <div class="trow2"><span>MRP Total</span><span>₹${mrpTotal.toFixed(2)}</span></div>
-    ${discount > 0 ? `<div class="trow2" style="color:#16a34a"><span>Discount</span><span>-₹${discount.toFixed(2)}</span></div>` : ''}
-    <div class="trow2 paid"><span>Paid Amount</span><span>₹${paid.toFixed(2)}</span></div>
+    <div class="trow"><span>MRP Total</span><span>${inr(mrpTotal)}</span></div>
+    <div class="trow"><span>CGST</span><span>${inr(cgstTotal)}</span></div>
+    <div class="trow"><span>SGST</span><span>${inr(sgstTotal)}</span></div>
+    ${discount ? `<div class="trow"><span>Discount</span><span>-${inr(discount)}</span></div>` : ''}
+    <div class="trow net"><span>Net Payable Amount</span><span>${inr(netPayable)}</span></div>
+    <div class="trow"><span>Paid Amount</span><span>${inr(paid)}</span></div>
+    <div class="trow" style="color:${balance > 0 ? '#b91c1c' : '#065f46'}"><span>Balance Amount</span><span>${inr(balance)}</span></div>
   </div>
 </div>
-<div class="contact">${(clinic.phone || orgInfo.phone) ? 'CALL &amp; WHATSAPP ON ' + esc(clinic.phone || orgInfo.phone) : ''}</div>
-<div class="foot">This is a computer generated GST invoice and does not require signature/stamp.<br/>${esc(gh)} — Pharmacy Department &nbsp;|&nbsp; Printed: ${dateStr}, ${timeStr}</div>
+${renderPaymentTable(payments, { force: true })}
+<div class="note">
+  This is a computer generated GST invoice and does not require signature/stamp.<br/>
+  Prices shown are MRP (GST-inclusive). CGST &amp; SGST are computed as the tax component already contained in the MRP.
+  <div style="margin-top:5px"><b>Note:</b></div>
+  Please bring this receipt for next collection / refill.<br/>
+  ${(clinic.phone || orgInfo.phone) ? 'Call &amp; WhatsApp on ' + esc(clinic.phone || orgInfo.phone) + '.<br/>' : ''}
+  By accepting this invoice / transacting with us, I agree/confirm having understood the Terms &amp; Conditions and Privacy Policy of ${esc(gh)}.
+  ${val('receiptFooter') ? '<br/><b>' + esc(val('receiptFooter')) + '</b>' : ''}
+</div>
+<div class="foot">${esc(gh)} — Pharmacy Department &nbsp;|&nbsp; Printed: ${dateStr}, ${timeStr}</div>
 </div></body></html>`
   win.document.open(); win.document.write(html); win.document.close(); win.focus()
   setTimeout(() => win.print(), 400)

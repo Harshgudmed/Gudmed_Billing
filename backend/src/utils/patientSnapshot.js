@@ -1,0 +1,93 @@
+// ── Shared patient snapshot helper (Pharmacy / Lab / Radiology / OPD / …) ──────
+// One place that knows how to pull a patient's receipt-facing details out of the
+// DB and normalize them. Every module that prints a receipt should use this so
+// the patient block (name, MRN/UHID, phone, age, gender, address) is IDENTICAL
+// everywhere and there is a single source of truth. Nobody re-types patient info.
+
+// Prisma `select` fragment — spread this into any `patient: { select: {...} }`
+// include so every query pulls exactly the fields the snapshot formatter needs.
+export const PATIENT_SNAPSHOT_SELECT = {
+  id: true,
+  mrn: true,
+  externalId: true,
+  firstName: true,
+  middleName: true,
+  lastName: true,
+  dateOfBirth: true,
+  gender: true,
+  phonePrimary: true,
+  phoneSecondary: true,
+  email: true,
+  region: true,
+  zone: true,
+  woreda: true,
+  kebele: true,
+  houseNumber: true,
+  postalCode: true,
+  addressDescription: true,
+}
+
+// Whole years between dateOfBirth and now. Returns null when DOB is missing.
+export function ageFromDob(dob) {
+  if (!dob) return null
+  const birth = new Date(dob)
+  if (Number.isNaN(birth.getTime())) return null
+  const now = new Date()
+  let age = now.getFullYear() - birth.getFullYear()
+  const m = now.getMonth() - birth.getMonth()
+  if (m < 0 || (m === 0 && now.getDate() < birth.getDate())) age--
+  return age >= 0 ? age : null
+}
+
+// Build one human-readable address line. Prefers the structured fields; falls
+// back to the legacy free-text `addressDescription` when they're empty.
+export function formatPatientAddress(p) {
+  if (!p) return ''
+  const parts = [p.houseNumber, p.kebele, p.woreda, p.zone, p.region, p.postalCode]
+    .map((x) => (x == null ? '' : String(x).trim()))
+    .filter(Boolean)
+  if (parts.length) return parts.join(', ')
+  return (p.addressDescription || '').trim()
+}
+
+// Turn a raw Patient row (selected via PATIENT_SNAPSHOT_SELECT) into the flat
+// shape receipts consume. Safe to call with null/undefined (returns nulls).
+export function formatPatientSnapshot(p) {
+  if (!p) {
+    return {
+      patientId: null, patientName: '', firstName: '', lastName: '',
+      mrn: null, uhid: null, phone: null, email: null,
+      age: null, gender: null, dateOfBirth: null, address: '',
+    }
+  }
+  const fullName = [p.firstName, p.middleName, p.lastName]
+    .map((x) => (x || '').trim()).filter(Boolean).join(' ')
+  return {
+    patientId: p.id || null,
+    patientName: fullName,
+    firstName: p.firstName || '',
+    lastName: p.lastName || '',
+    mrn: p.mrn || null,
+    uhid: p.mrn || p.externalId || null, // UHID surfaced as MRN (the org's patient no.)
+    phone: p.phonePrimary || p.phoneSecondary || null,
+    email: p.email || null,
+    age: ageFromDob(p.dateOfBirth),
+    gender: p.gender || null,
+    dateOfBirth: p.dateOfBirth || null,
+    address: formatPatientAddress(p),
+  }
+}
+
+// Fetch + format a patient in one call. `client` is a Prisma client OR a
+// transaction client (tx), so this works inside $transaction blocks too.
+// Returns null when no patientId is given or the patient doesn't exist — callers
+// should treat that as a walk-in / OTC sale with no linked patient record.
+export async function getPatientSnapshot(client, patientId) {
+  if (!patientId) return null
+  const patient = await client.patient.findUnique({
+    where: { id: patientId },
+    select: PATIENT_SNAPSHOT_SELECT,
+  })
+  if (!patient) return null
+  return formatPatientSnapshot(patient)
+}

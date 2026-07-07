@@ -4,6 +4,7 @@ import { getOrgId } from "../lib/reqContext.js";
 import { startOfDay, endOfDay, todayIST } from '../utils/dates.js'
 import { scopedDoctorId } from '../utils/scope.js'
 import { computeConsultationFee } from '../services/appointmentFees.js'
+import { generateQueueNumber } from '../utils/queueNumber.js'
 
 export async function getAll(req, res, next) {
   try {
@@ -360,17 +361,42 @@ export async function update(req, res, next) {
 
     if (body.reminderSent === true) updates.reminderSentAt = new Date()
 
-    const appointment = await db.appointment.update({
-      where: { id },
-      data: updates,
-      include: {
-        patient: {
-          select: { id: true, mrn: true, firstName: true, lastName: true, phonePrimary: true, gender: true, dateOfBirth: true },
+    // Checking in an appointment also creates (or reuses) its linked queue
+    // entry, atomically with the status update — this is what actually
+    // connects the Appointment and Queue modules (QueueManagement.appointmentId,
+    // added alongside this change). Before this, check-in only stamped
+    // `checkedInAt` on the appointment and never touched the queue at all.
+    const appointment = await db.$transaction(async (tx) => {
+      const updated = await tx.appointment.update({
+        where: { id },
+        data: updates,
+        include: {
+          patient: {
+            select: { id: true, mrn: true, firstName: true, lastName: true, phonePrimary: true, gender: true, dateOfBirth: true },
+          },
+          doctor: {
+            select: { id: true, fullName: true, specialization: true },
+          },
         },
-        doctor: {
-          select: { id: true, fullName: true, specialization: true },
-        },
-      },
+      })
+
+      if (body.status === 'checked_in') {
+        await tx.queueManagement.upsert({
+          where: { appointmentId: id },
+          create: {
+            organizationId,
+            patientId: updated.patientId,
+            appointmentId: id,
+            serviceArea: 'opd',
+            assignedToId: updated.doctorId,
+            status: 'waiting',
+            queueNumber: generateQueueNumber('opd'),
+          },
+          update: {}, // already queued (e.g. re-check-in after an edit) — leave as-is
+        })
+      }
+
+      return updated
     })
 
     res.json({ success: true, data: appointment })

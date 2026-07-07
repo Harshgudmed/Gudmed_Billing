@@ -1,6 +1,7 @@
 import { db } from '../config/db.js'
 import { getOrgId } from "../lib/reqContext.js";
 import { z } from 'zod'
+import { PATIENT_SNAPSHOT_SELECT } from '../utils/patientSnapshot.js'
 
 async function resolveRequestedById(organizationId) {
   const fromEnv = process.env.DEFAULT_REQUESTED_BY_ID
@@ -141,15 +142,7 @@ export const getAll = async (req, res, next) => {
           where,
           include: {
             patient: {
-              select: {
-                id: true,
-                mrn: true,
-                firstName: true,
-                lastName: true,
-                gender: true,
-                dateOfBirth: true,
-                phonePrimary: true,
-              },
+              select: PATIENT_SNAPSHOT_SELECT,
             },
             results: {
               include: { test: true },
@@ -185,15 +178,7 @@ export const getAll = async (req, res, next) => {
             order: {
               include: {
                 patient: {
-                  select: {
-                    id: true,
-                    mrn: true,
-                    firstName: true,
-                    lastName: true,
-                    gender: true,
-                    dateOfBirth: true,
-                    phonePrimary: true,
-                  },
+                  select: PATIENT_SNAPSHOT_SELECT,
                 },
               },
             },
@@ -294,15 +279,7 @@ export const create = async (req, res, next) => {
         // name in the UI immediately (not "Unknown" until the next refresh).
         include: {
           patient: {
-            select: {
-              id: true,
-              mrn: true,
-              firstName: true,
-              lastName: true,
-              gender: true,
-              dateOfBirth: true,
-              phonePrimary: true,
-            },
+            select: PATIENT_SNAPSHOT_SELECT,
           },
         },
       })

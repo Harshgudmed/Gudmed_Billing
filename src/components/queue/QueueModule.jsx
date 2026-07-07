@@ -84,17 +84,18 @@ export default function QueueModule() {
   const handleCall = async (entry) => {
     setUpdatingId(entry.id)
     try {
-      const res = await client.patch('/triage', { id: entry.id, status: 'called', resource: 'queue' })
+      // Backend route is PATCH /triage/:id — the id must be in the URL, not
+      // the body. Sending it as `PATCH /triage` (no id) always 404'd, and the
+      // old catch block showed a success toast anyway, hiding the failure.
+      const res = await client.patch(`/triage/${entry.id}`, { status: 'called' })
       if (res.success) {
         setQueue(q => q.map(e => e.id === entry.id ? { ...e, status: 'called' } : e))
         toast.success(`Called: ${entry.patientName || entry.patient?.firstName || 'Patient'}`)
       } else {
-        setQueue(q => q.map(e => e.id === entry.id ? { ...e, status: 'called' } : e))
-        toast.success('Patient called')
+        toast.error(res.error || 'Failed to call patient')
       }
-    } catch {
-      setQueue(q => q.map(e => e.id === entry.id ? { ...e, status: 'called' } : e))
-      toast.success('Patient called')
+    } catch (err) {
+      toast.error(err.message || 'Failed to call patient')
     } finally {
       setUpdatingId(null)
     }
@@ -103,17 +104,15 @@ export default function QueueModule() {
   const handleComplete = async (entry) => {
     setUpdatingId(entry.id + '_complete')
     try {
-      const res = await client.patch('/triage', { id: entry.id, status: 'completed', resource: 'queue' })
+      const res = await client.patch(`/triage/${entry.id}`, { status: 'completed' })
       if (res.success) {
         setQueue(q => q.map(e => e.id === entry.id ? { ...e, status: 'completed' } : e))
         toast.success('Marked as completed')
       } else {
-        setQueue(q => q.map(e => e.id === entry.id ? { ...e, status: 'completed' } : e))
-        toast.success('Marked as completed')
+        toast.error(res.error || 'Failed to mark completed')
       }
-    } catch {
-      setQueue(q => q.map(e => e.id === entry.id ? { ...e, status: 'completed' } : e))
-      toast.success('Marked as completed')
+    } catch (err) {
+      toast.error(err.message || 'Failed to mark completed')
     } finally {
       setUpdatingId(null)
     }
