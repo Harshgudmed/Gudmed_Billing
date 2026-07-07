@@ -337,6 +337,22 @@ export async function create(req, res) {
       // Transaction: the invoice number is drawn from a per-org counter inside
       // the same tx, so concurrent creates cannot collide on the @unique column.
       const invoice = await db.$transaction(async (tx) => {
+        // Verify the patient actually exists in THIS database before writing the
+        // invoice. Without this check, a stale/foreign patientId (e.g. from a UI
+        // still holding IDs from a different environment or an old DB snapshot)
+        // hits the `patientId` foreign key at insert time and Prisma throws a raw
+        // P2003 error — which the outer catch has no `.status` for, so it falls
+        // through to a generic, unhelpful 500. Fail fast here with a clear 404.
+        const patientExists = await tx.patient.findFirst({
+          where: { id: patientId, organizationId: ORGANIZATION_ID },
+          select: { id: true },
+        })
+        if (!patientExists) {
+          const err = new Error(`Patient not found: ${patientId}`)
+          err.status = 404
+          throw err
+        }
+
         const invoiceNumber = await nextInvoiceNumber(tx, ORGANIZATION_ID)
         return tx.invoice.create({
           data: {
