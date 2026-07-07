@@ -37,6 +37,8 @@ import client from '@/api/client'
 import { drName } from '@/lib/utils'
 import PatientLookup from '@/components/common/PatientLookup'
 import { printLabReceipt } from '@/components/billing/utils/printBilling'
+import PaymentFields from '@/components/billing/PaymentFields'
+import { createInvoiceWithPayment, fetchOrderInvoicePayments } from '@/lib/billing'
 
 // ============================================
 // API HELPERS
@@ -279,6 +281,8 @@ export default function LaboratoryModule() {
   // Patient search for New Order dialog
   const [selectedPatient, setSelectedPatient] = useState(null)
   const [orderHcc, setOrderHcc] = useState('') // home-collection charge for this order
+  const [orderAmountPaid, setOrderAmountPaid] = useState('') // paid at booking → Payment record
+  const [orderPayMethod, setOrderPayMethod] = useState('cash')
   const [showOrderDialog, setShowOrderDialog] = useState(false)
   const [showResultDialog, setShowResultDialog] = useState(false)
   const [showViewOrderDialog, setShowViewOrderDialog] = useState(false)
@@ -508,14 +512,13 @@ export default function LaboratoryModule() {
       const billTotal = billItems.reduce((s, i) => s + i.total, 0)
       if (billTotal > 0 && data.patientId) {
         try {
-          await fetchApi('/billing', {
-            method: 'POST',
-            body: JSON.stringify({
-              resource: 'invoice',
-              patientId: data.patientId,
-              items: billItems,
-              notes: `[Laboratory] Lab Order ${newOrder.orderNumber || ''}`.trim(),
-            }),
+          // Shared helper: create the invoice + record what was paid at booking.
+          await createInvoiceWithPayment({
+            patientId: data.patientId,
+            items: billItems,
+            notes: `[Laboratory] Lab Order ${newOrder.orderNumber || ''}`.trim(),
+            amountPaid: orderAmountPaid,
+            paymentMethod: orderPayMethod,
           })
           toast.success('Invoice generated for this lab order')
         } catch (e) {
@@ -528,6 +531,8 @@ export default function LaboratoryModule() {
       orderForm.reset()
       setSelectedPatient(null)
       setOrderHcc('')
+      setOrderAmountPaid('')
+      setOrderPayMethod('cash')
       fetchStats()
     } catch (error) {
       console.error('Failed to create order:', error)
@@ -888,7 +893,7 @@ tr:nth-child(even) td{background:#f9f9f9}
 
   // Lab receipt uses the SHARED printLabReceipt so the Billing module and the
   // Laboratory module render an IDENTICAL Dr-Lal-style bill.
-  const handlePrintLabInvoice = (order, payInfo = {}) => {
+  const handlePrintLabInvoice = async (order, payInfo = {}) => {
     let clinic = {}
     try { clinic = JSON.parse(localStorage.getItem('gudmed-clinic-profile') || '{}') } catch { clinic = {} }
     const now = new Date()
@@ -910,9 +915,18 @@ tr:nth-child(even) td{background:#f9f9f9}
     const home = payInfo.homeCollection !== undefined
       ? Number(payInfo.homeCollection)
       : (hccTag ? Number(hccTag[1]) : Number(orgInfo.homeCollectionCharge || 0))
+    // Payments live on the auto-created Invoice (tagged with this order number in
+    // its notes), not on the lab order. Shared helper fetches that invoice's payment
+    // ledger so the receipt's Payment table shows date/time, receipt & method.
+    const { payments, amountPaid: invoicePaid } = await fetchOrderInvoicePayments({
+      patientId: order.patientId || order.patient?.id,
+      orderNumber: order.orderNumber,
+    })
+
     const disc = Number(payInfo.discount || 0)
     const net = orderValue + home - disc
-    const paid = payInfo.paid !== undefined ? Number(payInfo.paid) : 0
+    const paid = payInfo.paid !== undefined ? Number(payInfo.paid)
+      : (invoicePaid !== undefined ? invoicePaid : payments.reduce((s, p) => s + Number(p.amount || 0), 0))
     printLabReceipt({
       invoiceNo: order.orderNumber,
       labId: order.accessionNumber || order.patientMrn,
@@ -925,6 +939,7 @@ tr:nth-child(even) td{background:#f9f9f9}
       refDoctor: order.requestingDoctor ? drName(order.requestingDoctor) : 'self',
       mode: payInfo.mode,
       items, orderValue, homeCollection: home, discount: disc, netPayable: net, paid, balance: net - paid,
+      payments,
     }, orgInfo, clinic)
   }
 
@@ -2406,6 +2421,14 @@ tr:nth-child(even) td{background:#f9f9f9}
                   onChange={e => setOrderHcc(e.target.value)}
                 />
               </div>
+
+              {/* Payment collected at booking — recorded as a Payment on the invoice */}
+              <PaymentFields
+                amount={orderAmountPaid}
+                method={orderPayMethod}
+                onAmountChange={setOrderAmountPaid}
+                onMethodChange={setOrderPayMethod}
+              />
 
               <DialogFooter>
                 <Button type="button" variant="outline" onClick={() => setShowOrderDialog(false)}>

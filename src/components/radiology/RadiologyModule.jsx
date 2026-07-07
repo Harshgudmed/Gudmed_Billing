@@ -4,6 +4,8 @@ import { sendRadiologyNotification } from '@/lib/whatsapp'
 import { format, differenceInYears } from 'date-fns'
 import { toast } from 'sonner'
 import { printRadiologyReceipt } from '@/components/billing/utils/printBilling'
+import PaymentFields from '@/components/billing/PaymentFields'
+import { createInvoiceWithPayment, fetchOrderInvoicePayments } from '@/lib/billing'
 import {
   Scan, Plus, Edit, Trash2, Search, Eye, CheckCircle, XCircle,
   RefreshCw, FileText, Printer, AlertTriangle, Upload, X, ChevronLeft, ChevronRight,
@@ -43,6 +45,7 @@ const emptyExam = {
 const emptyOrder = {
   patientId: '', examId: '', clinicalIndication: '', provisionalDiagnosis: '',
   relevantHistory: '', urgency: 'routine', scheduledDate: '', notes: '',
+  amountPaid: '', paymentMethod: 'cash', // collected at booking → Payment record
 }
 const emptyReport = {
   technique: '', findings: '', impression: '', recommendations: '',
@@ -267,15 +270,19 @@ export default function RadiologyModule() {
         // department, same as Laboratory's auto-invoice (LaboratoryModule.jsx).
         const exam = exams.find(e => e.id === orderForm.examId)
         if (exam && exam.price > 0) {
-          client.post('/billing', {
-            resource: 'invoice',
-            patientId: orderForm.patientId,
-            items: [{
-              serviceName: `${exam.examName} (${(exam.examCategory || '').toUpperCase()})`,
-              quantity: 1, unitPrice: exam.price, tax: 0, total: exam.price,
-            }],
-            notes: `[Radiology] Radiology Order ${res.data.orderNumber || ''}`.trim(),
-          }).catch(() => {})
+          // Shared helper: create the invoice + record what was paid at booking.
+          try {
+            await createInvoiceWithPayment({
+              patientId: orderForm.patientId,
+              items: [{
+                serviceName: `${exam.examName} (${(exam.examCategory || '').toUpperCase()})`,
+                quantity: 1, unitPrice: exam.price, tax: 0, total: exam.price,
+              }],
+              notes: `[Radiology] Radiology Order ${res.data.orderNumber || ''}`.trim(),
+              amountPaid: orderForm.amountPaid,
+              paymentMethod: orderForm.paymentMethod,
+            })
+          } catch { /* non-fatal — order is created regardless of billing */ }
         }
       }
     } catch (e) { toast.error(e.message || 'Failed to create order') }
@@ -398,7 +405,7 @@ export default function RadiologyModule() {
   // Radiology receipt uses the SHARED printRadiologyReceipt so the Billing module
   // and the Radiology module render an IDENTICAL bill — same format as Laboratory
   // (see handlePrintLabInvoice in LaboratoryModule.jsx).
-  const handlePrintInvoice = (order, payInfo = {}) => {
+  const handlePrintInvoice = async (order, payInfo = {}) => {
     let clinic = {}
     try { clinic = JSON.parse(localStorage.getItem('gudmed-clinic-profile') || '{}') } catch { clinic = {} }
     const now = new Date()
@@ -411,9 +418,20 @@ export default function RadiologyModule() {
       eta: order.scheduledDate ? format(new Date(order.scheduledDate), 'dd-MM-yyyy HH:mm') : '',
     }]
     const orderValue = items.reduce((s, i) => s + i.price, 0)
-    const disc = Number(payInfo.discount || 0)
+
+    // Payments live on the auto-created Invoice (tagged with this order number in
+    // its notes), not on the radiology order. Shared helper fetches that invoice's
+    // payment ledger so the receipt's Payment table shows date/time, receipt & method.
+    const { payments, amountPaid: invoicePaid, discountAmount: invoiceDisc } =
+      await fetchOrderInvoicePayments({
+        patientId: order.patientId || order.patient?.id,
+        orderNumber: order.orderNumber,
+      })
+
+    const disc = payInfo.discount !== undefined ? Number(payInfo.discount) : (invoiceDisc || 0)
     const net = orderValue - disc
-    const paid = payInfo.paid !== undefined ? Number(payInfo.paid) : 0
+    const paid = payInfo.paid !== undefined ? Number(payInfo.paid)
+      : (invoicePaid !== undefined ? invoicePaid : payments.reduce((s, p) => s + Number(p.amount || 0), 0))
     printRadiologyReceipt({
       invoiceNo: order.orderNumber,
       labId: order.orderNumber,
@@ -426,6 +444,7 @@ export default function RadiologyModule() {
       refDoctor: 'self',
       mode: payInfo.mode,
       items, orderValue, homeCollection: 0, discount: disc, netPayable: net, paid, balance: net - paid,
+      payments,
     }, orgInfo, clinic)
   }
 
@@ -1154,6 +1173,14 @@ ${order.clinicalIndication ? `<div class="section"><div class="section-header">C
               <Label>Notes</Label>
               <Textarea value={orderForm.notes} onChange={e => setOrderForm(p => ({ ...p, notes: e.target.value }))} rows={2} />
             </div>
+
+            <PaymentFields
+              amount={orderForm.amountPaid}
+              method={orderForm.paymentMethod}
+              onAmountChange={(v) => setOrderForm(p => ({ ...p, amountPaid: v }))}
+              onMethodChange={(v) => setOrderForm(p => ({ ...p, paymentMethod: v }))}
+              charge={exams.find(e => e.id === orderForm.examId)?.price || 0}
+            />
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowOrderDialog(false)}>Cancel</Button>

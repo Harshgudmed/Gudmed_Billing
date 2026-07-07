@@ -28,6 +28,7 @@ import {
 import ImportMedicinesDialog from "./ImportMedicinesDialog";
 import MedicineNameAutocomplete from "./MedicineNameAutocomplete";
 import { printPharmacyReceipt } from "@/components/billing/utils/printBilling";
+import PatientLookup from "@/components/common/PatientLookup";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -259,8 +260,14 @@ export default function PharmacyModule() {
   // Sale dialog
   const [showSaleDialog, setShowSaleDialog] = useState(false);
   const [saleItems, setSaleItems] = useState([{ drugId: "", quantity: 1 }]);
+  const [customerName, setCustomerName] = useState("");
   const [paymentMethod, setPaymentMethod] = useState("cash");
   const [savingSale, setSavingSale] = useState(false);
+  const [salePatient, setSalePatient] = useState(null); // selected via shared PatientLookup
+  const [saleReferenceDoctor, setSaleReferenceDoctor] = useState("");
+  // Split payment across methods (Cash + UPI, etc.). Empty = single-method sale.
+  const [splitPayment, setSplitPayment] = useState(false);
+  const [salePayments, setSalePayments] = useState([{ paymentMethod: "cash", amount: "" }]);
 
   // Delete confirm
   const [deleteConfirm, setDeleteConfirm] = useState(null);
@@ -730,16 +737,48 @@ export default function PharmacyModule() {
         };
       });
       const total = items.reduce((s, i) => s + i.total, 0);
+      // When split-payment is on, send the per-method breakdown so the backend
+      // stores a multi-payment ledger and the receipt prints a Payment table.
+      const splits = splitPayment
+        ? salePayments
+            .map((p) => ({ paymentMethod: p.paymentMethod, amount: Number(p.amount) || 0 }))
+            .filter((p) => p.amount > 0)
+        : [];
       const res = await client.post("/pharmacy/sales", {
         items,
+        customerName: customerName.trim() || undefined,
         paymentMethod,
         paymentStatus: "paid",
+        // Real patient id from the shared PatientLookup → backend fills phone/mrn/uhid
+        // from the patient record (single source of truth). Walk-in = no patient.
+        patientId: salePatient?.id || undefined,
+        phone: salePatient?.phonePrimary || undefined,
+        uhid: salePatient?.mrn || undefined,
+        referenceDoctor: saleReferenceDoctor.trim() || undefined,
+        payments: splits.length ? splits : undefined,
       });
       if (res.success) {
-        handlePrintSaleReceipt(res.data, paymentMethod);
+        // Enrich the just-created sale with the selected patient's name/contact so
+        // the receipt shows them immediately (the create response has patientId but
+        // not the joined patient row).
+        const printable = salePatient
+          ? {
+              ...res.data,
+              patientName: `${salePatient.firstName || ""} ${salePatient.lastName || ""}`.trim(),
+              phone: res.data.phone || salePatient.phonePrimary,
+              uhid: res.data.uhid || salePatient.mrn,
+              mrn: res.data.mrn || salePatient.mrn,
+            }
+          : res.data;
+        handlePrintSaleReceipt(printable, paymentMethod);
         toast.success(`Sale completed — ₹${total.toFixed(2)}`);
         setShowSaleDialog(false);
         setSaleItems([{ drugId: "", quantity: 1 }]);
+        setCustomerName("");
+        setSalePatient(null);
+        setSaleReferenceDoctor("");
+        setSplitPayment(false);
+        setSalePayments([{ paymentMethod: "cash", amount: "" }]);
         fetchAll();
         salePage.refresh(); // new sale appears in the list + period total
         drugPage.refresh(); // stock decremented
@@ -2106,6 +2145,14 @@ export default function PharmacyModule() {
             <DialogTitle>Direct Sale (OTC)</DialogTitle>
           </DialogHeader>
           <div className="space-y-3">
+            <div>
+              <Label>Customer Name <span className="text-gray-400 font-normal">(optional)</span></Label>
+              <Input
+                placeholder="Walk-in customer name"
+                value={customerName}
+                onChange={(e) => setCustomerName(e.target.value)}
+              />
+            </div>
             {saleItems.map((item, idx) => (
               <div key={idx} className="flex gap-2 items-end">
                 <div className="flex-1">
@@ -2175,19 +2222,124 @@ export default function PharmacyModule() {
                 Total: ₹{saleTotal.toFixed(2)}
               </div>
             )}
+            {!splitPayment ? (
+              <div>
+                <div className="flex items-center justify-between">
+                  <Label>Payment Method</Label>
+                  <button
+                    type="button"
+                    className="text-xs text-blue-600 hover:underline"
+                    onClick={() => {
+                      setSplitPayment(true);
+                      setSalePayments([{ paymentMethod: "cash", amount: saleTotal ? saleTotal.toFixed(2) : "" }]);
+                    }}
+                  >
+                    + Split payment
+                  </button>
+                </div>
+                <Select value={paymentMethod} onValueChange={setPaymentMethod}>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="cash">Cash</SelectItem>
+                    <SelectItem value="card">Card</SelectItem>
+                    <SelectItem value="upi">UPI</SelectItem>
+                    <SelectItem value="insurance">Insurance</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <Label>Split Payment</Label>
+                  <button
+                    type="button"
+                    className="text-xs text-gray-500 hover:underline"
+                    onClick={() => setSplitPayment(false)}
+                  >
+                    Use single method
+                  </button>
+                </div>
+                {salePayments.map((p, idx) => (
+                  <div key={idx} className="flex gap-2 items-center">
+                    <Select
+                      value={p.paymentMethod}
+                      onValueChange={(v) =>
+                        setSalePayments((prev) => prev.map((x, i) => (i === idx ? { ...x, paymentMethod: v } : x)))
+                      }
+                    >
+                      <SelectTrigger className="flex-1">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="cash">Cash</SelectItem>
+                        <SelectItem value="card">Card</SelectItem>
+                        <SelectItem value="upi">UPI</SelectItem>
+                        <SelectItem value="insurance">Insurance</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <Input
+                      type="number"
+                      min={0}
+                      className="w-28"
+                      placeholder="Amount"
+                      value={p.amount}
+                      onChange={(e) =>
+                        setSalePayments((prev) => prev.map((x, i) => (i === idx ? { ...x, amount: e.target.value } : x)))
+                      }
+                    />
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="text-red-500"
+                      onClick={() => setSalePayments((prev) => prev.filter((_, i) => i !== idx))}
+                    >
+                      <XCircle className="h-4 w-4" />
+                    </Button>
+                  </div>
+                ))}
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => setSalePayments((prev) => [...prev, { paymentMethod: "upi", amount: "" }])}
+                >
+                  <Plus className="h-4 w-4 mr-1" />
+                  Add Payment
+                </Button>
+                {(() => {
+                  const paidSum = salePayments.reduce((s, x) => s + (Number(x.amount) || 0), 0);
+                  const diff = saleTotal - paidSum;
+                  return (
+                    <div className={`text-xs text-right font-semibold ${Math.abs(diff) < 0.01 ? "text-green-600" : "text-amber-600"}`}>
+                      Paid: ₹{paidSum.toFixed(2)} / ₹{saleTotal.toFixed(2)}
+                      {Math.abs(diff) >= 0.01 && ` — ${diff > 0 ? "remaining" : "excess"} ₹${Math.abs(diff).toFixed(2)}`}
+                    </div>
+                  );
+                })()}
+              </div>
+            )}
+
+            <hr className="my-2" />
+
+            <div className="text-xs font-semibold text-gray-600">PATIENT INFO (Optional)</div>
+
+            {/* Shared PatientLookup — search/select a registered patient (or add new).
+                Name, phone, UHID auto-fill from the DB; no manual typing. */}
+            <PatientLookup
+              selectedPatient={salePatient}
+              onSelect={(p) => setSalePatient(p)}
+              onClear={() => setSalePatient(null)}
+              placeholder="Search patient by UHID, name, or phone..."
+            />
+
             <div>
-              <Label>Payment Method</Label>
-              <Select value={paymentMethod} onValueChange={setPaymentMethod}>
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="cash">Cash</SelectItem>
-                  <SelectItem value="card">Card</SelectItem>
-                  <SelectItem value="upi">UPI</SelectItem>
-                  <SelectItem value="insurance">Insurance</SelectItem>
-                </SelectContent>
-              </Select>
+              <Label className="text-xs">Reference Doctor</Label>
+              <Input
+                placeholder="Doctor name"
+                value={saleReferenceDoctor}
+                onChange={(e) => setSaleReferenceDoctor(e.target.value)}
+              />
             </div>
           </div>
           <DialogFooter>

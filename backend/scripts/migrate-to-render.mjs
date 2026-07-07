@@ -1,69 +1,122 @@
-// One-time migration: push essential local data (org, users, full pharmacy
-// catalog, full lab/radiology test catalogs, a small patient sample) to the
-// new Render production database. Reads the remote connection string from
+// One-time migration: push the REAL, richly-linked patients (those with at
+// least one invoice/consultation/admission/order/etc — not just the most
+// recently-created dummy rows) plus all their related records to the new
+// Render production database. Reads the remote connection string from
 // process.env.REMOTE_DATABASE_URL — never logs it.
 import { PrismaClient } from '@prisma/client'
-
-const PATIENT_SAMPLE_SIZE = 2000
 
 let remoteUrl = process.env.REMOTE_DATABASE_URL
 if (!remoteUrl) {
   console.error('REMOTE_DATABASE_URL env var not set — aborting')
   process.exit(1)
 }
-// External Render Postgres connections require SSL; force it + a larger pool
-// timeout so a big createMany batch doesn't get dropped mid-write.
 if (!remoteUrl.includes('sslmode=')) {
   remoteUrl += (remoteUrl.includes('?') ? '&' : '?') + 'sslmode=require&connect_timeout=30&pool_timeout=30'
 }
 
 const localDb = new PrismaClient()
-const remoteDb = new PrismaClient({ datasources: { db: { url: remoteUrl } } })
 
-async function copyInBatches(name, rows, createFn, batchSize = 500) {
+async function copyInBatches(remoteDb, name, rows, modelName, batchSize = 100) {
   let done = 0
   for (let i = 0; i < rows.length; i += batchSize) {
     const batch = rows.slice(i, i + batchSize)
-    await createFn(batch)
+    await remoteDb[modelName].createMany({ data: batch, skipDuplicates: true })
     done += batch.length
     process.stdout.write(`\r${name}: ${done}/${rows.length}`)
   }
   console.log('')
 }
 
-async function safeStep(name, fn) {
-  try {
-    await fn()
-    console.log(`${name}: OK`)
-  } catch (e) {
-    console.log(`${name}: FAILED — ${e.message.split('\n')[0]}`)
+// Opens a brand-new connection just for this one table, then closes it —
+// avoids reusing a connection Render's proxy may have silently dropped.
+async function copyAll(modelName, where = undefined, retries = 3) {
+  for (let attempt = 1; attempt <= retries + 1; attempt++) {
+    const remoteDb = new PrismaClient({ datasources: { db: { url: remoteUrl } } })
+    try {
+      const rows = await localDb[modelName].findMany(where ? { where } : undefined)
+      await copyInBatches(remoteDb, modelName, rows, modelName)
+      console.log(`${modelName}: OK (${rows.length} rows)`)
+      await remoteDb.$disconnect()
+      return rows
+    } catch (e) {
+      await remoteDb.$disconnect().catch(() => {})
+      const flat = (e.message || String(e)).trim().replace(/\s+/g, ' ')
+      const msg = flat.length > 400 ? '…' + flat.slice(-400) : flat
+      if (attempt <= retries) {
+        console.log(`${modelName}: retry ${attempt} after error — ${msg}`)
+        await new Promise((r) => setTimeout(r, 3000))
+      } else {
+        console.log(`${modelName}: FAILED — ${msg}`)
+        return []
+      }
+    }
   }
+  return []
+}
+
+async function distinctPatientIds(modelName) {
+  const rows = await localDb[modelName].findMany({ distinct: ['patientId'], select: { patientId: true } })
+  return rows.map((r) => r.patientId).filter(Boolean)
 }
 
 async function main() {
-  console.log('Fetching from local...')
-  const orgs = await localDb.organization.findMany()
-  const departments = await localDb.department.findMany()
-  const users = await localDb.user.findMany()
-  const drugs = await localDb.pharmacyDrug.findMany()
-  const labTests = await localDb.labTest.findMany()
-  const radiologyExams = await localDb.radiologyExam.findMany()
-  const patients = await localDb.patient.findMany({ take: PATIENT_SAMPLE_SIZE, orderBy: { createdAt: 'desc' } })
+  console.log('Finding real patients (those with actual activity records)...')
+  const sets = await Promise.all([
+    'invoice', 'consultation', 'admission', 'labOrder', 'radiologyOrder',
+    'prescription', 'pharmacySale', 'preTriage', 'queueManagement',
+    'dayCareCase', 'ambulanceTrip', 'insuranceCase', 'deathCertificate',
+  ].map(distinctPatientIds))
+  const realPatientIds = [...new Set(sets.flat())]
+  console.log(`Real patients with activity: ${realPatientIds.length}`)
 
-  console.log(`Counts — orgs:${orgs.length} departments:${departments.length} users:${users.length} drugs:${drugs.length} labTests:${labTests.length} radiologyExams:${radiologyExams.length} patients:${patients.length}`)
+  console.log('Writing patients (skipDuplicates — the earlier 2000 dummy sample stays too)...')
+  const patients = await localDb.patient.findMany({ where: { id: { in: realPatientIds } } })
+  await (async () => {
+    const remoteDb = new PrismaClient({ datasources: { db: { url: remoteUrl } } })
+    try { await copyInBatches(remoteDb, 'patients', patients, 'patient'); console.log(`patients: OK (${patients.length})`) }
+    catch (e) { console.log('patients: FAILED —', e.message.slice(0, 300)) }
+    await remoteDb.$disconnect()
+  })()
 
-  console.log('Writing to remote...')
-  await safeStep('orgs', () => remoteDb.organization.createMany({ data: orgs, skipDuplicates: true }))
-  await safeStep('departments', () => remoteDb.department.createMany({ data: departments, skipDuplicates: true }))
-  await safeStep('users', () => remoteDb.user.createMany({ data: users, skipDuplicates: true }))
-  await safeStep('drugs', () => copyInBatches('drugs', drugs, (batch) => remoteDb.pharmacyDrug.createMany({ data: batch, skipDuplicates: true })))
-  await safeStep('labTests', () => copyInBatches('labTests', labTests, (batch) => remoteDb.labTest.createMany({ data: batch, skipDuplicates: true })))
-  await safeStep('radiologyExams', () => copyInBatches('radiologyExams', radiologyExams, (batch) => remoteDb.radiologyExam.createMany({ data: batch, skipDuplicates: true })))
-  await safeStep('patients', () => copyInBatches('patients', patients, (batch) => remoteDb.patient.createMany({ data: batch, skipDuplicates: true })))
+  const pWhere = { patientId: { in: realPatientIds } }
+  console.log('Writing patient-scoped tables for the real patients...')
+  await copyAll('consultation', pWhere)
+  await copyAll('admission', pWhere)
+  await copyAll('prescription', pWhere)
+  await copyAll('pharmacySale', pWhere)
+  await copyAll('invoice', pWhere)
+  await copyAll('patientDocument', pWhere)
+  await copyAll('labOrder', pWhere)
+  await copyAll('radiologyOrder', pWhere)
+  await copyAll('preTriage', pWhere)
+  await copyAll('queueManagement', pWhere)
+  await copyAll('dayCareCase', pWhere)
+  await copyAll('ambulanceTrip', pWhere)
+  await copyAll('insuranceCase', pWhere)
+  await copyAll('deathCertificate', pWhere)
+  await copyAll('appointment', pWhere)
+
+  console.log('Writing tables that depend on the above...')
+  await copyAll('payment', pWhere)
+
+  const admissions = await localDb.admission.findMany({ where: pWhere, select: { id: true } })
+  const admissionIds = admissions.map((a) => a.id)
+  await copyAll('patientTariff', { admissionId: { in: admissionIds } })
+  await copyAll('vitalsRecord', { admissionId: { in: admissionIds } })
+  await copyAll('clinicalNote', { admissionId: { in: admissionIds } })
+
+  const labOrders = await localDb.labOrder.findMany({ where: pWhere, select: { id: true } })
+  await copyAll('labResult', { orderId: { in: labOrders.map((o) => o.id) } })
+
+  const radOrders = await localDb.radiologyOrder.findMany({ where: pWhere, select: { id: true } })
+  await copyAll('radiologyReport', { orderId: { in: radOrders.map((o) => o.id) } })
+
+  const insCases = await localDb.insuranceCase.findMany({ where: pWhere, select: { id: true } })
+  await copyAll('insuranceClaim', { caseId: { in: insCases.map((c) => c.id) } })
 
   console.log('DONE')
 }
 
 main()
-  .catch((e) => { console.error('MIGRATION FAILED:', e.message); process.exit(1) })
-  .finally(async () => { await localDb.$disconnect(); await remoteDb.$disconnect() })
+  .catch((e) => { console.error('MIGRATION FAILED:', e.message) })
+  .finally(async () => { await localDb.$disconnect() })

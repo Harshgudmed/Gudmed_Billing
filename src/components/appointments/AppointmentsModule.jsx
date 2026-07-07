@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useRef } from "react";
+import { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useOrgSettings } from "@/lib/useOrgSettings";
 import { Button } from "@/components/ui/button";
@@ -543,24 +543,44 @@ export default function AppointmentsModule() {
     setPaginationField("selectedDay", 1);
   };
 
-  // One status-change path for all the simple lifecycle actions, instead of
-  // five near-identical handlers.
-  const changeStatus = async (appointment, status, successMessage) => {
-    try {
-      await updateAppointment(appointment.id, { status });
-      toast.success(successMessage);
-    } catch {
-      toast.error("Failed to update appointment");
-    }
-  };
+  const changeStatus = useCallback(
+    async (appointment, status, successMessage) => {
+      try {
+        await updateAppointment(appointment.id, { status });
+        toast.success(successMessage);
+      } catch {
+        toast.error("Failed to update appointment");
+      }
+    },
+    [updateAppointment]
+  );
 
-  const handleCheckIn = (appointment) => changeStatus(appointment, "checked_in", "Patient checked in successfully");
-  const handleStartConsultation = (appointment) => changeStatus(appointment, "in_progress", "Consultation started");
-  const handleComplete = (appointment) => changeStatus(appointment, "completed", "Appointment completed");
-  const handleConfirm = (appointment) => changeStatus(appointment, "confirmed", "Appointment confirmed");
-  const handleNoShow = (appointment) => changeStatus(appointment, "no_show", "Marked as no-show");
+  const handleCheckIn = useCallback(
+    (appointment) => changeStatus(appointment, "checked_in", "Patient checked in successfully"),
+    [changeStatus]
+  );
 
-  const handleCancel = async () => {
+  const handleStartConsultation = useCallback(
+    (appointment) => changeStatus(appointment, "in_progress", "Consultation started"),
+    [changeStatus]
+  );
+
+  const handleComplete = useCallback(
+    (appointment) => changeStatus(appointment, "completed", "Appointment completed"),
+    [changeStatus]
+  );
+
+  const handleConfirm = useCallback(
+    (appointment) => changeStatus(appointment, "confirmed", "Appointment confirmed"),
+    [changeStatus]
+  );
+
+  const handleNoShow = useCallback(
+    (appointment) => changeStatus(appointment, "no_show", "Marked as no-show"),
+    [changeStatus]
+  );
+
+  const handleCancel = useCallback(async () => {
     if (!dialog.appointment || !dialog.reason.trim()) {
       toast.error("Please provide a cancellation reason");
       return;
@@ -578,17 +598,15 @@ export default function AppointmentsModule() {
     } finally {
       setLoading("submitting", false);
     }
-  };
+  }, [dialog.appointment, dialog.reason, updateAppointment, closeDialog, setLoading]);
 
-  const handleReschedule = async () => {
+  const handleReschedule = useCallback(async () => {
     if (!dialog.appointment || !dialog.rescheduleDate || !dialog.rescheduleTime) {
       toast.error("Please select date and time");
       return;
     }
     try {
       setLoading("submitting", true);
-      // Single atomic backend call — creates the new appointment and marks the
-      // old one rescheduled together (no orphan-row risk if one half fails).
       await rescheduleAppointment(dialog.appointment.id, {
         appointmentDate: dialog.rescheduleDate.toISOString(),
         appointmentTime: dialog.rescheduleTime,
@@ -600,7 +618,14 @@ export default function AppointmentsModule() {
     } finally {
       setLoading("submitting", false);
     }
-  };
+  }, [
+    dialog.appointment,
+    dialog.rescheduleDate,
+    dialog.rescheduleTime,
+    rescheduleAppointment,
+    closeDialog,
+    setLoading,
+  ]);
 
   const openEditDialog = (appointment) => {
     editForm.reset({
@@ -616,7 +641,7 @@ export default function AppointmentsModule() {
     openDialog("edit", { editing: appointment });
   };
 
-  const handleEditSubmit = async (data) => {
+  const handleEditSubmit = useCallback(async (data) => {
     if (!dialog.editing || isEditSubmittingRef.current) return;
     isEditSubmittingRef.current = true;
     setLoading("editSubmitting", true);
@@ -638,31 +663,28 @@ export default function AppointmentsModule() {
       setLoading("editSubmitting", false);
       isEditSubmittingRef.current = false;
     }
-  };
+  }, [dialog.editing, updateAppointment, closeDialog, setLoading]);
 
-  const toggleAppointmentSelection = (id) => {
+  const toggleAppointmentSelection = useCallback((id) => {
     setSelectedAppointmentIds((prev) => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
       else next.add(id);
       return next;
     });
-  };
+  }, []);
 
-  const toggleAllAppointments = () => {
-    if (selectedAppointmentIds.size === listData.rows.length)
-      setSelectedAppointmentIds(new Set());
-    else
-      setSelectedAppointmentIds(
-        new Set(listData.rows.map((appointment) => appointment.id)),
-      );
-  };
+  const toggleAllAppointments = useCallback(() => {
+    setSelectedAppointmentIds((prev) => {
+      if (prev.size === listData.rows.length) return new Set();
+      return new Set(listData.rows.map((appointment) => appointment.id));
+    });
+  }, [listData.rows]);
 
-  const handleBulkStatusUpdate = async (status) => {
+  const handleBulkStatusUpdate = useCallback(async (status) => {
     const count = selectedAppointmentIds.size;
     if (count === 0) return;
     try {
-      // One request for all selected (was one PATCH per appointment).
       await bulkUpdateStatus([...selectedAppointmentIds], status);
       setSelectedAppointmentIds(new Set());
       toast.success(
@@ -671,9 +693,9 @@ export default function AppointmentsModule() {
     } catch {
       toast.error("Failed to update some appointments");
     }
-  };
+  }, [selectedAppointmentIds, bulkUpdateStatus]);
 
-  const handleSendReminder = async (appointment) => {
+  const handleSendReminder = useCallback(async (appointment) => {
     try {
       const patient = appointment.patient || getPatient(appointment.patientId);
       const phone = patient?.phonePrimary?.replace(/[^0-9]/g, "") || "";
@@ -696,7 +718,7 @@ export default function AppointmentsModule() {
     } catch {
       toast.error("Failed to send reminder");
     }
-  };
+  }, [getPatient, getDoctor, orgInfo, updateAppointment]);
 
   const handlePrintAppointmentCard = (appointment) =>
     printAppointmentCard(appointment, orgInfo);
@@ -706,7 +728,7 @@ export default function AppointmentsModule() {
     setRefreshCount((count) => count + 1);
   };
 
-  const onSubmit = async (data) => {
+  const onSubmit = useCallback(async (data) => {
     try {
       setLoading("submitting", true);
       const patient = dialog.patient; // already chosen in the form
@@ -737,7 +759,7 @@ export default function AppointmentsModule() {
     } finally {
       setLoading("submitting", false);
     }
-  };
+  }, [dialog.patient, createAppointment, closeDialog, form, getPatientFullName, setLoading]);
 
   if (loading) {
     return (

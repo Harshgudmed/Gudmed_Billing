@@ -271,6 +271,9 @@ export default function BillingModule({ onBack }) {
             gstAmt: inv.taxAmount || 0, total: inv.totalAmount,
             amountPaid: inv.amountPaid || 0, balanceDue: inv.balanceDue ?? (inv.totalAmount - (inv.amountPaid || 0)),
             createdAt: inv.invoiceDate || inv.createdAt,
+            // Payment ledger (date/time + receipt + method) for the receipt's Payment
+            // table. Stamp each row with this invoice's number for the Invoice No column.
+            payments: (inv.payments || []).map((p) => ({ ...p, invoiceNumber: inv.invoiceNumber })),
           }
         })
         setBills(mapped)
@@ -886,29 +889,34 @@ export default function BillingModule({ onBack }) {
                   </CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-3">
-                  {/* Department selector — each department has its OWN form/catalogue */}
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs font-medium text-gray-500 whitespace-nowrap">Department</span>
-                    <Select
-                      value={department}
-                      onValueChange={(v) => {
-                        // Switching department = a fresh, department-specific bill.
-                        if (department && v !== department && form.items.length > 0) {
-                          if (!window.confirm('Switching department will clear the current cart. Continue?')) return
-                        }
-                        setDepartment(v); setActiveCat(v); setCatSearch('')
-                        // Home Collection only applies to Lab — clear any leftover value so
-                        // switching away from Lab can't silently carry it onto another bill.
-                        setForm(f => ({ ...f, items: [], homeCollection: v === 'Lab' ? f.homeCollection : '' }))
-                      }}
-                    >
-                      <SelectTrigger className="h-8 text-sm"><SelectValue placeholder="Select a department to start…" /></SelectTrigger>
-                      <SelectContent>
-                        {Object.keys(CATALOGUE).map(cat => (
-                          <SelectItem key={cat} value={cat}>{DEPT_LABEL[cat] || cat}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                  {/* Department selector — radio buttons (client requirement). Each
+                      department has its OWN form/catalogue; switching clears the cart. */}
+                  <div className="flex items-start gap-2">
+                    <span className="text-xs font-medium text-gray-500 whitespace-nowrap mt-1.5">Department</span>
+                    <div className="flex flex-wrap gap-x-4 gap-y-1.5">
+                      {Object.keys(CATALOGUE).map(cat => (
+                        <label key={cat} className="flex items-center gap-1.5 cursor-pointer text-sm">
+                          <input
+                            type="radio"
+                            name="billing-department"
+                            value={cat}
+                            checked={department === cat}
+                            onChange={() => {
+                              // Switching department = a fresh, department-specific bill.
+                              if (department && cat !== department && form.items.length > 0) {
+                                if (!window.confirm('Switching department will clear the current cart. Continue?')) return
+                              }
+                              setDepartment(cat); setActiveCat(cat); setCatSearch('')
+                              // Home Collection only applies to Lab — clear any leftover value so
+                              // switching away from Lab can't silently carry it onto another bill.
+                              setForm(f => ({ ...f, items: [], homeCollection: cat === 'Lab' ? f.homeCollection : '' }))
+                            }}
+                            className="accent-blue-600 h-3.5 w-3.5"
+                          />
+                          {DEPT_LABEL[cat] || cat}
+                        </label>
+                      ))}
+                    </div>
                   </div>
                   {/* Search within the selected department */}
                   {department && (
@@ -920,7 +928,7 @@ export default function BillingModule({ onBack }) {
                   {/* Items grid */}
                   <div className="max-h-64 overflow-y-auto space-y-1">
                     {!department ? (
-                      <p className="text-sm text-gray-400 text-center py-6">👆 Select a department above to load its billing form</p>
+                      <p className="text-sm text-gray-400 text-center py-6"></p>
                     ) : catItems.length === 0 ? (
                       <p className="text-sm text-gray-400 text-center py-4">No items found</p>
                     ) : catItems.map(it => (
