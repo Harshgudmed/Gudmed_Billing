@@ -115,12 +115,40 @@ function financialYear(d = new Date()) {
 // @unique invoiceNumber column. Format: INV-2026-27-000123
 async function nextInvoiceNumber(tx, organizationId) {
   const year = financialYear()
+  const prefix = `INV-${year}-`
+
+  // Reconcile the counter with the REAL max invoice for this org+year. After a
+  // data migration (old DB → fresh gudmed-db-2) the invoices get copied but the
+  // BillCounter does NOT, so the counter lags at 1 while INV-...-000017 already
+  // exists. Every create then collides on the @unique invoiceNumber (Prisma
+  // P2002), and because the failed transaction ROLLS BACK the counter increment
+  // too, it never advances — deadlocking billing forever. Numbers are zero-padded
+  // to 6 digits, so lexicographic DESC == numeric order → top row is the true max.
+  const last = await tx.invoice.findFirst({
+    where: { organizationId, invoiceNumber: { startsWith: prefix } },
+    orderBy: { invoiceNumber: 'desc' },
+    select: { invoiceNumber: true },
+  })
+  const lastSeq = last ? (parseInt(last.invoiceNumber.slice(prefix.length), 10) || 0) : 0
+
   const counter = await tx.billCounter.upsert({
     where: { organizationId_series_year: { organizationId, series: 'INV', year } },
-    create: { organizationId, series: 'INV', year, value: 1 },
+    create: { organizationId, series: 'INV', year, value: lastSeq + 1 },
     update: { value: { increment: 1 } },
   })
-  return `INV-${year}-${String(counter.value).padStart(6, '0')}`
+
+  // If the counter had lagged behind migrated data, jump it past the real max so
+  // the number we hand out cannot already exist.
+  let value = counter.value
+  if (value <= lastSeq) {
+    const fixed = await tx.billCounter.update({
+      where: { organizationId_series_year: { organizationId, series: 'INV', year } },
+      data: { value: lastSeq + 1 },
+    })
+    value = fixed.value
+  }
+
+  return `${prefix}${String(value).padStart(6, '0')}`
 }
 
 export async function getAll(req, res) {
