@@ -102,6 +102,10 @@ export async function update(req, res, next) {
     const { id } = req.body
     if (!id) return res.status(400).json({ success: false, error: 'id is required' })
 
+    // Tenant guard: only touch a case that belongs to this org (no cross-tenant write).
+    const owned = await db.dayCareCase.findFirst({ where: { id, organizationId: ORG_ID }, select: { id: true } })
+    if (!owned) return res.status(404).json({ success: false, error: 'Day-care case not found' })
+
     const data = {}
     const allowed = ['procedure', 'dischargeTime', 'paymentStatus', 'status', 'notes']
     for (const k of allowed) if (req.body[k] !== undefined) data[k] = req.body[k] || null
@@ -134,9 +138,11 @@ export async function update(req, res, next) {
 
 export async function remove(req, res, next) {
   try {
+    const ORG_ID = getOrgId(req)
     const { id } = req.query
     if (!id) return res.status(400).json({ success: false, error: 'id is required' })
-    await db.dayCareCase.delete({ where: { id } })
+    const { count } = await db.dayCareCase.deleteMany({ where: { id, organizationId: ORG_ID } })
+    if (count === 0) return res.status(404).json({ success: false, error: 'Day-care case not found' })
     res.json({ success: true })
   } catch (err) {
     next(err)

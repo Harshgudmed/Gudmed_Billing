@@ -100,7 +100,12 @@ export async function create(req, res, next) {
 
 export async function update(req, res, next) {
   try {
+    const ORG_ID = getOrgId(req)
     const { id, issuedTo, issuedToRelationship, ...rest } = req.body
+    if (!id) return res.status(400).json({ success: false, error: 'id is required' })
+    // Tenant guard: only touch a certificate that belongs to this org.
+    const owned = await db.deathCertificate.findFirst({ where: { id, organizationId: ORG_ID }, select: { id: true } })
+    if (!owned) return res.status(404).json({ success: false, error: 'Death certificate not found' })
     const data = {}
     if (issuedTo !== undefined) {
       data.issuedTo = issuedTo
@@ -131,8 +136,11 @@ export async function update(req, res, next) {
 
 export async function remove(req, res, next) {
   try {
+    const ORG_ID = getOrgId(req)
     const { id } = req.query
-    await db.deathCertificate.delete({ where: { id } })
+    if (!id) return res.status(400).json({ success: false, error: 'id is required' })
+    const { count } = await db.deathCertificate.deleteMany({ where: { id, organizationId: ORG_ID } })
+    if (count === 0) return res.status(404).json({ success: false, error: 'Death certificate not found' })
     res.json({ success: true })
   } catch (err) {
     next(err)
