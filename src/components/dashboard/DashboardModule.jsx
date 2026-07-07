@@ -88,6 +88,14 @@ export default function DashboardModule() {
               <Calendar className="h-6 w-6" />
               <span>Book Appointment</span>
             </Button>
+            <Button variant="outline" className="h-20 flex-col gap-2" onClick={() => navigate(`${base}/pre-triage`)}>
+              <Stethoscope className="h-6 w-6" />
+              <span>Triage Patient</span>
+            </Button>
+            <Button variant="outline" className="h-20 flex-col gap-2" onClick={() => navigate(`${base}/laboratory`)}>
+              <FlaskConical className="h-6 w-6" />
+              <span>Lab Order</span>
+            </Button>
             <Button variant="outline" className="h-20 flex-col gap-2" onClick={() => navigate(`${base}/pharmacy`)}>
               <Pill className="h-6 w-6" />
               <span>Dispense</span>
@@ -100,7 +108,7 @@ export default function DashboardModule() {
         </CardContent>
       </Card>
 
-      {/* Primary Stats */}
+      {/* Primary Stats — every card is clickable and navigates to its module */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         <Card className="cursor-pointer hover:shadow-lg hover:border-blue-300 transition-all" onClick={() => navigate(`${base}/patients`)}>
           <CardHeader className="flex flex-row items-center justify-between pb-2">
@@ -122,7 +130,18 @@ export default function DashboardModule() {
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">{stats.todayAppointments || 0}</div>
-            <p className="text-xs text-gray-500">Scheduled today</p>
+            <p className="text-xs text-gray-500">{stats.checkedInToday || 0} checked in</p>
+          </CardContent>
+        </Card>
+
+        <Card className="cursor-pointer hover:shadow-lg hover:border-orange-300 transition-all" onClick={() => navigate(`${base}/queue`)}>
+          <CardHeader className="flex flex-row items-center justify-between pb-2">
+            <CardTitle className="text-sm font-medium text-gray-600">Queue Waiting</CardTitle>
+            <Clock className="h-5 w-5 text-orange-500" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">{stats.queueWaiting || 0}</div>
+            <p className="text-xs text-gray-500">In waiting area</p>
           </CardContent>
         </Card>
 
@@ -140,8 +159,19 @@ export default function DashboardModule() {
         </Card>
       </div>
 
-      {/* Secondary Stats */}
+      {/* Secondary Stats — every card is clickable and navigates to its module */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+        <Card className="cursor-pointer hover:shadow-lg hover:border-cyan-300 transition-all" onClick={() => navigate(`${base}/laboratory`)}>
+          <CardHeader className="flex flex-row items-center justify-between pb-2">
+            <CardTitle className="text-sm font-medium text-gray-600">Pending Lab Orders</CardTitle>
+            <FlaskConical className="h-5 w-5 text-cyan-600" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">{stats.pendingLabOrders || 0}</div>
+            <Progress value={Math.min(100, (stats.pendingLabOrders || 0) * 10)} className="mt-2 h-2" />
+          </CardContent>
+        </Card>
+
         <Card className="cursor-pointer hover:shadow-lg hover:border-pink-300 transition-all" onClick={() => navigate(`${base}/pharmacy`)}>
           <CardHeader className="flex flex-row items-center justify-between pb-2">
             <CardTitle className="text-sm font-medium text-gray-600">Pending Prescriptions</CardTitle>
@@ -149,7 +179,25 @@ export default function DashboardModule() {
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">{stats.pendingPrescriptions || 0}</div>
-            <Progress value={72} className="mt-2 h-2" />
+            <Progress value={Math.min(100, (stats.pendingPrescriptions || 0) * 10)} className="mt-2 h-2" />
+          </CardContent>
+        </Card>
+
+        <Card className="cursor-pointer hover:shadow-lg hover:border-indigo-300 transition-all" onClick={() => navigate(`${base}/inpatient`)}>
+          <CardHeader className="flex flex-row items-center justify-between pb-2">
+            <CardTitle className="text-sm font-medium text-gray-600">Bed Occupancy</CardTitle>
+            <BedDouble className="h-5 w-5 text-indigo-600" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">
+              {(stats.occupiedBeds || 0)}/{((stats.occupiedBeds || 0) + (stats.availableBeds || 0)) || 0}
+            </div>
+            <Progress
+              value={((stats.occupiedBeds || 0) + (stats.availableBeds || 0)) > 0
+                ? ((stats.occupiedBeds || 0) / ((stats.occupiedBeds || 0) + (stats.availableBeds || 0))) * 100
+                : 0}
+              className="mt-2 h-2"
+            />
           </CardContent>
         </Card>
 
