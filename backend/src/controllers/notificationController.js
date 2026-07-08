@@ -99,17 +99,24 @@ export async function sendPrescriptionNotification(req, res) {
 
     // Send pharmacy purchase prompt and start bot session
     const total = enriched.reduce((s, m) => s + (m.unitPrice || 0) * (m.quantity || 1), 0) + (consultationFee || 0)
+    // Fire-and-forget after the response. MUST be wrapped: an unhandled rejection
+    // in a detached setTimeout (e.g. WhatsApp/Twilio down) can crash the whole
+    // Node process — taking the API down for every user. Log + swallow instead.
     setTimeout(async () => {
-      await whatsapp.sendMessage(phone,
-        `💊 *Would you like to purchase these medicines from our pharmacy?*\n\nReply *YES* to order now\nReply *NO* to skip`)
-      await startPharmacySession(phone, {
-        prescriptionId:  prescription.id,
-        consultationId:  prescription.consultationId,
-        patientId:       prescription.patient?.id,
-        patientName:     patName,
-        items:           enriched,
-        total,
-      })
+      try {
+        await whatsapp.sendMessage(phone,
+          `💊 *Would you like to purchase these medicines from our pharmacy?*\n\nReply *YES* to order now\nReply *NO* to skip`)
+        await startPharmacySession(phone, {
+          prescriptionId:  prescription.id,
+          consultationId:  prescription.consultationId,
+          patientId:       prescription.patient?.id,
+          patientName:     patName,
+          items:           enriched,
+          total,
+        })
+      } catch (e) {
+        console.error('[notifications] pharmacy-prompt background task failed:', e?.message)
+      }
     }, 2000)
 
     return res.json({ success: true, ...result, message, enrichedItems: enriched })
