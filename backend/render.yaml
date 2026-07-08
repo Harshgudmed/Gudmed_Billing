@@ -2,7 +2,11 @@ services:
   - type: web
     name: gudmed-api
     env: node
-    buildCommand: npm install && npx prisma generate && npx prisma db push --skip-generate && node scripts/ensure-ipd-indexes.mjs && node prisma/seed.js
+    # Prisma MIGRATIONS (not db push). The first deploy baselines the existing
+    # db-push'd database by marking 0_init as already-applied (|| true so a
+    # re-run is harmless), then `migrate deploy` applies any new migrations.
+    # Verified locally against both a fresh DB and a simulated pre-migration prod.
+    buildCommand: npm install && npx prisma generate && (npx prisma migrate resolve --applied 0_init 2>/dev/null || true) && npx prisma migrate deploy && node scripts/ensure-ipd-indexes.mjs && node prisma/seed.js
     startCommand: node server.js
     envVars:
       - key: NODE_ENV
