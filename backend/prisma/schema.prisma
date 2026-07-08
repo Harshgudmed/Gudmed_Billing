@@ -1080,6 +1080,12 @@ model Payment {
   // Notes
   notes String?
 
+  // Idempotency: a client-supplied token that makes a payment POST safe to retry —
+  // a duplicate submit with the same key returns the existing payment instead of
+  // charging twice. Nullable so old/other-path payments are unaffected (Postgres
+  // allows many NULLs under a unique index).
+  idempotencyKey String?
+
   createdAt   DateTime @default(now())
   createdById String?
 
@@ -1088,6 +1094,7 @@ model Payment {
   patient      Patient?     @relation(fields: [patientId], references: [id])
   processedBy  User?        @relation("PaymentsProcessed", fields: [processedById], references: [id])
 
+  @@unique([organizationId, idempotencyKey])
   @@index([organizationId])
   @@index([invoiceId])
   @@index([patientId])

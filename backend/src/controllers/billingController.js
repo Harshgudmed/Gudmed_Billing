@@ -51,6 +51,8 @@ const paymentSchema = z.object({
   bankName: z.string().optional(),
   chequeNumber: z.string().optional(),
   notes: z.string().optional(),
+  // Optional client token so a retried/double-clicked submit is charged once.
+  idempotencyKey: z.string().min(1).optional(),
 })
 
 // Refund / Credit Note. A refund is a Payment row with isRefund:true. Using
@@ -450,7 +452,18 @@ export async function create(req, res) {
         bankName,
         chequeNumber,
         notes,
+        idempotencyKey,
       } = parsed.data
+
+      // IDEMPOTENCY: if this exact submit was already recorded (same client token),
+      // return that payment instead of charging again. Prevents double-charge on a
+      // double-click / network retry, even across tabs or lost responses.
+      if (idempotencyKey) {
+        const existing = await db.payment.findFirst({
+          where: { organizationId: ORGANIZATION_ID, idempotencyKey },
+        })
+        if (existing) return res.status(200).json({ success: true, data: existing, idempotent: true })
+      }
 
       const receiptNumber = 'RCP' + Date.now()
 
@@ -486,6 +499,7 @@ export async function create(req, res) {
             chequeNumber: chequeNumber || null,
             notes: notes || null,
             receiptNumber,
+            idempotencyKey: idempotencyKey || null,
             paymentDate: new Date(),
             isRefund: false,
           },
