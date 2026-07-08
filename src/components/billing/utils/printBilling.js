@@ -79,69 +79,89 @@ export function printInvoice(bill, orgInfo, clinic) {
   
   const itemRows = (bill.items || []).map((it, i) => `
     <tr>
-      <td style="padding:6px 10px;border-bottom:1px solid #eee">${i + 1}</td>
-      <td style="padding:6px 10px;border-bottom:1px solid #eee">${it.name}${it.sub ? `<br/><span style="font-size:9pt;color:#888">${it.sub}</span>` : ''}</td>
-      <td style="padding:6px 10px;border-bottom:1px solid #eee;text-align:center">${it.qty}</td>
-      <td style="padding:6px 10px;border-bottom:1px solid #eee;text-align:right">₹${Number(it.amt).toLocaleString('en-IN')}</td>
-      <td style="padding:6px 10px;border-bottom:1px solid #eee;text-align:right;font-weight:600">₹${(it.qty * it.amt).toLocaleString('en-IN')}</td>
+      <td style="padding:6px 8px;border-bottom:1px solid #eee;font-size:8.5pt">${i + 1}</td>
+      <td style="padding:6px 8px;border-bottom:1px solid #eee;font-family:monospace;color:#0b5cab;font-weight:bold">${esc(it.code || it.name.substring(0,4).toUpperCase())}</td>
+      <td style="padding:6px 8px;border-bottom:1px solid #eee;font-size:8.5pt"><strong>${esc(it.name)}</strong>${it.sub ? `<br/><span style="font-size:8pt;color:#888">${esc(it.sub)}</span>` : ''}</td>
+      <td style="padding:6px 8px;border-bottom:1px solid #eee;font-size:8.5pt">${esc(bill.date)}</td>
+      <td style="padding:6px 8px;border-bottom:1px solid #eee;text-align:right;font-size:8.5pt;font-weight:bold">${inr(it.qty * it.amt)}</td>
     </tr>`).join('')
   
   const calcSubtotal = bill.subtotal || (bill.items || []).reduce((a, i) => a + i.qty * i.amt, 0)
 
-  const html = `<!DOCTYPE html><html><head><title>Invoice ${bill.invoiceNo}</title>
-<style>*{box-sizing:border-box;margin:0;padding:0}body{font-family:'Segoe UI',Arial,sans-serif;font-size:11pt;color:#222;padding:30px}
-.header{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:3px solid #1e3a5f;padding-bottom:12px;margin-bottom:16px}
-.hosp-name{font-size:18pt;font-weight:700;color:#1e3a5f}.hosp-sub{font-size:9pt;color:#555;margin-top:3px}
-.banner{background:#1e3a5f;color:#fff;text-align:center;padding:6px;font-size:13pt;font-weight:700;letter-spacing:2px;margin-bottom:14px}
-.patient-box{background:#f0f4f8;border:1px solid #ddd;border-radius:4px;padding:10px 14px;margin-bottom:14px;display:flex;gap:24px;flex-wrap:wrap}
-.patient-field label{font-size:8pt;color:#666;font-weight:700;text-transform:uppercase;display:block}
-.patient-field span{font-size:11pt;font-weight:600}
-table{width:100%;border-collapse:collapse;margin-bottom:12px}
-thead th{background:#1e3a5f;color:#fff;padding:7px 10px;text-align:left;font-size:9.5pt}
-.total-wrap{display:flex;justify-content:flex-end;margin-bottom:12px}
-.total-box{border:2px solid #1e3a5f;border-radius:4px;overflow:hidden;width:260px}
-.total-row{display:flex;justify-content:space-between;padding:6px 12px;border-bottom:1px solid #eee;font-size:10.5pt}
-.total-final{background:#1e3a5f;color:#fff;font-weight:700;font-size:12pt;border-bottom:none}
-.status-badge{display:inline-block;padding:2px 12px;border-radius:20px;font-size:10pt;font-weight:700}
-.footer{border-top:1px solid #ccc;padding-top:8px;margin-top:14px;font-size:8pt;color:#888;text-align:center}
+  let paymentList = [...(bill.payments || [])].sort((a, b) => new Date(b.paymentDate || b.date || new Date()) - new Date(a.paymentDate || a.date || new Date()))
+  if (paymentList.length === 0 && Number(bill.amountPaid || 0) > 0) {
+    paymentList = [{
+      receiptNo: bill.invoiceNo,
+      date: bill.date,
+      invoiceNo: bill.invoiceNo,
+      amount: bill.amountPaid,
+      mode: bill.mode || 'cash'
+    }]
+  }
+
+  const mrn = bill.uhid || 'NA'
+  
+  const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Invoice ${bill.invoiceNo}</title><style>
+*{box-sizing:border-box;margin:0;padding:0}body{font-family:Arial,Helvetica,sans-serif;font-size:9pt;color:#000;background:#f3f4f6;padding:20px}
+.page{max-width:200mm;margin:0 auto;background:#fff;padding:22px;box-shadow:0 1px 8px rgba(0,0,0,.1)}
+.top{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px}
+.brand-box { display:flex; align-items:center; gap: 12px; }
+.brand{font-size:16pt;font-weight:bold;color:#1a3e6f}
+.reg{font-size:7.5pt;color:#333;line-height:1.6;margin-top:4px}.reg b{display:inline-block;min-width:70px}
+.labnum{font-size:13pt;font-weight:bold;letter-spacing:3px;text-align:right;margin-top:2px}
+.title{text-align:center;font-weight:bold;font-size:12pt;margin:8px 0 1px;background:#f0f4f8;padding:8px;border:1px solid #d0e0f0;border-radius:4px;color:#1a3e6f;}
+.subtitle{text-align:center;font-size:8pt;color:#666;margin-bottom:8px}
+.grid{border:1px solid #d0e0f0;background:#f8fafc;display:grid;grid-template-columns:1fr 1fr;margin-bottom:12px;border-radius:4px;overflow:hidden;}
+.cell{display:flex;padding:6px 12px;border-bottom:1px solid #d0e0f0;font-size:8.5pt}.cell:nth-child(odd){border-right:1px solid #d0e0f0}.cell .l{color:#666;min-width:130px}.cell .v{flex:1;font-weight:bold;color:#1a3e6f}
+table{width:100%;border-collapse:collapse;margin-bottom:6px;border:1px solid #d0e0f0}
+thead th{background:#eef2f7;border-bottom:1px solid #d0e0f0;padding:8px;text-align:left;font-size:8.5pt;color:#1a3e6f;text-transform:uppercase}thead th:last-child{text-align:right}
+tbody td{padding:6px 8px;border-bottom:1px solid #eee;font-size:8.5pt}
+.totwrap{display:flex;justify-content:space-between;margin-bottom:10px;margin-top:10px}.totals{width:280px;border:1px solid #d0e0f0;border-radius:4px;overflow:hidden;}
+.trow{display:flex;justify-content:space-between;padding:6px 12px;font-size:9pt;color:#555}.trow.b{font-weight:bold;border-top:1px solid #d0e0f0;background:#f8fafc;color:#1a3e6f}.trow.net{font-weight:bold;font-size:10.5pt;color:#1a3e6f;padding:8px 12px;background:#eef2f7}
+.note{border:1px solid #eee;background:#fdfdfd;padding:10px;font-size:7.5pt;color:#666;line-height:1.6;margin-top:6px;border-radius:4px;}
+.foot{text-align:center;font-size:7.5pt;color:#888;margin-top:12px}
 ${PAYMENT_TABLE_CSS}
-@media print{body{padding:10px}}</style></head><body>
-<div class="header">
+@media print{body{padding:0;background:#fff}.page{box-shadow:none}}</style></head><body><div class="page">
+<div class="top">
+  <div class="brand-box">
+    ${orgInfo.logoUrl ? `<img src="${orgInfo.logoUrl}" alt="" style="height:46px;object-fit:contain"/>` : ''}
+    <div>
+      <div class="brand">${esc(orgInfo.name || clinic.clinicName)}</div>
+      <div class="reg">
+        <div><b>Address</b> ${esc(clinic.address || '')}</div>
+        <div><b>Phone</b> ${esc(clinic.phone || '')}</div>
+        ${clinic.email ? `<div><b>Email</b> ${esc(clinic.email)}</div>` : ''}
+      </div>
+    </div>
+  </div>
   <div>
-    ${orgInfo.logoUrl ? `<img src="${orgInfo.logoUrl}" alt="" style="height:46px;max-width:170px;object-fit:contain;margin-bottom:6px"/>` : ''}
-    <div class="hosp-name">${orgInfo.name || clinic.clinicName}</div>
-    <div class="hosp-sub">${clinic.address || ''}${clinic.phone ? ' · Ph: ' + clinic.phone : ''}</div>
-    ${clinic.regNo ? `<div class="hosp-sub">Reg: ${clinic.regNo}${clinic.gstNo ? ' · GST: ' + clinic.gstNo : ''}</div>` : ''}
-  </div>
-  <div style="text-align:right">
-    <div style="font-size:10pt;color:#555">Invoice #: <strong>${bill.invoiceNo}</strong></div>
-    <div style="font-size:9pt;color:#555">Date: ${bill.date}</div>
-    <span class="status-badge" style="background:${bill.paid ? '#d1fae5' : '#fef3c7'};color:${bill.paid ? '#065f46' : '#92400e'};border:1px solid ${bill.paid ? '#6ee7b7' : '#fde68a'};margin-top:6px;display:inline-block">${bill.paid ? 'PAID' : 'PENDING'}</span>
+    <svg xmlns="http://www.w3.org/2000/svg" width="220" height="44" viewBox="0 0 336.00 44" preserveAspectRatio="none" fill="#000" style="display:block;margin-left:auto;max-width:250px;height:44px"><rect x="0.00" y="0" width="1.50" height="44"/><rect x="6.00" y="0" width="1.50" height="44"/><rect x="9.00" y="0" width="4.50" height="44"/><rect x="15.00" y="0" width="4.50" height="44"/><rect x="21.00" y="0" width="1.50" height="44"/><rect x="24.00" y="0" width="4.50" height="44"/><rect x="30.00" y="0" width="1.50" height="44"/><rect x="33.00" y="0" width="1.50" height="44"/><rect x="39.00" y="0" width="1.50" height="44"/><rect x="42.00" y="0" width="4.50" height="44"/><rect x="48.00" y="0" width="4.50" height="44"/><rect x="54.00" y="0" width="4.50" height="44"/><rect x="60.00" y="0" width="1.50" height="44"/><rect x="66.00" y="0" width="1.50" height="44"/><rect x="69.00" y="0" width="1.50" height="44"/><rect x="72.00" y="0" width="4.50" height="44"/><rect x="78.00" y="0" width="4.50" height="44"/><rect x="84.00" y="0" width="1.50" height="44"/><rect x="90.00" y="0" width="1.50" height="44"/><rect x="93.00" y="0" width="1.50" height="44"/><rect x="96.00" y="0" width="1.50" height="44"/><rect x="102.00" y="0" width="1.50" height="44"/><rect x="105.00" y="0" width="1.50" height="44"/><rect x="108.00" y="0" width="4.50" height="44"/><rect x="114.00" y="0" width="4.50" height="44"/><rect x="120.00" y="0" width="1.50" height="44"/><rect x="123.00" y="0" width="1.50" height="44"/><rect x="126.00" y="0" width="4.50" height="44"/><rect x="135.00" y="0" width="1.50" height="44"/><rect x="138.00" y="0" width="4.50" height="44"/><rect x="144.00" y="0" width="4.50" height="44"/><rect x="150.00" y="0" width="1.50" height="44"/><rect x="153.00" y="0" width="4.50" height="44"/><rect x="162.00" y="0" width="1.50" height="44"/><rect x="165.00" y="0" width="1.50" height="44"/><rect x="168.00" y="0" width="4.50" height="44"/><rect x="174.00" y="0" width="4.50" height="44"/><rect x="180.00" y="0" width="1.50" height="44"/><rect x="183.00" y="0" width="1.50" height="44"/><rect x="189.00" y="0" width="1.50" height="44"/><rect x="192.00" y="0" width="4.50" height="44"/><rect x="198.00" y="0" width="1.50" height="44"/><rect x="201.00" y="0" width="4.50" height="44"/><rect x="207.00" y="0" width="1.50" height="44"/><rect x="213.00" y="0" width="1.50" height="44"/><rect x="216.00" y="0" width="1.50" height="44"/><rect x="222.00" y="0" width="1.50" height="44"/><rect x="225.00" y="0" width="1.50" height="44"/><rect x="228.00" y="0" width="4.50" height="44"/><rect x="234.00" y="0" width="4.50" height="44"/><rect x="240.00" y="0" width="4.50" height="44"/><rect x="246.00" y="0" width="1.50" height="44"/><rect x="249.00" y="0" width="1.50" height="44"/><rect x="255.00" y="0" width="4.50" height="44"/><rect x="261.00" y="0" width="1.50" height="44"/><rect x="264.00" y="0" width="1.50" height="44"/><rect x="267.00" y="0" width="4.50" height="44"/><rect x="273.00" y="0" width="1.50" height="44"/><rect x="276.00" y="0" width="1.50" height="44"/><rect x="282.00" y="0" width="4.50" height="44"/><rect x="288.00" y="0" width="1.50" height="44"/><rect x="291.00" y="0" width="1.50" height="44"/><rect x="297.00" y="0" width="1.50" height="44"/><rect x="300.00" y="0" width="4.50" height="44"/><rect x="306.00" y="0" width="4.50" height="44"/><rect x="312.00" y="0" width="1.50" height="44"/><rect x="318.00" y="0" width="1.50" height="44"/><rect x="321.00" y="0" width="4.50" height="44"/><rect x="327.00" y="0" width="4.50" height="44"/><rect x="333.00" y="0" width="1.50" height="44"/></svg>
+    <div class="labnum">${esc(mrn)}</div>
   </div>
 </div>
-<div class="banner">${(bill.department ? bill.department.toUpperCase() + ' ' : '')}INVOICE</div>
-<div class="patient-box">
-  <div class="patient-field"><label>Patient</label><span>${bill.patientName}</span></div>
-  ${bill.phone ? `<div class="patient-field"><label>Phone</label><span>${bill.phone}</span></div>` : ''}
-  ${bill.uhid ? `<div class="patient-field"><label>UHID</label><span>${bill.uhid}</span></div>` : ''}
-  ${bill.age ? `<div class="patient-field"><label>Age</label><span>${bill.age} yrs</span></div>` : ''}
+<div class="title">Bill Of Supply / Cash Receipt</div>
+<div class="subtitle">(PLEASE BRING THIS RECEIPT FOR REPORT COLLECTION)</div>
+<div class="grid">
+<div class="cell"><span class="l">Invoice Number</span><span class="v">${esc(bill.invoiceNo)}</span></div><div class="cell"><span class="l">Patient ID / UHID</span><span class="v">${esc(mrn)}</span></div>
+<div class="cell"><span class="l">Lab ID</span><span class="v">${esc(mrn)}</span></div><div class="cell"><span class="l">Patient Name</span><span class="v">${esc(bill.patientName)}</span></div>
+<div class="cell"><span class="l">Date &amp; Time</span><span class="v">${esc(bill.date)}</span></div><div class="cell"><span class="l">Contact Number</span><span class="v">${esc(bill.phone || 'NA')}</span></div>
+<div class="cell"><span class="l">Reference Doctor</span><span class="v">${esc(bill.doctorName || 'self')}</span></div><div class="cell"><span class="l">GST No</span><span class="v">${esc(clinic.gstNo || 'NA')}</span></div>
+<div class="cell"><span class="l">Mode of Payment</span><span class="v">${esc(bill.mode || 'Cash')}</span></div><div class="cell"><span class="l"></span><span class="v"></span></div>
 </div>
-<table>
-  <thead><tr><th>#</th><th>Description</th><th style="text-align:center">Qty</th><th style="text-align:right">Rate</th><th style="text-align:right">Amount</th></tr></thead>
-  <tbody>${itemRows}</tbody>
-</table>
-<div class="total-wrap"><div class="total-box">
-  <div class="total-row"><span>Subtotal</span><span>₹${Number(calcSubtotal).toLocaleString('en-IN')}</span></div>
-  ${(bill.discountAmt || 0) > 0 ? `<div class="total-row" style="color:#16a34a"><span>Discount (${bill.discount}%)</span><span>-₹${Number(bill.discountAmt).toLocaleString('en-IN')}</span></div>` : ''}
-  ${(bill.homeCollectionCharge || 0) > 0 ? `<div class="total-row"><span>Home Collection</span><span>₹${Number(bill.homeCollectionCharge).toLocaleString('en-IN')}</span></div>` : ''}
-  <div class="total-row total-final"><span>NET PAYABLE</span><span>₹${Number(bill.total).toLocaleString('en-IN')}</span></div>
-  ${bill.amountPaid !== undefined ? `<div class="total-row" style="color:#065f46"><span>Amount Paid</span><span>₹${Number(bill.amountPaid || 0).toLocaleString('en-IN')}</span></div>` : ''}
-  ${bill.balanceDue !== undefined ? `<div class="total-row" style="${(bill.balanceDue || 0) > 0 ? 'color:#b91c1c' : 'color:#065f46'}"><span>Balance Due</span><span>₹${Number(bill.balanceDue || 0).toLocaleString('en-IN')}</span></div>` : ''}
+<table><thead><tr><th style="width:34px">S.NO.</th><th style="width:110px">TEST CODE</th><th>TEST NAME</th><th style="width:130px">ESTIMATE OF REPORT BY</th><th style="width:80px;text-align:right">PRICE</th></tr></thead>
+<tbody>${itemRows}</tbody></table>
+<div class="totwrap"><div style="font-size:8.5pt;padding-top:4px">Amount Paid In Words : <b>${esc(amountInWords(Number(bill.amountPaid || 0)))} Only</b></div>
+<div class="totals">
+<div class="trow"><span>Order Value</span><span>${inr(calcSubtotal)}</span></div>
+<div class="trow b"><span>Total Order Value</span><span>${inr(calcSubtotal)}</span></div>
+<div class="trow net"><span>Net Payable Amount</span><span>${inr(bill.total)}</span></div>
+<div class="trow"><span>Paid Amount</span><span>${inr(bill.amountPaid)}</span></div>
+<div class="trow" style="color:#b91c1c"><span>Balance Amount</span><span>${inr(bill.balanceDue)}</span></div>
 </div></div>
-${renderPaymentTable(bill.payments, { force: true })}
-${bill.notes ? `<div style="background:#f8fafc;border:1px solid #eee;border-radius:4px;padding:8px 12px;font-size:10pt;margin-bottom:12px">Notes: ${bill.notes}</div>` : ''}
-<div class="footer">${orgInfo.name || clinic.clinicName} · Computer-generated invoice · gudmed.in</div>
-</body></html>`
+${renderPaymentTable(paymentList, { force: true })}
+<div class="note">This is a computer generated receipt and does not require signature/stamp.<br/><b>*${esc(orgInfo.name || clinic.clinicName)} is exempt from GST being a health care services provider.</b></div>
+<div class="foot">Printed: ${format(new Date(), 'dd-MM-yyyy HH:mm:ss')}</div>
+</div></body></html>`
   win.document.open()
   win.document.write(html)
   win.document.close()
@@ -150,134 +170,118 @@ ${bill.notes ? `<div style="background:#f8fafc;border:1px solid #eee;border-radi
 }
 
 export function printReceipt(p, orgInfo, clinic) {
-  const win = window.open('', '_blank', 'width=480,height=680')
+  const win = window.open('', '_blank', 'width=900,height=780')
   if (!win) { toast.error('Allow pop-ups to print'); return }
 
-  const patientName = p.invoice?.patient
-    ? `${p.invoice.patient.firstName} ${p.invoice.patient.lastName}`
-    : (p.patient ? `${p.patient.firstName} ${p.patient.lastName}` : 'Patient')
-  const mrn     = p.invoice?.patient?.mrn || p.patient?.mrn || ''
+  const patientName = p.invoice?.patientName || (p.invoice?.patient ? `${p.invoice.patient.firstName} ${p.invoice.patient.lastName}` : (p.patient ? `${p.patient.firstName} ${p.patient.lastName}` : 'Patient'))
+  const mrn     = p.invoice?.uhid || p.invoice?.patient?.mrn || p.patient?.mrn || ''
   const rxDate  = p.paymentDate ? format(new Date(p.paymentDate), 'dd MMM yyyy, hh:mm aa') : format(new Date(), 'dd MMM yyyy, hh:mm aa')
-  const invNo   = p.invoice?.invoiceNumber || '—'
-  const hospName  = orgInfo.name   || clinic.clinicName || 'Hospital'
-  const hospAddr  = clinic.address || orgInfo.address   || ''
-  const hospPhone = clinic.phone   || orgInfo.phone     || ''
-  const hospEmail = orgInfo.email  || ''
-  const regNo     = clinic.regNo   || ''
-  const upi       = clinic.upiId   || ''
+  const invNo   = p.invoice?.invoiceNo || p.invoice?.invoiceNumber || '—'
 
-  const html = `<!DOCTYPE html>
-<html><head><title>Receipt ${p.receiptNumber}</title>
-<style>
-* { box-sizing: border-box; margin: 0; padding: 0; }
-body { font-family: 'Courier New', monospace; font-size: 11pt; color: #111; background: #fff; padding: 0; }
-.page { max-width: 360px; margin: 0 auto; padding: 18px 20px; }
+  // Calculate historical state at the time of this specific payment
+  const receiptDate = new Date(p.paymentDate || p.date || new Date());
+  const allPayments = p.invoice?.payments || [];
+  const sortedPayments = [...allPayments].sort((a, b) => new Date(a.paymentDate || a.date) - new Date(b.paymentDate || b.date));
+  
+  // Include payments made ON OR BEFORE this receipt
+  const historicalPayments = sortedPayments.filter(hist => new Date(hist.paymentDate || hist.date) <= receiptDate);
+  
+  let historicalAmountPaid = 0;
+  historicalPayments.forEach(hist => {
+    if (hist.isRefund) historicalAmountPaid -= hist.amount;
+    else historicalAmountPaid += hist.amount;
+  });
 
-/* Header */
-.hosp-name { font-size: 16pt; font-weight: 700; text-align: center; text-transform: uppercase; letter-spacing: 1px; }
-.hosp-sub  { font-size: 8.5pt; text-align: center; color: #444; margin-top: 2px; line-height: 1.5; }
-.divider   { border: none; border-top: 1px dashed #666; margin: 8px 0; }
-.divider-solid { border: none; border-top: 2px solid #111; margin: 8px 0; }
+  const totalInvoiceValue = p.invoice?.total || p.invoice?.totalAmount || 0;
+  const historicalBalanceDue = totalInvoiceValue - historicalAmountPaid;
 
-/* Title */
-.receipt-title { text-align: center; font-size: 13pt; font-weight: 700; letter-spacing: 3px; margin: 6px 0; }
-
-/* Info rows */
-.row { display: flex; justify-content: space-between; font-size: 9.5pt; margin: 3px 0; }
-.row .lbl { color: #555; }
-.row .val { font-weight: 600; text-align: right; }
-
-/* Amount box */
-.amount-box { background: #111; color: #fff; text-align: center; padding: 10px 0; margin: 10px 0; border-radius: 2px; }
-.amount-box .amt-label { font-size: 8pt; letter-spacing: 2px; text-transform: uppercase; opacity: 0.7; }
-.amount-box .amt-value { font-size: 22pt; font-weight: 700; }
-
-/* Method */
-.method-badge { display: inline-block; background: #e8f5e9; color: #1b5e20; border: 1px solid #a5d6a7; padding: 3px 12px; border-radius: 20px; font-size: 9pt; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; }
-
-/* Footer */
-.footer { text-align: center; font-size: 8pt; color: #666; margin-top: 10px; line-height: 1.6; }
-.thank-you { text-align: center; font-size: 11pt; font-weight: 700; margin: 8px 0 4px; }
-
-@media print {
-  body { padding: 0; }
-  .page { max-width: 100%; padding: 10px 14px; }
-  button { display: none; }
-}
-</style>
-</head><body>
-<div class="page">
-
-<!-- Hospital Header -->
-${orgInfo.logoUrl ? `<img src="${orgInfo.logoUrl}" alt="" style="display:block;margin:0 auto 6px;height:48px;max-width:70%;object-fit:contain"/>` : ''}
-<div class="hosp-name">${hospName}</div>
-<div class="hosp-sub">
-  ${hospAddr ? hospAddr + '<br/>' : ''}
-  ${hospPhone ? 'Ph: ' + hospPhone : ''}${hospEmail ? ' | ' + hospEmail : ''}
-  ${regNo ? '<br/>Reg. No: ' + regNo : ''}
+  const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Receipt ${p.receiptNumber}</title><style>
+*{box-sizing:border-box;margin:0;padding:0}body{font-family:Arial,Helvetica,sans-serif;font-size:9pt;color:#000;background:#f3f4f6;padding:20px}
+.page{max-width:200mm;margin:0 auto;background:#fff;padding:22px;box-shadow:0 1px 8px rgba(0,0,0,.1)}
+.top{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px}
+.brand-box { display:flex; align-items:center; gap: 12px; }
+.brand{font-size:16pt;font-weight:bold;color:#1a3e6f}
+.reg{font-size:7.5pt;color:#333;line-height:1.6;margin-top:4px}.reg b{display:inline-block;min-width:70px}
+.labnum{font-size:13pt;font-weight:bold;letter-spacing:3px;text-align:right;margin-top:2px}
+.title{text-align:center;font-weight:bold;font-size:12pt;margin:8px 0 1px;background:#f0f4f8;padding:8px;border:1px solid #d0e0f0;border-radius:4px;color:#1a3e6f;text-transform:uppercase}
+.grid{border:1px solid #d0e0f0;background:#f8fafc;display:grid;grid-template-columns:1fr 1fr;margin-bottom:12px;border-radius:4px;overflow:hidden;}
+.cell{display:flex;padding:6px 12px;border-bottom:1px solid #d0e0f0;font-size:8.5pt}.cell:nth-child(odd){border-right:1px solid #d0e0f0}.cell .l{color:#666;min-width:130px}.cell .v{flex:1;font-weight:bold;color:#1a3e6f}
+.totwrap{display:flex;justify-content:space-between;margin-bottom:10px}.totals{width:320px;border:1px solid #d0e0f0;border-radius:4px;overflow:hidden;}
+.trow{display:flex;justify-content:space-between;padding:8px 12px;font-size:9pt;color:#555}.trow.b{font-weight:bold;border-top:1px solid #d0e0f0;background:#f8fafc;color:#1a3e6f}.trow.net{font-weight:bold;font-size:11pt;color:#065f46;padding:12px;background:#ecfdf5}
+.note{border:1px solid #eee;background:#fdfdfd;padding:10px;font-size:7.5pt;color:#666;line-height:1.6;margin-top:6px;border-radius:4px;}
+.foot{text-align:center;font-size:7.5pt;color:#888;margin-top:12px}
+@media print{body{padding:0;background:#fff}.page{box-shadow:none}}</style></head><body><div class="page">
+<div class="top">
+  <div class="brand-box">
+    ${orgInfo.logoUrl ? `<img src="${orgInfo.logoUrl}" alt="" style="height:46px;object-fit:contain"/>` : ''}
+    <div>
+      <div class="brand">${esc(orgInfo.name || clinic.clinicName)}</div>
+      <div class="reg">
+        <div><b>Address</b> ${esc(clinic.address || '')}</div>
+        <div><b>Phone</b> ${esc(clinic.phone || '')}</div>
+        ${clinic.email ? `<div><b>Email</b> ${esc(clinic.email)}</div>` : ''}
+      </div>
+    </div>
+  </div>
+  <div>
+    <svg xmlns="http://www.w3.org/2000/svg" width="220" height="44" viewBox="0 0 336.00 44" preserveAspectRatio="none" fill="#000" style="display:block;margin-left:auto;max-width:250px;height:44px"><rect x="0.00" y="0" width="1.50" height="44"/><rect x="6.00" y="0" width="1.50" height="44"/><rect x="9.00" y="0" width="4.50" height="44"/><rect x="15.00" y="0" width="4.50" height="44"/><rect x="21.00" y="0" width="1.50" height="44"/><rect x="24.00" y="0" width="4.50" height="44"/><rect x="30.00" y="0" width="1.50" height="44"/><rect x="33.00" y="0" width="1.50" height="44"/><rect x="39.00" y="0" width="1.50" height="44"/><rect x="42.00" y="0" width="4.50" height="44"/><rect x="48.00" y="0" width="4.50" height="44"/><rect x="54.00" y="0" width="4.50" height="44"/><rect x="60.00" y="0" width="1.50" height="44"/><rect x="66.00" y="0" width="1.50" height="44"/><rect x="69.00" y="0" width="1.50" height="44"/><rect x="72.00" y="0" width="4.50" height="44"/><rect x="78.00" y="0" width="4.50" height="44"/><rect x="84.00" y="0" width="1.50" height="44"/><rect x="90.00" y="0" width="1.50" height="44"/><rect x="93.00" y="0" width="1.50" height="44"/><rect x="96.00" y="0" width="1.50" height="44"/><rect x="102.00" y="0" width="1.50" height="44"/><rect x="105.00" y="0" width="1.50" height="44"/><rect x="108.00" y="0" width="4.50" height="44"/><rect x="114.00" y="0" width="4.50" height="44"/><rect x="120.00" y="0" width="1.50" height="44"/><rect x="123.00" y="0" width="1.50" height="44"/><rect x="126.00" y="0" width="4.50" height="44"/><rect x="135.00" y="0" width="1.50" height="44"/><rect x="138.00" y="0" width="4.50" height="44"/><rect x="144.00" y="0" width="4.50" height="44"/><rect x="150.00" y="0" width="1.50" height="44"/><rect x="153.00" y="0" width="4.50" height="44"/><rect x="162.00" y="0" width="1.50" height="44"/><rect x="165.00" y="0" width="1.50" height="44"/><rect x="168.00" y="0" width="4.50" height="44"/><rect x="174.00" y="0" width="4.50" height="44"/><rect x="180.00" y="0" width="1.50" height="44"/><rect x="183.00" y="0" width="1.50" height="44"/><rect x="189.00" y="0" width="1.50" height="44"/><rect x="192.00" y="0" width="4.50" height="44"/><rect x="198.00" y="0" width="1.50" height="44"/><rect x="201.00" y="0" width="4.50" height="44"/><rect x="207.00" y="0" width="1.50" height="44"/><rect x="213.00" y="0" width="1.50" height="44"/><rect x="216.00" y="0" width="1.50" height="44"/><rect x="222.00" y="0" width="1.50" height="44"/><rect x="225.00" y="0" width="1.50" height="44"/><rect x="228.00" y="0" width="4.50" height="44"/><rect x="234.00" y="0" width="4.50" height="44"/><rect x="240.00" y="0" width="4.50" height="44"/><rect x="246.00" y="0" width="1.50" height="44"/><rect x="249.00" y="0" width="1.50" height="44"/><rect x="255.00" y="0" width="4.50" height="44"/><rect x="261.00" y="0" width="1.50" height="44"/><rect x="264.00" y="0" width="1.50" height="44"/><rect x="267.00" y="0" width="4.50" height="44"/><rect x="273.00" y="0" width="1.50" height="44"/><rect x="276.00" y="0" width="1.50" height="44"/><rect x="282.00" y="0" width="4.50" height="44"/><rect x="288.00" y="0" width="1.50" height="44"/><rect x="291.00" y="0" width="1.50" height="44"/><rect x="297.00" y="0" width="1.50" height="44"/><rect x="300.00" y="0" width="4.50" height="44"/><rect x="306.00" y="0" width="4.50" height="44"/><rect x="312.00" y="0" width="1.50" height="44"/><rect x="318.00" y="0" width="1.50" height="44"/><rect x="321.00" y="0" width="4.50" height="44"/><rect x="327.00" y="0" width="4.50" height="44"/><rect x="333.00" y="0" width="1.50" height="44"/></svg>
+    <div class="labnum">${esc(mrn || p.receiptNumber)}</div>
+  </div>
+</div>
+<div class="title">PAYMENT RECEIPT</div>
+<div class="grid">
+<div class="cell"><span class="l">Receipt No</span><span class="v">${esc(p.receiptNumber)}</span></div><div class="cell"><span class="l">Invoice No</span><span class="v">${esc(invNo)}</span></div>
+<div class="cell"><span class="l">Patient ID / UHID</span><span class="v">${esc(mrn)}</span></div><div class="cell"><span class="l">Patient Name</span><span class="v">${esc(patientName)}</span></div>
+<div class="cell"><span class="l">Date &amp; Time</span><span class="v">${esc(rxDate)}</span></div><div class="cell"><span class="l">Mode of Payment</span><span class="v">${esc(p.paymentMethod || 'Cash')}</span></div>
 </div>
 
-<hr class="divider-solid" style="margin-top:10px"/>
-
-<div class="receipt-title">PAYMENT RECEIPT</div>
-
-<hr class="divider"/>
-
-<!-- Receipt Details -->
-<div class="row"><span class="lbl">Receipt No.</span><span class="val">${p.receiptNumber}</span></div>
-<div class="row"><span class="lbl">Date & Time</span><span class="val">${rxDate}</span></div>
-<div class="row"><span class="lbl">Invoice No.</span><span class="val">${invNo}</span></div>
-
-<hr class="divider"/>
-
-<!-- Patient Details -->
-<div class="row"><span class="lbl">Patient Name</span><span class="val">${patientName}</span></div>
-${mrn ? `<div class="row"><span class="lbl">UHID / MRN</span><span class="val">${mrn}</span></div>` : ''}
-
-<hr class="divider"/>
-
-<!-- Amount -->
-<div class="amount-box">
-  <div class="amt-label">${p.isRefund ? 'Amount Refunded' : 'Amount Paid'}</div>
-  <div class="amt-value">₹${Number(p.amount).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</div>
-</div>
-
-<!-- Payment Method -->
-<div style="text-align:center; margin: 6px 0;">
-  <span class="method-badge">${p.isRefund ? 'REFUND · ' : ''}${p.paymentMethod}</span>
-</div>
-
-<hr class="divider"/>
-
-<!-- Invoice financial summary (Dr-Lal style): Order Value / Paid / Balance -->
+<div class="totwrap"><div style="font-size:8.5pt;padding-top:4px">Amount In Words : <b>${esc(amountInWords(Number(p.amount || 0)))} Only</b></div>
+<div class="totals">
+<div class="trow net" style="${p.isRefund ? 'color:#b91c1c;background:#fef2f2' : ''}"><span>${p.isRefund ? 'Amount Refunded' : 'Amount Paid'}</span><span>${inr(p.amount)}</span></div>
+</div></div>
 ${p.invoice ? `
-<div class="row"><span class="lbl">Order Value</span><span class="val">₹${Number(p.invoice.totalAmount || 0).toLocaleString('en-IN')}</span></div>
-<div class="row"><span class="lbl">Total Paid</span><span class="val">₹${Number(p.invoice.amountPaid || 0).toLocaleString('en-IN')}</span></div>
-<div class="row"><span class="lbl">Balance Due</span><span class="val" style="${(p.invoice.balanceDue || 0) > 0 ? 'color:#b91c1c' : 'color:#065f46'}">₹${Number(p.invoice.balanceDue || 0).toLocaleString('en-IN')}</span></div>
-<hr class="divider"/>` : ''}
-
-<!-- UPI / Bank info if available -->
-${upi ? `<div class="row"><span class="lbl">UPI ID</span><span class="val">${upi}</span></div>` : ''}
-${clinic.bankName ? `<div class="row"><span class="lbl">Bank</span><span class="val">${clinic.bankName}</span></div>` : ''}
-
-<hr class="divider"/>
-
-<div class="thank-you">Thank you for your payment!</div>
-<div class="footer">
-  This is a computer-generated receipt.<br/>
-  No signature required.<br/>
-  ${hospName} · gudmed.in
+<div style="margin-top:20px;border:1px solid #d0e0f0;border-radius:4px;overflow:hidden;background:#fff">
+  <div style="background:#f0f4f8;padding:8px 12px;font-weight:bold;color:#1a3e6f;border-bottom:1px solid #d0e0f0;font-size:9.5pt">Invoice Summary & Payment History</div>
+  <div style="padding:16px;display:flex;gap:30px">
+    <div style="flex:1">
+      <div style="font-size:7.5pt;color:#888;margin-bottom:8px;text-transform:uppercase;font-weight:bold;letter-spacing:0.5px">Bill Status (As of ${format(receiptDate, 'dd MMM')})</div>
+      <div style="display:flex;justify-content:space-between;margin-bottom:6px;font-size:9pt"><span style="color:#555">Order Value:</span><b>${inr(totalInvoiceValue)}</b></div>
+      <div style="display:flex;justify-content:space-between;margin-bottom:6px;font-size:9pt"><span style="color:#555">Total Paid:</span><b style="color:#065f46">${inr(historicalAmountPaid)}</b></div>
+      <div style="display:flex;justify-content:space-between;font-size:9.5pt;color:#b91c1c;margin-top:8px;padding-top:8px;border-top:1px dashed #d0e0f0"><span>Balance Due:</span><b>${inr(historicalBalanceDue)}</b></div>
+    </div>
+    <div style="flex:2;border-left:1px solid #eee;padding-left:30px">
+      <div style="font-size:7.5pt;color:#888;margin-bottom:8px;text-transform:uppercase;font-weight:bold;letter-spacing:0.5px">Payments up to this receipt</div>
+      ${historicalPayments.length > 0 ? `
+      <table style="width:100%;border-collapse:collapse;font-size:8pt">
+        <tr style="border-bottom:1px solid #eee;color:#555">
+          <th style="text-align:left;padding-bottom:6px;font-weight:bold">Date</th>
+          <th style="text-align:left;padding-bottom:6px;font-weight:bold">Receipt No</th>
+          <th style="text-align:left;padding-bottom:6px;font-weight:bold">Mode</th>
+          <th style="text-align:right;padding-bottom:6px;font-weight:bold">Amount</th>
+        </tr>
+        ${historicalPayments.slice(0, 5).map(hist => `
+          <tr style="border-bottom:1px dashed #eee;${hist.receiptNumber === p.receiptNumber ? 'background:#f0f7ff' : ''}">
+            <td style="padding:6px 0;color:#555">${format(new Date(hist.paymentDate || hist.date || new Date()), 'dd MMM yyyy')}</td>
+            <td style="padding:6px 0;font-family:monospace;color:#333">${hist.receiptNumber === p.receiptNumber ? '<b>' + (hist.receiptNumber || hist.receiptNo) + '</b> (This)' : (hist.receiptNumber || hist.receiptNo || '—')}</td>
+            <td style="padding:6px 0;color:#555">${hist.paymentMethod || hist.method || hist.payMode || 'Cash'}</td>
+            <td style="padding:6px 0;text-align:right;font-weight:bold;${hist.isRefund ? 'color:#b91c1c' : 'color:#065f46'}">${hist.isRefund ? '-' : ''}${inr(hist.amount)}</td>
+          </tr>
+        `).join('')}
+        ${historicalPayments.length > 5 ? `<tr><td colspan="4" style="padding-top:6px;font-size:7.5pt;color:#888;text-align:center">...and ${historicalPayments.length - 5} more</td></tr>` : ''}
+      </table>
+      ` : '<div style="font-size:8pt;color:#888;padding-top:4px">No previous payment history available.</div>'}
+    </div>
+  </div>
 </div>
-
-<hr class="divider" style="margin-top:14px"/>
-</div>
-
-<script>window.onload = function() { window.print() }<\/script>
-</body></html>`
-
+` : ''}
+<div class="note">This is a computer generated receipt and does not require signature/stamp.<br/><b>*${esc(orgInfo.name || clinic.clinicName)} is exempt from GST being a health care services provider.</b></div>
+<div class="foot">Printed: ${format(new Date(), 'dd-MM-yyyy HH:mm:ss')}</div>
+</div></body></html>`
   win.document.open()
   win.document.write(html)
   win.document.close()
+  win.focus()
+  setTimeout(() => win.print(), 500)
 }
 
 // ── Amount → words (Indian numbering) ───────────────────────────────────────────
@@ -375,6 +379,17 @@ function printDiagnosticReceipt(r, orgInfo = {}, clinic = {}, dept = LAB_DEPT) {
   const disc = Number(r.discount || 0)
   const net = r.netPayable !== undefined ? Number(r.netPayable) : orderValue + home - disc
   const paid = Number(r.paid || 0), bal = r.balance !== undefined ? Number(r.balance) : net - paid
+
+  let paymentList = r.payments || [];
+  if (paymentList.length === 0 && paid > 0) {
+    paymentList = [{
+      receiptNo: r.invoiceNo || r.labId,
+      date: r.dateTime,
+      invoiceNo: r.invoiceNo || r.labId,
+      amount: paid,
+      mode: r.mode || 'cash'
+    }];
+  }
 
   // Build ONE clean address line. The Address field often already contains the
   // city/state, so only append city/region if they aren't already present
@@ -509,7 +524,7 @@ ${PAYMENT_TABLE_CSS}
     <div class="trow" style="color:${bal > 0 ? '#b91c1c' : '#065f46'}"><span>Balance Amount</span><span>${inr(bal)}</span></div>
   </div>
 </div>
-${renderPaymentTable(r.payments, { force: true })}
+${renderPaymentTable(paymentList, { force: true })}
 <div class="note">
   This is a computer generated receipt and does not require signature/stamp.<br/>
   <b>*${esc(gh)} is exempt from GST being a health care services provider.</b>
@@ -554,7 +569,7 @@ export function printPharmacyReceipt(sale, orgInfo = {}, clinic = {}) {
   const items = (typeof sale.items === 'string' ? JSON.parse(sale.items || '[]') : sale.items) || []
   // payments is stored as a JSON string on PharmacySale — normalize to an array
   // so the shared renderPaymentTable() can build the multi-payment ledger.
-  const payments = (typeof sale.payments === 'string' ? JSON.parse(sale.payments || '[]') : sale.payments) || []
+  let payments = (typeof sale.payments === 'string' ? JSON.parse(sale.payments || '[]') : sale.payments) || []
   const gh = orgInfo.name || clinic.clinicName || 'Hospital'
   const val = (k) => clinic[k] || orgInfo[k] || ''
   const patientName = titleCase(
@@ -602,6 +617,17 @@ export function printPharmacyReceipt(sale, orgInfo = {}, clinic = {}) {
   const paid = Number(sale.amountPaid ?? sale.totalAmount ?? (mrpTotal - discount))
   const netPayable = mrpTotal - discount
   const balance = netPayable - paid
+
+  if (payments.length === 0 && paid > 0) {
+    payments = [{
+      receiptNo: invoiceNo,
+      date: saleDate,
+      invoiceNo: invoiceNo,
+      amount: paid,
+      mode: sale.paymentMethod || 'cash'
+    }]
+  }
+
   const fileName = `${(patientName || 'Patient').replace(/\s+/g, '_')}_${invoiceNo}`
 
   // ── Header address / registration lines (identical build to Lab/Radiology) ──
