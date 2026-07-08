@@ -155,7 +155,7 @@ export async function getAll(req, res) {
   try {
     const ORGANIZATION_ID = getOrgId(req)
     const { resource, category, status, patientId, invoiceId } = req.query
-    const limit = parseInt(req.query.limit || '10')
+    const limit = Math.min(Math.max(parseInt(req.query.limit) || 10, 1), 1000) // hard cap → no unbounded query DoS
     const offset = parseInt(req.query.offset || '0')
 
     if (resource === 'services') {
