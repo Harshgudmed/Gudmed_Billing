@@ -1,5 +1,6 @@
 import { db } from '../config/db.js'
 import { getOrgId } from "../lib/reqContext.js";
+import { financialYear } from "../lib/money.js";
 import { z } from 'zod'
 
 // Validation schemas
@@ -103,12 +104,7 @@ const serviceUpdateSchema = z.object({
   }),
 })
 
-// Indian financial year (Apr 1 – Mar 31), e.g. "2026-27".
-function financialYear(d = new Date()) {
-  const y = d.getFullYear()
-  const startYear = d.getMonth() >= 3 ? y : y - 1
-  return `${startYear}-${String((startYear + 1) % 100).padStart(2, '0')}`
-}
+// financialYear now lives in ../lib/money.js (shared, single source of truth).
 
 // Atomic, gap-free, per-org invoice number. The upsert+increment runs inside the
 // caller's transaction so two concurrent invoices can never collide on the
@@ -154,7 +150,7 @@ async function nextInvoiceNumber(tx, organizationId) {
 export async function getAll(req, res) {
   try {
     const ORGANIZATION_ID = getOrgId(req)
-    const { resource, category, status, patientId, invoiceId } = req.query
+    const { resource, category, status, patientId, invoiceId, search } = req.query
     const limit = Math.min(Math.max(parseInt(req.query.limit) || 10, 1), 1000) // hard cap → no unbounded query DoS
     const offset = parseInt(req.query.offset || '0')
 
@@ -186,8 +182,21 @@ export async function getAll(req, res) {
 
     if (resource === 'invoices') {
       const where = { organizationId: ORGANIZATION_ID }
-      if (status) where.paymentStatus = status
+      if (status) {
+        if (status === 'partial') where.paymentStatus = 'partially_paid'
+        else if (status === 'pending') where.paymentStatus = { in: ['unpaid', 'pending'] }
+        else where.paymentStatus = status
+      }
       if (patientId) where.patientId = patientId
+      if (search) {
+        const term = search.trim()
+        where.OR = [
+          { invoiceNumber: { contains: term, mode: 'insensitive' } },
+          { patient: { firstName: { contains: term, mode: 'insensitive' } } },
+          { patient: { lastName: { contains: term, mode: 'insensitive' } } },
+          { patient: { phonePrimary: { contains: term } } },
+        ]
+      }
       // Single-invoice fetch (with its payments) — used to render a receipt.
       if (invoiceId) where.id = invoiceId
 
@@ -360,6 +369,11 @@ export async function create(req, res) {
 
       const subtotal = items.reduce((sum, item) => sum + item.total, 0)
       const taxAmount = items.reduce((sum, item) => sum + (item.tax || 0), 0)
+      
+      if (discountAmount > subtotal + taxAmount) {
+        return res.status(400).json({ success: false, error: 'Discount cannot exceed the total value of the items' })
+      }
+
       const totalAmount = subtotal - discountAmount + taxAmount
 
       // Transaction: the invoice number is drawn from a per-org counter inside
@@ -484,6 +498,15 @@ export async function create(req, res) {
           select: { totalAmount: true, amountPaid: true },
         })
 
+        // SECURITY: If the atomic increment pushed amountPaid past totalAmount,
+        // it means this payment exceeded the balance due. Throwing an error here
+        // automatically aborts and rolls back the ENTIRE transaction!
+        if (updated.amountPaid > updated.totalAmount) {
+          const err = new Error('Payment exceeds balance due')
+          err.status = 400
+          throw err
+        }
+
         const paymentStatus =
           updated.amountPaid >= updated.totalAmount ? 'paid' : 'partially_paid'
 
@@ -543,6 +566,31 @@ export async function create(req, res) {
           err.status = 400; throw err
         }
 
+        // SECURITY PATCH: Prevent "Infinite Receipt Refund Exploit"
+        // Ensure that the specific receipt being refunded isn't over-refunded!
+        if (originalPaymentId) {
+          const originalPayment = await tx.payment.findUnique({
+            where: { id: originalPaymentId },
+            select: { amount: true }
+          })
+          if (!originalPayment) {
+            const err = new Error('Original receipt not found'); err.status = 404; throw err
+          }
+          
+          const existingRefunds = await tx.payment.aggregate({
+            where: { originalPaymentId, isRefund: true },
+            _sum: { amount: true }
+          })
+          
+          const refundedSoFar = existingRefunds._sum.amount || 0
+          const maxRefundable = originalPayment.amount - refundedSoFar
+          
+          if (amount > maxRefundable) {
+            const err = new Error(`Refund amount exceeds the original receipt amount (Max available to refund: ₹${maxRefundable})`)
+            err.status = 400; throw err
+          }
+        }
+
         const created = await tx.payment.create({
           data: {
             organizationId: ORGANIZATION_ID,
@@ -564,6 +612,15 @@ export async function create(req, res) {
           data: { amountPaid: { decrement: amount } },
           select: { totalAmount: true, amountPaid: true },
         })
+
+        // SECURITY: If the atomic decrement pushed amountPaid below zero,
+        // it means we refunded more money than the invoice ever collected
+        // (e.g. a double-refund race condition). Roll back the transaction!
+        if (updated.amountPaid < 0) {
+          const err = new Error('Refund exceeds amount paid')
+          err.status = 400
+          throw err
+        }
 
         const paid = updated.amountPaid
         const paymentStatus =

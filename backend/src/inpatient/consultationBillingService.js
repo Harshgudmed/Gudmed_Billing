@@ -8,8 +8,7 @@
 
 import { db } from '../config/db.js'
 import { resolvePrice } from './tariffService.js'
-
-const r2 = (n) => Math.round((n || 0) * 100) / 100
+import { round2 as r2 } from '../lib/money.js'
 
 /**
  * Called inside a transaction when IpdConsultation.status → COMPLETED.
