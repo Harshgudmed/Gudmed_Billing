@@ -14,8 +14,7 @@
 //                         is ACTUALLY performed instead of a single line.
 import { db } from '../config/db.js'
 import { resolvePrice } from './tariffService.js'
-
-const r2 = (n) => Math.round((n || 0) * 100) / 100
+import { round2 as r2 } from '../lib/money.js'
 
 /**
  * Resolve catalog/tariff pricing for an order and build the IpdCharge data fields

@@ -1,5 +1,6 @@
 import { db } from '../config/db.js'
 import { getOrgId, safeMoney } from "../lib/reqContext.js";
+import { isOwned } from "../lib/tenant.js";
 
 const patientSelect = { id: true, firstName: true, middleName: true, lastName: true, mrn: true, phonePrimary: true }
 
@@ -93,8 +94,7 @@ export async function update(req, res, next) {
     if (!id) return res.status(400).json({ success: false, error: 'id is required' })
 
     // Tenant guard: only touch a trip that belongs to this org (no cross-tenant write).
-    const owned = await db.ambulanceTrip.findFirst({ where: { id, organizationId: ORG_ID }, select: { id: true } })
-    if (!owned) return res.status(404).json({ success: false, error: 'Ambulance trip not found' })
+    if (!(await isOwned('ambulanceTrip', id, ORG_ID))) return res.status(404).json({ success: false, error: 'Ambulance trip not found' })
 
     const data = {}
     const allowed = ['ambulanceType', 'fromLocation', 'toLocation', 'status', 'driverName', 'vehicleNumber', 'contactPhone', 'notes']

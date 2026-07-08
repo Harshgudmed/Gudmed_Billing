@@ -1,5 +1,6 @@
 import { db } from "../config/db.js";
 import { getOrgId, getActor, svcErr } from "../lib/reqContext.js";
+import { round2 as r2 } from "../lib/money.js";
 import { z } from "zod";
 import {
   resolvePrice,
@@ -1391,7 +1392,6 @@ async function createPostCharge(req, res, orgId, body) {
         if (dup) return res.json({ success: true, data: dup, deduped: true });
       }
 
-      const r2 = (n) => Math.round((n || 0) * 100) / 100;
       const discountPct = Number(body.discountPct) || 0;
       let chargeData;
       try {

@@ -1,5 +1,6 @@
 import { db } from '../config/db.js'
 import { getOrgId, safeMoney } from "../lib/reqContext.js";
+import { isOwned } from "../lib/tenant.js";
 
 const patientSelect = { id: true, firstName: true, middleName: true, lastName: true, mrn: true, phonePrimary: true }
 
@@ -88,8 +89,7 @@ async function updateCase(req, res, ORG_ID) {
   const { id } = req.body
   if (!id) return res.status(400).json({ success: false, error: 'id is required' })
   // Tenant guard: only touch a case that belongs to this org (no cross-tenant write).
-  const owned = await db.insuranceCase.findFirst({ where: { id, organizationId: ORG_ID }, select: { id: true } })
-  if (!owned) return res.status(404).json({ success: false, error: 'Insurance case not found' })
+  if (!(await isOwned('insuranceCase', id, ORG_ID))) return res.status(404).json({ success: false, error: 'Insurance case not found' })
   const data = {}
   const allowed = ['insurerName', 'tpaName', 'policyNumber', 'status', 'notes']
   for (const k of allowed) if (req.body[k] !== undefined) data[k] = req.body[k] || null
@@ -147,8 +147,7 @@ async function updateClaim(req, res, ORG_ID) {
   if (!id) return res.status(400).json({ success: false, error: 'id is required' })
   // Tenant guard: only touch a claim that belongs to this org (blocks cross-tenant
   // tampering with claimAmount / approvedAmount / status).
-  const owned = await db.insuranceClaim.findFirst({ where: { id, organizationId: ORG_ID }, select: { id: true } })
-  if (!owned) return res.status(404).json({ success: false, error: 'Insurance claim not found' })
+  if (!(await isOwned('insuranceClaim', id, ORG_ID))) return res.status(404).json({ success: false, error: 'Insurance claim not found' })
   const data = {}
   if (req.body.diagnosis !== undefined) data.diagnosis = req.body.diagnosis || null
   if (req.body.remarks !== undefined) data.remarks = req.body.remarks || null

@@ -1,5 +1,6 @@
 import { db } from '../config/db.js'
 import { getOrgId } from "../lib/reqContext.js";
+import { isOwned } from "../lib/tenant.js";
 
 export async function getAll(req, res, next) {
   try {
@@ -104,8 +105,7 @@ export async function update(req, res, next) {
     const { id, issuedTo, issuedToRelationship, ...rest } = req.body
     if (!id) return res.status(400).json({ success: false, error: 'id is required' })
     // Tenant guard: only touch a certificate that belongs to this org.
-    const owned = await db.deathCertificate.findFirst({ where: { id, organizationId: ORG_ID }, select: { id: true } })
-    if (!owned) return res.status(404).json({ success: false, error: 'Death certificate not found' })
+    if (!(await isOwned('deathCertificate', id, ORG_ID))) return res.status(404).json({ success: false, error: 'Death certificate not found' })
     const data = {}
     if (issuedTo !== undefined) {
       data.issuedTo = issuedTo
