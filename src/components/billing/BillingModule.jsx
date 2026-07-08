@@ -213,12 +213,18 @@ export default function BillingModule({ onBack }) {
   const paymentLock = useRef(false)
   const [savingPayment, setSavingPayment] = useState(false)
   const [payAmount, setPayAmount] = useState('') // supports partial payments
+  // Idempotency token for the CURRENT payment intent. Stable across manual retries
+  // of the same installment (so a network-timeout retry is deduped by the backend),
+  // regenerated whenever the modal opens or the balance changes after a payment.
+  const payIdemKey = useRef(null)
 
-  // When the pay modal opens, default the amount to the remaining balance.
+  // When the pay modal opens (or the balance changes after a payment), default the
+  // amount to the remaining balance and mint a fresh idempotency key for that intent.
   useEffect(() => {
     if (showPayModal) {
       const bal = showPayModal.balanceDue ?? (Number(showPayModal.total || 0) - Number(showPayModal.amountPaid || 0))
       setPayAmount(bal > 0 ? String(bal) : '')
+      payIdemKey.current = (crypto?.randomUUID?.() || `idem-${Date.now()}-${Math.random().toString(36).slice(2)}`)
     }
   }, [showPayModal])
 
@@ -597,6 +603,7 @@ export default function BillingModule({ onBack }) {
         await client.post('/billing', {
           resource: 'payment', invoiceId: bill.dbId,
           patientId: bill.patientId, amount: amt, paymentMethod: method,
+          idempotencyKey: payIdemKey.current, // retry-safe: backend charges once per key
         })
       }
       const newPaid = Number(bill.amountPaid || 0) + amt
