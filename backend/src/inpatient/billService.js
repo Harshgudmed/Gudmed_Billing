@@ -81,17 +81,39 @@ export async function finalizeBill(organizationId, admissionId, { userId, billTy
     const bill = await tx.bill.findFirst({ where: { organizationId, admissionId, status: 'DRAFT' } })
     if (!bill) throw Object.assign(new Error('No open draft bill to finalize'), { status: 409 })
 
-    // Atomic counter: upsert-then-increment guarantees a unique sequence value.
+    // Reconcile the counter with the REAL max IPD bill for this org+year before
+    // incrementing. After a data migration the bills get copied but the BillCounter
+    // does not, so it lags and the generated IPD-<FY>-NNNNNN collides on the unique
+    // billNumber (P2002), and the failed tx rolls back the increment → deadlock.
+    // (Same class as the OPD invoice-number fix.) Numbers are zero-padded, so
+    // lexicographic DESC == numeric order → top row is the true max.
+    const prefix = `IPD-${year}-`
+    const lastBill = await tx.bill.findFirst({
+      where: { organizationId, billNumber: { startsWith: prefix } },
+      orderBy: { billNumber: 'desc' },
+      select: { billNumber: true },
+    })
+    const lastSeq = lastBill ? (parseInt(lastBill.billNumber.slice(prefix.length), 10) || 0) : 0
+
     await tx.billCounter.upsert({
       where: { organizationId_series_year: { organizationId, series: 'IPD', year } },
-      create: { organizationId, series: 'IPD', year, value: 0 },
+      create: { organizationId, series: 'IPD', year, value: lastSeq },
       update: {},
     })
     const counter = await tx.billCounter.update({
       where: { organizationId_series_year: { organizationId, series: 'IPD', year } },
       data: { value: { increment: 1 } },
     })
-    const billNumber = `IPD-${year}-${String(counter.value).padStart(6, '0')}`
+    // If the counter had lagged behind migrated bills, jump past the real max.
+    let seq = counter.value
+    if (seq <= lastSeq) {
+      const fixed = await tx.billCounter.update({
+        where: { organizationId_series_year: { organizationId, series: 'IPD', year } },
+        data: { value: lastSeq + 1 },
+      })
+      seq = fixed.value
+    }
+    const billNumber = `${prefix}${String(seq).padStart(6, '0')}`
 
     return tx.bill.update({
       where: { id: bill.id },

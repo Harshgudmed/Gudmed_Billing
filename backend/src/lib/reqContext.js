@@ -33,3 +33,16 @@ export function svcErr(res, e) {
     .status(e.status || 500)
     .json({ success: false, code: e.code, error: e.message });
 }
+
+/**
+ * Coerce a user-supplied money/quantity value to a safe, non-negative, finite
+ * number. Blank/null → fallback (default 0). Rejects negatives, NaN and Infinity
+ * by returning `null` — callers should treat null as "invalid input" and 400.
+ * Prevents `Number("abc")` (NaN) or a negative charge from poisoning stored totals.
+ */
+export function safeMoney(value, { fallback = 0 } = {}) {
+  if (value === "" || value === null || value === undefined) return fallback;
+  const n = Number(value);
+  if (!Number.isFinite(n) || n < 0) return null;
+  return n;
+}

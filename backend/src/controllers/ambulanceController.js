@@ -1,5 +1,5 @@
 import { db } from '../config/db.js'
-import { getOrgId } from "../lib/reqContext.js";
+import { getOrgId, safeMoney } from "../lib/reqContext.js";
 
 const patientSelect = { id: true, firstName: true, middleName: true, lastName: true, mrn: true, phonePrimary: true }
 
@@ -99,8 +99,16 @@ export async function update(req, res, next) {
     const data = {}
     const allowed = ['ambulanceType', 'fromLocation', 'toLocation', 'status', 'driverName', 'vehicleNumber', 'contactPhone', 'notes']
     for (const k of allowed) if (req.body[k] !== undefined) data[k] = req.body[k] || null
-    if (req.body.distanceKm !== undefined) data.distanceKm = req.body.distanceKm === '' || req.body.distanceKm == null ? null : Number(req.body.distanceKm)
-    if (req.body.charge !== undefined) data.charge = req.body.charge === '' || req.body.charge == null ? 0 : Number(req.body.charge)
+    if (req.body.distanceKm !== undefined) {
+      const v = safeMoney(req.body.distanceKm, { fallback: null })
+      if (v === null && req.body.distanceKm !== '' && req.body.distanceKm != null) return res.status(400).json({ success: false, error: 'distanceKm must be a non-negative number' })
+      data.distanceKm = v
+    }
+    if (req.body.charge !== undefined) {
+      const v = safeMoney(req.body.charge)
+      if (v === null) return res.status(400).json({ success: false, error: 'charge must be a non-negative number' })
+      data.charge = v
+    }
     if (req.body.tripDate !== undefined) data.tripDate = new Date(req.body.tripDate)
     if (req.body.patientId !== undefined) {
       let safePatientId = null
