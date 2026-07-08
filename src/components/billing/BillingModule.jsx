@@ -147,17 +147,21 @@ const calcAge = (dob) => {
 }
 
 // ── Status badge helper ───────────────────────────────────────────────────────
-function PayBadge({ paid }) {
-  return paid
-    ? <Badge className="bg-green-100 text-green-800">Paid</Badge>
-    : <Badge className="bg-yellow-100 text-yellow-800">Pending</Badge>
+function PayBadge({ invoice }) {
+  if (!invoice) return null
+  if (invoice.paid) return <Badge className="bg-green-100 text-green-800">Paid</Badge>
+  const total = Number(invoice.total || 0)
+  const paidAmt = Number(invoice.amountPaid || 0)
+  const balance = invoice.balanceDue ?? (total - paidAmt)
+  if (paidAmt > 0 && balance > 0) return <Badge className="bg-orange-100 text-orange-800">Partial</Badge>
+  return <Badge className="bg-yellow-100 text-yellow-800">Pending</Badge>
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // MAIN COMPONENT
 // ─────────────────────────────────────────────────────────────────────────────
 export default function BillingModule({ onBack }) {
-  const [activeTab, setActiveTab] = useState('dashboard')
+  const [activeTab, setActiveTab] = useState('invoices')
   const [orgInfo, setOrgInfo] = useState({ name: 'Hospital', address: '', city: '', phone: '', email: '' })
   const [clinic, setClinic] = useState(() => {
     if (typeof window !== 'undefined') {
@@ -170,8 +174,7 @@ export default function BillingModule({ onBack }) {
   // Data
   const [bills, setBills] = useState([])
   const [billsLoading, setBillsLoading] = useState(false)
-  const [payments, setPayments] = useState([])
-  const [paymentsLoading, setPaymentsLoading] = useState(false)
+
   const [services, setServices] = useState([])
   const [servicesLoading, setServicesLoading] = useState(false)
   const [stats, setStats] = useState({ todayRevenue: 0, pendingCount: 0, collectedToday: 0, outstanding: 0 })
@@ -198,6 +201,11 @@ export default function BillingModule({ onBack }) {
 
   // Modals
   const [showInvoiceModal, setShowInvoiceModal] = useState(null)
+  
+  // Refund state
+  const [refundDialog, setRefundDialog] = useState(null)
+  const [refundAmount, setRefundAmount] = useState('')
+  const [refundReason, setRefundReason] = useState('')
   const [showPayModal, setShowPayModal] = useState(null)
   const [payMethod, setPayMethod] = useState('Cash')
   // Re-entrancy lock for payments: the ref blocks a double-click synchronously
@@ -216,7 +224,9 @@ export default function BillingModule({ onBack }) {
 
   // Invoice search/filter
   const [invoiceSearch, setInvoiceSearch] = useState('')
+  const [debouncedInvoiceSearch, setDebouncedInvoiceSearch] = useState('')
   const [invoiceFilter, setInvoiceFilter] = useState('all')
+  const [totalBills, setTotalBills] = useState(0)
 
   // Service catalog
   const [showAddServiceDialog, setShowAddServiceDialog] = useState(false)
@@ -225,8 +235,16 @@ export default function BillingModule({ onBack }) {
 
   // Pagination
   const [invoicesPage, setInvoicesPage] = useState(1)
-  const [paymentsPage, setPaymentsPage] = useState(1)
   const [servicesPage, setServicesPage] = useState(1)
+
+  useEffect(() => {
+    const handler = setTimeout(() => setDebouncedInvoiceSearch(invoiceSearch), 400)
+    return () => clearTimeout(handler)
+  }, [invoiceSearch])
+
+  useEffect(() => {
+    setInvoicesPage(1)
+  }, [debouncedInvoiceSearch, invoiceFilter])
 
   // Derived cart totals
   const subtotal = form.items.reduce((a, i) => a + i.qty * i.amt, 0)
@@ -240,8 +258,17 @@ export default function BillingModule({ onBack }) {
     setBillsLoading(true)
     try {
       const offset = (invoicesPage - 1) * BILLING_ITEMS_PER_PAGE
-      const res = await client.get('/billing', { params: { resource: 'invoices', limit: BILLING_ITEMS_PER_PAGE, offset } })
+      const res = await client.get('/billing', { 
+        params: { 
+          resource: 'invoices', 
+          limit: BILLING_ITEMS_PER_PAGE, 
+          offset,
+          search: debouncedInvoiceSearch || undefined,
+          status: invoiceFilter === 'all' ? undefined : invoiceFilter
+        } 
+      })
       if (res.success) {
+        setTotalBills(res.meta?.total || 0)
         const mapped = res.data.map((inv) => {
           let items = []
           try { items = typeof inv.items === 'string' ? JSON.parse(inv.items) : (inv.items || []) } catch { items = [] }
@@ -284,7 +311,7 @@ export default function BillingModule({ onBack }) {
       }
     } catch { /* silent */ }
     finally { setBillsLoading(false) }
-  }, [invoicesPage])
+  }, [invoicesPage, debouncedInvoiceSearch, invoiceFilter])
 
   const fetchStats = useCallback(async () => {
     try {
@@ -301,16 +328,6 @@ export default function BillingModule({ onBack }) {
     } catch { /* silent */ }
   }, [])
 
-  const fetchPayments = useCallback(async () => {
-    setPaymentsLoading(true)
-    try {
-      const offset = (paymentsPage - 1) * BILLING_ITEMS_PER_PAGE
-      const res = await client.get('/billing', { params: { resource: 'payments', limit: BILLING_ITEMS_PER_PAGE, offset } })
-      if (res.success) setPayments(res.data || [])
-    } catch { /* silent */ }
-    finally { setPaymentsLoading(false) }
-  }, [paymentsPage])
-
   const fetchServices = useCallback(async () => {
     setServicesLoading(true)
     try {
@@ -323,10 +340,9 @@ export default function BillingModule({ onBack }) {
 
   const fetchAll = useCallback(() => {
     fetchBills()
-    fetchPayments()
     fetchServices()
     fetchStats()
-  }, [fetchBills, fetchPayments, fetchServices, fetchStats])
+  }, [fetchBills, fetchServices, fetchStats])
 
   useEffect(() => { fetchAll() }, [fetchAll])
 
@@ -437,7 +453,6 @@ export default function BillingModule({ onBack }) {
             })
           }
           await fetchBills()
-          await fetchPayments()
         }
       } else {
         setBills(b => [bill, ...b])
@@ -588,7 +603,7 @@ export default function BillingModule({ onBack }) {
       const newBal = Math.max(0, bal - amt)
       const updated = { ...bill, amountPaid: newPaid, balanceDue: newBal, paid: newBal <= 0.009 }
       setBills(bs => bs.map(b => b.id === bill.id ? updated : b))
-      fetchBills(); fetchPayments(); fetchStats()
+      fetchBills(); fetchStats()
       if (newBal <= 0.009) {
         setShowPayModal(null)
         toast.success('Invoice fully paid ✓')
@@ -605,26 +620,48 @@ export default function BillingModule({ onBack }) {
   // ── Refund / Credit note ───────────────────────────────────────────────────
   async function handleRefund(p) {
     if (p.isRefund) return
-    const maxPaid = p.invoice?.amountPaid ?? p.amount
-    const raw = window.prompt(`Refund amount for receipt ${p.receiptNumber} (max ₹${maxPaid}):`, String(p.amount))
-    if (raw === null) return
-    const amount = Number(raw)
-    if (!Number.isFinite(amount) || amount <= 0) { toast.error('Enter a valid amount'); return }
-    const refundReason = window.prompt('Reason for refund / credit note:')?.trim()
-    if (!refundReason) { toast.error('A reason is required for the audit trail'); return }
+    
+    // Calculate how much of THIS SPECIFIC receipt has already been refunded
+    const relatedRefunds = (showInvoiceModal?.payments || []).filter(pay => pay.isRefund && pay.originalPaymentId === p.id)
+    const refundedSoFar = relatedRefunds.reduce((sum, r) => sum + r.amount, 0)
+    const maxPaid = Math.max(0, p.amount - refundedSoFar)
+    
+    if (maxPaid <= 0) { toast.error('This receipt has already been fully refunded'); return }
+
+    setRefundDialog({ ...p, maxPaid, refundedSoFar })
+    setRefundAmount(String(maxPaid))
+    setRefundReason('')
+  }
+
+  async function submitRefund() {
+    if (!refundDialog) return
+    const amount = Number(refundAmount)
+    if (!Number.isFinite(amount) || amount <= 0 || amount > refundDialog.maxPaid) {
+      toast.error('Enter a valid amount within the available limit')
+      return
+    }
+    if (!refundReason.trim()) {
+      toast.error('A reason is required for the audit trail')
+      return
+    }
+
     try {
       await client.post('/billing', {
         resource: 'refund',
-        invoiceId: p.invoiceId,
+        invoiceId: refundDialog.invoiceId || refundDialog.invoice?.id,
         amount,
-        refundReason,
-        paymentMethod: p.paymentMethod || 'cash',
-        originalPaymentId: p.id,
+        refundReason: refundReason.trim(),
+        paymentMethod: refundDialog.paymentMethod || 'cash',
+        originalPaymentId: refundDialog.id,
       })
-      toast.success('Refund recorded')
-      fetchPayments()
+      toast.success('Refund recorded successfully')
+      setRefundDialog(null)
       fetchBills()
       fetchStats()
+      if (showInvoiceModal) {
+        // We'll close and rely on the background refresh, or user can reopen
+        setShowInvoiceModal(null)
+      }
     } catch (err) {
       toast.error(err.message || 'Failed to record refund')
     }
@@ -653,12 +690,7 @@ export default function BillingModule({ onBack }) {
   }
 
   // ── Filtered invoices ──────────────────────────────────────────────────────
-  const filteredBills = bills.filter(b => {
-    const q = invoiceSearch.toLowerCase()
-    const matchSearch = !q || b.patientName.toLowerCase().includes(q) || b.invoiceNo.toLowerCase().includes(q)
-    const matchFilter = invoiceFilter === 'all' || (invoiceFilter === 'paid' && b.paid) || (invoiceFilter === 'pending' && !b.paid)
-    return matchSearch && matchFilter
-  })
+  const filteredBills = bills // Backend handles pagination and filtering now
 
   // ── Recent transactions (last 10) ─────────────────────────────────────────
   const recentBills = [...bills].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt)).slice(0, 10)
@@ -719,23 +751,20 @@ export default function BillingModule({ onBack }) {
 
       {/* Tabs */}
       <Tabs value={activeTab} onValueChange={setActiveTab}>
-        <TabsList className="w-full grid grid-cols-6 mb-6">
-          <TabsTrigger value="dashboard">Dashboard</TabsTrigger>
-          <TabsTrigger value="invoices">Invoices ({bills.length})</TabsTrigger>
+        <TabsList className="w-full grid grid-cols-5 mb-6">
+          <TabsTrigger value="invoices">Dashboard & Invoices</TabsTrigger>
           <TabsTrigger value="new-invoice">New Invoice</TabsTrigger>
-          <TabsTrigger value="payments">Payments</TabsTrigger>
           <TabsTrigger value="catalog">Service Catalog</TabsTrigger>
           <TabsTrigger value="insurance">Insurance</TabsTrigger>
         </TabsList>
 
-        {/* ── DASHBOARD ── */}
-        <TabsContent value="dashboard" className="space-y-6">
+        {/* ── INVOICES (Merged with Dashboard) ── */}
+        <TabsContent value="invoices" className="space-y-6">
           {/* Stats cards */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             {[
               { label: 'Today Revenue', value: fmt(stats.todayRevenue), color: 'text-green-600', bg: 'bg-green-50' },
               { label: 'Pending Invoices', value: stats.pendingCount, color: 'text-yellow-600', bg: 'bg-yellow-50' },
-              // { label: 'Collected Today', value: fmt(stats.collectedToday), color: 'text-blue-600', bg: 'bg-blue-50' },
               { label: 'Outstanding Balance', value: fmt(stats.outstanding), color: 'text-red-600', bg: 'bg-red-50' },
             ].map(s => (
               <Card key={s.label} className={s.bg}>
@@ -747,46 +776,6 @@ export default function BillingModule({ onBack }) {
             ))}
           </div>
 
-          {/* Recent transactions */}
-          <Card>
-            <CardHeader className="pb-3">
-              <CardTitle className="text-base">Recent Transactions</CardTitle>
-            </CardHeader>
-            <CardContent className="p-0">
-              {billsLoading ? (
-                <div className="text-center py-10 text-gray-400">Loading...</div>
-              ) : (
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Invoice #</TableHead>
-                      <TableHead>Patient</TableHead>
-                      <TableHead>Date</TableHead>
-                      <TableHead>Total</TableHead>
-                      <TableHead>Status</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {recentBills.length === 0 ? (
-                      <TableRow><TableCell colSpan={5} className="text-center py-8 text-gray-400">No transactions yet</TableCell></TableRow>
-                    ) : recentBills.map(b => (
-                      <TableRow key={b.id}>
-                        <TableCell className="font-mono text-sm text-blue-600">{b.invoiceNo}</TableCell>
-                        <TableCell className="font-medium">{b.patientName}</TableCell>
-                        <TableCell className="text-sm text-gray-500">{b.date}</TableCell>
-                        <TableCell className="font-semibold">{fmt(b.total)}</TableCell>
-                        <TableCell><PayBadge paid={b.paid} /></TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              )}
-            </CardContent>
-          </Card>
-        </TabsContent>
-
-        {/* ── INVOICES ── */}
-        <TabsContent value="invoices" className="space-y-4">
           <div className="flex flex-wrap gap-3">
             <div className="relative flex-1 min-w-48">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
@@ -797,6 +786,7 @@ export default function BillingModule({ onBack }) {
               <SelectContent>
                 <SelectItem value="all">All</SelectItem>
                 <SelectItem value="paid">Paid</SelectItem>
+                <SelectItem value="partial">Partial</SelectItem>
                 <SelectItem value="pending">Pending</SelectItem>
               </SelectContent>
             </Select>
@@ -813,8 +803,9 @@ export default function BillingModule({ onBack }) {
                         <TableHead>Invoice #</TableHead>
                         <TableHead>Patient</TableHead>
                         <TableHead>Phone</TableHead>
-                        <TableHead>Items</TableHead>
                         <TableHead>Total</TableHead>
+                        <TableHead>Paid</TableHead>
+                        <TableHead>Balance</TableHead>
                         <TableHead>Date</TableHead>
                         <TableHead>Status</TableHead>
                         <TableHead>Actions</TableHead>
@@ -823,19 +814,20 @@ export default function BillingModule({ onBack }) {
                     <TableBody>
                       {filteredBills.length === 0 ? (
                         <TableRow><TableCell colSpan={8} className="text-center py-10 text-gray-400">No invoices found</TableCell></TableRow>
-                      ) : filteredBills.slice((invoicesPage - 1) * BILLING_ITEMS_PER_PAGE, invoicesPage * BILLING_ITEMS_PER_PAGE).map(b => (
+                      ) : filteredBills.map(b => (
                         <TableRow key={b.id}>
                           <TableCell className="font-mono text-sm text-blue-600">{b.invoiceNo}</TableCell>
                           <TableCell className="font-medium">{b.patientName}</TableCell>
                           <TableCell className="text-sm text-gray-500">{b.phone || '—'}</TableCell>
-                          <TableCell className="text-sm text-gray-500">{b.items.length}</TableCell>
                           <TableCell className="font-semibold">{fmt(b.total)}</TableCell>
+                          <TableCell className="text-sm text-green-700">{fmt(b.amountPaid || 0)}</TableCell>
+                          <TableCell className="text-sm text-red-600">{fmt(b.balanceDue ?? (b.total - (b.amountPaid || 0)))}</TableCell>
                           <TableCell className="text-sm text-gray-500">{b.date}</TableCell>
-                          <TableCell><PayBadge paid={b.paid} /></TableCell>
+                          <TableCell><PayBadge invoice={b} /></TableCell>
                           <TableCell>
                             <div className="flex gap-1">
                               <Button size="sm" variant="outline" onClick={() => setShowInvoiceModal(b)}>View</Button>
-                              {!b.paid && (
+                              {(!b.paid || (b.balanceDue ?? (b.total - (b.amountPaid || 0))) > 0) && (
                                 <Button size="sm" onClick={() => { setShowPayModal(b); setPayMethod('Cash') }}>Pay</Button>
                               )}
                             </div>
@@ -844,9 +836,9 @@ export default function BillingModule({ onBack }) {
                       ))}
                     </TableBody>
                   </Table>
-                  {filteredBills.length > BILLING_ITEMS_PER_PAGE && (
+                  {totalBills > BILLING_ITEMS_PER_PAGE && (
                     <div className="px-4">
-                      <PaginationControls currentPage={invoicesPage} setCurrentPage={setInvoicesPage} totalItems={filteredBills.length} />
+                      <PaginationControls currentPage={invoicesPage} setCurrentPage={setInvoicesPage} totalItems={totalBills} />
                     </div>
                   )}
                 </>
@@ -1057,82 +1049,7 @@ export default function BillingModule({ onBack }) {
         </TabsContent>
 
         {/* ── PAYMENTS ── */}
-        <TabsContent value="payments" className="space-y-4">
-          <div className="grid grid-cols-3 gap-4">
-            {[
-              { label: 'Total Payments', value: payments.length, color: 'text-gray-900' },
-              { label: 'Total Collected', value: fmt(payments.reduce((a, p) => a + (p.amount || 0), 0)), color: 'text-green-600' },
-              { label: 'Avg. Payment', value: payments.length ? fmt(Math.round(payments.reduce((a, p) => a + (p.amount || 0), 0) / payments.length)) : '₹0.00', color: 'text-blue-600' },
-            ].map(s => (
-              <Card key={s.label}>
-                <CardContent className="pt-4">
-                  <p className="text-xs text-gray-500 uppercase font-medium">{s.label}</p>
-                  <p className={`text-2xl font-bold mt-1 ${s.color}`}>{s.value}</p>
-                </CardContent>
-              </Card>
-            ))}
-          </div>
-          <Card>
-            <CardContent className="p-0">
-              {paymentsLoading ? (
-                <div className="text-center py-10 text-gray-400">Loading payments...</div>
-              ) : (
-                <>
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>Receipt #</TableHead>
-                        <TableHead>Invoice #</TableHead>
-                        <TableHead>Patient</TableHead>
-                        <TableHead>Amount</TableHead>
-                        <TableHead>Method</TableHead>
-                        <TableHead>Date</TableHead>
-                        <TableHead>Status</TableHead>
-                        <TableHead>Print</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {payments.length === 0 ? (
-                        <TableRow><TableCell colSpan={8} className="text-center py-10 text-gray-400">No payment records yet</TableCell></TableRow>
-                      ) : payments.slice((paymentsPage - 1) * BILLING_ITEMS_PER_PAGE, paymentsPage * BILLING_ITEMS_PER_PAGE).map(p => (
-                        <TableRow key={p.id}>
-                          <TableCell className="font-mono text-sm text-blue-600">{p.receiptNumber}</TableCell>
-                          <TableCell className="text-sm text-gray-500">{p.invoice?.invoiceNumber || '—'}</TableCell>
-                          <TableCell className="font-medium">{p.invoice?.patient ? `${p.invoice.patient.firstName} ${p.invoice.patient.lastName}` : '—'}</TableCell>
-                          <TableCell className="font-bold text-green-700">{fmt(p.amount)}</TableCell>
-                          <TableCell><Badge className="bg-blue-100 text-blue-800">{p.paymentMethod}</Badge></TableCell>
-                          <TableCell className="text-sm text-gray-500">{p.paymentDate ? format(new Date(p.paymentDate), 'dd MMM yyyy') : '—'}</TableCell>
-                          <TableCell>
-                            {p.isRefund
-                              ? <Badge className="bg-red-100 text-red-800">Refund</Badge>
-                              : <Badge className="bg-green-100 text-green-800">Received</Badge>}
-                          </TableCell>
-                          <TableCell>
-                            <div className="flex gap-1">
-                              <Button size="sm" variant="outline" onClick={() => printReceipt(p, orgInfo, clinic)}>
-                                <Printer className="h-3.5 w-3.5 mr-1" />Receipt
-                              </Button>
-                              {!p.isRefund && (
-                                <Button size="sm" variant="outline" className="text-red-600 border-red-200 hover:bg-red-50" onClick={() => handleRefund(p)}>
-                                  Refund
-                                </Button>
-                              )}
-                            </div>
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                  {payments.length > BILLING_ITEMS_PER_PAGE && (
-                    <div className="px-4">
-                      <PaginationControls currentPage={paymentsPage} setCurrentPage={setPaymentsPage} totalItems={payments.length} />
-                    </div>
-                  )}
-                </>
-              )}
-            </CardContent>
-          </Card>
-        </TabsContent>
+
 
         {/* ── SERVICE CATALOG ── */}
         <TabsContent value="catalog" className="space-y-4">
@@ -1251,7 +1168,7 @@ export default function BillingModule({ onBack }) {
                 <div><span className="text-gray-500">Date: </span><span>{showInvoiceModal.date}</span></div>
                 {showInvoiceModal.phone && <div><span className="text-gray-500">Phone: </span><span>{showInvoiceModal.phone}</span></div>}
                 {showInvoiceModal.uhid && <div><span className="text-gray-500">UHID: </span><span className="font-mono">{showInvoiceModal.uhid}</span></div>}
-                <div><span className="text-gray-500">Status: </span><PayBadge paid={showInvoiceModal.paid} /></div>
+                <div><span className="text-gray-500">Status: </span><PayBadge invoice={showInvoiceModal} /></div>
               </div>
               <Table>
                 <TableHeader>
@@ -1278,17 +1195,69 @@ export default function BillingModule({ onBack }) {
                   ))}
                 </TableBody>
               </Table>
-              <div className="flex justify-end">
+              <div className="flex flex-col items-end gap-4">
                 <div className="w-64 space-y-1 border rounded-lg p-3">
                   <div className="flex justify-between text-gray-600"><span>Subtotal</span><span>{fmt(showInvoiceModal.subtotal || 0)}</span></div>
                   {(showInvoiceModal.discountAmt || 0) > 0 && <div className="flex justify-between text-green-600"><span>Discount</span><span>−{fmt(showInvoiceModal.discountAmt)}</span></div>}
                   <div className="flex justify-between font-bold text-base border-t pt-1 mt-1"><span>Total</span><span>{fmt(showInvoiceModal.total)}</span></div>
+                  <div className="flex justify-between text-green-700 text-sm"><span>Amount Paid</span><span>{fmt(showInvoiceModal.amountPaid || 0)}</span></div>
+                  <div className="flex justify-between font-semibold text-red-600 text-sm"><span>Balance Due</span><span>{fmt(showInvoiceModal.balanceDue ?? (showInvoiceModal.total - (showInvoiceModal.amountPaid || 0)))}</span></div>
                 </div>
+                {/* Payment History */}
+                {(showInvoiceModal.payments || []).length > 0 && (
+                  <div className="w-full mt-2">
+                    <h4 className="text-sm font-semibold mb-2 text-gray-700">Payment History</h4>
+                    <Table>
+                      <TableHeader className="bg-gray-50">
+                        <TableRow>
+                          <TableHead className="h-8 py-1 text-xs">Date</TableHead>
+                          <TableHead className="h-8 py-1 text-xs">Receipt No</TableHead>
+                          <TableHead className="h-8 py-1 text-xs">Mode</TableHead>
+                          <TableHead className="h-8 py-1 text-xs text-right">Amount</TableHead>
+                          <TableHead className="h-8 py-1 text-xs text-right">Actions</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {[...showInvoiceModal.payments].sort((a, b) => new Date(b.date || b.paymentDate || new Date()) - new Date(a.date || a.paymentDate || new Date())).map((p, i) => (
+                          <TableRow key={i}>
+                            <TableCell className="py-2 text-xs text-gray-500">{p.date || p.paymentDate || showInvoiceModal.date}</TableCell>
+                            <TableCell className="py-2 text-xs font-mono">{p.receiptNo || p.receiptNumber || `RCPT-${i+1}`}</TableCell>
+                            <TableCell className="py-2 text-xs">
+                              {p.method || p.paymentMethod || showInvoiceModal.payMode || 'Cash'}
+                              {p.isRefund && <Badge variant="outline" className="ml-2 text-[10px] text-red-600 bg-red-50 border-red-200">Refund</Badge>}
+                            </TableCell>
+                            <TableCell className="py-2 text-xs text-right font-medium">{fmt(p.amount)}</TableCell>
+                            <TableCell className="py-2 text-xs text-right">
+                              <div className="flex gap-1 justify-end">
+                                <Button size="sm" variant="outline" className="h-6 px-2 text-[10px]" onClick={() => printReceipt({ ...p, invoice: showInvoiceModal }, orgInfo, clinic)}>
+                                  <Printer className="h-3 w-3 mr-1" />Print
+                                </Button>
+                                {(() => {
+                                  if (p.isRefund) return null;
+                                  const relatedRefunds = (showInvoiceModal?.payments || []).filter(pay => pay.isRefund && pay.originalPaymentId === p.id);
+                                  const refundedSoFar = relatedRefunds.reduce((sum, r) => sum + r.amount, 0);
+                                  if (refundedSoFar >= p.amount) {
+                                    return <Badge variant="outline" className="h-6 px-2 text-[10px] text-gray-500 bg-gray-100 border-gray-200">Fully Refunded</Badge>;
+                                  }
+                                  return (
+                                    <Button size="sm" variant="outline" className="h-6 px-2 text-[10px] text-red-600 border-red-200 hover:bg-red-50" onClick={() => handleRefund({ ...p, invoiceId: showInvoiceModal.dbId })}>
+                                      Refund {refundedSoFar > 0 ? `(Bal ₹${p.amount - refundedSoFar})` : ''}
+                                    </Button>
+                                  );
+                                })()}
+                              </div>
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
+                )}
               </div>
             </div>
           )}
           <DialogFooter className="gap-2">
-            {showInvoiceModal && !showInvoiceModal.paid && (
+            {showInvoiceModal && (!showInvoiceModal.paid || (showInvoiceModal.balanceDue ?? (showInvoiceModal.total - (showInvoiceModal.amountPaid || 0))) > 0) && (
               <Button onClick={() => { setShowPayModal(showInvoiceModal); setPayMethod('Cash'); setShowInvoiceModal(null) }}>Collect Payment</Button>
             )}
             <Button variant="outline" onClick={() => {
@@ -1311,6 +1280,7 @@ export default function BillingModule({ onBack }) {
                   items: testItems.map(it => ({ code: (it.name || 'TEST').substring(0, 6).toUpperCase(), name: it.name, price: (it.amt || 0) * (it.qty || 1), eta: '' })),
                   orderValue: testTotal, homeCollection: hcc, discount: b.discountAmt || 0,
                   netPayable: b.total, paid: b.amountPaid || 0, balance: b.balanceDue ?? (b.total - (b.amountPaid || 0)),
+                  payments: b.payments
                 }, orgInfo, clinic)
               } else if (/^radiology/i.test(b.department || '')) {
                 const examItems = b.items || []
@@ -1322,6 +1292,7 @@ export default function BillingModule({ onBack }) {
                   items: examItems.map(it => ({ code: (it.name || 'EXAM').substring(0, 6).toUpperCase(), name: it.name, price: (it.amt || 0) * (it.qty || 1), eta: '' })),
                   orderValue: examTotal, homeCollection: 0, discount: b.discountAmt || 0,
                   netPayable: b.total, paid: b.amountPaid || 0, balance: b.balanceDue ?? (b.total - (b.amountPaid || 0)),
+                  payments: b.payments
                 }, orgInfo, clinic)
               } else if (/^pharmacy/i.test(b.department || '')) {
                 // Same GST-invoice format as the pharmacy counter receipt — GST%/
@@ -1331,6 +1302,7 @@ export default function BillingModule({ onBack }) {
                   receiptNumber: b.invoiceNo, patientName: b.patientName,
                   saleDate: b.createdAt || b.date, paymentMethod: b.payMode,
                   discountAmount: b.discountAmt || 0, amountPaid: b.amountPaid || 0, totalAmount: b.total,
+                  payments: b.payments,
                   items: (b.items || []).map(it => ({
                     drugName: it.name, quantity: it.qty, unitPrice: it.amt, total: (it.amt || 0) * (it.qty || 1),
                     gstRate: it.gstRate, batchNumber: it.batchNumber, expiryDate: it.expiryDate,
@@ -1454,6 +1426,70 @@ export default function BillingModule({ onBack }) {
             <Button variant="outline" onClick={() => setShowAddServiceDialog(false)}>Cancel</Button>
             <Button onClick={handleAddService} disabled={savingService}>{savingService ? 'Saving...' : 'Add Service'}</Button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      {/* Refund Dialog */}
+      <Dialog open={!!refundDialog} onOpenChange={(o) => !o && setRefundDialog(null)}>
+        <DialogContent className="max-w-md bg-white border-0 shadow-2xl rounded-2xl overflow-hidden">
+          <div className="bg-red-500 p-6 text-white flex flex-col items-center justify-center text-center">
+            <div className="bg-white/20 p-4 rounded-full mb-4">
+              <Shield className="h-10 w-10 text-white" />
+            </div>
+            <DialogTitle className="text-2xl font-bold">Issue Refund</DialogTitle>
+            <p className="text-red-100 text-sm mt-2 opacity-90">
+              Receipt: {refundDialog?.receiptNumber || refundDialog?.receiptNo}
+            </p>
+          </div>
+          
+          <div className="p-6 space-y-6">
+            <div className="bg-gray-50 rounded-xl p-4 flex justify-between items-center border border-gray-100">
+              <div>
+                <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Available to Refund</p>
+                <p className="text-2xl font-bold text-gray-900 mt-1">₹{refundDialog?.maxPaid?.toLocaleString()}</p>
+              </div>
+              <div className="text-right">
+                <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Original Payment</p>
+                <p className="text-sm font-medium text-gray-700 mt-1">₹{refundDialog?.amount?.toLocaleString()}</p>
+              </div>
+            </div>
+
+            <div className="space-y-4">
+              <div className="space-y-2">
+                <Label className="text-gray-700 font-semibold">Refund Amount (₹)</Label>
+                <Input 
+                  type="number" 
+                  value={refundAmount} 
+                  onChange={(e) => setRefundAmount(e.target.value)}
+                  className="text-lg font-medium bg-white h-12 focus-visible:ring-red-500"
+                  max={refundDialog?.maxPaid}
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label className="text-gray-700 font-semibold">Reason for Refund</Label>
+                <Input 
+                  value={refundReason} 
+                  onChange={(e) => setRefundReason(e.target.value)}
+                  placeholder="e.g. Patient cancelled service"
+                  className="bg-white h-12 focus-visible:ring-red-500"
+                />
+              </div>
+            </div>
+          </div>
+          
+          <div className="p-6 bg-gray-50/50 border-t border-gray-100 flex gap-3 justify-end">
+            <Button variant="outline" onClick={() => setRefundDialog(null)} className="h-11 rounded-lg">
+              Cancel
+            </Button>
+            <Button 
+              variant="destructive" 
+              onClick={submitRefund}
+              className="h-11 px-8 rounded-lg bg-red-600 hover:bg-red-700 text-white font-medium shadow-sm"
+              disabled={!refundAmount || !refundReason.trim()}
+            >
+              Process Refund
+            </Button>
+          </div>
         </DialogContent>
       </Dialog>
     </div>
