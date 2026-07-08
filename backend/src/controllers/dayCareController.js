@@ -1,5 +1,5 @@
 import { db } from '../config/db.js'
-import { getOrgId } from "../lib/reqContext.js";
+import { getOrgId, safeMoney } from "../lib/reqContext.js";
 
 const patientSelect = { id: true, firstName: true, middleName: true, lastName: true, mrn: true, phonePrimary: true }
 
@@ -67,6 +67,11 @@ export async function create(req, res, next) {
       if (doc) { safeDoctorId = doc.id; doctorName = doc.fullName }
     }
 
+    // Reject negative / NaN money before it poisons stored totals.
+    const feeVal = safeMoney(fee)
+    const paidVal = safeMoney(amountPaid)
+    if (feeVal === null || paidVal === null) return res.status(400).json({ success: false, error: 'fee and amountPaid must be non-negative numbers' })
+
     const caseNumber = await nextCaseNumber(ORG_ID)
     const dayCase = await db.dayCareCase.create({
       data: {
@@ -78,9 +83,9 @@ export async function create(req, res, next) {
         procedure: procedure || null,
         admissionDate: admissionDate ? new Date(admissionDate) : new Date(),
         dischargeTime: dischargeTime || null,
-        fee: fee != null && fee !== '' ? Number(fee) : 0,
+        fee: feeVal,
         paymentStatus: paymentStatus || 'pending',
-        amountPaid: amountPaid != null && amountPaid !== '' ? Number(amountPaid) : 0,
+        amountPaid: paidVal,
         status: status || 'admitted',
         notes: notes || null,
         createdById: req.user?.userId || null,
@@ -109,8 +114,16 @@ export async function update(req, res, next) {
     const data = {}
     const allowed = ['procedure', 'dischargeTime', 'paymentStatus', 'status', 'notes']
     for (const k of allowed) if (req.body[k] !== undefined) data[k] = req.body[k] || null
-    if (req.body.fee !== undefined) data.fee = req.body.fee === '' || req.body.fee == null ? 0 : Number(req.body.fee)
-    if (req.body.amountPaid !== undefined) data.amountPaid = req.body.amountPaid === '' || req.body.amountPaid == null ? 0 : Number(req.body.amountPaid)
+    if (req.body.fee !== undefined) {
+      const v = safeMoney(req.body.fee)
+      if (v === null) return res.status(400).json({ success: false, error: 'fee must be a non-negative number' })
+      data.fee = v
+    }
+    if (req.body.amountPaid !== undefined) {
+      const v = safeMoney(req.body.amountPaid)
+      if (v === null) return res.status(400).json({ success: false, error: 'amountPaid must be a non-negative number' })
+      data.amountPaid = v
+    }
     if (req.body.admissionDate !== undefined) data.admissionDate = new Date(req.body.admissionDate)
     if (req.body.doctorId !== undefined) {
       let safeDoctorId = null, doctorName = null

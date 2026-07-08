@@ -113,7 +113,7 @@ export const getAll = async (req, res, next) => {
     const { resource, status, urgency, examCategory, orderId } = req.query
 
     // Parse and validate pagination parameters
-    let limit = parseInt(req.query.limit) || 10
+    let limit = Math.min(Math.max(parseInt(req.query.limit) || 10, 1), 2000) // hard cap → no unbounded query DoS
     let offset = parseInt(req.query.offset) || 0
 
     // Ensure valid values

@@ -1904,6 +1904,23 @@ async function createDischargeFinalize(req, res, orgId, body) {
           .json({ success: false, error: "admissionId required" });
       const typeCfg = DISCHARGE_TYPES[dischargeType] || DISCHARGE_TYPES.NORMAL;
 
+      // AUTHORIZATION: `force` skips the paid-bill gate below → it is a financial
+      // override and must be restricted to privileged roles, not any doctor who can
+      // discharge. Otherwise a patient could be released with an unpaid bill (revenue
+      // leak). Only enforced when auth is on (demo mode stays permissive, like RBAC).
+      const AUTH_ENFORCED = process.env.AUTH_ENFORCED === "true";
+      if (force && AUTH_ENFORCED) {
+        const role = req.user?.role;
+        const canForce = role === "admin" || role === "super_admin" || role === "billing";
+        if (!canForce) {
+          return res.status(403).json({
+            success: false,
+            code: "FORCE_DISCHARGE_FORBIDDEN",
+            error: "Only an admin or billing user can discharge with an unpaid bill.",
+          });
+        }
+      }
+
       // Billing gate: a NORMAL discharge for a CASH payer needs the bill paid
       // (balanceDue == 0). LAMA/ABSCONDED/EXPIRED/TRANSFER_OUT bypass; `force` overrides.
       if (typeCfg.requireClearances && !force) {

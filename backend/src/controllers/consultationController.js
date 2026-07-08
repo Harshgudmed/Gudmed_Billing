@@ -6,7 +6,7 @@ export async function getAll(req, res, next) {
   try {
     const organizationId = getOrgId(req)
     const { patientId, doctorId, date } = req.query
-    const limit = parseInt(req.query.limit || '50')
+    const limit = Math.min(Math.max(parseInt(req.query.limit) || 50, 1), 1000) // hard cap → no unbounded query DoS
     const offset = parseInt(req.query.offset || '0')
 
     const where = { organizationId }

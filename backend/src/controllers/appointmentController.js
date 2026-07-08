@@ -214,6 +214,26 @@ export async function create(req, res, next) {
               : { type: 'new_patient' }
     }
 
+    // Prevent double-booking: no two live appointments for the SAME doctor at the
+    // same date + time slot. Cancelled appointments free the slot again.
+    const slotClash = await db.appointment.findFirst({
+      where: {
+        organizationId,
+        doctorId: validatedData.doctorId,
+        appointmentDate: apptDate,
+        appointmentTime: validatedData.appointmentTime,
+        status: { notIn: ['cancelled', 'no_show'] },
+      },
+      select: { id: true },
+    })
+    if (slotClash) {
+      return res.status(409).json({
+        success: false,
+        code: 'SLOT_TAKEN',
+        error: `That doctor already has an appointment at ${validatedData.appointmentTime} on this date. Pick another slot.`,
+      })
+    }
+
     // Create appointment, invoice, AND commission in transaction
     const { appointment, draftInvoiceNumber, commission } = await db.$transaction(async (tx) => {
       const appointment = await tx.appointment.create({

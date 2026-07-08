@@ -1,5 +1,5 @@
 import { db } from '../config/db.js'
-import { getOrgId } from "../lib/reqContext.js";
+import { getOrgId, safeMoney } from "../lib/reqContext.js";
 
 const patientSelect = { id: true, firstName: true, middleName: true, lastName: true, mrn: true, phonePrimary: true }
 
@@ -61,6 +61,9 @@ async function createCase(req, res, ORG_ID) {
   const patient = await db.patient.findFirst({ where: { id: patientId, organizationId: ORG_ID }, select: { id: true } })
   if (!patient) return res.status(400).json({ success: false, error: 'Patient not found in this organization' })
 
+  const coverageVal = safeMoney(coverageLimit)
+  if (coverageVal === null) return res.status(400).json({ success: false, error: 'coverageLimit must be a non-negative number' })
+
   const insCase = await db.insuranceCase.create({
     data: {
       organizationId: ORG_ID,
@@ -69,7 +72,7 @@ async function createCase(req, res, ORG_ID) {
       insurerName,
       tpaName: tpaName || null,
       policyNumber: policyNumber || null,
-      coverageLimit: coverageLimit != null && coverageLimit !== '' ? Number(coverageLimit) : 0,
+      coverageLimit: coverageVal,
       status: status || 'Active',
       validFrom: validFrom ? new Date(validFrom) : null,
       validTo: validTo ? new Date(validTo) : null,
@@ -91,7 +94,11 @@ async function updateCase(req, res, ORG_ID) {
   const allowed = ['insurerName', 'tpaName', 'policyNumber', 'status', 'notes']
   for (const k of allowed) if (req.body[k] !== undefined) data[k] = req.body[k] || null
   if (req.body.payerType !== undefined) data.payerType = req.body.payerType === 'TPA' ? 'TPA' : 'INSURANCE'
-  if (req.body.coverageLimit !== undefined) data.coverageLimit = req.body.coverageLimit === '' || req.body.coverageLimit == null ? 0 : Number(req.body.coverageLimit)
+  if (req.body.coverageLimit !== undefined) {
+    const v = safeMoney(req.body.coverageLimit)
+    if (v === null) return res.status(400).json({ success: false, error: 'coverageLimit must be a non-negative number' })
+    data.coverageLimit = v
+  }
   if (req.body.validFrom !== undefined) data.validFrom = req.body.validFrom ? new Date(req.body.validFrom) : null
   if (req.body.validTo !== undefined) data.validTo = req.body.validTo ? new Date(req.body.validTo) : null
 
@@ -111,14 +118,19 @@ async function createClaim(req, res, ORG_ID) {
   const insCase = await db.insuranceCase.findFirst({ where: { id: caseId, organizationId: ORG_ID }, select: { id: true } })
   if (!insCase) return res.status(400).json({ success: false, error: 'Insurance case not found' })
 
+  const claimVal = safeMoney(claimAmount)
+  const approvedVal = (approvedAmount == null || approvedAmount === '') ? null : safeMoney(approvedAmount)
+  if (claimVal === null || approvedVal === null && !(approvedAmount == null || approvedAmount === ''))
+    return res.status(400).json({ success: false, error: 'claimAmount / approvedAmount must be non-negative numbers' })
+
   const st = status || 'pending'
   const claim = await db.insuranceClaim.create({
     data: {
       organizationId: ORG_ID,
       caseId,
       claimNumber: await nextClaimNumber(ORG_ID),
-      claimAmount: claimAmount != null && claimAmount !== '' ? Number(claimAmount) : 0,
-      approvedAmount: approvedAmount != null && approvedAmount !== '' ? Number(approvedAmount) : null,
+      claimAmount: claimVal,
+      approvedAmount: approvedVal,
       status: st,
       diagnosis: diagnosis || null,
       remarks: remarks || null,
@@ -140,8 +152,20 @@ async function updateClaim(req, res, ORG_ID) {
   const data = {}
   if (req.body.diagnosis !== undefined) data.diagnosis = req.body.diagnosis || null
   if (req.body.remarks !== undefined) data.remarks = req.body.remarks || null
-  if (req.body.claimAmount !== undefined) data.claimAmount = req.body.claimAmount === '' || req.body.claimAmount == null ? 0 : Number(req.body.claimAmount)
-  if (req.body.approvedAmount !== undefined) data.approvedAmount = req.body.approvedAmount === '' || req.body.approvedAmount == null ? null : Number(req.body.approvedAmount)
+  if (req.body.claimAmount !== undefined) {
+    const v = safeMoney(req.body.claimAmount)
+    if (v === null) return res.status(400).json({ success: false, error: 'claimAmount must be a non-negative number' })
+    data.claimAmount = v
+  }
+  if (req.body.approvedAmount !== undefined) {
+    if (req.body.approvedAmount === '' || req.body.approvedAmount == null) {
+      data.approvedAmount = null
+    } else {
+      const v = safeMoney(req.body.approvedAmount)
+      if (v === null) return res.status(400).json({ success: false, error: 'approvedAmount must be a non-negative number' })
+      data.approvedAmount = v
+    }
+  }
   if (req.body.status !== undefined) {
     data.status = req.body.status
     if (['submitted', 'approved', 'rejected', 'settled'].includes(req.body.status)) data.submittedAt = new Date()
