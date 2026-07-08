@@ -200,6 +200,10 @@ export default function BillingModule({ onBack }) {
   const [showInvoiceModal, setShowInvoiceModal] = useState(null)
   const [showPayModal, setShowPayModal] = useState(null)
   const [payMethod, setPayMethod] = useState('Cash')
+  // Re-entrancy lock for payments: the ref blocks a double-click synchronously
+  // (before React re-renders the disabled button), so no duplicate charge is posted.
+  const paymentLock = useRef(false)
+  const [savingPayment, setSavingPayment] = useState(false)
   const [payAmount, setPayAmount] = useState('') // supports partial payments
 
   // When the pay modal opens, default the amount to the remaining balance.
@@ -569,6 +573,10 @@ export default function BillingModule({ onBack }) {
     const amt = Number(amount)
     if (!Number.isFinite(amt) || amt <= 0) { toast.error('Enter a valid amount'); return }
     if (amt > bal + 0.01) { toast.error(`Amount cannot exceed balance ₹${bal.toLocaleString('en-IN')}`); return }
+    // Hard guard against double-click / double-submit → duplicate payment.
+    if (paymentLock.current) return
+    paymentLock.current = true
+    setSavingPayment(true)
     try {
       if (bill.dbId) {
         await client.post('/billing', {
@@ -591,6 +599,7 @@ export default function BillingModule({ onBack }) {
         toast.success(`₹${amt.toLocaleString('en-IN')} received via ${method}. Balance ₹${newBal.toLocaleString('en-IN')}`)
       }
     } catch { toast.error('Failed to record payment') }
+    finally { paymentLock.current = false; setSavingPayment(false) }
   }
 
   // ── Refund / Credit note ───────────────────────────────────────────────────
@@ -1400,9 +1409,9 @@ export default function BillingModule({ onBack }) {
                     </Select>
                   </div>
                 </div>
-                <Button className="w-full"
+                <Button className="w-full" disabled={savingPayment}
                   onClick={() => showPayModal && recordPayment(showPayModal, payMethod, payAmount)}>
-                  Record {payAmount ? '₹' + Number(payAmount).toLocaleString('en-IN') : ''} ({payMethod})
+                  {savingPayment ? 'Recording…' : `Record ${payAmount ? '₹' + Number(payAmount).toLocaleString('en-IN') : ''} (${payMethod})`}
                 </Button>
                 <p className="text-xs text-gray-400 text-center">Tip: pay part now (e.g. ₹500 Cash), then add another method for the rest — balance updates automatically.</p>
               </div>
