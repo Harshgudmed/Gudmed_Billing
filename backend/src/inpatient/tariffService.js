@@ -6,6 +6,7 @@
 //            → apply adjustment (PERCENT | FIXED_DELTA | ABSOLUTE_OVERRIDE)
 // And computes a segment-aware running bill (bed charges per occupancy window).
 import { db } from '../config/db.js'
+import { round2 } from '../lib/money.js'
 
 const MS_PER_DAY = 1000 * 60 * 60 * 24
 
@@ -290,8 +291,6 @@ export async function computeBedCharges(organizationId, admissionId, { upToDate 
   })
   return { lines, total: Math.round(total * 100) / 100, totalDays, warnings }
 }
-
-const round2 = (n) => Math.round(n * 100) / 100
 
 // Full running bill: bed charges (segment-aware) + posted IpdCharge line items,
 // with per-line GST from the charge master (M5).

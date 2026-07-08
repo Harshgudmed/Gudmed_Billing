@@ -4,15 +4,9 @@
 import { db } from '../config/db.js'
 import { computeRunningBill } from './tariffService.js'
 import { recalcBill, ensureLegacyDepositAdvance } from './billPaymentService.js'
-
-const round2 = (n) => Math.round((n || 0) * 100) / 100
-
-// Indian financial year for a date: Apr 1 → Mar 31 → "2026-27"
-export function financialYear(d = new Date()) {
-  const y = d.getFullYear()
-  const startYear = d.getMonth() >= 3 ? y : y - 1 // month 3 = April (0-indexed)
-  return `${startYear}-${String((startYear + 1) % 100).padStart(2, '0')}`
-}
+import { round2 } from '../lib/money.js'
+// Re-export so existing importers (billPaymentService) keep working unchanged.
+export { financialYear } from '../lib/money.js'
 
 // The "current" bill for an admission: the open DRAFT if any, else the latest.
 export async function getCurrentBill(organizationId, admissionId) {

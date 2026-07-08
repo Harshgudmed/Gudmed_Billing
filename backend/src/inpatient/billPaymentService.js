@@ -2,8 +2,8 @@
 // paidTotal/balanceDue are recomputed on the Bill from its SUCCESS payments.
 import { db } from '../config/db.js'
 import { financialYear } from './billService.js'
+import { round2 } from '../lib/money.js'
 
-const round2 = (n) => Math.round((Number(n) || 0) * 100) / 100
 const METHODS = ['CASH', 'UPI', 'CARD', 'BANK_TRANSFER', 'CHEQUE']
 
 // Recompute Bill.paidTotal/balanceDue/paymentStatus from its SUCCESS payments. Call inside a tx.
