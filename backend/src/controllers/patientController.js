@@ -158,8 +158,8 @@ export async function getOne(req, res, next) {
   try {
     const organizationId = getOrgId(req)
 
-    const patient = await db.patient.findUnique({ where: { id: req.params.id } })
-    if (!patient || patient.organizationId !== organizationId) {
+    const patient = await db.patient.findFirst({ where: { id: req.params.id, organizationId } })
+    if (!patient) {
       return res.status(404).json({ success: false, error: 'Patient not found' })
     }
 
@@ -179,8 +179,8 @@ export async function getRecords(req, res, next) {
   try {
     const organizationId = getOrgId(req)
     const { id } = req.params
-    const patient = await db.patient.findUnique({ where: { id } })
-    if (!patient || patient.organizationId !== organizationId) {
+    const patient = await db.patient.findFirst({ where: { id, organizationId } })
+    if (!patient) {
       return res.status(404).json({ success: false, error: 'Patient not found' })
     }
 
@@ -334,13 +334,8 @@ export async function update(req, res, next) {
     const { id } = req.params
     const body = req.body
 
-    const patient = await db.patient.findUnique({ where: { id } })
+    const patient = await db.patient.findFirst({ where: { id, organizationId } })
     if (!patient) {
-      return res.status(404).json({ success: false, error: 'Patient not found' })
-    }
-
-    // Enforce organization scope
-    if (patient.organizationId !== organizationId) {
       return res.status(404).json({ success: false, error: 'Patient not found' })
     }
 

@@ -164,8 +164,8 @@ export async function create(req, res, next) {
       }
 
       // 5. Fetch and return the fully assembled record with all relations inside transaction
-      const fullConsultation = await tx.consultation.findUnique({
-        where: { id: newConsultation.id },
+      const fullConsultation = await tx.consultation.findFirst({
+        where: { id: newConsultation.id, organizationId },
         include: {
           patient: { select: { id: true, mrn: true, firstName: true, middleName: true, lastName: true } },
           doctor: { select: { id: true, fullName: true } },
@@ -232,7 +232,7 @@ export async function update(req, res, next) {
       }
 
       // Fetch current consultation to get patientId and doctorId
-      const currentConsultation = await tx.consultation.findUnique({ where: { id } })
+      const currentConsultation = await tx.consultation.findFirst({ where: { id, organizationId } })
 
       // 2. Handle Prescriptions
       if (prescriptionItems && prescriptionItems.length > 0) {
@@ -324,8 +324,8 @@ export async function update(req, res, next) {
       }
 
       // 5. Fetch and return the fully assembled, updated record with all relations
-      return await tx.consultation.findUnique({
-        where: { id },
+      return await tx.consultation.findFirst({
+        where: { id, organizationId },
         include: {
           patient: { select: { id: true, mrn: true, firstName: true, middleName: true, lastName: true } },
           doctor: { select: { id: true, fullName: true } },
