@@ -98,7 +98,7 @@ export default function RadiologyModule() {
   const [orgInfo, setOrgInfo] = useState({ name: 'Hospital', address: '', city: '', phone: '', email: '' })
   const [exams, setExams] = useState([])
   const [orders, setOrders] = useState([])
-  const [patients, setPatients] = useState([])
+  const [selectedPatient, setSelectedPatient] = useState(null) // via shared PatientLookup (server search)
   const [reports, setReports] = useState([])
   const [loading, setLoading] = useState(true)
   const [stats, setStats] = useState({ pending: 0, inProgress: 0, completedToday: 0, criticalFindings: 0, totalExams: 0 })
@@ -169,10 +169,9 @@ export default function RadiologyModule() {
       const ordersOffset = (ordersPage - 1) * RADIOLOGY_ITEMS_PER_PAGE
       const reportsOffset = (reportsPage - 1) * RADIOLOGY_ITEMS_PER_PAGE
 
-      const [eRes, oRes, pRes, rRes] = await Promise.all([
+      const [eRes, oRes, rRes] = await Promise.all([
         client.get(`/radiology?resource=exams&limit=${RADIOLOGY_ITEMS_PER_PAGE}&offset=${examsOffset}`),
         client.get(`/radiology?resource=orders&limit=${RADIOLOGY_ITEMS_PER_PAGE}&offset=${ordersOffset}`),
-        client.get('/patients?limit=1000'),
         client.get(`/radiology?resource=reports&limit=${RADIOLOGY_ITEMS_PER_PAGE}&offset=${reportsOffset}`),
       ])
       if (eRes.success) {
@@ -183,7 +182,6 @@ export default function RadiologyModule() {
         setOrders(oRes.data || [])
         if (oRes.meta) setOrdersMeta(oRes.meta)
       }
-      if (pRes.success) setPatients(pRes.data || [])
       if (rRes.success) {
         setReports(rRes.data || [])
         if (rRes.meta) setReportsMeta(rRes.meta)
@@ -261,6 +259,7 @@ export default function RadiologyModule() {
         toast.success(`Order ${res.data.orderNumber} created`)
         setShowOrderDialog(false)
         setOrderForm(emptyOrder)
+        setSelectedPatient(null)
         fetchStats()
 
         // Auto-billing (non-fatal). Item must use `serviceName` (not `description`) —
@@ -1132,9 +1131,9 @@ ${order.clinicalIndication ? `<div class="section"><div class="section-header">C
               <PatientLookup
                 className="mt-1"
                 showHint={false}
-                selectedPatient={patients.find(p => p.id === orderForm.patientId) || null}
-                onSelect={(p) => { setPatients(prev => prev.some(x => x.id === p.id) ? prev : [p, ...prev]); setOrderForm(f => ({ ...f, patientId: p.id })) }}
-                onClear={() => setOrderForm(f => ({ ...f, patientId: '' }))}
+                selectedPatient={selectedPatient}
+                onSelect={(p) => { setSelectedPatient(p); setOrderForm(f => ({ ...f, patientId: p.id })) }}
+                onClear={() => { setSelectedPatient(null); setOrderForm(f => ({ ...f, patientId: '' })) }}
               />
             </div>
             <div>

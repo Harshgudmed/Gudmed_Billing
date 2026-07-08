@@ -7,7 +7,7 @@ import { Badge } from '@/components/ui/badge'
 import { Textarea } from '@/components/ui/textarea'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
-import { SearchableSelect } from '@/components/ui/searchable-select'
+import PatientLookup from '@/components/common/PatientLookup'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { ShieldCheck, Plus, Search, Trash2, Loader2, AlertCircle, FileText, Users, Clock } from 'lucide-react'
 import { toast } from 'sonner'
@@ -26,7 +26,7 @@ const EMPTY_CLAIM = { claimAmount: '', approvedAmount: '', status: 'pending', di
 export default function InsuranceModule() {
   const [cases, setCases] = useState([])
   const [stats, setStats] = useState({ tpaPatients: 0, insurancePatients: 0, claimsPending: 0 })
-  const [patients, setPatients] = useState([])
+  const [selectedPatient, setSelectedPatient] = useState(null) // via shared PatientLookup
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [search, setSearch] = useState('')
@@ -53,9 +53,6 @@ export default function InsuranceModule() {
   }
 
   useEffect(() => { fetchCases() }, [search, payerFilter])
-  useEffect(() => {
-    client.get('/patients?limit=1000').then(r => { if (r.success) setPatients(r.data || []) }).catch(() => {})
-  }, [])
 
   // Keep the open claims dialog in sync with refreshed data.
   useEffect(() => {
@@ -65,9 +62,6 @@ export default function InsuranceModule() {
     }
   }, [cases]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  const patientOptions = useMemo(() => patients.map(p => ({
-    value: p.id, label: `${p.firstName} ${p.lastName}`, sublabel: p.mrn, keywords: `${p.mrn} ${p.phonePrimary || ''}`,
-  })), [patients])
 
   const setCase = (k, v) => setCaseForm(f => ({ ...f, [k]: v }))
   const setClaim = (k, v) => setClaimForm(f => ({ ...f, [k]: v }))
@@ -79,7 +73,7 @@ export default function InsuranceModule() {
     setSavingCase(true)
     try {
       const res = await client.post('/insurance', caseForm)
-      if (res.success) { toast.success('Policy added'); setCaseForm(EMPTY_CASE); setCaseOpen(false); fetchCases() }
+      if (res.success) { toast.success('Policy added'); setCaseForm(EMPTY_CASE); setSelectedPatient(null); setCaseOpen(false); fetchCases() }
       else toast.error(res.error || 'Failed to add')
     } catch (e) { toast.error(e.message || 'Failed to add') } finally { setSavingCase(false) }
   }
@@ -203,7 +197,12 @@ export default function InsuranceModule() {
           <form onSubmit={handleCreateCase} className="space-y-4">
             <div>
               <Label>Patient *</Label>
-              <SearchableSelect options={patientOptions} value={caseForm.patientId} onChange={v => setCase('patientId', v)} placeholder="Select patient..." className="w-full mt-1" />
+              <PatientLookup
+                selectedPatient={selectedPatient}
+                onSelect={(p) => { setSelectedPatient(p); setCase('patientId', p.id) }}
+                onClear={() => { setSelectedPatient(null); setCase('patientId', '') }}
+                className="mt-1"
+              />
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div>
