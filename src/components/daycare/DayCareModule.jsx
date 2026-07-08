@@ -7,7 +7,7 @@ import { Badge } from '@/components/ui/badge'
 import { Textarea } from '@/components/ui/textarea'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
-import { SearchableSelect } from '@/components/ui/searchable-select'
+import PatientLookup from '@/components/common/PatientLookup'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { Sun, Plus, Search, Trash2, Loader2, AlertCircle } from 'lucide-react'
 import { format } from 'date-fns'
@@ -29,7 +29,7 @@ const EMPTY = { patientId: '', doctorId: '', procedure: '', fee: '', paymentStat
 
 export default function DayCareModule() {
   const [cases, setCases] = useState([])
-  const [patients, setPatients] = useState([])
+  const [selectedPatient, setSelectedPatient] = useState(null) // via shared PatientLookup
   const [doctors, setDoctors] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
@@ -53,13 +53,8 @@ export default function DayCareModule() {
 
   useEffect(() => { fetchCases() }, [search, statusFilter])
   useEffect(() => {
-    client.get('/patients?limit=1000').then(r => { if (r.success) setPatients(r.data || []) }).catch(() => {})
     client.get('/settings?resource=users').then(r => { if (r.success) setDoctors((r.data || []).filter(u => u.role === 'doctor' && u.isActive !== false)) }).catch(() => {})
   }, [])
-
-  const patientOptions = useMemo(() => patients.map(p => ({
-    value: p.id, label: `${p.firstName} ${p.lastName}`, sublabel: p.mrn, keywords: `${p.mrn} ${p.phonePrimary || ''}`,
-  })), [patients])
 
   const stats = useMemo(() => ({
     total: cases.length,
@@ -76,7 +71,7 @@ export default function DayCareModule() {
     setSaving(true)
     try {
       const res = await client.post('/day-care', form)
-      if (res.success) { toast.success(`Day care case ${res.data.caseNumber} created`); setForm(EMPTY); setOpen(false); fetchCases() }
+      if (res.success) { toast.success(`Day care case ${res.data.caseNumber} created`); setForm(EMPTY); setSelectedPatient(null); setOpen(false); fetchCases() }
       else toast.error(res.error || 'Failed to create')
     } catch (e) { toast.error(e.message || 'Failed to create') } finally { setSaving(false) }
   }
@@ -205,7 +200,12 @@ export default function DayCareModule() {
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
               <Label>Patient *</Label>
-              <SearchableSelect options={patientOptions} value={form.patientId} onChange={v => set('patientId', v)} placeholder="Select patient..." className="w-full mt-1" />
+              <PatientLookup
+                selectedPatient={selectedPatient}
+                onSelect={(p) => { setSelectedPatient(p); set('patientId', p.id) }}
+                onClear={() => { setSelectedPatient(null); set('patientId', '') }}
+                className="mt-1"
+              />
             </div>
             <div>
               <Label>Doctor</Label>

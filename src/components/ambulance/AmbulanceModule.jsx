@@ -7,7 +7,7 @@ import { Badge } from '@/components/ui/badge'
 import { Textarea } from '@/components/ui/textarea'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
-import { SearchableSelect } from '@/components/ui/searchable-select'
+import PatientLookup from '@/components/common/PatientLookup'
 import { Ambulance, Plus, Search, Trash2, Loader2, AlertCircle } from 'lucide-react'
 import { format } from 'date-fns'
 import { toast } from 'sonner'
@@ -38,7 +38,7 @@ const EMPTY = {
 
 export default function AmbulanceModule() {
   const [trips, setTrips] = useState([])
-  const [patients, setPatients] = useState([])
+  const [selectedPatient, setSelectedPatient] = useState(null) // via shared PatientLookup (server search)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [search, setSearch] = useState('')
@@ -57,16 +57,6 @@ export default function AmbulanceModule() {
   }
 
   useEffect(() => { fetchTrips() }, [search])
-  useEffect(() => {
-    client.get('/patients?limit=1000').then(res => { if (res.success) setPatients(res.data || []) }).catch(() => {})
-  }, [])
-
-  const patientOptions = useMemo(() => patients.map(p => ({
-    value: p.id,
-    label: `${p.firstName} ${p.lastName}`,
-    sublabel: `${p.mrn}${p.phonePrimary ? ' · ' + p.phonePrimary : ''}`,
-    keywords: `${p.mrn} ${p.phonePrimary || ''}`,
-  })), [patients])
 
   const stats = useMemo(() => ({
     total: trips.length,
@@ -83,7 +73,7 @@ export default function AmbulanceModule() {
     setSaving(true)
     try {
       const res = await client.post('/ambulance', form)
-      if (res.success) { toast.success(`Trip ${res.data.tripNumber} added`); setForm(EMPTY); fetchTrips() }
+      if (res.success) { toast.success(`Trip ${res.data.tripNumber} added`); setForm(EMPTY); setSelectedPatient(null); fetchTrips() }
       else toast.error(res.error || 'Failed to add trip')
     } catch (e) { toast.error(e.message || 'Failed to add trip') } finally { setSaving(false) }
   }
@@ -198,7 +188,12 @@ export default function AmbulanceModule() {
             <form onSubmit={handleSubmit} className="space-y-4">
               <div>
                 <Label>Patient</Label>
-                <SearchableSelect options={patientOptions} value={form.patientId} onChange={v => set('patientId', v)} placeholder="Select patient..." className="w-full mt-1" />
+                <PatientLookup
+                  selectedPatient={selectedPatient}
+                  onSelect={(p) => { setSelectedPatient(p); set('patientId', p.id) }}
+                  onClear={() => { setSelectedPatient(null); set('patientId', '') }}
+                  className="mt-1"
+                />
               </div>
               <div>
                 <Label>Ambulance Type</Label>
