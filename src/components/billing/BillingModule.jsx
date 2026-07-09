@@ -90,6 +90,15 @@ const CATALOGUE = {
   ],
 }
 
+// Catalogue tabs whose items are real master-data rows. Billing one of these
+// must also move the real record behind it (stock draw-down / clinical order),
+// so the line is tagged with the module the backend should fulfil it against.
+const SOURCE_TYPE = {
+  Lab: 'lab',
+  Radiology: 'radiology',
+  Pharmacy: 'pharmacy',
+}
+
 const CAT_META = {
   Consultation: { color: 'bg-cyan-100 text-cyan-800', dot: '#0097a7' },
   Lab: { color: 'bg-blue-100 text-blue-800', dot: '#185fa5' },
@@ -173,6 +182,14 @@ export default function BillingModule({ onBack }) {
   const [services, setServices] = useState([])
   const [servicesLoading, setServicesLoading] = useState(false)
   const [stats, setStats] = useState({ todayRevenue: 0, pendingCount: 0, collectedToday: 0, outstanding: 0 })
+
+  // Real Lab/Radiology/Pharmacy catalogues (was hardcoded dummy CATALOGUE data).
+  // Lab tests + Radiology exams are small enough to load in full and filter
+  // client-side; Pharmacy has ~2 lakh drugs so it's searched server-side instead.
+  const [labTests, setLabTests] = useState([])
+  const [radiologyExams, setRadiologyExams] = useState([])
+  const [pharmacyDrugs, setPharmacyDrugs] = useState([])
+  const [catalogLoading, setCatalogLoading] = useState(false)
 
   // Real insurance claims (was a hardcoded DEMO_CLAIMS array of fake patients).
   // GET /insurance returns cases, each with its nested claims — flatten to rows.
@@ -372,6 +389,42 @@ export default function BillingModule({ onBack }) {
     finally { setClaimsLoading(false) }
   }, [])
 
+  // Real Lab test catalog (LabTest table — the same master data the Lab module
+  // uses for orders), loaded once per session and cached.
+  const fetchLabTests = useCallback(async () => {
+    if (labTests.length > 0) return
+    setCatalogLoading(true)
+    try {
+      const res = await client.get('/laboratory', { params: { resource: 'tests', limit: 2000 } })
+      if (res.success) setLabTests(res.data || [])
+    } catch { toast.error('Failed to load lab test catalog') }
+    finally { setCatalogLoading(false) }
+  }, [labTests.length])
+
+  // Real Radiology exam catalog (RadiologyExam table — same master data as the
+  // Radiology module), loaded once per session and cached.
+  const fetchRadiologyExams = useCallback(async () => {
+    if (radiologyExams.length > 0) return
+    setCatalogLoading(true)
+    try {
+      const res = await client.get('/radiology', { params: { resource: 'exams', limit: 2000 } })
+      if (res.success) setRadiologyExams(res.data || [])
+    } catch { toast.error('Failed to load radiology catalog') }
+    finally { setCatalogLoading(false) }
+  }, [radiologyExams.length])
+
+  // Real Pharmacy drug catalog — ~2 lakh drugs, so searched server-side (same
+  // /pharmacy/drugs endpoint the Pharmacy module itself uses) rather than loaded whole.
+  const searchPharmacyDrugs = useCallback(async (query) => {
+    if (query.trim().length < 2) { setPharmacyDrugs([]); return }
+    setCatalogLoading(true)
+    try {
+      const res = await client.get('/pharmacy/drugs', { params: { search: query.trim(), limit: 30 } })
+      if (res.success) setPharmacyDrugs(res.data || [])
+    } catch { toast.error('Failed to search pharmacy inventory') }
+    finally { setCatalogLoading(false) }
+  }, [])
+
   const fetchAll = useCallback(() => {
     fetchBills()
     fetchServices()
@@ -416,6 +469,19 @@ export default function BillingModule({ onBack }) {
     return () => document.removeEventListener('mousedown', h)
   }, [])
 
+  // ── Load real Lab/Radiology catalogues when that department is selected ────
+  useEffect(() => {
+    if (department === 'Lab') fetchLabTests()
+    if (department === 'Radiology') fetchRadiologyExams()
+  }, [department, fetchLabTests, fetchRadiologyExams])
+
+  // ── Pharmacy catalogue: server-side search (too many drugs to load whole) ──
+  useEffect(() => {
+    if (department !== 'Pharmacy') return
+    const t = setTimeout(() => searchPharmacyDrugs(catSearch), 300)
+    return () => clearTimeout(t)
+  }, [department, catSearch, searchPharmacyDrugs])
+
   function selectPatient(p) {
     const age = calcAge(p.dateOfBirth)
     setForm(f => ({
@@ -437,7 +503,9 @@ export default function BillingModule({ onBack }) {
         items[ex] = { ...items[ex], qty: items[ex].qty + 1 }
         return { ...f, items }
       }
-      return { ...f, items: [...f.items, { name: item.name, sub: item.sub || '', cat, qty: 1, amt: item.amt }] }
+      // Keep the master-data id: the backend uses it to draw the drug out of
+      // stock / raise the lab-radiology order this line implies.
+      return { ...f, items: [...f.items, { id: item.id, name: item.name, sub: item.sub || '', cat, qty: 1, amt: item.amt }] }
     })
   }
   function removeItem(i) { setForm(f => ({ ...f, items: f.items.filter((_, idx) => idx !== i) })) }
@@ -466,6 +534,9 @@ export default function BillingModule({ onBack }) {
           unitPrice:   it.amt,
           total:       it.qty * it.amt,
           tax:         0,
+          // Only the three clinical catalogues carry a master-data id; billing it
+          // decrements pharmacy stock / raises the lab-radiology order.
+          ...(it.id && SOURCE_TYPE[it.cat] ? { sourceType: SOURCE_TYPE[it.cat], sourceId: it.id } : {}),
         }))
         // Home collection charge → its own line so the invoice total is correct.
         // Lab-only (see the department gate on the input above) — checked again
@@ -739,7 +810,17 @@ export default function BillingModule({ onBack }) {
   const recentBills = [...bills].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt)).slice(0, 10)
 
   // ── Catalogue items filtered ───────────────────────────────────────────────
-  const catItems = (CATALOGUE[activeCat] || []).filter(i =>
+  // Lab/Radiology/Pharmacy come from real backend master data, not the hardcoded
+  // CATALOGUE — normalized to the same {name, sub, amt} shape addToCart expects.
+  const rawCatItems =
+    activeCat === 'Lab' ? labTests.map(t => ({ id: t.id, name: t.testName, sub: t.testCategory || t.department || '', amt: Number(t.price || 0) })) :
+    activeCat === 'Radiology' ? radiologyExams.map(e => ({ id: e.id, name: e.examName, sub: e.examCategory || e.bodyPart || '', amt: Number(e.price || 0) })) :
+    activeCat === 'Pharmacy' ? pharmacyDrugs.map(d => ({ id: d.id, name: d.drugName + (d.strength ? ` ${d.strength}` : ''), sub: d.drugCategory || d.genericName || '', amt: Number(d.sellingPrice || d.mrp || 0) })) :
+    (CATALOGUE[activeCat] || [])
+
+  // Pharmacy is already filtered server-side (search param); Lab/Radiology/other
+  // catalogues are filtered client-side against the cached full list.
+  const catItems = activeCat === 'Pharmacy' ? rawCatItems : rawCatItems.filter(i =>
     !catSearch || i.name.toLowerCase().includes(catSearch.toLowerCase()) || (i.sub || '').toLowerCase().includes(catSearch.toLowerCase())
   )
 
@@ -974,10 +1055,14 @@ export default function BillingModule({ onBack }) {
                   <div className="max-h-64 overflow-y-auto space-y-1">
                     {!department ? (
                       <p className="text-sm text-gray-400 text-center py-6"></p>
+                    ) : catalogLoading ? (
+                      <p className="text-sm text-gray-400 text-center py-4">Loading...</p>
+                    ) : activeCat === 'Pharmacy' && catSearch.trim().length < 2 ? (
+                      <p className="text-sm text-gray-400 text-center py-4">Type at least 2 characters to search medicines</p>
                     ) : catItems.length === 0 ? (
                       <p className="text-sm text-gray-400 text-center py-4">No items found</p>
                     ) : catItems.map(it => (
-                      <div key={it.name} onClick={() => addToCart(it, activeCat)}
+                      <div key={it.id || it.name} onClick={() => addToCart(it, activeCat)}
                         className="flex items-center justify-between px-3 py-2 rounded-lg cursor-pointer hover:bg-gray-50 border border-transparent hover:border-gray-200 transition-colors">
                         <div>
                           <span className="text-sm font-medium">{it.name}</span>

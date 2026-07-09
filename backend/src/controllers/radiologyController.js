@@ -328,6 +328,7 @@ export const create = async (req, res, next) => {
 
       const data = await db.radiologyReport.create({
         data: {
+          organizationId: getOrgId(req),
           orderId,
           status: 'draft',
           ...(technique !== undefined ? { technique } : {}),
