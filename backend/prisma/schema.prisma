@@ -56,12 +56,15 @@ model Organization {
   appointments        Appointment[]
   consultations       Consultation[]
   pharmacyDrugs       PharmacyDrug[]
+  pharmacyBatches     PharmacyBatch[]
   prescriptions       Prescription[]
   pharmacySales       PharmacySale[]
   labTests            LabTest[]
   labOrders           LabOrder[]
+  labResults          LabResult[]
   radiologyExams      RadiologyExam[]
   radiologyOrders     RadiologyOrder[]
+  radiologyReports    RadiologyReport[]
   billingServices     BillingService[]
   invoices            Invoice[]
   payments            Payment[]
@@ -730,6 +733,7 @@ model PharmacyBatch {
   createdAt   DateTime @default(now())
   createdById String?
 
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   drug   PharmacyDrug @relation(fields: [drugId], references: [id], onDelete: Cascade)
   vendor Vendor?      @relation(fields: [vendorId], references: [id])
 
@@ -737,6 +741,7 @@ model PharmacyBatch {
   @@index([expiryDate])
   @@index([status])
   @@index([vendorId])
+  @@index([organizationId])
 }
 
 /// Prescription
@@ -2244,7 +2249,7 @@ model LabOrder {
 /// Lab Result
 model LabResult {
   id                 String   @id @default(cuid())
-  organizationId     String?
+  organizationId     String
   orderId            String
   testId             String
   resultValue        String
@@ -2268,6 +2273,7 @@ model LabResult {
   createdAt          DateTime  @default(now())
   updatedAt          DateTime  @updatedAt
 
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   order      LabOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
   test       LabTest  @relation(fields: [testId], references: [id])
   enteredBy  User?    @relation("LabResultsEntered", fields: [enteredById], references: [id])
@@ -2275,6 +2281,7 @@ model LabResult {
 
   @@index([isCritical])
   @@index([orderId])
+  @@index([organizationId])
 }
 
 // ============================================
@@ -2357,7 +2364,7 @@ model RadiologyOrder {
 /// Radiology Report
 model RadiologyReport {
   id             String  @id @default(cuid())
-  organizationId String?
+  organizationId String
 
   orderId String @unique
 
@@ -2386,10 +2393,12 @@ model RadiologyReport {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  organization Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   order      RadiologyOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
   reportedBy User?          @relation("RadiologyReports", fields: [reportedById], references: [id])
 
   @@index([hasCriticalFindings])
+  @@index([organizationId])
 }
 
 /// Pre-Triage Screening (initial screening before formal triage / registration)

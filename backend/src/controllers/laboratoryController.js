@@ -297,6 +297,7 @@ export const create = async (req, res, next) => {
 
       const data = await db.labResult.create({
         data: {
+          organizationId: getOrgId(req),
           orderId,
           testId,
           resultValue,
