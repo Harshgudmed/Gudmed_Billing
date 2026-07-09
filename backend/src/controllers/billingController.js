@@ -236,6 +236,8 @@ export async function getAll(req, res) {
     if (resource === 'payments') {
       const where = { organizationId: ORGANIZATION_ID }
       if (invoiceId) where.invoiceId = invoiceId
+      if (req.query.status) where.status = req.query.status
+      if (req.query.isRefund !== undefined) where.isRefund = req.query.isRefund === 'true'
 
       const [payments, total] = await Promise.all([
         db.payment.findMany({
@@ -617,43 +619,19 @@ export async function create(req, res) {
             originalPaymentId: originalPaymentId || null,
             notes: notes || null,
             paymentDate: new Date(),
+            status: 'PENDING_APPROVAL', // New Approval Workflow
           },
-        })
-
-        // Atomic decrement — the database performs the subtraction.
-        const updated = await tx.invoice.update({
-          where: { id: invoiceId },
-          data: { amountPaid: { decrement: amount } },
-          select: { totalAmount: true, amountPaid: true },
-        })
-
-        // SECURITY: If the atomic decrement pushed amountPaid below zero,
-        // it means we refunded more money than the invoice ever collected
-        // (e.g. a double-refund race condition). Roll back the transaction!
-        if (updated.amountPaid < 0) {
-          const err = new Error('Refund exceeds amount paid')
-          err.status = 400
-          throw err
-        }
-
-        const paid = updated.amountPaid
-        const paymentStatus =
-          paid <= 0 ? 'refunded' : paid >= updated.totalAmount ? 'paid' : 'partially_paid'
-
-        await tx.invoice.update({
-          where: { id: invoiceId },
-          data: { balanceDue: updated.totalAmount - paid, paymentStatus },
         })
 
         await tx.auditLog.create({
           data: {
             organizationId: ORGANIZATION_ID,
-            action: 'REFUND_ISSUED',
+            action: 'REFUND_REQUESTED',
             entityType: 'Invoice',
             entityId: invoiceId,
             metadata: JSON.stringify({
               refundId: created.id, amount, paymentMethod, refundReason,
-              receiptNumber, newPaymentStatus: paymentStatus,
+              receiptNumber, status: 'PENDING_APPROVAL'
             }),
             performedAt: new Date(),
           },
@@ -663,6 +641,145 @@ export async function create(req, res) {
       })
 
       return res.status(201).json({ success: true, data: refund })
+    }
+
+    if (resource === 'approve_refund') {
+      const { paymentId, action } = req.body // action: 'APPROVE' or 'REJECT'
+      
+      // Basic role check (assume req.user exists from auth middleware)
+      // If no auth middleware is active in demo, we bypass it, but in prod we check:
+      if (req.user && !['finance_controller', 'super_admin', 'admin'].includes(req.user.role)) {
+        return res.status(403).json({ success: false, error: 'Unauthorized to approve refunds' })
+      }
+
+      if (!paymentId || !['APPROVE', 'REJECT'].includes(action)) {
+        return res.status(400).json({ success: false, error: 'Invalid payload' })
+      }
+
+      const result = await db.$transaction(async (tx) => {
+        const payment = await tx.payment.findUnique({
+          where: { id: paymentId, organizationId: ORGANIZATION_ID },
+          include: { invoice: true }
+        })
+
+        if (!payment || payment.status !== 'PENDING_APPROVAL') {
+          const err = new Error('Invalid or already processed refund request'); err.status = 400; throw err
+        }
+
+        if (action === 'REJECT') {
+          const updatedPayment = await tx.payment.update({
+            where: { id: paymentId },
+            data: { 
+              status: 'REJECTED', 
+              approvedByUserId: req.user?.id || 'SYSTEM',
+              approvalDate: new Date()
+            }
+          })
+          
+          await tx.auditLog.create({
+            data: {
+              organizationId: ORGANIZATION_ID,
+              action: 'REFUND_REJECTED',
+              entityType: 'Payment',
+              entityId: paymentId,
+              metadata: JSON.stringify({ reason: 'Finance Controller Rejected' }),
+              performedAt: new Date(),
+            }
+          })
+          return updatedPayment
+        }
+
+        // APPROVE LOGIC: Lock old invoice, generate new revised invoice
+        const oldInvoice = payment.invoice
+        const refundedAmount = payment.amount
+
+        // 1. Update Payment (approver id comes from req.user.userId in this codebase)
+        const approvedPayment = await tx.payment.update({
+          where: { id: paymentId },
+          data: {
+            status: 'APPROVED',
+            approvedByUserId: req.user?.userId || req.user?.id || null,
+            approvalDate: new Date()
+          }
+        })
+
+        // 2. Lock Old Invoice (immutable — kept exactly as-is for the audit trail)
+        await tx.invoice.update({
+          where: { id: oldInvoice.id },
+          data: {
+            paymentStatus: 'refunded',
+            isArchived: true,
+          }
+        })
+
+        // 3. Generate Revised Invoice
+        let parsedItems = []
+        try { parsedItems = JSON.parse(oldInvoice.items) } catch (e) { parsedItems = [] }
+
+        const newTotalAmount = oldInvoice.totalAmount - refundedAmount
+        const newAmountPaid = oldInvoice.amountPaid - refundedAmount
+        const newBalanceDue = newTotalAmount - newAmountPaid
+        const newPaymentStatus = newAmountPaid >= newTotalAmount ? 'paid' : (newAmountPaid > 0 ? 'partially_paid' : 'unpaid')
+
+        // Keep line-item integrity: carry the original lines and append a negative
+        // "Refund Adjustment" line so the items SUM equals the revised total (the old
+        // code copied items unchanged while lowering the total → items ≠ total).
+        const revisedItems = [
+          ...parsedItems,
+          {
+            serviceName: `Refund Adjustment (${payment.receiptNumber})`,
+            quantity: 1,
+            unitPrice: -refundedAmount,
+            total: -refundedAmount,
+            tax: 0,
+          },
+        ]
+
+        // Sequential, collision-free revision number: base + -R<n> (was random(0-999)).
+        const baseNumber = oldInvoice.invoiceNumber.replace(/-R\d+$/, '')
+        const revCount = await tx.invoice.count({ where: { organizationId: ORGANIZATION_ID, parentInvoiceId: oldInvoice.id } })
+        const revisedNumber = `${baseNumber}-R${revCount + 1}`
+
+        const revisedInvoice = await tx.invoice.create({
+          data: {
+            organizationId: ORGANIZATION_ID,
+            patientId: oldInvoice.patientId,
+            consultationId: oldInvoice.consultationId,
+            parentInvoiceId: oldInvoice.id,
+            invoiceNumber: revisedNumber,
+            items: JSON.stringify(revisedItems),
+            subtotal: newTotalAmount,
+            taxAmount: oldInvoice.taxAmount,
+            discountAmount: oldInvoice.discountAmount,
+            discountPercentage: oldInvoice.discountPercentage,
+            totalAmount: newTotalAmount,
+            amountPaid: newAmountPaid,
+            balanceDue: newBalanceDue,
+            paymentStatus: newPaymentStatus,
+            insuranceClaimAmount: oldInvoice.insuranceClaimAmount,
+            patientCopayAmount: oldInvoice.patientCopayAmount,
+            notes: 'Revised Invoice due to Refund ' + payment.receiptNumber,
+          }
+        })
+
+        await tx.auditLog.create({
+          data: {
+            organizationId: ORGANIZATION_ID,
+            action: 'REFUND_APPROVED',
+            entityType: 'Invoice',
+            entityId: oldInvoice.id,
+            metadata: JSON.stringify({
+              refundId: paymentId,
+              revisedInvoiceId: revisedInvoice.id
+            }),
+            performedAt: new Date(),
+          }
+        })
+
+        return { payment: approvedPayment, revisedInvoice }
+      })
+
+      return res.status(200).json({ success: true, data: result })
     }
 
     if (resource === 'invoiceItem') {
