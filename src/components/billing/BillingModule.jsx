@@ -4,6 +4,7 @@ import { toast } from 'sonner'
 import { format } from 'date-fns'
 import client from '@/api/client'
 import PatientLookup from '@/components/common/PatientLookup'
+import RefundApprovalsTab from './RefundApprovalsTab'
 import { Receipt, RefreshCw, Plus, Search, Trash2, Shield, Eye, Printer, Download, TrendingUp, Clock, AlertCircle } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -161,6 +162,7 @@ function PayBadge({ invoice }) {
 // MAIN COMPONENT
 // ─────────────────────────────────────────────────────────────────────────────
 export default function BillingModule({ onBack }) {
+  const user = JSON.parse(localStorage.getItem('gudmed-user') || '{}')
   const [activeTab, setActiveTab] = useState('invoices')
   const [orgInfo, setOrgInfo] = useState({ name: 'Hospital', address: '', city: '', phone: '', email: '' })
   const [clinic, setClinic] = useState(() => {
@@ -242,6 +244,7 @@ export default function BillingModule({ onBack }) {
   // Pagination
   const [invoicesPage, setInvoicesPage] = useState(1)
   const [servicesPage, setServicesPage] = useState(1)
+  const [totalServices, setTotalServices] = useState(0)
 
   useEffect(() => {
     const handler = setTimeout(() => setDebouncedInvoiceSearch(invoiceSearch), 400)
@@ -339,7 +342,10 @@ export default function BillingModule({ onBack }) {
     try {
       const offset = (servicesPage - 1) * BILLING_ITEMS_PER_PAGE
       const res = await client.get('/billing', { params: { resource: 'services', limit: BILLING_ITEMS_PER_PAGE, offset } })
-      if (res.success) setServices(res.data || [])
+      if (res.success) {
+        setServices(res.data || [])
+        setTotalServices(res.meta?.total || 0)
+      }
     } catch { /* silent */ }
     finally { setServicesLoading(false) }
   }, [servicesPage])
@@ -653,7 +659,7 @@ export default function BillingModule({ onBack }) {
     }
 
     try {
-      await client.post('/billing', {
+      const res = await client.post('/billing', {
         resource: 'refund',
         invoiceId: refundDialog.invoiceId || refundDialog.invoice?.id,
         amount,
@@ -661,13 +667,20 @@ export default function BillingModule({ onBack }) {
         paymentMethod: refundDialog.paymentMethod || 'cash',
         originalPaymentId: refundDialog.id,
       })
-      toast.success('Refund recorded successfully')
-      setRefundDialog(null)
-      fetchBills()
-      fetchStats()
-      if (showInvoiceModal) {
-        // We'll close and rely on the background refresh, or user can reopen
-        setShowInvoiceModal(null)
+      if (res.success) {
+        toast.success('Refund request sent for approval')
+        setRefundDialog(null)
+        fetchAll()
+        fetchBills()
+        fetchStats()
+        if (showInvoiceModal) {
+          const updatedInvoice = await client.get('/billing', { params: { resource: 'invoices', invoiceId: showInvoiceModal.dbId } })
+          if (updatedInvoice.success && updatedInvoice.data[0]) {
+            setShowInvoiceModal({ ...showInvoiceModal, payments: updatedInvoice.data[0].payments })
+          }
+        }
+      } else {
+        toast.error(res.error || 'Failed to process refund')
       }
     } catch (err) {
       toast.error(err.message || 'Failed to record refund')
@@ -758,11 +771,12 @@ export default function BillingModule({ onBack }) {
 
       {/* Tabs */}
       <Tabs value={activeTab} onValueChange={setActiveTab}>
-        <TabsList className="w-full grid grid-cols-5 mb-6">
+        <TabsList className="w-full grid grid-cols-6 mb-6">
           <TabsTrigger value="invoices">Dashboard & Invoices</TabsTrigger>
           <TabsTrigger value="new-invoice">New Invoice</TabsTrigger>
           <TabsTrigger value="catalog">Service Catalog</TabsTrigger>
           <TabsTrigger value="insurance">Insurance</TabsTrigger>
+          <TabsTrigger value="approvals">Refund Approvals</TabsTrigger>
         </TabsList>
 
         {/* ── INVOICES (Merged with Dashboard) ── */}
@@ -1082,7 +1096,7 @@ export default function BillingModule({ onBack }) {
                     <TableBody>
                       {services.length === 0 ? (
                         <TableRow><TableCell colSpan={4} className="text-center py-10 text-gray-400">No services added yet</TableCell></TableRow>
-                      ) : services.slice((servicesPage - 1) * BILLING_ITEMS_PER_PAGE, servicesPage * BILLING_ITEMS_PER_PAGE).map(s => (
+                      ) : services.map(s => (
                         <TableRow key={s.id}>
                           <TableCell className="font-medium">{s.name}</TableCell>
                           <TableCell><Badge variant="outline">{s.category || '—'}</Badge></TableCell>
@@ -1092,9 +1106,9 @@ export default function BillingModule({ onBack }) {
                       ))}
                     </TableBody>
                   </Table>
-                  {services.length > BILLING_ITEMS_PER_PAGE && (
+                  {totalServices > BILLING_ITEMS_PER_PAGE && (
                     <div className="px-4">
-                      <PaginationControls currentPage={servicesPage} setCurrentPage={setServicesPage} totalItems={services.length} />
+                      <PaginationControls currentPage={servicesPage} setCurrentPage={setServicesPage} totalItems={totalServices} />
                     </div>
                   )}
                 </>
@@ -1161,6 +1175,9 @@ export default function BillingModule({ onBack }) {
               </Table>
             </CardContent>
           </Card>
+        </TabsContent>
+        <TabsContent value="approvals" className="space-y-4">
+          <RefundApprovalsTab userRole={user?.role} onProcess={fetchAll} />
         </TabsContent>
       </Tabs>
 
