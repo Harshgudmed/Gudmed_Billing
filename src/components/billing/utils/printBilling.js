@@ -34,17 +34,27 @@ export function renderPaymentTable(payments, opts = {}) {
     const inv = p.invoiceNumber || p.invoiceNo || p.invoice || '—'
     const amt = Number(p.amount || 0)
     const mode = p.paymentMethod || p.method || p.paymode || p.mode || '—'
+    const isRefund = !!p.isRefund
+    const statusTag = isRefund && p.status && p.status !== 'APPROVED'
+      ? ` <span style="color:#b45309">(${p.status === 'PENDING_APPROVAL' ? 'Pending' : p.status === 'REJECTED' ? 'Rejected' : p.status})</span>`
+      : ''
     return `<tr>
       <td class="sno">${i + 1}</td>
       <td>${esc(rcpt)}</td>
       <td>${esc(dateStr)}</td>
       <td>${esc(inv)}</td>
-      <td style="text-align:right">${inr(amt)}</td>
-      <td>${esc(String(mode).charAt(0).toUpperCase() + String(mode).slice(1))}</td>
+      <td style="text-align:right${isRefund ? ';color:#dc2626' : ''}">${isRefund ? '-' : ''}${inr(amt)}</td>
+      <td>${esc(String(mode).charAt(0).toUpperCase() + String(mode).slice(1))}${isRefund ? ` <span style="color:#dc2626;font-weight:700">(Refund)</span>` : ''}${statusTag}</td>
     </tr>`
   }).join('')
 
-  const totalPaid = list.reduce((s, p) => s + Number(p.amount || 0), 0)
+  // Only an APPROVED refund actually reduces the money collected; a pending/rejected
+  // refund request has not moved any cash yet, so it must not shrink the printed total.
+  const totalPaid = list.reduce((s, p) => {
+    const amt = Number(p.amount || 0)
+    if (p.isRefund) return p.status === 'APPROVED' ? s - amt : s
+    return s + amt
+  }, 0)
   const words = amountInWords(totalPaid)
 
   return `
@@ -73,7 +83,8 @@ const PAYMENT_TABLE_CSS = `
 .paytable tr.paytotal td{background:#eef2f8;font-weight:800;color:#1a3e6f;font-size:9.5pt}
 .paythanks{font-size:8.5pt;color:#475569;margin-bottom:12px}`
 
-export function printInvoice(bill, orgInfo, clinic) {
+export function printInvoice(bill, orgInfo, clinic, options = {}) {
+  const formatOpt = options.format || 'invoice'
   const win = window.open('', '_blank', 'width=900,height=780')
   if (!win) { toast.error('Allow pop-ups to print'); return }
   
@@ -150,16 +161,28 @@ ${PAYMENT_TABLE_CSS}
 </div>
 <table><thead><tr><th style="width:34px">S.NO.</th><th style="width:110px">TEST CODE</th><th>TEST NAME</th><th style="width:130px">ESTIMATE OF REPORT BY</th><th style="width:80px;text-align:right">PRICE</th></tr></thead>
 <tbody>${itemRows}</tbody></table>
-<div class="totwrap"><div style="font-size:8.5pt;padding-top:4px">Amount Paid In Words : <b>${esc(amountInWords(Number(bill.amountPaid || 0)))} Only</b></div>
+<div class="totwrap">
+  ${formatOpt === 'invoice' ? `
+  <div>
+    <div style="font-size:8.5pt;padding-top:4px;margin-bottom:8px">Amount Paid In Words : <b>${esc(amountInWords(Number(bill.amountPaid || 0)))} Only</b></div>
+    <div style="font-size:9.5pt">Payment Mode : <b>${esc(bill.mode || 'Cash')}</b></div>
+    <div style="font-size:9.5pt;margin-top:4px">Status : <b>${bill.balanceDue <= 0 ? 'Paid' : 'Unpaid'}</b></div>
+  </div>
+  ` : `
+  <div style="font-size:8.5pt;padding-top:4px">Amount Paid In Words : <b>${esc(amountInWords(Number(bill.amountPaid || 0)))} Only</b></div>
+  `}
 <div class="totals">
 <div class="trow"><span>Order Value</span><span>${inr(calcSubtotal)}</span></div>
 <div class="trow b"><span>Total Order Value</span><span>${inr(calcSubtotal)}</span></div>
 <div class="trow net"><span>Net Payable Amount</span><span>${inr(bill.total)}</span></div>
 <div class="trow"><span>Paid Amount</span><span>${inr(bill.amountPaid)}</span></div>
-<div class="trow" style="color:#b91c1c"><span>Balance Amount</span><span>${inr(bill.balanceDue)}</span></div>
+${formatOpt === 'detailed' ? `<div class="trow" style="color:#b91c1c"><span>Balance Amount</span><span>${inr(bill.balanceDue)}</span></div>` : ''}
 </div></div>
-${renderPaymentTable(paymentList, { force: true })}
-<div class="note">This is a computer generated receipt and does not require signature/stamp.<br/><b>*${esc(orgInfo.name || clinic.clinicName)} is exempt from GST being a health care services provider.</b></div>
+${formatOpt === 'detailed' ? renderPaymentTable(paymentList, { force: true }) : ''}
+<div class="note">This is a computer generated receipt and does not require signature/stamp.<br/>
+<b>*${esc(orgInfo.name || clinic.clinicName)} is exempt from GST being a health care services provider.</b><br/>
+For detailed Terms &amp; Conditions, please visit: <b><a href="https://www.gudmed.in/terms-conditions" target="_blank" style="color:inherit;text-decoration:none">www.gudmed.in/terms-conditions</a></b>
+</div>
 <div class="foot">Printed: ${format(new Date(), 'dd-MM-yyyy HH:mm:ss')}</div>
 </div></body></html>`
   win.document.open()
@@ -281,7 +304,10 @@ ${p.invoice ? `
   </div>
 </div>
 ` : ''}
-<div class="note">This is a computer generated receipt and does not require signature/stamp.<br/><b>*${esc(orgInfo.name || clinic.clinicName)} is exempt from GST being a health care services provider.</b></div>
+<div class="note">This is a computer generated receipt and does not require signature/stamp.<br/>
+<b>*${esc(orgInfo.name || clinic.clinicName)} is exempt from GST being a health care services provider.</b><br/>
+For detailed Terms &amp; Conditions, please visit: <b><a href="https://www.gudmed.in/terms-conditions" target="_blank" style="color:inherit;text-decoration:none">www.gudmed.in/terms-conditions</a></b>
+</div>
 <div class="foot">Printed: ${format(new Date(), 'dd-MM-yyyy HH:mm:ss')}</div>
 </div></body></html>`
   win.document.open()
@@ -369,7 +395,8 @@ const RADIOLOGY_DEPT = {
   
 }
 
-function printDiagnosticReceipt(r, orgInfo = {}, clinic = {}, dept = LAB_DEPT) {
+function printDiagnosticReceipt(r, orgInfo = {}, clinic = {}, dept = LAB_DEPT, options = {}) {
+  const formatOpt = options.format || 'invoice'
   const win = window.open('', '_blank', 'width=880,height=780')
   if (!win) { toast.error('Allow pop-ups to print'); return }
   const gh = orgInfo.name || clinic.clinicName || 'Hospital'
@@ -520,7 +547,15 @@ ${PAYMENT_TABLE_CSS}
   <th style="width:130px">Estimate of report by</th><th style="width:80px">Price</th>
 </tr></thead><tbody>${rows}</tbody></table>
 <div class="totwrap">
+  ${formatOpt === 'invoice' ? `
+  <div class="words">
+    <div style="margin-bottom:8px">Amount Paid In Words : <b>${amountInWords(paid || net)} Rupee(s) Only</b></div>
+    <div style="font-size:9.5pt">Payment Mode : <b>${esc(paymentList[paymentList.length - 1]?.method || paymentList[0]?.method || 'Cash')}</b></div>
+    <div style="font-size:9.5pt;margin-top:4px">Status : <b>${bal <= 0 ? 'Paid' : 'Unpaid'}</b></div>
+  </div>
+  ` : `
   <div class="words">Amount Paid In Words : <b>${amountInWords(paid || net)} Rupee(s) Only</b></div>
+  `}
   <div class="totals">
     <div class="trow"><span>Order Value</span><span>${inr(orderValue)}</span></div>
     ${home ? `<div class="trow"><span>Home Collection Charges</span><span>${inr(home)}</span></div>` : ''}
@@ -528,20 +563,16 @@ ${PAYMENT_TABLE_CSS}
     <div class="trow sub"><span>Total Order Value</span><span>${inr(orderValue + home)}</span></div>
     <div class="trow net"><span>Net Payable Amount</span><span>${inr(net)}</span></div>
     <div class="trow"><span>Paid Amount</span><span>${inr(paid)}</span></div>
-    <div class="trow" style="color:${bal > 0 ? '#b91c1c' : '#065f46'}"><span>Balance Amount</span><span>${inr(bal)}</span></div>
+    ${formatOpt === 'detailed' ? `<div class="trow" style="color:${bal > 0 ? '#b91c1c' : '#065f46'}"><span>Balance Amount</span><span>${inr(bal)}</span></div>` : ''}
   </div>
 </div>
-${renderPaymentTable(paymentList, { force: true })}
+${formatOpt === 'detailed' ? renderPaymentTable(paymentList, { force: true }) : ''}
 <div class="note">
   This is a computer generated receipt and does not require signature/stamp.<br/>
   <b>*${esc(gh)} is exempt from GST being a health care services provider.</b>
   <div style="margin-top:5px"><b>Note:</b></div>
-   "Estimate of report by" is on a best-effort basis and tentative in nature. Delays may occur due to complexity of each case, diagnostic procedures and other unforeseen circumstances.<br/>
-  ${dept.newIdNote}<br/>
-  ${dept.timingLine}<br/>
-  ${esc(dept.reportsDownloadLabel)} can be downloaded from our website${val('website') ? ' (' + esc(val('website')) + ')' : ''} or Mobile App (Android / iOS). Online reports can be downloaded only after complete payment.<br/>
-  ${dept.cumulativeNote}<br/>
-  By accepting this invoice / transacting with us, I agree/confirm having understood the Terms &amp; Conditions and Privacy Policy of ${esc(gh)}.
+  Reports can be downloaded from our website${val('website') ? ' (' + esc(val('website')) + ')' : ''}. Online reports available only after complete payment.<br/>
+  For detailed Terms &amp; Conditions, please visit: <b><a href="https://www.gudmed.in/terms-conditions" target="_blank" style="color:inherit;text-decoration:none">www.gudmed.in/terms-conditions</a></b>
   ${val('receiptFooter') ? '<br/><b>' + esc(val('receiptFooter')) + '</b>' : ''}
 </div>
 <div class="foot">${esc(gh)} — ${esc(dept.footerDept)} &nbsp;|&nbsp; Printed: ${esc(r.dateTime || '')}</div>
@@ -550,12 +581,12 @@ ${renderPaymentTable(paymentList, { force: true })}
   setTimeout(() => win.print(), 400)
 }
 
-export function printLabReceipt(r, orgInfo = {}, clinic = {}) {
-  return printDiagnosticReceipt(r, orgInfo, clinic, LAB_DEPT)
+export function printLabReceipt(r, orgInfo = {}, clinic = {}, options = {}) {
+  return printDiagnosticReceipt(r, orgInfo, clinic, LAB_DEPT, options)
 }
 
-export function printRadiologyReceipt(r, orgInfo = {}, clinic = {}) {
-  return printDiagnosticReceipt(r, orgInfo, clinic, RADIOLOGY_DEPT)
+export function printRadiologyReceipt(r, orgInfo = {}, clinic = {}, options = {}) {
+  return printDiagnosticReceipt(r, orgInfo, clinic, RADIOLOGY_DEPT, options)
 }
 
 // ── SHARED Indian pharmacy GST retail-invoice receipt ───────────────────────────
@@ -569,7 +600,8 @@ export function printRadiologyReceipt(r, orgInfo = {}, clinic = {}) {
 //            patientAddress, prescribedBy, paymentMethod, discountAmount, amountPaid,
 //            totalAmount, items: [{drugName, gstRate, batchNumber,
 //            expiryDate, quantity, unitPrice, total}] }
-export function printPharmacyReceipt(sale, orgInfo = {}, clinic = {}) {
+export function printPharmacyReceipt(sale, orgInfo = {}, clinic = {}, options = {}) {
+  const formatOpt = options.format || 'invoice'
   const win = window.open('', '_blank', 'width=880,height=780')
   if (!win) { toast.error('Allow pop-ups to print'); return }
 
@@ -739,7 +771,15 @@ ${PAYMENT_TABLE_CSS}
   <th style="width:60px">GST%</th><th style="width:100px">Batch</th><th style="width:64px">Expiry</th><th style="width:100px">Amount</th>
 </tr></thead><tbody>${rows}</tbody></table>
 <div class="totwrap">
+  ${formatOpt === 'invoice' ? `
+  <div class="words">
+    <div style="margin-bottom:8px">Amount Paid In Words : <b>${amountInWords(paid || netPayable)} Rupee(s) Only</b></div>
+    <div style="font-size:9.5pt">Payment Mode : <b>${esc(sale?.paymentMethod || 'Cash')}</b></div>
+    <div style="font-size:9.5pt;margin-top:4px">Status : <b>${balance <= 0 ? 'Paid' : 'Unpaid'}</b></div>
+  </div>
+  ` : `
   <div class="words">Amount Paid In Words : <b>${amountInWords(paid || netPayable)} Rupee(s) Only</b></div>
+  `}
   <div class="totals">
     <div class="trow"><span>MRP Total</span><span>${inr(mrpTotal)}</span></div>
     <div class="trow"><span>CGST</span><span>${inr(cgstTotal)}</span></div>
@@ -747,17 +787,14 @@ ${PAYMENT_TABLE_CSS}
     ${discount ? `<div class="trow"><span>Discount</span><span>-${inr(discount)}</span></div>` : ''}
     <div class="trow net"><span>Net Payable Amount</span><span>${inr(netPayable)}</span></div>
     <div class="trow"><span>Paid Amount</span><span>${inr(paid)}</span></div>
-    <div class="trow" style="color:${balance > 0 ? '#b91c1c' : '#065f46'}"><span>Balance Amount</span><span>${inr(balance)}</span></div>
+    ${formatOpt === 'detailed' ? `<div class="trow" style="color:${balance > 0 ? '#b91c1c' : '#065f46'}"><span>Balance Amount</span><span>${inr(balance)}</span></div>` : ''}
   </div>
 </div>
-${renderPaymentTable(payments, { force: true })}
+${formatOpt === 'detailed' ? renderPaymentTable(payments, { force: true }) : ''}
 <div class="note">
-  This is a computer generated GST invoice and does not require signature/stamp.<br/>
-  Prices shown are MRP (GST-inclusive). CGST &amp; SGST are computed as the tax component already contained in the MRP.
-  <div style="margin-top:5px"><b>Note:</b></div>
-  Please bring this receipt for next collection / refill.<br/>
-  ${(clinic.phone || orgInfo.phone) ? 'Call &amp; WhatsApp on ' + esc(clinic.phone || orgInfo.phone) + '.<br/>' : ''}
-  By accepting this invoice / transacting with us, I agree/confirm having understood the Terms &amp; Conditions and Privacy Policy of ${esc(gh)}.
+  This is a computer generated GST invoice and does not require signature/stamp. Prices shown are MRP (GST-inclusive).<br/>
+  <div style="margin-top:5px"><b>Note:</b> Please bring this receipt for next collection / refill. ${(clinic.phone || orgInfo.phone) ? 'Call &amp; WhatsApp on ' + esc(clinic.phone || orgInfo.phone) + '.' : ''}</div>
+  For detailed Terms &amp; Conditions, please visit: <b><a href="https://www.gudmed.in/terms-conditions" target="_blank" style="color:inherit;text-decoration:none">www.gudmed.in/terms-conditions</a></b>
   ${val('receiptFooter') ? '<br/><b>' + esc(val('receiptFooter')) + '</b>' : ''}
 </div>
 <div class="foot">${esc(gh)} — Pharmacy Department &nbsp;|&nbsp; Printed: ${dateStr}, ${timeStr}</div>
