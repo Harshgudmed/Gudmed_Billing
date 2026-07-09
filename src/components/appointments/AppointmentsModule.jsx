@@ -25,8 +25,7 @@ import { useAppointments } from "./useAppointments";
 import { parseDate, getPatientFullName, byTime } from "./appointmentHelpers";
 import CancelAppointmentDialog from "./CancelAppointmentDialog";
 import RescheduleAppointmentDialog from "./RescheduleAppointmentDialog";
-import EditAppointmentDialog from "./EditAppointmentDialog";
-import NewAppointmentDialog from "./NewAppointmentDialog";
+import AppointmentFormDialog from "./AppointmentFormDialog";
 import WeeklyView from "./WeeklyView";
 import DoctorSlotsView from "./DoctorSlotsView";
 import MonthlyView from "./MonthlyView";
@@ -805,7 +804,8 @@ export default function AppointmentsModule() {
             Refresh
           </Button>
          
-          <NewAppointmentDialog
+          <AppointmentFormDialog
+            isEdit={false}
             open={dialog.active === "new"}
             onOpenChange={(open) => {
               if (open) {
@@ -933,7 +933,8 @@ export default function AppointmentsModule() {
         </TabsContent>
       </Tabs>
 
-      <EditAppointmentDialog
+      <AppointmentFormDialog
+        isEdit={true}
         open={dialog.active === "edit"}
         onOpenChange={handleDialogOpenChange}
         form={editForm}

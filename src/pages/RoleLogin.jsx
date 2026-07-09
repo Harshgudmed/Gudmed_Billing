@@ -29,9 +29,11 @@ const ROLE_VISUAL = {
 // Demo credentials shown on the login screen (so clients don't have to ask).
 // Falls back to the admin account for any role without its own demo login.
 const DEMO_ACCOUNTS = {
-  admin:       { email: 'admin@gudmed.in',       password: 'Gudmed@123' },
-  doctor:      { email: 'priya@gudmed.in',       password: 'Gudmed@123' },
-  patient_crm: { email: 'coordinator@gudmed.in', password: 'Gudmed@123' },
+  admin:              { email: 'admin@gudmed.in',       password: 'Gudmed@123' },
+  doctor:             { email: 'priya@gudmed.in',       password: 'Gudmed@123' },
+  patient_crm:        { email: 'coordinator@gudmed.in', password: 'Gudmed@123' },
+  receptionist:       { email: 'reception@gudmed.in',   password: 'Gudmed@123' },
+  finance_controller: { email: 'finance@gudmed.in',     password: 'Gudmed@123' },
 }
 
 // Per-role login page mounted at /:role/login. The hospital is resolved from the

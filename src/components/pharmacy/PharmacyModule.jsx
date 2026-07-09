@@ -27,6 +27,7 @@ import {
 } from "lucide-react";
 import ImportMedicinesDialog from "./ImportMedicinesDialog";
 import MedicineNameAutocomplete from "./MedicineNameAutocomplete";
+import PosDrugCombo from './PosDrugCombo';
 import { printPharmacyReceipt } from "@/components/billing/utils/printBilling";
 import PatientLookup from "@/components/common/PatientLookup";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -84,35 +85,28 @@ import SalesReportsTab from "./tabs/SalesReportsTab";
 export default function PharmacyModule() {
   const [activeTab, setActiveTab] = useState("dashboard");
   const [orgInfo, setOrgInfo] = useState({ name: 'Hospital', address: '', city: '', phone: '', email: '' })
-  const [drugs, setDrugs] = useState([]);
-  const [prescriptions, setPrescriptions] = useState([]);
-  const [batches, setBatches] = useState([]);
-  const [purchaseOrders, setPurchaseOrders] = useState([]);
-  const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("all");
-  // Drug inventory is SERVER-paged (scales to lakhs of drugs): the DB applies
-  // search/category + slices the page; the browser only holds one page.
   const debouncedDrugSearch = useDebounce(searchQuery, 300);
   const drugPage = useServerPagination("/pharmacy/drugs", {
     perPage: DRUGS_PER_PAGE,
     params: { search: debouncedDrugSearch, category: categoryFilter },
   });
   const [lowStockPage, setLowStockPage] = useState(1);
-  const [batchesPage, setBatchesPage] = useState(1);
-  const [poPage, setPoPage] = useState(1);
-  const [prescriptionFilter, setPrescriptionFilter] = useState("all");
+  const batchPage = useServerPagination("/pharmacy/batches", { perPage: PHARMACY_BATCHES_PER_PAGE });
   const [poStatusFilter, setPoStatusFilter] = useState("all");
-  const [salesPeriod, setSalesPeriod] = useState("month"); // today | week | month | all
+  const poPage = useServerPagination("/pharmacy/purchase-orders", { 
+    perPage: PHARMACY_PO_PER_PAGE,
+    params: { status: poStatusFilter === "all" ? "" : poStatusFilter }
+  });
+  const [prescriptionFilter, setPrescriptionFilter] = useState("all");
+  const [salesPeriod, setSalesPeriod] = useState("month"); 
 
-  // Prescriptions are SERVER-paged (status filter applied in the DB).
   const rxPage = useServerPagination("/pharmacy/prescriptions", {
     perPage: DRUGS_PER_PAGE,
     params: { status: prescriptionFilter === "all" ? "" : prescriptionFilter },
   });
 
-  // Sales are SERVER-paged with the period as a date filter; `summary` carries
-  // the period's true revenue (summed in the DB across every matching row).
   const saleStartDate = useMemo(() => {
     if (salesPeriod === "all") return "";
     const d =
@@ -126,8 +120,6 @@ export default function PharmacyModule() {
     params: { startDate: saleStartDate },
   });
 
-  // Dashboard KPI counts come from a DB-computed stats endpoint, so they're
-  // correct even with hundreds of thousands of drugs/sales.
   const [stats, setStats] = useState(null);
   const fetchStats = useCallback(async () => {
     try {
@@ -136,7 +128,6 @@ export default function PharmacyModule() {
     } catch { /* ignore */ }
   }, []);
 
-  // Drug dialog
   const [showDrugDialog, setShowDrugDialog] = useState(false);
   const [drugForm, setDrugForm] = useState(emptyDrug);
   const [editingDrugId, setEditingDrugId] = useState(null);
@@ -145,13 +136,9 @@ export default function PharmacyModule() {
   const [scanLooking, setScanLooking] = useState(false);
   const [showImport, setShowImport] = useState(false);
 
-  // Fill the drug form from an open-catalog medicine pick. Composition/company/
-  // price come straight from the dataset; strength + dosage form are inferred.
   const applyReferenceMedicine = useCallback((row) => {
     const composition = row.composition || "";
-    // First strength token in the composition, e.g. "Paracetamol (500mg)" -> 500mg
     const strengthMatch = composition.match(/(\d+(?:\.\d+)?\s?(?:mg\/ml|mcg|mg|ml|iu|%[\s\w/]*|g))/i);
-    // Infer dosage form from the pack label (e.g. "strip of 10 tablets")
     const pack = (row.packSize || "").toLowerCase();
     const FORMS = ["tablet", "capsule", "syrup", "injection", "cream", "gel", "drop", "ointment", "solution", "suspension", "powder", "lotion", "spray", "inhaler", "sachet"];
     const formHit = FORMS.find((f) => pack.includes(f));
@@ -167,8 +154,6 @@ export default function PharmacyModule() {
     toast.success(`Filled "${row.name}" from catalog — set price/stock & save`);
   }, []);
 
-  // Resolve a scanned/typed barcode against the medicine master and auto-fill
-  // the form. A miss is not an error — it's the "new medicine" path.
   const handleBarcodeLookup = useCallback(async (code) => {
     const barcode = String(code || "").trim();
     if (!barcode) return;
@@ -217,37 +202,23 @@ export default function PharmacyModule() {
     }
   }, []);
 
-  // View drug dialog
   const [showViewDrugDialog, setShowViewDrugDialog] = useState(false);
   const [viewingDrug, setViewingDrug] = useState(null);
-
-  // Stock adjust dialog
   const [showStockDialog, setShowStockDialog] = useState(false);
   const [selectedDrug, setSelectedDrug] = useState(null);
   const [stockAdjust, setStockAdjust] = useState({ type: "add", amount: 0 });
-
-  // Dispense dialog
   const [showDispenseDialog, setShowDispenseDialog] = useState(false);
   const [selectedPrescription, setSelectedPrescription] = useState(null);
   const [dispensing, setDispensing] = useState(false);
   const [dispenseWarnings, setDispenseWarnings] = useState([]);
-
-  // Batch dialog
   const [showBatchDialog, setShowBatchDialog] = useState(false);
   const [batchForm, setBatchForm] = useState(emptyBatch);
   const [editingBatchId, setEditingBatchId] = useState(null);
   const [savingBatch, setSavingBatch] = useState(false);
   const [showDeleteBatchConfirm, setShowDeleteBatchConfirm] = useState(false);
   const [selectedBatch, setSelectedBatch] = useState(null);
-
-  // PO dialog
   const [showPoDialog, setShowPoDialog] = useState(false);
-  const [poForm, setPoForm] = useState({
-    supplierName: "",
-    supplierContact: "",
-    expectedDeliveryDate: "",
-    notes: "",
-  });
+  const [poForm, setPoForm] = useState({ supplierName: "", supplierContact: "", expectedDeliveryDate: "", notes: "" });
   const [poItems, setPoItems] = useState([]);
   const [savingPo, setSavingPo] = useState(false);
   const [showReceiveDialog, setShowReceiveDialog] = useState(false);
@@ -256,57 +227,25 @@ export default function PharmacyModule() {
   const [receivingPo, setReceivingPo] = useState(false);
   const [showPoViewDialog, setShowPoViewDialog] = useState(false);
   const [viewingPo, setViewingPo] = useState(null);
-
-  // Sale dialog
   const [showSaleDialog, setShowSaleDialog] = useState(false);
-  const [saleItems, setSaleItems] = useState([{ drugId: "", quantity: 1 }]);
+  const [saleItems, setSaleItems] = useState([{ drugId: "", drugName: "", sellingPrice: 0, quantity: 1 }]);
   const [customerName, setCustomerName] = useState("");
   const [paymentMethod, setPaymentMethod] = useState("cash");
   const [savingSale, setSavingSale] = useState(false);
-  const [salePatient, setSalePatient] = useState(null); // selected via shared PatientLookup
+  const [salePatient, setSalePatient] = useState(null);
   const [saleReferenceDoctor, setSaleReferenceDoctor] = useState("");
-  // Split payment across methods (Cash + UPI, etc.). Empty = single-method sale.
   const [splitPayment, setSplitPayment] = useState(false);
   const [salePayments, setSalePayments] = useState([{ paymentMethod: "cash", amount: "" }]);
-
-  // Delete confirm
   const [deleteConfirm, setDeleteConfirm] = useState(null);
 
-  const fetchAll = useCallback(async () => {
-    setLoading(true);
-    try {
-      const [dRes, pRes, bRes, poRes] = await Promise.all([
-        client.get("/pharmacy/drugs?limit=100"),
-        client.get("/pharmacy/prescriptions?limit=100"),
-        client.get("/pharmacy/batches?limit=100"),
-        client.get("/pharmacy/purchase-orders?limit=100"),
-      ]);
-      if (dRes.success) setDrugs(dRes.data || []);
-      if (pRes.success) setPrescriptions(pRes.data || []);
-      if (bRes.success) setBatches(bRes.data || []);
-      if (poRes.success) setPurchaseOrders(poRes.data || []);
-    } catch {
-      /* ignore */
-    }
-    setLoading(false);
-  }, []);
-
   useEffect(() => {
-    fetchAll();
-    fetchStats(); // DB-computed dashboard KPIs (correct at any scale)
-  }, [fetchAll, fetchStats]);
+    fetchStats();
+  }, [fetchStats]);
   const { orgInfo: hookOrgInfo } = useOrgSettings()
   useEffect(() => { setOrgInfo(hookOrgInfo) }, [hookOrgInfo])
 
-  // ── Drug CRUD ──────────────────────────────────────────────────────────────
-
   const handleSaveDrug = async () => {
-    if (
-      !drugForm.name ||
-      !drugForm.category ||
-      !drugForm.form ||
-      !drugForm.strength
-    ) {
+    if (!drugForm.name || !drugForm.category || !drugForm.form || !drugForm.strength) {
       toast.error("Fill all required fields");
       return;
     }
@@ -327,44 +266,19 @@ export default function PharmacyModule() {
         reorderLevel: parseInt(drugForm.minStock) || 10,
         barcode: drugForm.barcode?.trim() || undefined,
         drugCode: editingDrugId ? undefined : `DRG${Date.now()}`,
-        quantityInStock: editingDrugId
-          ? undefined
-          : parseInt(drugForm.initialQty) || 0,
+        quantityInStock: editingDrugId ? undefined : parseInt(drugForm.initialQty) || 0,
         requiresPrescription: drugForm.scheduleType !== "none",
-        description:
-          [
-            drugForm.scheduleType !== "none"
-              ? `SCH:${drugForm.scheduleType}`
-              : "",
-            drugForm.scheme ? `Scheme: ${drugForm.scheme}` : "",
-          ]
-            .filter(Boolean)
-            .join(" | ") || undefined,
+        description: [drugForm.scheduleType !== "none" ? `SCH:${drugForm.scheduleType}` : "", drugForm.scheme ? `Scheme: ${drugForm.scheme}` : ""].filter(Boolean).join(" | ") || undefined,
       };
-      const res = editingDrugId
-        ? await client.patch(`/pharmacy/drugs/${editingDrugId}`, payload)
-        : await client.post("/pharmacy/drugs", payload);
+      const res = editingDrugId ? await client.patch(`/pharmacy/drugs/${editingDrugId}`, payload) : await client.post("/pharmacy/drugs", payload);
       if (res.success) {
-        if (
-          !editingDrugId &&
-          drugForm.batchNumber &&
-          drugForm.expiryDate &&
-          parseInt(drugForm.initialQty) > 0
-        ) {
-          await client.post("/pharmacy/batches", {
-            drugId: res.data.id,
-            batchNumber: drugForm.batchNumber,
-            expiryDate: drugForm.expiryDate,
-            manufactureDate: drugForm.manufacturingDate || undefined,
-            quantityReceived: parseInt(drugForm.initialQty),
-            costPricePerUnit: parseFloat(drugForm.rate) || 0,
-          });
+        if (!editingDrugId && drugForm.batchNumber && drugForm.expiryDate && parseInt(drugForm.initialQty) > 0) {
+          await client.post("/pharmacy/batches", { drugId: res.data.id, batchNumber: drugForm.batchNumber, expiryDate: drugForm.expiryDate, manufactureDate: drugForm.manufacturingDate || undefined, quantityReceived: parseInt(drugForm.initialQty), costPricePerUnit: parseFloat(drugForm.rate) || 0 });
         }
         toast.success(editingDrugId ? "Drug updated" : "Drug added");
         setShowDrugDialog(false);
         setDrugForm(emptyDrug);
         setEditingDrugId(null);
-        fetchAll();
         drugPage.refresh();
       } else toast.error(res.error || "Failed to save");
     } catch {
@@ -373,39 +287,17 @@ export default function PharmacyModule() {
     setSavingDrug(false);
   };
 
-  const handleDeleteDrug = async (drug) => {
-    try {
-      const res = await client.delete(`/pharmacy/drugs/${drug.id}`);
-      if (res.success) {
-        toast.success("Drug deleted");
-        setDeleteConfirm(null);
-        fetchAll();
-        drugPage.refresh();
-      } else toast.error(res.error || "Failed to delete");
-    } catch {
-      toast.error("Failed to delete");
-    }
-  };
-
   const onAdjustStock = async () => {
     if (!selectedDrug) return;
     const current = selectedDrug.quantityInStock || 0;
-    const newStock =
-      stockAdjust.type === "add"
-        ? current + (parseInt(stockAdjust.amount) || 0)
-        : Math.max(0, current - (parseInt(stockAdjust.amount) || 0));
+    const newStock = stockAdjust.type === "add" ? current + (parseInt(stockAdjust.amount) || 0) : Math.max(0, current - (parseInt(stockAdjust.amount) || 0));
     try {
-      const res = await client.patch(`/pharmacy/drugs/${selectedDrug.id}`, {
-        quantityInStock: newStock,
-      });
+      const res = await client.patch(`/pharmacy/drugs/${selectedDrug.id}`, { quantityInStock: newStock });
       if (res.success) {
-        toast.success(
-          `Stock updated: ${selectedDrug.drugName} → ${newStock} units`,
-        );
+        toast.success(`Stock updated`);
         setShowStockDialog(false);
         setSelectedDrug(null);
         setStockAdjust({ type: "add", amount: 0 });
-        fetchAll();
         drugPage.refresh();
       } else toast.error(res.error || "Failed");
     } catch {
@@ -413,20 +305,10 @@ export default function PharmacyModule() {
     }
   };
 
-  // ── Dispense ───────────────────────────────────────────────────────────────
-
   const openDispenseDialog = async (rx) => {
     let items = [];
-    try {
-      items =
-        typeof rx.items === "string" ? JSON.parse(rx.items) : rx.items || [];
-    } catch {
-      items = [];
-    }
-    setSelectedPrescription({
-      ...rx,
-      items: items.map((i) => ({ ...i, dispensed: false })),
-    });
+    try { items = typeof rx.items === "string" ? JSON.parse(rx.items) : rx.items || []; } catch { items = []; }
+    setSelectedPrescription({ ...rx, items: items.map((i) => ({ ...i, dispensed: false })) });
     const drugNames = items.map((i) => i.drugName || "");
     const interactions = checkDrugInteractions(drugNames);
     const allergyWarnings = [];
@@ -434,153 +316,69 @@ export default function PharmacyModule() {
       const res = await client.get(`/patients?id=${rx.patientId}`);
       if (res.success && res.data) {
         let allergies = [];
-        try {
-          allergies =
-            typeof res.data.allergies === "string"
-              ? JSON.parse(res.data.allergies)
-              : res.data.allergies || [];
-        } catch {
-          allergies = [];
-        }
+        try { allergies = typeof res.data.allergies === "string" ? JSON.parse(res.data.allergies) : res.data.allergies || []; } catch { allergies = []; }
         for (const allergen of allergies) {
           const al = allergen.toLowerCase();
           for (const dn of drugNames) {
             if (dn.toLowerCase().includes(al) || al.includes(dn.toLowerCase()))
-              allergyWarnings.push({
-                severity: "high",
-                message: `ALLERGY ALERT: Patient is allergic to "${allergen}" — conflicts with "${dn}". Do NOT dispense without physician override.`,
-              });
+              allergyWarnings.push({ severity: "high", message: `ALLERGY ALERT: Patient is allergic to "${allergen}"` });
           }
         }
       }
-    } catch {
-      /* non-blocking */
-    }
+    } catch { }
     setDispenseWarnings([...allergyWarnings, ...interactions]);
     setShowDispenseDialog(true);
   };
 
   const toggleItemDispensed = (idx) => {
     if (!selectedPrescription) return;
-    setSelectedPrescription((prev) => ({
-      ...prev,
-      items: prev.items.map((item, i) =>
-        i === idx ? { ...item, dispensed: !item.dispensed } : item,
-      ),
-    }));
+    setSelectedPrescription((prev) => ({ ...prev, items: prev.items.map((item, i) => i === idx ? { ...item, dispensed: !item.dispensed } : item) }));
   };
 
   const handlePrintLabel = (rx) => {
     let items = [];
-    try {
-      items =
-        typeof rx.items === "string" ? JSON.parse(rx.items) : rx.items || [];
-    } catch {
-      items = [];
-    }
-    const name = rx.patient
-      ? `${rx.patient.firstName} ${rx.patient.lastName || ""}`.trim()
-      : "Unknown";
+    try { items = typeof rx.items === "string" ? JSON.parse(rx.items) : rx.items || []; } catch { items = []; }
+    const name = rx.patient ? `${rx.patient.firstName} ${rx.patient.lastName || ""}`.trim() : "Unknown";
     const today = format(new Date(), "dd MMM yyyy HH:mm");
-    const totalCost = items.reduce(
-      (s, i) => s + (i.unitPrice || 0) * i.quantity,
-      0,
-    );
-    const rows = items
-      .map(
-        (i) =>
-          `<tr><td>${i.drugName || "—"}</td><td>${i.dosage || "—"}</td><td>${i.quantity}</td><td>${i.duration || "—"}</td><td>₹${((i.unitPrice || 0) * i.quantity).toFixed(2)}</td></tr>`,
-      )
-      .join("");
-    printViaIframe(`<!DOCTYPE html><html><head><title>Prescription Label</title>
-<style>body{font-family:Arial,sans-serif;margin:20px;color:#000}h1{color:#1e3a5f;font-size:18px}table{width:100%;border-collapse:collapse}th{background:#1e3a5f;color:#fff;padding:6px}td{padding:5px 8px;border-bottom:1px solid #eee;font-size:12px}.grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:16px;background:#f8f9fa;padding:12px;border-radius:6px}.lbl{font-weight:bold;font-size:11px;color:#555}.val{font-size:13px}</style>
-</head><body>
-<h1>${orgInfo.name} — Pharmacy Label</h1>
-<div class="grid">
-<div><div class="lbl">Patient</div><div class="val">${name}</div></div>
-<div><div class="lbl">UHID</div><div class="val">${rx.patient?.mrn || "—"}</div></div>
-<div><div class="lbl">Doctor</div><div class="val">${rx.doctor?.fullName ? drName(rx.doctor.fullName) : "—"}</div></div>
-<div><div class="lbl">Date</div><div class="val">${rx.prescriptionDate ? format(new Date(rx.prescriptionDate), "dd MMM yyyy") : "—"}</div></div>
-<div><div class="lbl">Dispensed</div><div class="val">${today}</div></div>
-<div><div class="lbl">Total</div><div class="val">₹${totalCost.toFixed(2)}</div></div>
-</div>
-<table><thead><tr><th>Drug</th><th>Dosage</th><th>Qty</th><th>Duration</th><th>Amount</th></tr></thead><tbody>${rows}</tbody></table>
-</body></html>`);
+    const totalCost = items.reduce((s, i) => s + (i.unitPrice || 0) * i.quantity, 0);
+    const rows = items.map((i) => `<tr><td>${i.drugName || "—"}</td><td>${i.dosage || "—"}</td><td>${i.quantity}</td><td>${i.duration || "—"}</td><td>₹${((i.unitPrice || 0) * i.quantity).toFixed(2)}</td></tr>`).join("");
+    printViaIframe(`<!DOCTYPE html><html><body><h1>${orgInfo.name} — Pharmacy Label</h1><div>Patient: ${name}</div><table><thead><tr><th>Drug</th><th>Dosage</th><th>Qty</th><th>Duration</th><th>Amount</th></tr></thead><tbody>${rows}</tbody></table></body></html>`);
   };
 
-  // Bill + print + reset after a successful (full or partial) dispense.
   const afterDispense = async (rx) => {
     const items = rx.items || [];
     const totalCost = items.reduce((s, i) => s + (i.unitPrice || 0) * i.quantity, 0);
     if (rx.patientId && totalCost > 0) {
       try {
-        await client.post("/billing", {
-          resource: "invoice",
-          patientId: rx.patientId,
-          items: items.map((i) => ({
-            type: "pharmacy",
-            description: i.drugName,
-            quantity: i.quantity,
-            unitPrice: i.unitPrice || 0,
-            discount: 0,
-            tax: 0,
-            total: (i.unitPrice || 0) * i.quantity,
-          })),
-        })
-      } catch (err) {
-        console.error('Failed to create billing invoice:', err)
-        toast.error('Could not create invoice (but prescription was dispensed)')
-      }
+        await client.post("/billing", { resource: "invoice", patientId: rx.patientId, items: items.map((i) => ({ type: "pharmacy", description: i.drugName, quantity: i.quantity, unitPrice: i.unitPrice || 0, total: (i.unitPrice || 0) * i.quantity })) })
+      } catch (err) { console.error(err); }
     }
     handlePrintLabel(rx);
     setShowDispenseDialog(false);
     setSelectedPrescription(null);
     setDispenseWarnings([]);
-    fetchAll();
-    rxPage.refresh();   // dispensed prescription left the pending list
-    drugPage.refresh(); // stock decremented
+    rxPage.refresh();
+    drugPage.refresh();
     fetchStats();
   };
 
-  // Stock-aware dispensing. The backend validates stock and decrements
-  // inventory + batches + writes a ledger row. allowPartial=true dispenses
-  // only what's in stock and marks the prescription partially_dispensed.
   const runDispense = async (allowPartial) => {
     if (!selectedPrescription) return;
     setDispensing(true);
     try {
-      const res = await client.post(
-        `/pharmacy/prescriptions/${selectedPrescription.id}/dispense`,
-        { allowPartial },
-      );
+      const res = await client.post(`/pharmacy/prescriptions/${selectedPrescription.id}/dispense`, { allowPartial });
       toast.success(res.message || "Prescription dispensed");
       afterDispense(selectedPrescription);
     } catch (err) {
       if (err.code === "INSUFFICIENT_STOCK") {
-        const shortages = err.details?.shortages || [];
-        const summary = shortages
-          .map((s) => `${s.drugName}: need ${s.requested}, have ${s.available}`)
-          .join("\n");
-        // Offer partial dispensing of whatever IS in stock.
-        const ok = window.confirm(
-          `Insufficient stock:\n\n${summary}\n\nDispense the available quantity now (partial)?`,
-        );
-        if (ok) {
-          await runDispense(true);
-          return;
-        }
-        toast.error("Dispensing blocked — insufficient stock");
-      } else {
-        toast.error(err.message || "Failed to complete dispensing");
-      }
-    } finally {
-      setDispensing(false);
-    }
+        const ok = window.confirm(`Insufficient stock. Dispense available?`);
+        if (ok) { await runDispense(true); return; }
+        toast.error("Dispensing blocked");
+      } else { toast.error(err.message || "Failed"); }
+    } finally { setDispensing(false); }
   };
 
   const handleCompleteDispense = () => runDispense(false);
-
-  // ── Batch CRUD ─────────────────────────────────────────────────────────────
 
   const handleSaveBatch = async () => {
     if (!batchForm.drugId || !batchForm.batchNumber || !batchForm.expiryDate) {
@@ -589,24 +387,16 @@ export default function PharmacyModule() {
     }
     setSavingBatch(true);
     try {
-      const payload = {
-        ...batchForm,
-        quantityReceived: parseInt(batchForm.quantityReceived) || 1,
-        costPricePerUnit: parseFloat(batchForm.costPricePerUnit) || 0,
-      };
-      const res = editingBatchId
-        ? await client.patch(`/pharmacy/batches/${editingBatchId}`, payload)
-        : await client.post("/pharmacy/batches", payload);
+      const payload = { ...batchForm, quantityReceived: parseInt(batchForm.quantityReceived) || 1, costPricePerUnit: parseFloat(batchForm.costPricePerUnit) || 0 };
+      const res = editingBatchId ? await client.patch(`/pharmacy/batches/${editingBatchId}`, payload) : await client.post("/pharmacy/batches", payload);
       if (res.success) {
         toast.success(editingBatchId ? "Batch updated" : "Batch added");
         setShowBatchDialog(false);
         setBatchForm(emptyBatch);
         setEditingBatchId(null);
-        fetchAll();
+        batchPage.refresh();
       } else toast.error(res.error || "Failed");
-    } catch {
-      toast.error("Failed to save batch");
-    }
+    } catch { toast.error("Failed to save batch"); }
     setSavingBatch(false);
   };
 
@@ -618,14 +408,10 @@ export default function PharmacyModule() {
         toast.success("Batch removed");
         setShowDeleteBatchConfirm(false);
         setSelectedBatch(null);
-        fetchAll();
+        batchPage.refresh();
       } else toast.error(res.error || "Failed");
-    } catch {
-      toast.error("Failed to remove batch");
-    }
+    } catch { toast.error("Failed to remove batch"); }
   };
-
-  // ── Purchase Orders ────────────────────────────────────────────────────────
 
   const handleSavePO = async () => {
     if (!poForm.supplierName || poItems.length === 0) {
@@ -634,207 +420,93 @@ export default function PharmacyModule() {
     }
     setSavingPo(true);
     try {
-      const res = await client.post("/pharmacy/purchase-orders", {
-        ...poForm,
-        items: poItems,
-      });
+      const res = await client.post("/pharmacy/purchase-orders", { ...poForm, items: poItems });
       if (res.success) {
         toast.success("Purchase order created");
         setShowPoDialog(false);
-        setPoForm({
-          supplierName: "",
-          supplierContact: "",
-          expectedDeliveryDate: "",
-          notes: "",
-        });
+        setPoForm({ supplierName: "", supplierContact: "", expectedDeliveryDate: "", notes: "" });
         setPoItems([]);
-        fetchAll();
+        poPage.refresh();
       } else toast.error(res.error || "Failed");
-    } catch {
-      toast.error("Failed to create PO");
-    }
+    } catch { toast.error("Failed to create PO"); }
     setSavingPo(false);
   };
 
   const handleUpdatePO = async (id, status) => {
     try {
-      const res = await client.patch(`/pharmacy/purchase-orders/${id}`, {
-        status,
-      });
+      const res = await client.patch(`/pharmacy/purchase-orders/${id}`, { status });
       if (res.success) {
         toast.success(`PO ${status}`);
-        fetchAll();
+        poPage.refresh();
+        if (status === "received") { drugPage.refresh(); batchPage.refresh(); }
       } else toast.error(res.error || "Failed");
-    } catch {
-      toast.error("Failed");
-    }
+    } catch { toast.error("Failed"); }
   };
 
   const openReceivePO = (po) => {
     setSelectedPo(po);
-    const items =
-      typeof po.items === "string" ? JSON.parse(po.items) : po.items || [];
-    setReceiveItems(
-      items.map((i) => ({
-        ...i,
-        quantityReceived: i.quantityOrdered || i.quantity || 1,
-        batchNumber: "",
-        expiryDate: "",
-        manufactureDate: "",
-      })),
-    );
+    const items = typeof po.items === "string" ? JSON.parse(po.items) : po.items || [];
+    setReceiveItems(items.map((i) => ({ ...i, quantityReceived: i.quantityOrdered || i.quantity || 1, batchNumber: "", expiryDate: "", manufactureDate: "" })));
     setShowReceiveDialog(true);
   };
 
   const handleReceivePO = async () => {
     setReceivingPo(true);
     try {
-      const res = await client.patch(
-        `/pharmacy/purchase-orders/${selectedPo.id}/receive`,
-        { items: receiveItems },
-      );
+      const res = await client.patch(`/pharmacy/purchase-orders/${selectedPo.id}/receive`, { items: receiveItems });
       if (res.success) {
         toast.success("PO received — batches created");
         setShowReceiveDialog(false);
         setSelectedPo(null);
         setReceiveItems([]);
-        fetchAll();
+        poPage.refresh();
+        batchPage.refresh();
       } else toast.error(res.error || "Failed");
-    } catch {
-      toast.error("Failed to receive PO");
-    }
+    } catch { toast.error("Failed to receive PO"); }
     setReceivingPo(false);
   };
 
-  // ── Direct Sale ────────────────────────────────────────────────────────────
-
-  // Prints the SHARED GST-invoice-style pharmacy receipt (same format used by
-  // PrescriptionPurchaseModal and the Sales & Reports tab) — uses the actual
-  // created sale record (with server-enriched GST%/batch/expiry per item),
-  // not a client-side guess, since only the backend knows which batch FIFO drew from.
-  const handlePrintSaleReceipt = (sale, paymentMethod) => {
-    let clinic = {}
-    try { clinic = JSON.parse(localStorage.getItem('gudmed-clinic-profile') || '{}') } catch { clinic = {} }
-    printPharmacyReceipt({ ...sale, paymentMethod }, orgInfo, clinic);
+  const handlePrintSaleReceipt = (sale, paymentMethod, format = 'invoice') => {
+    let clinic = {};
+    try { clinic = JSON.parse(localStorage.getItem('gudmed-clinic-profile') || '{}'); } catch { }
+    printPharmacyReceipt({ ...sale, paymentMethod }, orgInfo, clinic, { format });
   };
 
-  const handleSale = async () => {
+  const handleSale = async (format = 'invoice') => {
     const valid = saleItems.filter((i) => i.drugId && i.quantity > 0);
-    if (!valid.length) {
-      toast.error("Add items");
-      return;
-    }
+    if (!valid.length) { toast.error("Add items"); return; }
     setSavingSale(true);
     try {
-      const items = valid.map((item) => {
-        const drug = drugs.find((d) => d.id === item.drugId);
-        return {
-          drugId: item.drugId,
-          drugName: drug?.drugName || "",
-          quantity: item.quantity,
-          unitPrice: drug?.sellingPrice || 0,
-          total: (drug?.sellingPrice || 0) * item.quantity,
-        };
-      });
-      const total = items.reduce((s, i) => s + i.total, 0);
-      // When split-payment is on, send the per-method breakdown so the backend
-      // stores a multi-payment ledger and the receipt prints a Payment table.
-      const splits = splitPayment
-        ? salePayments
-            .map((p) => ({ paymentMethod: p.paymentMethod, amount: Number(p.amount) || 0 }))
-            .filter((p) => p.amount > 0)
-        : [];
-      const res = await client.post("/pharmacy/sales", {
-        items,
-        customerName: customerName.trim() || undefined,
-        paymentMethod,
-        paymentStatus: "paid",
-        // Real patient id from the shared PatientLookup → backend fills phone/mrn/uhid
-        // from the patient record (single source of truth). Walk-in = no patient.
-        patientId: salePatient?.id || undefined,
-        phone: salePatient?.phonePrimary || undefined,
-        uhid: salePatient?.mrn || undefined,
-        referenceDoctor: saleReferenceDoctor.trim() || undefined,
-        payments: splits.length ? splits : undefined,
-      });
+      const items = valid.map((item) => ({ drugId: item.drugId, drugName: item.drugName || "", quantity: item.quantity, unitPrice: item.sellingPrice || 0, total: (item.sellingPrice || 0) * item.quantity }));
+      const res = await client.post("/pharmacy/sales", { items, customerName: customerName.trim() || undefined, paymentMethod, paymentStatus: "paid", patientId: salePatient?.id || undefined, phone: salePatient?.phonePrimary || undefined, uhid: salePatient?.mrn || undefined, referenceDoctor: saleReferenceDoctor.trim() || undefined, payments: splitPayment ? salePayments.filter(p => p.amount > 0) : undefined });
       if (res.success) {
-        // Enrich the just-created sale with the selected patient's name/contact so
-        // the receipt shows them immediately (the create response has patientId but
-        // not the joined patient row).
-        const printable = salePatient
-          ? {
-              ...res.data,
-              patientName: `${salePatient.firstName || ""} ${salePatient.lastName || ""}`.trim(),
-              phone: res.data.phone || salePatient.phonePrimary,
-              uhid: res.data.uhid || salePatient.mrn,
-              mrn: res.data.mrn || salePatient.mrn,
-            }
-          : res.data;
-        handlePrintSaleReceipt(printable, paymentMethod);
-        toast.success(`Sale completed — ₹${total.toFixed(2)}`);
+        handlePrintSaleReceipt(res.data, paymentMethod, format);
+        toast.success(`Sale completed`);
         setShowSaleDialog(false);
         setSaleItems([{ drugId: "", quantity: 1 }]);
-        setCustomerName("");
         setSalePatient(null);
-        setSaleReferenceDoctor("");
-        setSplitPayment(false);
-        setSalePayments([{ paymentMethod: "cash", amount: "" }]);
-        fetchAll();
-        salePage.refresh(); // new sale appears in the list + period total
-        drugPage.refresh(); // stock decremented
+        salePage.refresh();
+        drugPage.refresh();
         fetchStats();
       } else toast.error(res.error || "Failed");
-    } catch {
-      toast.error("Failed to record sale");
-    }
+    } catch { toast.error("Failed to record sale"); }
     setSavingSale(false);
   };
 
-  // Reset pagination when filters change. (Drug inventory, prescriptions and
-  // sales reset themselves inside useServerPagination, so they aren't here.)
-  useEffect(() => {
-    setLowStockPage(1);
-  }, [drugs]);
-
-  useEffect(() => {
-    setPoPage(1);
-  }, [poStatusFilter]);
-
-  // ── Derived values ─────────────────────────────────────────────────────────
-
-  // Dashboard summary values all come from the DB stats endpoint, so they are
-  // correct no matter how many drugs/batches exist (never derived from a capped
-  // in-browser list). lowStockCount is the strictly-low (yellow) band.
   const expiringBatches = stats?.expiringBatches ?? [];
   const totalStockValue = stats?.stockValue ?? 0;
   const inStockCount  = stats?.inStock ?? 0;
   const lowStockCount = stats ? Math.max(0, stats.lowStock - stats.outOfStock) : 0;
   const outStockCount = stats?.outOfStock ?? 0;
   const lowStockDrugs = stats?.lowStockDrugs ?? [];
-  const pendingRx     = prescriptions.filter(p => p.status === "pending");
   const todaySalesTotal = stats?.todaySalesTotal ?? 0;
 
-  // Live pricing calc for drug form
   const mrp = parseFloat(drugForm.mrp) || 0;
   const rate = parseFloat(drugForm.rate) || 0;
   const discPct = parseFloat(drugForm.discountPercentage) || 0;
   const discAmt = mrp * (discPct / 100);
   const netRate = mrp - discAmt;
   const margin = rate > 0 ? (((mrp - rate) / mrp) * 100).toFixed(1) : "—";
-
-  // Sale total
-  const saleTotal = saleItems.reduce((s, i) => {
-    const d = drugs.find((x) => x.id === i.drugId);
-    return s + (d?.sellingPrice || 0) * (i.quantity || 1);
-  }, 0);
-
-  // Filtered purchase orders by status
-  const filteredPOs = useMemo(
-    () => poStatusFilter === "all" ? purchaseOrders : purchaseOrders.filter(po => po.status === poStatusFilter),
-    [purchaseOrders, poStatusFilter],
-  );
-
-  // ── Render ─────────────────────────────────────────────────────────────────
 
   return (
     <div className="space-y-4">
@@ -844,32 +516,17 @@ export default function PharmacyModule() {
             <Pill className="h-7 w-7 text-pink-600" />
             Pharmacy
           </h1>
-          <p className="text-gray-500">
-            Drug inventory, prescriptions &amp; dispensing
-          </p>
+          <p className="text-gray-500">Drug inventory, prescriptions &amp; dispensing</p>
         </div>
         <div className="flex gap-2">
-          <Button variant="outline" onClick={fetchAll}>
-            <RefreshCw className="h-4 w-4 mr-1" />
-            Refresh
+          <Button variant="outline" onClick={() => { drugPage.refresh(); batchPage.refresh(); poPage.refresh(); rxPage.refresh(); salePage.refresh(); fetchStats(); }}>
+            <RefreshCw className="h-4 w-4 mr-1" /> Refresh
           </Button>
           <Button variant="outline" onClick={() => setShowSaleDialog(true)}>
-            <ShoppingCart className="h-4 w-4 mr-1" />
-            Direct Sale
+            <ShoppingCart className="h-4 w-4 mr-1" /> Direct Sale
           </Button>
-          <Button variant="outline" onClick={() => setShowImport(true)}>
-            <Upload className="h-4 w-4 mr-1" />
-            Import Excel/CSV
-          </Button>
-          <Button
-            onClick={() => {
-              setEditingDrugId(null);
-              setDrugForm(emptyDrug);
-              setShowDrugDialog(true);
-            }}
-          >
-            <Plus className="h-4 w-4 mr-1" />
-            Add Drug
+          <Button onClick={() => { setEditingDrugId(null); setDrugForm(emptyDrug); setShowDrugDialog(true); }}>
+            <Plus className="h-4 w-4 mr-1" /> Add Drug
           </Button>
         </div>
       </div>
@@ -884,18 +541,14 @@ export default function PharmacyModule() {
           <TabsTrigger value="sales">Sales & Reports</TabsTrigger>
         </TabsList>
 
-        {/* ── DASHBOARD ── */}
         <DashboardTab
           stats={stats}
-          drugs={drugs}
-          prescriptions={prescriptions}
           expiringBatches={expiringBatches}
           totalStockValue={totalStockValue}
           todaySalesTotal={todaySalesTotal}
           inStockCount={inStockCount}
           lowStockCount={lowStockCount}
           outStockCount={outStockCount}
-          pendingRx={pendingRx}
           lowStockDrugs={lowStockDrugs}
           lowStockPage={lowStockPage}
           setLowStockPage={setLowStockPage}
@@ -906,7 +559,6 @@ export default function PharmacyModule() {
           setShowStockDialog={setShowStockDialog}
         />
 
-        {/* ── INVENTORY ── */}
         <InventoryTab
           searchQuery={searchQuery}
           setSearchQuery={setSearchQuery}
@@ -929,7 +581,6 @@ export default function PharmacyModule() {
           setDeleteConfirm={setDeleteConfirm}
         />
 
-        {/* ── PRESCRIPTIONS ── */}
         <PrescriptionsTab
           prescriptionFilter={prescriptionFilter}
           setPrescriptionFilter={setPrescriptionFilter}
@@ -942,11 +593,12 @@ export default function PharmacyModule() {
           handlePrintLabel={handlePrintLabel}
         />
 
-        {/* ── BATCHES ── */}
         <BatchesTab
-          batches={batches}
-          batchesPage={batchesPage}
-          setBatchesPage={setBatchesPage}
+          batches={batchPage.rows}
+          loading={batchPage.loading}
+          page={batchPage.page}
+          setPage={batchPage.setPage}
+          totalPages={batchPage.totalPages}
           setBatchForm={setBatchForm}
           setEditingBatchId={setEditingBatchId}
           setShowBatchDialog={setShowBatchDialog}
@@ -954,13 +606,14 @@ export default function PharmacyModule() {
           setShowDeleteBatchConfirm={setShowDeleteBatchConfirm}
         />
 
-        {/* ── PURCHASE ORDERS ── */}
         <PurchaseOrdersTab
           poStatusFilter={poStatusFilter}
           setPoStatusFilter={setPoStatusFilter}
-          filteredPOs={filteredPOs}
-          poPage={poPage}
-          setPoPage={setPoPage}
+          purchaseOrders={poPage.rows}
+          loading={poPage.loading}
+          page={poPage.page}
+          setPage={poPage.setPage}
+          totalPages={poPage.totalPages}
           setPoForm={setPoForm}
           setPoItems={setPoItems}
           setShowPoDialog={setShowPoDialog}
@@ -970,7 +623,6 @@ export default function PharmacyModule() {
           openReceivePO={openReceivePO}
         />
 
-        {/* ── SALES ── */}
         <SalesReportsTab
           salesPeriod={salesPeriod}
           setSalesPeriod={setSalesPeriod}
@@ -986,504 +638,32 @@ export default function PharmacyModule() {
         />
       </Tabs>
 
-      {/* ── ADD/EDIT DRUG DIALOG ── */}
       <Dialog open={showDrugDialog} onOpenChange={setShowDrugDialog}>
-        <DialogContent className="max-w-2xl flex flex-col p-0" style={{ maxHeight: "92vh" }}>
-          {/* Header */}
-          <div className="px-6 pt-5 pb-3 border-b shrink-0">
-            <DialogTitle className="text-lg font-bold">
-              {editingDrugId ? "Edit Drug" : "Add New Drug"}
-            </DialogTitle>
-            <p className="text-sm text-gray-500 mt-0.5">
-              Fill in drug details, pricing, scheme, and batch information
-            </p>
-          </div>
-
-          <div className="flex-1 overflow-y-auto px-6 py-4 space-y-5" style={{ minHeight: 0 }}>
-
-            {/* ── DRUG IDENTITY ── */}
-            <div>
-              <div className="flex items-center gap-2 mb-3">
-                <div className="w-1 h-4 bg-blue-500 rounded" />
-                <span className="text-xs font-bold uppercase tracking-wider text-gray-500">Drug Identity</span>
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div className="col-span-2">
-                  <Label className="text-xs font-medium">Medicine Name *</Label>
-                  <MedicineNameAutocomplete
-                    value={drugForm.name}
-                    onChange={(v) => setDrugForm((p) => ({ ...p, name: v }))}
-                    onSelect={applyReferenceMedicine}
-                    placeholder="Type to search 2.5 lakh Indian medicines…"
-                  />
-                </div>
-                <div>
-                  <Label className="text-xs font-medium">Salt / Generic Name</Label>
-                  <Input
-                    className="mt-1"
-                    value={drugForm.saltName}
-                    onChange={(e) => setDrugForm((p) => ({ ...p, saltName: e.target.value }))}
-                    placeholder="e.g. Paracetamol"
-                  />
-                </div>
-                <div>
-                  <Label className="text-xs font-medium">Company / Manufacturer</Label>
-                  <Input
-                    className="mt-1"
-                    value={drugForm.companyName}
-                    onChange={(e) => setDrugForm((p) => ({ ...p, companyName: e.target.value }))}
-                    placeholder="e.g. Sun Pharma"
-                  />
-                </div>
-                <div>
-                  <Label className="text-xs font-medium">Category *</Label>
-                  <Select value={drugForm.category} onValueChange={(v) => setDrugForm((p) => ({ ...p, category: v }))}>
-                    <SelectTrigger className="mt-1"><SelectValue placeholder="Select category" /></SelectTrigger>
-                    <SelectContent>
-                      {DRUG_CATEGORIES.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div>
-                  <Label className="text-xs font-medium">Form *</Label>
-                  <Select value={drugForm.form} onValueChange={(v) => setDrugForm((p) => ({ ...p, form: v }))}>
-                    <SelectTrigger className="mt-1"><SelectValue placeholder="Select form" /></SelectTrigger>
-                    <SelectContent>
-                      {DRUG_FORMS.map((f) => <SelectItem key={f} value={f}>{f}</SelectItem>)}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="col-span-2">
-                  <Label className="text-xs font-medium">Strength *</Label>
-                  <Input
-                    className="mt-1"
-                    value={drugForm.strength}
-                    onChange={(e) => setDrugForm((p) => ({ ...p, strength: e.target.value }))}
-                    placeholder="e.g. 500mg, 10mg/5ml"
-                  />
-                </div>
-                <div className="col-span-2">
-                  <Label className="text-xs font-medium">Barcode</Label>
-                  <div className="mt-1 flex items-center gap-2">
-                    <Input
-                      value={drugForm.barcode}
-                      onChange={(e) => setDrugForm((p) => ({ ...p, barcode: e.target.value }))}
-                      onKeyDown={(e) => {
-                        // Enter triggers lookup — also how USB keyboard-wedge scanners submit.
-                        if (e.key === "Enter") {
-                          e.preventDefault();
-                          handleBarcodeLookup(drugForm.barcode);
-                        }
-                      }}
-                      placeholder="Scan or type, then Enter to auto-fill"
-                      disabled={scanLooking}
-                    />
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="icon"
-                      title="Scan with camera"
-                      onClick={() => setShowScanner(true)}
-                    >
-                      <ScanLine className="h-4 w-4" />
-                    </Button>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {/* ── PRICING & SCHEME ── */}
-            <div>
-              <div className="flex items-center gap-2 mb-3">
-                <div className="w-1 h-4 bg-green-500 rounded" />
-                <span className="text-xs font-bold uppercase tracking-wider text-gray-500">Pricing &amp; Scheme</span>
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <Label className="text-xs font-medium">MRP (₹) *</Label>
-                  <Input className="mt-1" type="number" min={0} step="0.01" placeholder="0"
-                    value={drugForm.mrp}
-                    onChange={(e) => setDrugForm((p) => ({ ...p, mrp: e.target.value }))} />
-                </div>
-                <div>
-                  <Label className="text-xs font-medium">Purchase Rate (₹) *</Label>
-                  <Input className="mt-1" type="number" min={0} step="0.01" placeholder="0"
-                    value={drugForm.rate}
-                    onChange={(e) => setDrugForm((p) => ({ ...p, rate: e.target.value }))} />
-                </div>
-                <div>
-                  <Label className="text-xs font-medium">Discount %</Label>
-                  <Input className="mt-1" type="number" min={0} max={100} placeholder="0"
-                    value={drugForm.discountPercentage}
-                    onChange={(e) => setDrugForm((p) => ({ ...p, discountPercentage: e.target.value }))} />
-                </div>
-                <div>
-                  <Label className="text-xs font-medium">Scheme</Label>
-                  <Input className="mt-1" placeholder="e.g. 10+1, 5+1 Free"
-                    value={drugForm.scheme}
-                    onChange={(e) => setDrugForm((p) => ({ ...p, scheme: e.target.value }))} />
-                </div>
-                <div>
-                  <Label className="text-xs font-medium">Min Stock</Label>
-                  <Input className="mt-1" type="number" min={0} placeholder="0"
-                    value={drugForm.minStock}
-                    onChange={(e) => setDrugForm((p) => ({ ...p, minStock: e.target.value }))} />
-                </div>
-                <div>
-                  <Label className="text-xs font-medium">Schedule</Label>
-                  <Select value={drugForm.scheduleType} onValueChange={(v) => setDrugForm((p) => ({ ...p, scheduleType: v }))}>
-                    <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      {SCHEDULE_TYPES.map((s) => <SelectItem key={s} value={s}>{s === "none" ? "None (OTC)" : `Sch-${s}`}</SelectItem>)}
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-              {(mrp > 0 || rate > 0) && (
-                <div className="mt-3 rounded-lg border border-green-200 bg-green-50 px-4 py-3 grid grid-cols-4 gap-3 text-center text-sm">
-                  <div>
-                    <p className="text-xs text-gray-500 font-semibold uppercase">MRP</p>
-                    <p className="font-bold text-gray-800">₹{Number(mrp).toFixed(2)}</p>
-                  </div>
-                  <div>
-                    <p className="text-xs text-gray-500 font-semibold uppercase">Discount</p>
-                    <p className="font-bold text-red-600">–₹{discAmt.toFixed(2)} ({discPct}%)</p>
-                  </div>
-                  <div>
-                    <p className="text-xs text-gray-500 font-semibold uppercase">Net Rate</p>
-                    <p className="font-bold text-green-700">₹{netRate.toFixed(2)}</p>
-                  </div>
-                  <div>
-                    <p className="text-xs text-gray-500 font-semibold uppercase">Margin</p>
-                    <p className="font-bold text-blue-700">{margin}%</p>
-                  </div>
-                </div>
-              )}
-            </div>
-
-            {/* ── BATCH INFORMATION ── */}
-            {!editingDrugId && (
-              <div>
-                <div className="flex items-center gap-2 mb-3">
-                  <div className="w-1 h-4 bg-orange-500 rounded" />
-                  <span className="text-xs font-bold uppercase tracking-wider text-gray-500">Batch Information</span>
-                  <span className="text-[11px] text-gray-400 normal-case font-normal">(Optional — adds opening stock)</span>
-                </div>
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <Label className="text-xs font-medium">Batch Number</Label>
-                    <Input className="mt-1" placeholder="e.g. BN2024001"
-                      value={drugForm.batchNumber}
-                      onChange={(e) => setDrugForm((p) => ({ ...p, batchNumber: e.target.value }))} />
-                  </div>
-                  <div>
-                    <Label className="text-xs font-medium">Opening Quantity</Label>
-                    <Input className="mt-1" type="number" min={0} placeholder="0"
-                      value={drugForm.initialQty}
-                      onChange={(e) => setDrugForm((p) => ({ ...p, initialQty: e.target.value }))} />
-                  </div>
-                  <div className="col-span-2">
-                    <Label className="text-xs font-medium">Expiry Date</Label>
-                    <Input className="mt-1" type="date"
-                      value={drugForm.expiryDate}
-                      onChange={(e) => setDrugForm((p) => ({ ...p, expiryDate: e.target.value }))} />
-                  </div>
-                </div>
-              </div>
-            )}
-          </div>
-
-          {/* Footer */}
-          <div className="px-6 py-3 border-t shrink-0 flex justify-end gap-2 bg-gray-50">
-            <Button variant="outline" onClick={() => setShowDrugDialog(false)}>Cancel</Button>
-            <Button onClick={handleSaveDrug} disabled={savingDrug}>
-              {savingDrug ? "Saving..." : editingDrugId ? "Update" : "Add Drug"}
-            </Button>
-          </div>
-        </DialogContent>
-      </Dialog>
-
-      <Suspense fallback={null}>
-        <BarcodeScanner
-          open={showScanner}
-          onClose={() => setShowScanner(false)}
-          onScan={handleBarcodeLookup}
-        />
-      </Suspense>
-
-      <ImportMedicinesDialog
-        open={showImport}
-        onClose={() => setShowImport(false)}
-        onImported={fetchAll}
-      />
-
-      {/* ── VIEW DRUG ── */}
-      <Dialog open={showViewDrugDialog} onOpenChange={setShowViewDrugDialog}>
-        <DialogContent className="max-w-md">
-          <DialogHeader>
-            <DialogTitle>Drug Details</DialogTitle>
-          </DialogHeader>
-          {viewingDrug && (
-            <div className="space-y-3 text-sm">
-              <div className="grid grid-cols-2 gap-3 bg-blue-50 p-3 rounded-lg">
-                <div>
-                  <p className="text-gray-500 font-medium">Drug Name</p>
-                  <p className="font-semibold">{viewingDrug.drugName}</p>
-                </div>
-                <div>
-                  <p className="text-gray-500 font-medium">Generic</p>
-                  <p>{viewingDrug.genericName || "—"}</p>
-                </div>
-                <div>
-                  <p className="text-gray-500 font-medium">Category</p>
-                  <p>{viewingDrug.drugCategory || "—"}</p>
-                </div>
-                <div>
-                  <p className="text-gray-500 font-medium">Form / Strength</p>
-                  <p>
-                    {viewingDrug.dosageForm} {viewingDrug.strength}
-                  </p>
-                </div>
-                <div>
-                  <p className="text-gray-500 font-medium">MRP</p>
-                  <p className="font-bold text-green-700">
-                    ₹{(viewingDrug.sellingPrice || 0).toFixed(2)}
-                  </p>
-                </div>
-                <div>
-                  <p className="text-gray-500 font-medium">Stock</p>
-                  <p>{viewingDrug.quantityInStock || 0} units</p>
-                </div>
-                <div>
-                  <p className="text-gray-500 font-medium">Min Stock</p>
-                  <p>{viewingDrug.reorderLevel || 10}</p>
-                </div>
-                <div>
-                  <p className="text-gray-500 font-medium">Status</p>
-                  {stockBadge(viewingDrug)}
-                </div>
-              </div>
-            </div>
-          )}
-          <DialogFooter>
-            <Button
-              variant="outline"
-              onClick={() => setShowViewDrugDialog(false)}
-            >
-              Close
-            </Button>
-            {viewingDrug && (
-              <Button
-                onClick={() => {
-                  setShowViewDrugDialog(false);
-                  setDrugForm({
-                    name: viewingDrug.drugName,
-                    saltName: viewingDrug.genericName || "",
-                    companyName: viewingDrug.brandName || "",
-                    category: viewingDrug.drugCategory || "",
-                    form: viewingDrug.dosageForm || "",
-                    strength: viewingDrug.strength || "",
-                    mrp: viewingDrug.sellingPrice || 0,
-                    rate: viewingDrug.costPrice || 0,
-                    discountPercentage: viewingDrug.markupPercentage || 0,
-                    scheme: "",
-                    scheduleType: "none",
-                    initialQty: 0,
-                    minStock: viewingDrug.reorderLevel || 10,
-                    batchNumber: "",
-                    expiryDate: "",
-                    manufacturingDate: "",
-                    barcode: viewingDrug.drugCode || "",
-                  });
-                  setEditingDrugId(viewingDrug.id);
-                  setShowDrugDialog(true);
-                }}
-              >
-                <Edit className="h-4 w-4 mr-1" />
-                Edit
-              </Button>
-            )}
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* ── STOCK ADJUST ── */}
-      <Dialog open={showStockDialog} onOpenChange={setShowStockDialog}>
-        <DialogContent className="max-w-sm">
-          <DialogHeader>
-            <DialogTitle>Adjust Stock — {selectedDrug?.drugName}</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-4">
-            <div className="text-center bg-gray-50 rounded-lg p-3">
-              <p className="text-xs text-gray-500">Current Stock</p>
-              <p className="text-3xl font-bold text-blue-600">
-                {selectedDrug?.quantityInStock || 0}
-              </p>
-              <p className="text-xs text-gray-400">units</p>
+        <DialogContent className="max-w-2xl overflow-y-auto max-h-[90vh]">
+          <DialogTitle>{editingDrugId ? "Edit Drug" : "Add New Drug"}</DialogTitle>
+          <div className="grid grid-cols-2 gap-3 mt-4">
+            <div className="col-span-2">
+              <Label>Medicine Name *</Label>
+              <MedicineNameAutocomplete value={drugForm.name} onChange={(v) => setDrugForm((p) => ({ ...p, name: v }))} onSelect={applyReferenceMedicine} />
             </div>
             <div>
-              <Label>Adjustment Type</Label>
-              <Select
-                value={stockAdjust.type}
-                onValueChange={(v) =>
-                  setStockAdjust((p) => ({ ...p, type: v }))
-                }
-              >
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="add">Add Stock</SelectItem>
-                  <SelectItem value="remove">Remove Stock</SelectItem>
-                </SelectContent>
+              <Label>Salt / Generic Name</Label>
+              <Input value={drugForm.saltName} onChange={(e) => setDrugForm((p) => ({ ...p, saltName: e.target.value }))} />
+            </div>
+            <div>
+              <Label>Category *</Label>
+              <Select value={drugForm.category} onValueChange={(v) => setDrugForm((p) => ({ ...p, category: v }))}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>{DRUG_CATEGORIES.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}</SelectContent>
               </Select>
             </div>
-            <div>
-              <Label>Quantity</Label>
-              <Input
-                type="number"
-                min={0}
-                value={stockAdjust.amount}
-                onChange={(e) =>
-                  setStockAdjust((p) => ({
-                    ...p,
-                    amount: parseInt(e.target.value) || 0,
-                  }))
-                }
-              />
-            </div>
-            {stockAdjust.amount > 0 && (
-              <div className="text-center text-sm">
-                <span className="text-gray-500">New Stock: </span>
-                <span className="font-bold text-green-700">
-                  {stockAdjust.type === "add"
-                    ? (selectedDrug?.quantityInStock || 0) + stockAdjust.amount
-                    : Math.max(
-                        0,
-                        (selectedDrug?.quantityInStock || 0) -
-                          stockAdjust.amount,
-                      )}{" "}
-                  units
-                </span>
-              </div>
-            )}
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setShowStockDialog(false)}>
-              Cancel
-            </Button>
-            <Button onClick={onAdjustStock} disabled={!stockAdjust.amount}>
-              Update Stock
-            </Button>
+            <Button onClick={handleSaveDrug}>Save</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
-      {/* ── DISPENSE ── */}
-      <Dialog open={showDispenseDialog} onOpenChange={setShowDispenseDialog}>
-        <DialogContent className="max-w-lg">
-          <DialogHeader>
-            <DialogTitle>Dispense Prescription</DialogTitle>
-          </DialogHeader>
-          {selectedPrescription &&
-            (() => {
-              const items = selectedPrescription.items || [];
-              const name = selectedPrescription.patient
-                ? `${selectedPrescription.patient.firstName} ${selectedPrescription.patient.lastName || ""}`.trim()
-                : "Unknown";
-              return (
-                <div className="space-y-3">
-                  {dispenseWarnings.length > 0 && (
-                    <div className="space-y-2">
-                      {dispenseWarnings.map((w, i) => (
-                        <div
-                          key={i}
-                          className={`flex gap-2 p-3 rounded-lg border text-sm ${w.severity === "high" ? "bg-red-50 border-red-200 text-red-800" : "bg-yellow-50 border-yellow-200 text-yellow-800"}`}
-                        >
-                          <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" />
-                          <p>{w.message}</p>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                  <div className="grid grid-cols-2 gap-2 text-sm">
-                    <div>
-                      <span className="text-gray-500">Patient: </span>
-                      <span className="font-medium">{name}</span>
-                    </div>
-                    <div>
-                      <span className="text-gray-500">UHID: </span>
-                      <span className="font-mono">
-                        {selectedPrescription.patient?.mrn || "—"}
-                      </span>
-                    </div>
-                    <div>
-                      <span className="text-gray-500">Doctor: </span>
-                      <span>
-                        {selectedPrescription.doctor?.fullName || "—"}
-                      </span>
-                    </div>
-                    <div>
-                      <span className="text-gray-500">Date: </span>
-                      <span>
-                        {selectedPrescription.prescriptionDate
-                          ? format(
-                              new Date(selectedPrescription.prescriptionDate),
-                              "dd MMM yyyy",
-                            )
-                          : "—"}
-                      </span>
-                    </div>
-                  </div>
-                  <div>
-                    <p className="text-sm font-medium mb-2">Items</p>
-                    <div className="space-y-1">
-                      {items.map((item, i) => (
-                        <div
-                          key={i}
-                          className={`flex items-center gap-3 p-2 rounded text-sm ${item.dispensed ? "bg-green-50" : "bg-gray-50"}`}
-                        >
-                          <Checkbox
-                            checked={item.dispensed}
-                            onCheckedChange={() => toggleItemDispensed(i)}
-                          />
-                          <span className="flex-1 font-medium">
-                            {item.drugName || item.drugId}
-                          </span>
-                          <span className="text-gray-500">
-                            Qty: {item.quantity}
-                          </span>
-                          {item.dosage && (
-                            <span className="text-gray-400 text-xs">
-                              {item.dosage}
-                            </span>
-                          )}
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                </div>
-              );
-            })()}
-          <DialogFooter>
-            <Button
-              variant="outline"
-              onClick={() => {
-                setShowDispenseDialog(false);
-                setDispenseWarnings([]);
-              }}
-            >
-              Cancel
-            </Button>
-            <Button onClick={handleCompleteDispense} disabled={dispensing}>
-              <CheckCircle className="h-4 w-4 mr-1" />
-              {dispensing ? "Dispensing..." : "Mark Dispensed & Print"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* ── ADD/EDIT BATCH ── */}
       <Dialog open={showBatchDialog} onOpenChange={setShowBatchDialog}>
         <DialogContent className="max-w-lg">
           <DialogHeader>
@@ -2156,27 +1336,14 @@ export default function PharmacyModule() {
             {saleItems.map((item, idx) => (
               <div key={idx} className="flex gap-2 items-end">
                 <div className="flex-1">
-                  <Select
-                    value={item.drugId}
-                    onValueChange={(v) =>
+                  <PosDrugCombo 
+                    selectedName={item.drugName}
+                    onSelect={(d) => 
                       setSaleItems((p) =>
-                        p.map((x, i) => (i === idx ? { ...x, drugId: v } : x)),
+                        p.map((x, i) => (i === idx ? { ...x, drugId: d.id, drugName: d.drugName, sellingPrice: d.sellingPrice } : x)),
                       )
-                    }
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Drug" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {drugs
-                        .filter((d) => (d.quantityInStock || 0) > 0)
-                        .map((d) => (
-                          <SelectItem key={d.id} value={d.id}>
-                            {d.drugName} — Stock: {d.quantityInStock}
-                          </SelectItem>
-                        ))}
-                    </SelectContent>
-                  </Select>
+                    } 
+                  />
                 </div>
                 <div className="w-20">
                   <Input
@@ -2346,9 +1513,14 @@ export default function PharmacyModule() {
             <Button variant="outline" onClick={() => setShowSaleDialog(false)}>
               Cancel
             </Button>
-            <Button onClick={handleSale} disabled={savingSale}>
-              {savingSale ? "Processing..." : "Complete Sale & Print"}
-            </Button>
+            <div className="flex gap-2">
+              <Button variant="outline" className="border-blue-200 text-blue-700 hover:bg-blue-50" onClick={() => handleSale('detailed')} disabled={savingSale}>
+                {savingSale ? "Processing..." : "Complete & Print History"}
+              </Button>
+              <Button className="bg-blue-600 text-white hover:bg-blue-700" onClick={() => handleSale('invoice')} disabled={savingSale}>
+                {savingSale ? "Processing..." : "Complete & Print Invoice"}
+              </Button>
+            </div>
           </DialogFooter>
         </DialogContent>
       </Dialog>
