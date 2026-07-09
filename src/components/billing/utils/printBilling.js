@@ -186,10 +186,17 @@ export function printReceipt(p, orgInfo, clinic) {
   // Include payments made ON OR BEFORE this receipt
   const historicalPayments = sortedPayments.filter(hist => new Date(hist.paymentDate || hist.date) <= receiptDate);
   
+  // Only an APPROVED refund actually reduces the paid amount. A refund that is
+  // still PENDING_APPROVAL (or REJECTED) is just a request — the money hasn't left,
+  // so it must NOT lower "Total Paid" (that was the bug where a pending ₹100 refund
+  // showed Paid ₹400 while the invoice still held ₹500).
   let historicalAmountPaid = 0;
   historicalPayments.forEach(hist => {
-    if (hist.isRefund) historicalAmountPaid -= hist.amount;
-    else historicalAmountPaid += hist.amount;
+    if (hist.isRefund) {
+      if (hist.status === 'APPROVED') historicalAmountPaid -= hist.amount;
+    } else {
+      historicalAmountPaid += hist.amount;
+    }
   });
 
   const totalInvoiceValue = p.invoice?.total || p.invoice?.totalAmount || 0;
@@ -263,7 +270,7 @@ ${p.invoice ? `
           <tr style="border-bottom:1px dashed #eee;${hist.receiptNumber === p.receiptNumber ? 'background:#f0f7ff' : ''}">
             <td style="padding:6px 0;color:#555">${format(new Date(hist.paymentDate || hist.date || new Date()), 'dd MMM yyyy')}</td>
             <td style="padding:6px 0;font-family:monospace;color:#333">${hist.receiptNumber === p.receiptNumber ? '<b>' + (hist.receiptNumber || hist.receiptNo) + '</b> (This)' : (hist.receiptNumber || hist.receiptNo || '—')}</td>
-            <td style="padding:6px 0;color:#555">${hist.paymentMethod || hist.method || hist.payMode || 'Cash'}</td>
+            <td style="padding:6px 0;color:#555">${hist.paymentMethod || hist.method || hist.payMode || 'Cash'}${hist.isRefund && hist.status && hist.status !== 'APPROVED' ? ` <span style="color:#b45309;font-size:7pt">(${hist.status === 'PENDING_APPROVAL' ? 'Pending' : hist.status})</span>` : ''}</td>
             <td style="padding:6px 0;text-align:right;font-weight:bold;${hist.isRefund ? 'color:#b91c1c' : 'color:#065f46'}">${hist.isRefund ? '-' : ''}${inr(hist.amount)}</td>
           </tr>
         `).join('')}
