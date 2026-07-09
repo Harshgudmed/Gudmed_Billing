@@ -130,7 +130,7 @@ model User {
 
   // Professional Info
   employeeId     String?
-  role           String // super_admin, admin, doctor, nurse, receptionist, pharmacist, lab_tech, lab_supervisor, radiologist, radiology_tech, billing_clerk, inventory_manager
+  role           String // super_admin, admin, doctor, nurse, receptionist, pharmacist, lab_tech, lab_supervisor, radiologist, radiology_tech, billing_clerk, inventory_manager, finance_controller
   departmentId   String?
   specialization String?
   licenseNumber  String?
@@ -989,6 +989,9 @@ model Invoice {
   // Relations
   patientId      String
   consultationId String?
+  parentInvoiceId String?
+  parentInvoice   Invoice?  @relation("RevisedInvoices", fields: [parentInvoiceId], references: [id])
+  revisedInvoices Invoice[] @relation("RevisedInvoices")
 
   // Invoice Details
   invoiceNumber String    @unique
@@ -1016,7 +1019,8 @@ model Invoice {
   patientCopayAmount   Float   @default(0)
 
   // Status
-  status String @default("draft") // draft, sent, overdue, paid, cancelled
+  status     String  @default("draft") // draft, sent, overdue, paid, cancelled
+  isArchived Boolean @default(false)
 
   // Notes
   notes              String?
@@ -1076,6 +1080,11 @@ model Payment {
   isRefund          Boolean @default(false)
   refundReason      String?
   originalPaymentId String?
+
+  // Approval Tracking
+  status           String    @default("COMPLETED") // PENDING_APPROVAL, APPROVED, REJECTED
+  approvedByUserId String?
+  approvalDate     DateTime?
 
   // Notes
   notes String?

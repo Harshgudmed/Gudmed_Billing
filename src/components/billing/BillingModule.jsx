@@ -635,7 +635,7 @@ export default function BillingModule({ onBack }) {
     if (p.isRefund) return
     
     // Calculate how much of THIS SPECIFIC receipt has already been refunded
-    const relatedRefunds = (showInvoiceModal?.payments || []).filter(pay => pay.isRefund && pay.originalPaymentId === p.id)
+    const relatedRefunds = (showInvoiceModal?.payments || []).filter(pay => pay.isRefund && pay.originalPaymentId === p.id && pay.status !== 'REJECTED')
     const refundedSoFar = relatedRefunds.reduce((sum, r) => sum + r.amount, 0)
     const maxPaid = Math.max(0, p.amount - refundedSoFar)
     
@@ -1248,7 +1248,11 @@ export default function BillingModule({ onBack }) {
                             <TableCell className="py-2 text-xs font-mono">{p.receiptNo || p.receiptNumber || `RCPT-${i+1}`}</TableCell>
                             <TableCell className="py-2 text-xs">
                               {p.method || p.paymentMethod || showInvoiceModal.payMode || 'Cash'}
-                              {p.isRefund && <Badge variant="outline" className="ml-2 text-[10px] text-red-600 bg-red-50 border-red-200">Refund</Badge>}
+                              {p.isRefund && (
+                                <Badge variant="outline" className="ml-2 text-[10px] text-red-600 bg-red-50 border-red-200">
+                                  Refund{p.status && p.status !== 'APPROVED' ? ` (${p.status === 'PENDING_APPROVAL' ? 'Pending' : 'Rejected'})` : ''}
+                                </Badge>
+                              )}
                             </TableCell>
                             <TableCell className="py-2 text-xs text-right font-medium">{fmt(p.amount)}</TableCell>
                             <TableCell className="py-2 text-xs text-right">
@@ -1258,7 +1262,7 @@ export default function BillingModule({ onBack }) {
                                 </Button>
                                 {(() => {
                                   if (p.isRefund) return null;
-                                  const relatedRefunds = (showInvoiceModal?.payments || []).filter(pay => pay.isRefund && pay.originalPaymentId === p.id);
+                                  const relatedRefunds = (showInvoiceModal?.payments || []).filter(pay => pay.isRefund && pay.originalPaymentId === p.id && pay.status !== 'REJECTED');
                                   const refundedSoFar = relatedRefunds.reduce((sum, r) => sum + r.amount, 0);
                                   if (refundedSoFar >= p.amount) {
                                     return <Badge variant="outline" className="h-6 px-2 text-[10px] text-gray-500 bg-gray-100 border-gray-200">Fully Refunded</Badge>;
@@ -1284,58 +1288,67 @@ export default function BillingModule({ onBack }) {
             {showInvoiceModal && (!showInvoiceModal.paid || (showInvoiceModal.balanceDue ?? (showInvoiceModal.total - (showInvoiceModal.amountPaid || 0))) > 0) && (
               <Button onClick={() => { setShowPayModal(showInvoiceModal); setPayMethod('Cash'); setShowInvoiceModal(null) }}>Collect Payment</Button>
             )}
-            <Button variant="outline" onClick={() => {
-              if (!showInvoiceModal) return
-              const b = showInvoiceModal
-              // Laboratory and Radiology invoices print the SHARED Dr-Lal-style
-              // diagnostic receipt (identical layout for both — see printBilling.js);
-              // every other department uses the standard invoice format.
-              if (/^lab/i.test(b.department || '')) {
-                // Home-collection is tagged in notes; show it as a separate total
-                // line (not a test row) — same as the Laboratory module receipt.
-                const hccTag = String(b.notes || '').match(/\[HCC:(\d+(?:\.\d+)?)\]/)
-                const hcc = hccTag ? Number(hccTag[1]) : 0
-                const testItems = (b.items || []).filter(it => !/home collection/i.test(it.name || ''))
-                const testTotal = testItems.reduce((s, it) => s + (it.amt || 0) * (it.qty || 1), 0)
-                printLabReceipt({
-                  invoiceNo: b.invoiceNo, labId: b.uhid, patientName: b.patientName, uhid: b.uhid,
-                  age: b.age ? `${b.age} year(s)` : '', sex: b.gender, contact: b.phone,
-                  dateTime: b.date, refDoctor: b.refDoctor || 'self', mode: b.payMode,
-                  items: testItems.map(it => ({ code: (it.name || 'TEST').substring(0, 6).toUpperCase(), name: it.name, price: (it.amt || 0) * (it.qty || 1), eta: '' })),
-                  orderValue: testTotal, homeCollection: hcc, discount: b.discountAmt || 0,
-                  netPayable: b.total, paid: b.amountPaid || 0, balance: b.balanceDue ?? (b.total - (b.amountPaid || 0)),
-                  payments: b.payments
-                }, orgInfo, clinic)
-              } else if (/^radiology/i.test(b.department || '')) {
-                const examItems = b.items || []
-                const examTotal = examItems.reduce((s, it) => s + (it.amt || 0) * (it.qty || 1), 0)
-                printRadiologyReceipt({
-                  invoiceNo: b.invoiceNo, labId: b.uhid, patientName: b.patientName, uhid: b.uhid,
-                  age: b.age ? `${b.age} year(s)` : '', sex: b.gender, contact: b.phone,
-                  dateTime: b.date, refDoctor: b.refDoctor || 'self', mode: b.payMode,
-                  items: examItems.map(it => ({ code: (it.name || 'EXAM').substring(0, 6).toUpperCase(), name: it.name, price: (it.amt || 0) * (it.qty || 1), eta: '' })),
-                  orderValue: examTotal, homeCollection: 0, discount: b.discountAmt || 0,
-                  netPayable: b.total, paid: b.amountPaid || 0, balance: b.balanceDue ?? (b.total - (b.amountPaid || 0)),
-                  payments: b.payments
-                }, orgInfo, clinic)
-              } else if (/^pharmacy/i.test(b.department || '')) {
-                // Same GST-invoice format as the pharmacy counter receipt — GST%/
-                // batch/expiry ride on each item when the sale carried them through
-                // (see PrescriptionPurchaseModal.jsx); otherwise those columns show "—".
-                printPharmacyReceipt({
-                  receiptNumber: b.invoiceNo, patientName: b.patientName,
-                  saleDate: b.createdAt || b.date, paymentMethod: b.payMode,
-                  discountAmount: b.discountAmt || 0, amountPaid: b.amountPaid || 0, totalAmount: b.total,
-                  payments: b.payments,
-                  items: (b.items || []).map(it => ({
-                    drugName: it.name, quantity: it.qty, unitPrice: it.amt, total: (it.amt || 0) * (it.qty || 1),
-                    gstRate: it.gstRate, batchNumber: it.batchNumber, expiryDate: it.expiryDate,
-                  })),
-                }, orgInfo, clinic)
-              } else {
-                printInvoice(b, orgInfo, clinic)
+            {(() => {
+              const doPrint = (format) => {
+                if (!showInvoiceModal) return
+                const b = showInvoiceModal
+                const options = { format }
+                // Laboratory and Radiology invoices print the SHARED Dr-Lal-style
+                // diagnostic receipt (identical layout for both — see printBilling.js);
+                // every other department uses the standard invoice format.
+                if (/^lab/i.test(b.department || '')) {
+                  // Home-collection is tagged in notes; show it as a separate total
+                  // line (not a test row) — same as the Laboratory module receipt.
+                  const hccTag = String(b.notes || '').match(/\[HCC:(\d+(?:\.\d+)?)\]/)
+                  const hcc = hccTag ? Number(hccTag[1]) : 0
+                  const testItems = (b.items || []).filter(it => !/home collection/i.test(it.name || ''))
+                  const testTotal = testItems.reduce((s, it) => s + (it.amt || 0) * (it.qty || 1), 0)
+                  printLabReceipt({
+                    invoiceNo: b.invoiceNo, labId: b.uhid, patientName: b.patientName, uhid: b.uhid,
+                    age: b.age ? `${b.age} year(s)` : '', sex: b.gender, contact: b.phone,
+                    dateTime: b.date, refDoctor: b.refDoctor || 'self', mode: b.payMode,
+                    items: testItems.map(it => ({ code: (it.name || 'TEST').substring(0, 6).toUpperCase(), name: it.name, price: (it.amt || 0) * (it.qty || 1), eta: '' })),
+                    orderValue: testTotal, homeCollection: hcc, discount: b.discountAmt || 0,
+                    netPayable: b.total, paid: b.amountPaid || 0, balance: b.balanceDue ?? (b.total - (b.amountPaid || 0)),
+                    payments: b.payments
+                  }, orgInfo, clinic, options)
+                } else if (/^radiology/i.test(b.department || '')) {
+                  const examItems = b.items || []
+                  const examTotal = examItems.reduce((s, it) => s + (it.amt || 0) * (it.qty || 1), 0)
+                  printRadiologyReceipt({
+                    invoiceNo: b.invoiceNo, labId: b.uhid, patientName: b.patientName, uhid: b.uhid,
+                    age: b.age ? `${b.age} year(s)` : '', sex: b.gender, contact: b.phone,
+                    dateTime: b.date, refDoctor: b.refDoctor || 'self', mode: b.payMode,
+                    items: examItems.map(it => ({ code: (it.name || 'EXAM').substring(0, 6).toUpperCase(), name: it.name, price: (it.amt || 0) * (it.qty || 1), eta: '' })),
+                    orderValue: examTotal, homeCollection: 0, discount: b.discountAmt || 0,
+                    netPayable: b.total, paid: b.amountPaid || 0, balance: b.balanceDue ?? (b.total - (b.amountPaid || 0)),
+                    payments: b.payments
+                  }, orgInfo, clinic, options)
+                } else if (/^pharmacy/i.test(b.department || '')) {
+                  // Same GST-invoice format as the pharmacy counter receipt — GST%/
+                  // batch/expiry ride on each item when the sale carried them through
+                  // (see PrescriptionPurchaseModal.jsx); otherwise those columns show "—".
+                  printPharmacyReceipt({
+                    receiptNumber: b.invoiceNo, patientName: b.patientName,
+                    saleDate: b.createdAt || b.date, paymentMethod: b.payMode,
+                    discountAmount: b.discountAmt || 0, amountPaid: b.amountPaid || 0, totalAmount: b.total,
+                    payments: b.payments,
+                    items: (b.items || []).map(it => ({
+                      drugName: it.name, quantity: it.qty, unitPrice: it.amt, total: (it.amt || 0) * (it.qty || 1),
+                      gstRate: it.gstRate, batchNumber: it.batchNumber, expiryDate: it.expiryDate,
+                    })),
+                  }, orgInfo, clinic, options)
+                } else {
+                  printInvoice(b, orgInfo, clinic, options)
+                }
               }
-            }}>Print / PDF</Button>
+              return (
+                <div className="flex gap-2">
+                  <Button variant="outline" className="border-blue-200 text-blue-700 hover:bg-blue-50" onClick={() => doPrint('detailed')}>Print Payment History</Button>
+                  <Button className="bg-blue-600 text-white hover:bg-blue-700" onClick={() => doPrint('invoice')}>Print Invoice</Button>
+                </div>
+              )
+            })()}
             <Button variant="outline" onClick={() => setShowInvoiceModal(null)}>Close</Button>
           </DialogFooter>
         </DialogContent>
