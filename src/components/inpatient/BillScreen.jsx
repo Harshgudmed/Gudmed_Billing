@@ -14,7 +14,7 @@ import { useAuth } from '@/lib/auth'
 
 const SERVICE_GROUPS = ['PROCEDURE', 'LAB', 'RADIOLOGY', 'PHARMACY', 'CONSUMABLE', 'DOCTOR_VISIT', 'NURSING', 'OTHER']
 const PAY_METHODS = ['CASH', 'UPI', 'CARD', 'BANK_TRANSFER', 'CHEQUE']
-const inr = (n) => `₹${(Number(n) || 0).toLocaleString('en-IN')}`
+import { formatMoney as inr } from '@/lib/format'
 const statusStyle = { DRAFT: 'bg-amber-100 text-amber-800', FINAL: 'bg-green-100 text-green-800', CANCELLED: 'bg-gray-200 text-gray-600' }
 const payStatusStyle = { UNPAID: 'bg-red-100 text-red-800', PARTIAL: 'bg-amber-100 text-amber-800', PAID: 'bg-green-100 text-green-800', REFUNDED: 'bg-purple-100 text-purple-800' }
 const ledgerTypeStyle = { ADVANCE: 'bg-blue-100 text-blue-800', PAYMENT: 'bg-green-100 text-green-800', REFUND: 'bg-purple-100 text-purple-800' }

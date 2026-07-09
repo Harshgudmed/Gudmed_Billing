@@ -38,7 +38,7 @@ function age(dob) {
   if (!dob) return null
   return Math.floor((Date.now() - new Date(dob).getTime()) / (365.25 * 24 * 3600 * 1000))
 }
-function money(n) { return '₹' + Number(n || 0).toLocaleString('en-IN') }
+import { formatMoney as money } from '@/lib/format'
 function ago(date) {
   if (!date) return ''
   const s = Math.floor((Date.now() - date.getTime()) / 1000)

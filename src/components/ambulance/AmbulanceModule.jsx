@@ -29,7 +29,7 @@ const STATUS_STYLES = {
   cancelled: 'bg-gray-200 text-gray-600',
 }
 
-const inr = (n) => `₹${Number(n || 0).toLocaleString('en-IN')}`
+import { formatMoney as inr } from '@/lib/format'
 
 const EMPTY = {
   patientId: '', ambulanceType: 'ALS', fromLocation: '', toLocation: 'Hospital',

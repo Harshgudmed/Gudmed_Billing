@@ -22,7 +22,7 @@ const STATUS_STYLES = {
   cancelled: 'bg-gray-200 text-gray-600',
 }
 const PAY_STYLES = { pending: 'bg-orange-100 text-orange-700', partial: 'bg-amber-100 text-amber-700', paid: 'bg-green-100 text-green-700' }
-const inr = (n) => `₹${Number(n || 0).toLocaleString('en-IN')}`
+import { formatMoney as inr } from '@/lib/format'
 const labelize = (s) => (s || '').replace(/_/g, ' ')
 
 const EMPTY = { patientId: '', doctorId: '', procedure: '', fee: '', paymentStatus: 'pending', status: 'admitted', dischargeTime: '', notes: '' }

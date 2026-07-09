@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useOrgSettings } from '@/lib/useOrgSettings'
+import { formatMoney as fmt } from '@/lib/format'
 import { toast } from 'sonner'
 import { format } from 'date-fns'
 import client from '@/api/client'
@@ -111,21 +112,13 @@ const DEPT_LABEL = {
 
 const BILLING_ITEMS_PER_PAGE = 10
 
-const DEMO_CLAIMS = [
-  { id: 'CLM-001', patient: 'Rajesh Kumar',    insurer: 'Star Health Insurance',   policy: 'SH-4521-2025', amount: 28500, approved: 26000, status: 'Approved',  submitted: '02 Jun 2026', settled: '08 Jun 2026' },
-  { id: 'CLM-002', patient: 'Sunita Verma',    insurer: 'HDFC ERGO',               policy: 'HE-8821-2025', amount: 15200, approved: null,  status: 'Pending',   submitted: '05 Jun 2026', settled: null },
-  { id: 'CLM-003', patient: 'Mohd. Arif',      insurer: 'New India Assurance',     policy: 'NIA-2234-25',  amount: 42000, approved: 42000, status: 'Approved',  submitted: '28 May 2026', settled: '04 Jun 2026' },
-  { id: 'CLM-004', patient: 'Priya Sharma',    insurer: 'Bajaj Allianz Health',    policy: 'BA-9900-2025', amount: 8700,  approved: null,  status: 'Under Review', submitted: '06 Jun 2026', settled: null },
-  { id: 'CLM-005', patient: 'Deepak Singh',    insurer: 'ICICI Lombard',           policy: 'IL-3345-2025', amount: 19800, approved: null,  status: 'Rejected',  submitted: '20 May 2026', settled: null },
-  { id: 'CLM-006', patient: 'Kavita Joshi',    insurer: 'Star Health Insurance',   policy: 'SH-7723-2025', amount: 33500, approved: 31000, status: 'Approved',  submitted: '01 Jun 2026', settled: '07 Jun 2026' },
-  { id: 'CLM-007', patient: 'Anil Mehra',      insurer: 'United India Insurance',  policy: 'UI-5512-2025', amount: 11200, approved: null,  status: 'Pending',   submitted: '09 Jun 2026', settled: null },
-]
-
+// Claim statuses as stored by the insurance module (InsuranceClaim.status).
 const CLAIM_STATUS_STYLE = {
-  'Approved':     'bg-green-100 text-green-800',
-  'Pending':      'bg-yellow-100 text-yellow-800',
-  'Under Review': 'bg-blue-100 text-blue-800',
-  'Rejected':     'bg-red-100 text-red-800',
+  approved:  'bg-green-100 text-green-800',
+  settled:   'bg-emerald-100 text-emerald-800',
+  pending:   'bg-yellow-100 text-yellow-800',
+  submitted: 'bg-blue-100 text-blue-800',
+  rejected:  'bg-red-100 text-red-800',
 }
 
 const DEFAULT_CLINIC = {
@@ -136,7 +129,7 @@ const DEFAULT_CLINIC = {
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
-const fmt = (n) => '₹' + Number(n).toLocaleString('en-IN', { minimumFractionDigits: 2 })
+// Money formatting lives in @/lib/format so every screen and receipt agrees.
 const todayStr = () => new Date().toISOString().slice(0, 10)
 const newInvNo = () => 'INV-' + Date.now().toString().slice(-8)
 const calcAge = (dob) => {
@@ -180,6 +173,11 @@ export default function BillingModule({ onBack }) {
   const [services, setServices] = useState([])
   const [servicesLoading, setServicesLoading] = useState(false)
   const [stats, setStats] = useState({ todayRevenue: 0, pendingCount: 0, collectedToday: 0, outstanding: 0 })
+
+  // Real insurance claims (was a hardcoded DEMO_CLAIMS array of fake patients).
+  // GET /insurance returns cases, each with its nested claims — flatten to rows.
+  const [claims, setClaims] = useState([])
+  const [claimsLoading, setClaimsLoading] = useState(false)
 
   // New invoice form
   const newForm = () => ({
@@ -350,11 +348,36 @@ export default function BillingModule({ onBack }) {
     finally { setServicesLoading(false) }
   }, [servicesPage])
 
+  const fetchClaims = useCallback(async () => {
+    setClaimsLoading(true)
+    try {
+      const res = await client.get('/insurance')
+      if (res.success) {
+        const rows = (res.data || []).flatMap((c) =>
+          (c.claims || []).map((cl) => ({
+            id: cl.id,
+            claimNumber: cl.claimNumber,
+            patient: [c.patient?.firstName, c.patient?.lastName].filter(Boolean).join(' ') || '—',
+            insurer: c.insurerName,
+            policy: c.policyNumber,
+            amount: cl.claimAmount,
+            approved: cl.approvedAmount,
+            status: cl.status,
+            submitted: cl.submittedAt || cl.createdAt,
+          }))
+        )
+        setClaims(rows)
+      }
+    } catch { /* silent — the insurance module owns this data */ }
+    finally { setClaimsLoading(false) }
+  }, [])
+
   const fetchAll = useCallback(() => {
     fetchBills()
     fetchServices()
     fetchStats()
-  }, [fetchBills, fetchServices, fetchStats])
+    fetchClaims()
+  }, [fetchBills, fetchServices, fetchStats, fetchClaims])
 
   useEffect(() => { fetchAll() }, [fetchAll])
 
@@ -1128,19 +1151,19 @@ export default function BillingModule({ onBack }) {
               <div className="grid grid-cols-4 gap-4 mb-6">
                 <div className="bg-blue-50 rounded-lg p-4 text-center">
                   <p className="text-sm text-blue-600 font-medium">Total Claims</p>
-                  <p className="text-3xl font-bold text-blue-700">{DEMO_CLAIMS.length}</p>
+                  <p className="text-3xl font-bold text-blue-700">{claims.length}</p>
                 </div>
                 <div className="bg-green-50 rounded-lg p-4 text-center">
-                  <p className="text-sm text-green-600 font-medium">Approved</p>
-                  <p className="text-3xl font-bold text-green-700">{DEMO_CLAIMS.filter(c => c.status === 'Approved').length}</p>
+                  <p className="text-sm text-green-600 font-medium">Approved / Settled</p>
+                  <p className="text-3xl font-bold text-green-700">{claims.filter(c => c.status === 'approved' || c.status === 'settled').length}</p>
                 </div>
                 <div className="bg-yellow-50 rounded-lg p-4 text-center">
-                  <p className="text-sm text-yellow-600 font-medium">Pending / Review</p>
-                  <p className="text-3xl font-bold text-yellow-700">{DEMO_CLAIMS.filter(c => c.status === 'Pending' || c.status === 'Under Review').length}</p>
+                  <p className="text-sm text-yellow-600 font-medium">Pending / Submitted</p>
+                  <p className="text-3xl font-bold text-yellow-700">{claims.filter(c => c.status === 'pending' || c.status === 'submitted').length}</p>
                 </div>
                 <div className="bg-red-50 rounded-lg p-4 text-center">
                   <p className="text-sm text-red-600 font-medium">Rejected</p>
-                  <p className="text-3xl font-bold text-red-700">{DEMO_CLAIMS.filter(c => c.status === 'Rejected').length}</p>
+                  <p className="text-3xl font-bold text-red-700">{claims.filter(c => c.status === 'rejected').length}</p>
                 </div>
               </div>
               <Table>
@@ -1157,15 +1180,19 @@ export default function BillingModule({ onBack }) {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {DEMO_CLAIMS.map(c => (
+                  {claimsLoading ? (
+                    <TableRow><TableCell colSpan={8} className="text-center py-8 text-gray-500">Loading claims…</TableCell></TableRow>
+                  ) : claims.length === 0 ? (
+                    <TableRow><TableCell colSpan={8} className="text-center py-8 text-gray-500">No insurance claims yet. Add a policy and raise a claim from the Insurance module.</TableCell></TableRow>
+                  ) : claims.map(c => (
                     <TableRow key={c.id}>
-                      <TableCell className="font-mono text-sm text-blue-600">{c.id}</TableCell>
+                      <TableCell className="font-mono text-sm text-blue-600">{c.claimNumber}</TableCell>
                       <TableCell className="font-medium">{c.patient}</TableCell>
                       <TableCell className="text-sm">{c.insurer}</TableCell>
-                      <TableCell className="font-mono text-xs text-gray-500">{c.policy}</TableCell>
+                      <TableCell className="font-mono text-xs text-gray-500">{c.policy || '—'}</TableCell>
                       <TableCell className="text-right font-semibold">{fmt(c.amount)}</TableCell>
-                      <TableCell className="text-right font-semibold text-green-700">{c.approved ? fmt(c.approved) : '—'}</TableCell>
-                      <TableCell className="text-sm text-gray-500">{c.submitted}</TableCell>
+                      <TableCell className="text-right font-semibold text-green-700">{c.approved != null ? fmt(c.approved) : '—'}</TableCell>
+                      <TableCell className="text-sm text-gray-500">{c.submitted ? format(new Date(c.submitted), 'dd MMM yyyy') : '—'}</TableCell>
                       <TableCell>
                         <Badge className={CLAIM_STATUS_STYLE[c.status] || 'bg-gray-100 text-gray-800'}>{c.status}</Badge>
                       </TableCell>
