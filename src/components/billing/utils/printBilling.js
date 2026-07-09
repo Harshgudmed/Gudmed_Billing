@@ -10,7 +10,7 @@ const esc = (s) => String(s ?? '').replace(/[&<>]/g, c => ({ '&': '&amp;', '<': 
 const titleCase = (s) => String(s ?? '').trim().toLowerCase().replace(/\b\p{L}/gu, (c) => c.toUpperCase())
 // Indian-rupee money formatter — ₹ symbol + en-IN grouping + 2 decimals. Used by
 // EVERY receipt (Pharmacy, Lab, Radiology, Payment table) so amounts look the same.
-const inr = (n) => '₹' + Number(n || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+import { formatMoney as inr } from '@/lib/format'
 
 // ── SHARED multi-payment "Payment" table (Pharmacy / Lab / Radiology / Billing) ──
 // One bill can be settled across several receipts and methods (e.g. ₹3000 Cash +

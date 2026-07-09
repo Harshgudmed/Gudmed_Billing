@@ -1,6 +1,7 @@
 import { db } from '../config/db.js'
-import { getOrgId } from "../lib/reqContext.js";
-import { financialYear } from "../lib/money.js";
+import { getOrgId, getActor } from "../lib/reqContext.js";
+import { nextSeriesNumber, invoiceProbe } from "../lib/counters.js";
+import { recalcInvoice, refundableAmount } from "../lib/invoiceLedger.js";
 import { z } from 'zod'
 
 // Validation schemas
@@ -106,48 +107,25 @@ const serviceUpdateSchema = z.object({
   }),
 })
 
-// financialYear now lives in ../lib/money.js (shared, single source of truth).
+// financialYear now lives in ../lib/money.js and the counter machinery in
+// ../lib/counters.js (shared, single source of truth).
 
-// Atomic, gap-free, per-org invoice number. The upsert+increment runs inside the
-// caller's transaction so two concurrent invoices can never collide on the
-// @unique invoiceNumber column. Format: INV-2026-27-000123
+// Atomic, gap-free, per-org invoice number. Format: INV-2026-27-000123.
+// `invoiceProbe` lets the counter self-heal past invoices that a data migration
+// copied without their BillCounter row (the live incident that deadlocked billing).
 async function nextInvoiceNumber(tx, organizationId) {
-  const year = financialYear()
-  const prefix = `INV-${year}-`
-
-  // Reconcile the counter with the REAL max invoice for this org+year. After a
-  // data migration (old DB → fresh gudmed-db-2) the invoices get copied but the
-  // BillCounter does NOT, so the counter lags at 1 while INV-...-000017 already
-  // exists. Every create then collides on the @unique invoiceNumber (Prisma
-  // P2002), and because the failed transaction ROLLS BACK the counter increment
-  // too, it never advances — deadlocking billing forever. Numbers are zero-padded
-  // to 6 digits, so lexicographic DESC == numeric order → top row is the true max.
-  const last = await tx.invoice.findFirst({
-    where: { organizationId, invoiceNumber: { startsWith: prefix } },
-    orderBy: { invoiceNumber: 'desc' },
-    select: { invoiceNumber: true },
-  })
-  const lastSeq = last ? (parseInt(last.invoiceNumber.slice(prefix.length), 10) || 0) : 0
-
-  const counter = await tx.billCounter.upsert({
-    where: { organizationId_series_year: { organizationId, series: 'INV', year } },
-    create: { organizationId, series: 'INV', year, value: lastSeq + 1 },
-    update: { value: { increment: 1 } },
-  })
-
-  // If the counter had lagged behind migrated data, jump it past the real max so
-  // the number we hand out cannot already exist.
-  let value = counter.value
-  if (value <= lastSeq) {
-    const fixed = await tx.billCounter.update({
-      where: { organizationId_series_year: { organizationId, series: 'INV', year } },
-      data: { value: lastSeq + 1 },
-    })
-    value = fixed.value
-  }
-
-  return `${prefix}${String(value).padStart(6, '0')}`
+  return nextSeriesNumber(tx, organizationId, 'INV', 'INV', invoiceProbe(tx, organizationId))
 }
+
+// Receipt numbers for OPD payments and refunds. Dedicated series so they never
+// touch the IPD counters. Format: RCP-2026-27-000001 / REF-2026-27-000001.
+function nextReceiptNumber(tx, organizationId) {
+  return nextSeriesNumber(tx, organizationId, 'OPD_RCP', 'RCP')
+}
+function nextRefundNumber(tx, organizationId) {
+  return nextSeriesNumber(tx, organizationId, 'OPD_REF', 'REF')
+}
+
 
 export async function getAll(req, res) {
   try {
@@ -467,26 +445,30 @@ export async function create(req, res) {
         if (existing) return res.status(200).json({ success: true, data: existing, idempotent: true })
       }
 
-      const receiptNumber = 'RCP' + Date.now()
-
       // MONEY = ACID. Everything below runs in ONE transaction:
       //   1. verify the invoice exists AND belongs to this org (no cross-tenant write)
-      //   2. write the payment
-      //   3. atomically INCREMENT amountPaid in the DB (no read-modify-write in JS,
-      //      so two concurrent cashiers can never lose an update)
-      //   4. recompute balance/status from the post-increment value
-      //   5. write the audit row INSIDE the tx — if audit fails, the whole
+      //   2. draw an atomic receipt number and write the payment
+      //   3. recompute the invoice cache from its Payment rows (recalcInvoice)
+      //   4. write the audit row INSIDE the tx — if audit fails, the whole
       //      payment rolls back (a hospital's money trail must be provable)
       const payment = await db.$transaction(async (tx) => {
         const invoice = await tx.invoice.findFirst({
           where: { id: invoiceId, organizationId: ORGANIZATION_ID },
-          select: { id: true },
+          select: { id: true, isArchived: true },
         })
         if (!invoice) {
           const err = new Error('Invoice not found')
           err.status = 404
           throw err
         }
+        // A superseded invoice is frozen; money must be taken against its revision.
+        if (invoice.isArchived) {
+          const err = new Error('This invoice was revised by an approved refund. Collect against its revised invoice.')
+          err.status = 409
+          throw err
+        }
+
+        const receiptNumber = await nextReceiptNumber(tx, ORGANIZATION_ID)
 
         const created = await tx.payment.create({
           data: {
@@ -507,35 +489,17 @@ export async function create(req, res) {
           },
         })
 
-        // Atomic increment — the database performs the addition.
-        const updated = await tx.invoice.update({
-          where: { id: invoiceId },
-          data: { amountPaid: { increment: amount } },
-          select: { totalAmount: true, amountPaid: true },
-        })
+        // Derive the invoice cache from the Payment rows we just added to.
+        const totals = await recalcInvoice(tx, invoiceId)
 
-        // SECURITY: If the atomic increment pushed amountPaid past totalAmount,
-        // it means this payment exceeded the balance due. Throwing an error here
-        // automatically aborts and rolls back the ENTIRE transaction!
-        if (updated.amountPaid > updated.totalAmount) {
+        // SECURITY: if this payment pushed the invoice past its total, it exceeded
+        // the balance due. Throwing here rolls back the ENTIRE transaction.
+        if (totals.amountPaid > totals.totalAmount + 0.005) {
           const err = new Error('Payment exceeds balance due')
           err.status = 400
           throw err
         }
-
-        const paymentStatus =
-          updated.amountPaid >= updated.totalAmount ? 'paid' : 'partially_paid'
-
-        await tx.invoice.update({
-          where: { id: invoiceId },
-          data: {
-            balanceDue: updated.totalAmount - updated.amountPaid,
-            paymentStatus,
-            // Valid schema statuses: draft|sent|overdue|paid|cancelled.
-            // (Previously set the phantom value 'active'.)
-            status: paymentStatus === 'paid' ? 'paid' : 'sent',
-          },
-        })
+        const paymentStatus = totals.paymentStatus
 
         await tx.auditLog.create({
           data: {
@@ -566,47 +530,67 @@ export async function create(req, res) {
         return res.status(400).json({ success: false, error: parsed.error.flatten() })
       }
       const { invoiceId, amount, refundReason, paymentMethod, originalPaymentId, notes } = parsed.data
-      const receiptNumber = 'REF' + Date.now()
 
-      // MONEY = ACID. Same discipline as a payment, but amountPaid is DECREMENTED.
+      // MONEY = ACID. A refund is only a REQUEST here — no cash moves and
+      // amountPaid is untouched until a finance approver signs it off.
       const refund = await db.$transaction(async (tx) => {
         const invoice = await tx.invoice.findFirst({
           where: { id: invoiceId, organizationId: ORGANIZATION_ID },
-          select: { id: true, totalAmount: true, amountPaid: true },
+          select: { id: true, status: true, isArchived: true },
         })
         if (!invoice) {
           const err = new Error('Invoice not found'); err.status = 404; throw err
         }
-        if (amount > invoice.amountPaid) {
-          const err = new Error(`Refund (${amount}) cannot exceed amount paid (${invoice.amountPaid})`)
+        if (invoice.isArchived) {
+          const err = new Error('This invoice was already revised by an approved refund. Raise the refund against its revised invoice.')
+          err.status = 409; throw err
+        }
+        if (invoice.status === 'cancelled') {
+          const err = new Error('Cannot refund a cancelled invoice'); err.status = 400; throw err
+        }
+
+        // Invoice-level cap. Counts refunds that are APPROVED *or* still awaiting
+        // approval, so the same money cannot be requested twice: a pending refund
+        // no longer decrements amountPaid, so checking against amountPaid alone
+        // let an unlimited number of full-value refund requests through.
+        // REJECTED refunds are excluded — they release the amount they reserved.
+        const refundable = await refundableAmount(tx, invoiceId)
+        if (amount > refundable + 0.005) {
+          const err = new Error(`Refund (₹${amount}) exceeds the refundable balance (₹${refundable})`)
           err.status = 400; throw err
         }
 
-        // SECURITY PATCH: Prevent "Infinite Receipt Refund Exploit"
-        // Ensure that the specific receipt being refunded isn't over-refunded!
+        // Receipt-level cap: don't over-refund one specific receipt.
         if (originalPaymentId) {
-          const originalPayment = await tx.payment.findUnique({
-            where: { id: originalPaymentId },
-            select: { amount: true }
+          // Tenant-scoped: without organizationId this read another org's payment.
+          const originalPayment = await tx.payment.findFirst({
+            where: { id: originalPaymentId, organizationId: ORGANIZATION_ID, isRefund: false },
+            select: { amount: true },
           })
           if (!originalPayment) {
             const err = new Error('Original receipt not found'); err.status = 404; throw err
           }
-          
+
           const existingRefunds = await tx.payment.aggregate({
-            where: { originalPaymentId, isRefund: true },
-            _sum: { amount: true }
+            where: {
+              organizationId: ORGANIZATION_ID,
+              originalPaymentId,
+              isRefund: true,
+              status: { in: ['PENDING_APPROVAL', 'APPROVED'] },
+            },
+            _sum: { amount: true },
           })
-          
+
           const refundedSoFar = existingRefunds._sum.amount || 0
           const maxRefundable = originalPayment.amount - refundedSoFar
-          
-          if (amount > maxRefundable) {
-            const err = new Error(`Refund amount exceeds the original receipt amount (Max available to refund: ₹${maxRefundable})`)
+
+          if (amount > maxRefundable + 0.005) {
+            const err = new Error(`Refund exceeds this receipt's refundable amount (max ₹${maxRefundable})`)
             err.status = 400; throw err
           }
         }
 
+        const receiptNumber = await nextRefundNumber(tx, ORGANIZATION_ID)
         const created = await tx.payment.create({
           data: {
             organizationId: ORGANIZATION_ID,
@@ -619,7 +603,7 @@ export async function create(req, res) {
             originalPaymentId: originalPaymentId || null,
             notes: notes || null,
             paymentDate: new Date(),
-            status: 'PENDING_APPROVAL', // New Approval Workflow
+            status: 'PENDING_APPROVAL', // awaits finance approval
           },
         })
 
@@ -645,11 +629,17 @@ export async function create(req, res) {
 
     if (resource === 'approve_refund') {
       const { paymentId, action } = req.body // action: 'APPROVE' or 'REJECT'
-      
-      // Basic role check (assume req.user exists from auth middleware)
-      // If no auth middleware is active in demo, we bypass it, but in prod we check:
-      if (req.user && !['finance_controller', 'super_admin', 'admin'].includes(req.user.role)) {
+      const actor = getActor(req)
+
+      // Approving a refund releases hospital money, so it is role-gated. When auth
+      // is enforced there is always a role; when it is off (local demo) there is
+      // none and the gate stays open, matching every other endpoint's demo posture.
+      const APPROVER_ROLES = ['finance_controller', 'super_admin', 'admin']
+      if (actor.role && !APPROVER_ROLES.includes(actor.role)) {
         return res.status(403).json({ success: false, error: 'Unauthorized to approve refunds' })
+      }
+      if (!actor.role && process.env.AUTH_ENFORCED === 'true') {
+        return res.status(401).json({ success: false, error: 'Authentication required' })
       }
 
       if (!paymentId || !['APPROVE', 'REJECT'].includes(action)) {
@@ -657,8 +647,8 @@ export async function create(req, res) {
       }
 
       const result = await db.$transaction(async (tx) => {
-        const payment = await tx.payment.findUnique({
-          where: { id: paymentId, organizationId: ORGANIZATION_ID },
+        const payment = await tx.payment.findFirst({
+          where: { id: paymentId, organizationId: ORGANIZATION_ID, isRefund: true },
           include: { invoice: true }
         })
 
@@ -669,20 +659,23 @@ export async function create(req, res) {
         if (action === 'REJECT') {
           const updatedPayment = await tx.payment.update({
             where: { id: paymentId },
-            data: { 
-              status: 'REJECTED', 
-              approvedByUserId: req.user?.id || 'SYSTEM',
+            data: {
+              status: 'REJECTED',
+              // Was `|| 'SYSTEM'`, which wrote a sentinel string into a user-id
+              // column. Leave it null when there is no authenticated approver.
+              approvedByUserId: actor.id,
               approvalDate: new Date()
             }
           })
-          
+
           await tx.auditLog.create({
             data: {
               organizationId: ORGANIZATION_ID,
               action: 'REFUND_REJECTED',
               entityType: 'Payment',
               entityId: paymentId,
-              metadata: JSON.stringify({ reason: 'Finance Controller Rejected' }),
+              userId: actor.id,
+              metadata: JSON.stringify({ rejectedBy: actor.name, rejectedById: actor.id }),
               performedAt: new Date(),
             }
           })
@@ -693,12 +686,22 @@ export async function create(req, res) {
         const oldInvoice = payment.invoice
         const refundedAmount = payment.amount
 
-        // 1. Update Payment (approver id comes from req.user.userId in this codebase)
+        // An invoice can only be revised ONCE. Without this, two refunds left
+        // pending on the same invoice could both be approved, and each would
+        // derive its revised invoice from the SAME (already superseded) totals —
+        // refunding the money twice. The second request must be re-raised against
+        // the revised invoice instead.
+        if (oldInvoice.isArchived) {
+          const err = new Error('This invoice has already been revised by an approved refund. Re-raise this request against the revised invoice.')
+          err.status = 409; throw err
+        }
+
+        // 1. Update Payment
         const approvedPayment = await tx.payment.update({
           where: { id: paymentId },
           data: {
             status: 'APPROVED',
-            approvedByUserId: req.user?.userId || req.user?.id || null,
+            approvedByUserId: actor.id,
             approvalDate: new Date()
           }
         })
@@ -807,19 +810,14 @@ export async function create(req, res) {
         const subtotal = items.reduce((s, i) => s + (i.total || 0), 0)
         const taxAmount = items.reduce((s, i) => s + (i.tax || 0), 0)
         const totalAmount = subtotal - (invoice.discountAmount || 0) + taxAmount
-        const paid = invoice.amountPaid || 0
-        const paymentStatus =
-          paid <= 0 ? 'unpaid' : paid >= totalAmount ? 'paid' : 'partially_paid'
 
-        const inv = await tx.invoice.update({
+        await tx.invoice.update({
           where: { id: invoiceId },
-          data: {
-            items: JSON.stringify(items),
-            subtotal, taxAmount, totalAmount,
-            balanceDue: totalAmount - paid,
-            paymentStatus,
-          },
+          data: { items: JSON.stringify(items), subtotal, taxAmount, totalAmount },
         })
+        // Totals moved, so the paid/balance/status cache has to follow.
+        await recalcInvoice(tx, invoiceId)
+        const inv = await tx.invoice.findUnique({ where: { id: invoiceId } })
 
         await tx.auditLog.create({
           data: {

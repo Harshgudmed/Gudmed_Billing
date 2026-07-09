@@ -16,7 +16,7 @@ import client from '@/api/client'
 
 
 
-const inr = (n) => `₹${(Number(n) || 0).toLocaleString('en-IN')}`
+import { formatMoney as inr } from '@/lib/format'
 
 const STATUS_STYLE = {
   REQUESTED:   'bg-orange-100 text-orange-800',
