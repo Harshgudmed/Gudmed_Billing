@@ -19,9 +19,8 @@ import {
 import client from '@/api/client'
 import DoctorTiming from './DoctorTiming'
 
-function fmt(n) {
-  return '₹' + n.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-}
+// formatMoney also survives null/undefined — the old local `fmt` threw on them.
+import { formatMoney as fmt } from '@/lib/format'
 
 function periodLabel(p) {
   if (!p) return '—'

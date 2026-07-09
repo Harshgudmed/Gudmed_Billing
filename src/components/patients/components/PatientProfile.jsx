@@ -1,4 +1,5 @@
 import { format } from 'date-fns';
+import { formatMoney as fmtMoney } from '@/lib/format';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -194,7 +195,6 @@ body{font-family:Arial,Helvetica,sans-serif;font-size:10.5pt;color:#000;backgrou
   };
 
   const now = new Date();
-  const fmtMoney = (n) => `₹${(n ?? 0).toLocaleString('en-IN')}`;
   const isUpcoming = (a) => new Date(a.appointmentDate) >= new Date(now.getFullYear(), now.getMonth(), now.getDate())
     && !['cancelled', 'completed', 'no_show'].includes(a.status);
   const upcoming = records.appointments.filter(isUpcoming);

@@ -19,9 +19,7 @@ const PAYMENT_METHODS = [
   { key: 'insurance',    label: 'Insurance',     icon: CheckCircle, color: 'text-teal-600'   },
 ]
 
-function rupee(n) {
-  return `₹${Number(n || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}`
-}
+import { formatMoney as rupee } from '@/lib/format'
 
 /**
  * PrescriptionPurchaseModal

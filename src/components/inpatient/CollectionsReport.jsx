@@ -9,7 +9,7 @@ import { Label } from '@/components/ui/label'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import client from '@/api/client'
 
-const inr = (n) => `₹${(Number(n) || 0).toLocaleString('en-IN')}`
+import { formatMoney as inr } from '@/lib/format'
 const METHODS = ['CASH', 'UPI', 'CARD', 'BANK_TRANSFER', 'CHEQUE']
 const today = () => new Date().toISOString().slice(0, 10)
 
