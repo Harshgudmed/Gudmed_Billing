@@ -2,6 +2,7 @@ import { db } from '../config/db.js'
 import { getOrgId, getActor } from "../lib/reqContext.js";
 import { nextSeriesNumber, invoiceProbe } from "../lib/counters.js";
 import { recalcInvoice, refundableAmount } from "../lib/invoiceLedger.js";
+import { fulfillInvoiceItems } from "../lib/invoiceFulfillment.js";
 import { z } from 'zod'
 
 // Validation schemas
@@ -31,6 +32,11 @@ const invoiceItemSchema = z.object({
   gstRate: z.number().nonnegative().optional(),
   batchNumber: z.string().optional(),
   expiryDate: z.string().nullish(),
+  // Which module this line was billed from, and that module's record id. Set by
+  // the biller's UI so the invoice can draw down pharmacy stock / raise the lab
+  // and radiology orders the line implies. Absent = a plain, non-clinical line.
+  sourceType: z.enum(['pharmacy', 'lab', 'radiology']).optional(),
+  sourceId: z.string().optional(),
 })
 
 const invoiceSchema = z.object({
@@ -378,7 +384,7 @@ export async function create(req, res) {
         }
 
         const invoiceNumber = await nextInvoiceNumber(tx, ORGANIZATION_ID)
-        return tx.invoice.create({
+        const created = await tx.invoice.create({
           data: {
             organizationId: ORGANIZATION_ID,
             invoiceNumber,
@@ -411,6 +417,20 @@ export async function create(req, res) {
             },
           },
         })
+
+        // Billing a medicine must draw it out of pharmacy stock, and billing a
+        // lab test / radiology exam must raise the order that produces the report.
+        // Same transaction: a short-stocked line rolls the whole invoice back
+        // rather than leaving a bill for goods that were never deducted.
+        await fulfillInvoiceItems(tx, {
+          organizationId: ORGANIZATION_ID,
+          items,
+          invoice: created,
+          patientId,
+          actorId: getActor(req).id,
+        })
+
+        return created
       })
 
       return res.status(201).json({ success: true, data: invoice })
