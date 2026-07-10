@@ -27,6 +27,10 @@ services:
         sync: false
       - key: RAZORPAY_KEY_SECRET
         sync: false
+      # Webhook signatures use the secret set on the Razorpay dashboard webhook,
+      # NOT the API key secret. Without it every webhook is rejected (fail-closed).
+      - key: RAZORPAY_WEBHOOK_SECRET
+        sync: false
       - key: TWILIO_ACCOUNT_SID
         sync: false
       - key: TWILIO_AUTH_TOKEN
