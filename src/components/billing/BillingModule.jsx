@@ -389,29 +389,27 @@ export default function BillingModule({ onBack }) {
     finally { setClaimsLoading(false) }
   }, [])
 
-  // Real Lab test catalog (LabTest table — the same master data the Lab module
-  // uses for orders), loaded once per session and cached.
-  const fetchLabTests = useCallback(async () => {
-    if (labTests.length > 0) return
+  // Real Lab test catalog search
+  const searchLabTests = useCallback(async (query) => {
+    if (query.trim().length < 2) { setLabTests([]); return }
     setCatalogLoading(true)
     try {
-      const res = await client.get('/laboratory', { params: { resource: 'tests', limit: 2000 } })
+      const res = await client.get('/laboratory', { params: { resource: 'tests', search: query.trim(), limit: 30 } })
       if (res.success) setLabTests(res.data || [])
-    } catch { toast.error('Failed to load lab test catalog') }
+    } catch { toast.error('Failed to search lab tests') }
     finally { setCatalogLoading(false) }
-  }, [labTests.length])
+  }, [])
 
-  // Real Radiology exam catalog (RadiologyExam table — same master data as the
-  // Radiology module), loaded once per session and cached.
-  const fetchRadiologyExams = useCallback(async () => {
-    if (radiologyExams.length > 0) return
+  // Real Radiology exam catalog search
+  const searchRadiologyExams = useCallback(async (query) => {
+    if (query.trim().length < 2) { setRadiologyExams([]); return }
     setCatalogLoading(true)
     try {
-      const res = await client.get('/radiology', { params: { resource: 'exams', limit: 2000 } })
+      const res = await client.get('/radiology', { params: { resource: 'exams', search: query.trim(), limit: 30 } })
       if (res.success) setRadiologyExams(res.data || [])
-    } catch { toast.error('Failed to load radiology catalog') }
+    } catch { toast.error('Failed to search radiology exams') }
     finally { setCatalogLoading(false) }
-  }, [radiologyExams.length])
+  }, [])
 
   // Real Pharmacy drug catalog — ~2 lakh drugs, so searched server-side (same
   // /pharmacy/drugs endpoint the Pharmacy module itself uses) rather than loaded whole.
@@ -469,18 +467,15 @@ export default function BillingModule({ onBack }) {
     return () => document.removeEventListener('mousedown', h)
   }, [])
 
-  // ── Load real Lab/Radiology catalogues when that department is selected ────
+  // ── Unified server-side catalog search (Lab, Radiology, Pharmacy) ────────
   useEffect(() => {
-    if (department === 'Lab') fetchLabTests()
-    if (department === 'Radiology') fetchRadiologyExams()
-  }, [department, fetchLabTests, fetchRadiologyExams])
-
-  // ── Pharmacy catalogue: server-side search (too many drugs to load whole) ──
-  useEffect(() => {
-    if (department !== 'Pharmacy') return
-    const t = setTimeout(() => searchPharmacyDrugs(catSearch), 300)
+    const t = setTimeout(() => {
+      if (department === 'Lab') searchLabTests(catSearch)
+      else if (department === 'Radiology') searchRadiologyExams(catSearch)
+      else if (department === 'Pharmacy') searchPharmacyDrugs(catSearch)
+    }, 300)
     return () => clearTimeout(t)
-  }, [department, catSearch, searchPharmacyDrugs])
+  }, [department, catSearch, searchLabTests, searchRadiologyExams, searchPharmacyDrugs])
 
   function selectPatient(p) {
     const age = calcAge(p.dateOfBirth)
@@ -504,8 +499,9 @@ export default function BillingModule({ onBack }) {
         return { ...f, items }
       }
       // Keep the master-data id: the backend uses it to draw the drug out of
-      // stock / raise the lab-radiology order this line implies.
-      return { ...f, items: [...f.items, { id: item.id, name: item.name, sub: item.sub || '', cat, qty: 1, amt: item.amt }] }
+      // stock / raise the lab-radiology order this line implies. gstRate rides
+      // along for pharmacy lines so the receipt can show the CGST/SGST split.
+      return { ...f, items: [...f.items, { id: item.id, name: item.name, sub: item.sub || '', cat, qty: 1, amt: item.amt, gstRate: item.gstRate }] }
     })
   }
   function removeItem(i) { setForm(f => ({ ...f, items: f.items.filter((_, idx) => idx !== i) })) }
@@ -533,10 +529,16 @@ export default function BillingModule({ onBack }) {
           quantity:    it.qty,
           unitPrice:   it.amt,
           total:       it.qty * it.amt,
+          // Pharmacy prices are GST-INCLUSIVE (MRP-based, the Indian retail norm),
+          // so tax is never added on top here — the receipt backs CGST/SGST out of
+          // the line total. Adding it as `tax` would overcharge the patient.
           tax:         0,
           // Only the three clinical catalogues carry a master-data id; billing it
           // decrements pharmacy stock / raises the lab-radiology order.
           ...(it.id && SOURCE_TYPE[it.cat] ? { sourceType: SOURCE_TYPE[it.cat], sourceId: it.id } : {}),
+          // Carried so the invoice's stored item (and the PharmacySale the backend
+          // records from it) can render the real GST breakdown on the receipt.
+          ...(it.gstRate ? { gstRate: Number(it.gstRate) } : {}),
         }))
         // Home collection charge → its own line so the invoice total is correct.
         // Lab-only (see the department gate on the input above) — checked again
@@ -815,7 +817,7 @@ export default function BillingModule({ onBack }) {
   const rawCatItems =
     activeCat === 'Lab' ? labTests.map(t => ({ id: t.id, name: t.testName, sub: t.testCategory || t.department || '', amt: Number(t.price || 0) })) :
     activeCat === 'Radiology' ? radiologyExams.map(e => ({ id: e.id, name: e.examName, sub: e.examCategory || e.bodyPart || '', amt: Number(e.price || 0) })) :
-    activeCat === 'Pharmacy' ? pharmacyDrugs.map(d => ({ id: d.id, name: d.drugName + (d.strength ? ` ${d.strength}` : ''), sub: d.drugCategory || d.genericName || '', amt: Number(d.sellingPrice || d.mrp || 0) })) :
+    activeCat === 'Pharmacy' ? pharmacyDrugs.map(d => ({ id: d.id, name: d.drugName + (d.strength ? ` ${d.strength}` : ''), sub: d.drugCategory || d.genericName || '', amt: Number(d.sellingPrice || d.mrp || 0), gstRate: Number(d.gstRate || 0) })) :
     (CATALOGUE[activeCat] || [])
 
   // Pharmacy is already filtered server-side (search param); Lab/Radiology/other
