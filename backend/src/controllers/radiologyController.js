@@ -110,21 +110,28 @@ function todayRange() {
 export const getAll = async (req, res, next) => {
   try {
     const ORGANIZATION_ID = getOrgId(req)
-    const { resource, status, urgency, examCategory, orderId } = req.query
+    const { resource, status, urgency, examCategory, orderId, search } = req.query
 
-    // Parse and validate pagination parameters
-    let limit = Math.min(Math.max(parseInt(req.query.limit) || 10, 1), 2000) // hard cap → no unbounded query DoS
-    let offset = parseInt(req.query.offset) || 0
-
-    // Ensure valid values
-    limit = Math.max(1, Math.min(limit, 1000)) // min 1, max 1000
-    offset = Math.max(0, offset) // min 0
+    // Pagination. NOTE: a second `Math.min(limit, 1000)` used to sit below this and
+    // silently overrode the 2000 cap, so `?limit=2000` returned only 1000 rows and
+    // the rest of the catalogue was unreachable (1927 exams → 927 invisible).
+    const limit = Math.min(Math.max(parseInt(req.query.limit) || 10, 1), 2000)
+    const offset = Math.max(0, parseInt(req.query.offset) || 0)
 
     if (resource === 'exams') {
       const where = {
         organizationId: ORGANIZATION_ID,
         isActive: true,
         ...(examCategory ? { examCategory } : {}),
+      }
+      // Server-side search, so a picker never has to download the whole catalogue.
+      if (search) {
+        where.OR = [
+          { examName: { contains: search, mode: 'insensitive' } },
+          { examCode: { contains: search, mode: 'insensitive' } },
+          { modality: { contains: search, mode: 'insensitive' } },
+          { bodyPart: { contains: search, mode: 'insensitive' } },
+        ]
       }
       const [data, total] = await Promise.all([
         db.radiologyExam.findMany({

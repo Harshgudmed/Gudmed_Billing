@@ -16,6 +16,7 @@ import { router as doctorAccountabilityRoutes } from './doctorAccountabilityRout
 import { router as feeSlabRoutes } from './feeSlabRoutes.js'
 import notificationRoutes from './notificationRoutes.js'
 import paymentRoutes from './paymentRoutes.js'
+import { handleWebhook } from '../controllers/paymentController.js'
 import importRoutes from './importRoutes.js'
 import preTriageRoutes from './preTriageRoutes.js'
 import triageRoutes from './triageRoutes.js'
@@ -31,6 +32,11 @@ export const router = Router()
 // Public routes (no auth needed)
 router.use('/auth',   authRoutes)
 router.use('/import', importRoutes)  // data import — protected by x-import-secret header
+
+// Razorpay calls this server-to-server with no cookie or JWT. Mounted here, ahead
+// of `authenticate`, or every webhook is rejected with 401 in production and the
+// payment is never banked. It authenticates itself via the webhook signature.
+router.post('/payments/webhook', handleWebhook)
 
 // Apply authenticate middleware to all routes below
 router.use(authenticate)
