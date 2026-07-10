@@ -1,6 +1,7 @@
 import { db } from '../config/db.js'
 import { Prisma } from '@prisma/client'
 import { getOrgId } from "../lib/reqContext.js";
+import { nextSeriesNumber, invoiceProbe } from "../lib/counters.js";
 import { startOfDay, endOfDay, todayIST } from '../utils/dates.js'
 import { scopedDoctorId } from '../utils/scope.js'
 import { computeConsultationFee } from '../services/appointmentFees.js'
@@ -265,7 +266,10 @@ export async function create(req, res, next) {
       })
       const unitPrice = consultationFee ?? opdService?.unitPrice ?? 500
       const description = opdService?.serviceName ?? `${aptType} Consultation`
-      const invoiceNumber = `INV${Date.now()}`
+      // Same atomic per-org/FY series the billing counter draws from, so an
+      // appointment invoice and a counter invoice share one numbering scheme and
+      // cannot collide on the @unique column when created in the same millisecond.
+      const invoiceNumber = await nextSeriesNumber(tx, organizationId, 'INV', 'INV', invoiceProbe(tx, organizationId))
 
       const invoice = await tx.invoice.create({
         data: {

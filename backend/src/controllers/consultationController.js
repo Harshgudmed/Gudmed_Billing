@@ -1,5 +1,6 @@
 import { db } from '../config/db.js'
 import { getOrgId } from "../lib/reqContext.js";
+import { nextSeriesNumber } from "../lib/counters.js";
 import { scopedDoctorId } from '../utils/scope.js'
 
 export async function getAll(req, res, next) {
@@ -124,7 +125,7 @@ export async function create(req, res, next) {
             patientId: consultationData.patientId,
             consultationId: newConsultation.id,
             requestedById: consultationData.doctorId,
-            orderNumber: `LAB${Date.now()}`,
+            orderNumber: await nextSeriesNumber(tx, organizationId, 'LAB_ORDER', 'LAB'),
             tests: JSON.stringify(labTests),
             clinicalIndication: consultationData.diagnosis,
             priority: 'routine',

@@ -562,6 +562,9 @@ export default function PharmacyModule() {
           <Button variant="outline" onClick={() => setShowSaleDialog(true)}>
             <ShoppingCart className="h-4 w-4 mr-1" /> Direct Sale
           </Button>
+          <Button variant="outline" onClick={() => setShowImport(true)}>
+            <Upload className="h-4 w-4 mr-1" /> Import Excel/CSV
+          </Button>
           <Button onClick={() => { setEditingDrugId(null); setDrugForm(emptyDrug); setShowDrugDialog(true); }}>
             <Plus className="h-4 w-4 mr-1" /> Add Drug
           </Button>
@@ -577,6 +580,11 @@ export default function PharmacyModule() {
           <TabsTrigger value="purchase-orders">Purchase Orders</TabsTrigger>
           <TabsTrigger value="sales">Sales & Reports</TabsTrigger>
         </TabsList>
+        <ImportMedicinesDialog
+          open={showImport}
+          onClose={() => setShowImport(false)}
+          onImported={() => drugPage.refresh()}
+        />
 
         <DashboardTab
           stats={stats}
@@ -696,6 +704,52 @@ export default function PharmacyModule() {
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>{DRUG_CATEGORIES.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}</SelectContent>
               </Select>
+            </div>
+            <div>
+              <Label>Dosage Form *</Label>
+              <Input placeholder="Tablet, Syrup, Injection..." value={drugForm.form} onChange={(e) => setDrugForm((p) => ({ ...p, form: e.target.value }))} />
+            </div>
+            <div>
+              <Label>Strength</Label>
+              <Input placeholder="500mg, 10ml..." value={drugForm.strength} onChange={(e) => setDrugForm((p) => ({ ...p, strength: e.target.value }))} />
+            </div>
+            <div>
+              <Label>MRP (Selling Price) *</Label>
+              <Input type="number" min="0" step="0.01" value={drugForm.mrp} onChange={(e) => setDrugForm((p) => ({ ...p, mrp: e.target.value }))} />
+            </div>
+            <div>
+              <Label>Purchase Rate (Cost)</Label>
+              <Input type="number" min="0" step="0.01" value={drugForm.rate} onChange={(e) => setDrugForm((p) => ({ ...p, rate: e.target.value }))} />
+            </div>
+            <div>
+              <Label>Min Stock (Reorder Level)</Label>
+              <Input type="number" min="0" value={drugForm.minStock} onChange={(e) => setDrugForm((p) => ({ ...p, minStock: e.target.value }))} />
+            </div>
+            <div>
+              <Label>Manufacturer / Company</Label>
+              <Input value={drugForm.companyName} onChange={(e) => setDrugForm((p) => ({ ...p, companyName: e.target.value }))} />
+            </div>
+
+            <div className="col-span-2 mt-2">
+              <hr className="mb-2" />
+              <p className="text-xs font-semibold text-gray-500 uppercase">Initial Stock & Batch (Optional)</p>
+            </div>
+            
+            <div>
+              <Label>Initial Stock Qty</Label>
+              <Input type="number" min="0" value={drugForm.initialQty} onChange={(e) => setDrugForm((p) => ({ ...p, initialQty: e.target.value }))} />
+            </div>
+            <div>
+              <Label>Batch Number</Label>
+              <Input value={drugForm.batchNumber} onChange={(e) => setDrugForm((p) => ({ ...p, batchNumber: e.target.value }))} />
+            </div>
+            <div>
+              <Label>Expiry Date</Label>
+              <Input type="date" value={drugForm.expiryDate} onChange={(e) => setDrugForm((p) => ({ ...p, expiryDate: e.target.value }))} />
+            </div>
+            <div>
+              <Label>Mfg Date</Label>
+              <Input type="date" value={drugForm.manufacturingDate} onChange={(e) => setDrugForm((p) => ({ ...p, manufacturingDate: e.target.value }))} />
             </div>
           </div>
           <DialogFooter>
