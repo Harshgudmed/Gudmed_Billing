@@ -12,10 +12,15 @@ import { format } from "date-fns";
 import { emptyBatch, PHARMACY_BATCHES_PER_PAGE } from "../pharmacyConstants";
 import { Pagination } from "@/components/common/Pagination";
 
+// `batches` is ONE server-fetched page. It used to be the whole table, which this
+// tab sliced client-side via `batchesPage` — a prop that no longer exists, so the
+// slice ran on NaN bounds and silently rendered an empty table.
 export default function BatchesTab({
-  batches,
-  batchesPage,
-  setBatchesPage,
+  batches = [],
+  loading,
+  page,
+  setPage,
+  totalPages,
   setBatchForm,
   setEditingBatchId,
   setShowBatchDialog,
@@ -52,7 +57,13 @@ export default function BatchesTab({
               </TableRow>
             </TableHeader>
             <TableBody>
-              {batches.length === 0 ? (
+              {loading ? (
+                <TableRow>
+                  <TableCell colSpan={8} className="text-center py-8 text-gray-400">
+                    Loading…
+                  </TableCell>
+                </TableRow>
+              ) : batches.length === 0 ? (
                 <TableRow>
                   <TableCell
                     colSpan={8}
@@ -62,10 +73,7 @@ export default function BatchesTab({
                   </TableCell>
                 </TableRow>
               ) : (() => {
-                const startIdx = (batchesPage - 1) * PHARMACY_BATCHES_PER_PAGE;
-                const endIdx = startIdx + PHARMACY_BATCHES_PER_PAGE;
-                const paginatedBatches = batches.slice(startIdx, endIdx);
-                return paginatedBatches.map((b) => {
+                return batches.map((b) => {
                   const dl = Math.ceil(
                     (new Date(b.expiryDate) - new Date()) / 86400000,
                   );
@@ -106,6 +114,7 @@ export default function BatchesTab({
                             onClick={() => {
                               setBatchForm({
                                 drugId: b.drugId,
+                                drugName: b.drug?.drugName || "",
                                 batchNumber: b.batchNumber,
                                 expiryDate: b.expiryDate
                                   ? new Date(b.expiryDate)
@@ -149,11 +158,7 @@ export default function BatchesTab({
               })()}
             </TableBody>
           </Table>
-          <Pagination
-            page={batchesPage}
-            totalPages={Math.ceil(batches.length / PHARMACY_BATCHES_PER_PAGE)}
-            onPageChange={setBatchesPage}
-          />
+          <Pagination page={page} totalPages={totalPages} onPageChange={setPage} />
         </CardContent>
       </Card>
     </TabsContent>
