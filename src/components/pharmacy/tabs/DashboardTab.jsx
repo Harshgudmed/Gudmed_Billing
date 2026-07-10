@@ -14,18 +14,22 @@ import { stockBadge } from "../pharmacyHelpers";
 import { formatMoney } from "@/lib/format";
 import { Pagination } from "@/components/common/Pagination";
 
+// The list props default to [] on purpose. `stats` arrives one render AFTER the
+// first paint, and every KPI below reads `stats?.x ?? someList.length` — so an
+// undefined list crashed the whole page on mount ("Cannot read properties of
+// undefined (reading 'length')") until stats resolved.
 export default function DashboardTab({
   stats,
-  drugs,
-  prescriptions,
-  expiringBatches,
+  drugs = [],
+  prescriptions = [],
+  expiringBatches = [],
   totalStockValue,
   todaySalesTotal,
   inStockCount,
   lowStockCount,
   outStockCount,
-  pendingRx,
-  lowStockDrugs,
+  pendingRx = [],
+  lowStockDrugs = [],
   lowStockPage,
   setLowStockPage,
   setActiveTab,

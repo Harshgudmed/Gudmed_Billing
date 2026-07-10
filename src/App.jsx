@@ -42,6 +42,7 @@ const AmbulancePage            = lazy(() => import('./pages/AmbulancePage.jsx'))
 const InsurancePage            = lazy(() => import('./pages/InsurancePage.jsx'))
 const DeathCertificatePage     = lazy(() => import('./pages/DeathCertificatePage.jsx'))
 const InpatientPage            = lazy(() => import('./pages/InpatientPage.jsx'))
+const NotFoundPage             = lazy(() => import('./pages/NotFoundPage.jsx'))
 
 // Module key → page component. Shared by both legacy and role-based routing.
 const PAGE_BY_MODULE = {
@@ -245,6 +246,7 @@ function LegacyApp() {
           <Route path="/billing"               element={<BillingPage />} />
           <Route path="/doctor-accountability" element={<DoctorAccountabilityPage />} />
           <Route path="/settings"              element={<SettingsPage />} />
+          <Route path="*"                      element={<NotFoundPage />} />
         </Routes>
       </Suspense>
     </Shell>

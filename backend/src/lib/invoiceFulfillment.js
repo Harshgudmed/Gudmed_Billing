@@ -12,30 +12,7 @@
 // its OWN stock and raise orders against its OWN tests/exams.
 
 import { recordStockChange, consumeFromBatches, findShortages, insufficientStockError } from '../pharmacy/stockService.js'
-
-/**
- * Pick the User a system-generated order is attributed to.
- * Prefers the logged-in biller; falls back to the org's oldest active user so a
- * demo/unauthenticated request still satisfies the `requestedById` foreign key.
- */
-export async function resolveRequestedById(tx, organizationId, actorId) {
-  if (actorId) {
-    const user = await tx.user.findFirst({ where: { id: actorId, organizationId }, select: { id: true } })
-    if (user) return user.id
-  }
-  const fallback = await tx.user.findFirst({
-    where: { organizationId, isActive: true },
-    orderBy: { createdAt: 'asc' },
-    select: { id: true },
-  })
-  if (!fallback) {
-    throw Object.assign(
-      new Error('No active user found to raise orders against. Create a user in Settings first.'),
-      { status: 400 },
-    )
-  }
-  return fallback.id
-}
+import { resolveRequestedById } from './requestedBy.js'
 
 /** Invoice lines the biller tagged as coming from a given module. */
 const linesFrom = (items, sourceType) =>
