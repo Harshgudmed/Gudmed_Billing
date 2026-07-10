@@ -40,8 +40,13 @@ async function main() {
 
   // 2. Create admin user
   const hash = await bcrypt.hash(DEMO_PASSWORD, 10)
+  // Match on email, not id: email is the real unique identity here. Matching on
+  // id meant a user restored under a different id (e.g. `admin-001` after the
+  // Render DB was rebuilt and data re-imported) looked "missing", so the seed
+  // tried to CREATE it and died on the email unique constraint — failing the
+  // whole production build.
   const admin = await db.user.upsert({
-    where: { id: 'user-admin' },
+    where: { email: 'admin@gudmed.in' },
     // Re-assert the password on every seed so a hash that drifted (e.g. mutated by
     // an old demo login) is reset back to the known DEMO_PASSWORD.
     update: { passwordHash: hash },
@@ -67,7 +72,7 @@ async function main() {
   for (const doc of doctors) {
     const dHash = await bcrypt.hash(DEMO_PASSWORD, 10)
     await db.user.upsert({
-      where: { id: doc.id },
+      where: { email: doc.email }, // email, not id — see the admin upsert above
       update: { passwordHash: dHash },
       create: {
         id: doc.id,
@@ -85,10 +90,14 @@ async function main() {
   }
 
   // 4. Create wards
+  // Ward's bed-count column is `capacity`. This used to pass totalBeds/
+  // availableBeds/occupiedBeds — none of which exist on the model — so every
+  // upsert threw, and the `.catch(() => {})` swallowed it while still printing
+  // "✅ Ward created". No ward was ever actually seeded.
   const wards = [
-    { id: 'ward-general', name: 'General Ward', type: 'general', totalBeds: 20, floor: '1st' },
-    { id: 'ward-icu', name: 'ICU', type: 'icu', totalBeds: 5, floor: '2nd' },
-    { id: 'ward-private', name: 'Private Ward', type: 'private', totalBeds: 10, floor: '3rd' },
+    { id: 'ward-general', name: 'General Ward', type: 'general', capacity: 20, floor: '1st' },
+    { id: 'ward-icu', name: 'ICU', type: 'icu', capacity: 5, floor: '2nd' },
+    { id: 'ward-private', name: 'Private Ward', type: 'private', capacity: 10, floor: '3rd' },
   ]
   for (const w of wards) {
     await db.ward.upsert({
@@ -97,12 +106,9 @@ async function main() {
       create: {
         ...w,
         organizationId: 'org-demo',
-        availableBeds: w.totalBeds,
-        occupiedBeds: 0,
         isActive: true,
-        updatedAt: new Date(),
       },
-    }).catch(() => {})
+    })
     console.log('✅ Ward created:', w.name)
   }
 
