@@ -1,27 +1,8 @@
 import { db } from '../config/db.js'
-import { getOrgId } from "../lib/reqContext.js";
+import { getOrgId, getActor } from "../lib/reqContext.js";
+import { resolveRequestedById } from '../lib/requestedBy.js'
 import { z } from 'zod'
 import { PATIENT_SNAPSHOT_SELECT } from '../utils/patientSnapshot.js'
-
-async function resolveRequestedById(organizationId) {
-  const fromEnv = process.env.DEFAULT_REQUESTED_BY_ID
-  if (fromEnv) {
-    const user = await db.user.findUnique({ where: { id: fromEnv } })
-    if (user) return fromEnv
-  }
-  const orgId = organizationId || process.env.ORGANIZATION_ID || 'org-demo'
-  const admin = await db.user.findFirst({
-    where: { organizationId: orgId, isActive: true },
-    orderBy: { createdAt: 'asc' },
-  })
-  if (!admin) {
-    throw Object.assign(
-      new Error('No active user found to assign lab orders. Create a user in Settings or set DEFAULT_REQUESTED_BY_ID in .env'),
-      { status: 400 }
-    )
-  }
-  return admin.id
-}
 
 // ── Zod schemas ────────────────────────────────────────────────────────────────
 
@@ -266,7 +247,7 @@ export const create = async (req, res, next) => {
         parsed.data
 
       const orderNumber = `LAB${Date.now()}`
-      const requestedById = await resolveRequestedById(ORGANIZATION_ID)
+      const requestedById = await resolveRequestedById(db, ORGANIZATION_ID, getActor(req).id)
 
       const data = await db.labOrder.create({
         data: {

@@ -3,12 +3,15 @@ import ReactDOM from 'react-dom/client'
 import { BrowserRouter } from 'react-router-dom'
 import App from './App.jsx'
 import { AuthProvider } from '@/lib/auth'
+import { ErrorBoundary } from '@/components/ErrorBoundary'
 import './styles/globals.css'
 
 ReactDOM.createRoot(document.getElementById('root')).render(
-  <BrowserRouter>
-    <AuthProvider>
-      <App />
-    </AuthProvider>
-  </BrowserRouter>
+  <ErrorBoundary>
+    <BrowserRouter>
+      <AuthProvider>
+        <App />
+      </AuthProvider>
+    </BrowserRouter>
+  </ErrorBoundary>
 )

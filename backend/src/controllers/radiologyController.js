@@ -1,5 +1,6 @@
 import { db } from '../config/db.js'
-import { getOrgId } from "../lib/reqContext.js";
+import { getOrgId, getActor } from "../lib/reqContext.js";
+import { resolveRequestedById } from '../lib/requestedBy.js'
 import { z } from 'zod'
 import { PATIENT_SNAPSHOT_SELECT } from '../utils/patientSnapshot.js'
 
@@ -302,7 +303,7 @@ export const create = async (req, res, next) => {
           orderNumber,
           patientId,
           examId,
-          requestedById: 'user-admin',
+          requestedById: await resolveRequestedById(db, ORGANIZATION_ID, getActor(req).id),
           status: 'pending',
           ...(consultationId !== undefined ? { consultationId } : {}),
           ...(clinicalIndication !== undefined ? { clinicalIndication } : {}),

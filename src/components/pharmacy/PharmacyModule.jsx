@@ -238,6 +238,20 @@ export default function PharmacyModule() {
   const [salePayments, setSalePayments] = useState([{ paymentMethod: "cash", amount: "" }]);
   const [deleteConfirm, setDeleteConfirm] = useState(null);
 
+  // Basket total for the OTC sale dialog. This used to be derived by looking each
+  // row's drugId up in a full in-memory `drugs` list; that state is gone now that
+  // the drug list is server-paginated, so every sale row carries the price the
+  // picker selected. Mirrors the per-line maths in handleSale().
+  const saleTotal = useMemo(
+    () =>
+      saleItems.reduce(
+        (sum, i) =>
+          i.drugId ? sum + (Number(i.sellingPrice) || 0) * (Number(i.quantity) || 0) : sum,
+        0,
+      ),
+    [saleItems],
+  );
+
   useEffect(() => {
     fetchStats();
   }, [fetchStats]);
@@ -400,6 +414,21 @@ export default function PharmacyModule() {
     setSavingBatch(false);
   };
 
+  // The delete-drug confirm dialog called this, but it was never defined — clicking
+  // "Delete" threw `handleDeleteDrug is not defined` and took the module down.
+  const handleDeleteDrug = async (drug) => {
+    if (!drug?.id) return;
+    try {
+      const res = await client.delete(`/pharmacy/drugs/${drug.id}`);
+      if (res.success) {
+        toast.success("Drug removed");
+        setDeleteConfirm(null);
+        drugPage.refresh();
+        fetchStats();
+      } else toast.error(res.error || "Failed");
+    } catch { toast.error("Failed to remove drug"); }
+  };
+
   const handleDeleteBatch = async () => {
     if (!selectedBatch) return;
     try {
@@ -499,6 +528,14 @@ export default function PharmacyModule() {
   const lowStockCount = stats ? Math.max(0, stats.lowStock - stats.outOfStock) : 0;
   const outStockCount = stats?.outOfStock ?? 0;
   const lowStockDrugs = stats?.lowStockDrugs ?? [];
+
+  // Preview list for the dashboard's "Pending Prescriptions" card. The KPI count
+  // beside it comes from stats.pendingPrescriptions (whole table); this is only the
+  // handful shown, drawn from the prescriptions page currently loaded.
+  const pendingRx = useMemo(
+    () => rxPage.rows.filter((p) => p.status === "pending"),
+    [rxPage.rows],
+  );
   const todaySalesTotal = stats?.todaySalesTotal ?? 0;
 
   const mrp = parseFloat(drugForm.mrp) || 0;
@@ -543,6 +580,9 @@ export default function PharmacyModule() {
 
         <DashboardTab
           stats={stats}
+          drugs={drugPage.rows}
+          prescriptions={rxPage.rows}
+          pendingRx={pendingRx}
           expiringBatches={expiringBatches}
           totalStockValue={totalStockValue}
           todaySalesTotal={todaySalesTotal}
@@ -674,24 +714,21 @@ export default function PharmacyModule() {
           <div className="space-y-3">
             <div>
               <Label>Drug *</Label>
-              <Select
-                value={batchForm.drugId}
-                onValueChange={(v) =>
-                  setBatchForm((p) => ({ ...p, drugId: v }))
-                }
+              {/* Was `drugs.map(...)`, a state that stopped existing when the drug
+                  list moved to server pagination — it crashed the whole module.
+                  A page of rows would be the wrong source anyway: the drug being
+                  restocked is usually not on the currently visible page.
+                  `inStockOnly={false}` because a batch is added precisely when the
+                  stock is zero. */}
+              <PosDrugCombo
+                inStockOnly={false}
                 disabled={!!editingBatchId}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Select drug" />
-                </SelectTrigger>
-                <SelectContent>
-                  {drugs.map((d) => (
-                    <SelectItem key={d.id} value={d.id}>
-                      {d.drugName}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+                selectedName={batchForm.drugName}
+                placeholder="Search drug to add a batch for..."
+                onSelect={(d) =>
+                  setBatchForm((p) => ({ ...p, drugId: d.id, drugName: d.drugName }))
+                }
+              />
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div>

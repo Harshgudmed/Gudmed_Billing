@@ -65,6 +65,10 @@ export const emptyDrug = {
 
 export const emptyBatch = {
   drugId: "",
+  // Display-only: the picker is a server-side search, so the chosen drug's name is
+  // carried here rather than looked up in a full in-memory drug list. Stripped by
+  // the batch Zod schema on the way to the API.
+  drugName: "",
   batchNumber: "",
   expiryDate: "",
   manufactureDate: "",
