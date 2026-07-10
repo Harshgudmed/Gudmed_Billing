@@ -167,8 +167,13 @@ export default function OpdModule() {
       client.get('/patients?status=active&limit=500'),
       client.get('/settings?resource=users'),
       client.get('/pharmacy/drugs?limit=5000'),
-      client.get('/laboratory?resource=tests&limit=1000'),
-      client.get('/radiology?resource=exams&limit=1000'),
+      // 1000 silently truncated the catalogue (1607 tests / 1927 exams), so tests
+      // past the cap could not be ordered. These lists are looked up in memory by
+      // id AND by name below, so they must stay complete. When either catalogue
+      // approaches 2000, move this picker to the debounced server-side `search`
+      // param that BillingModule already uses.
+      client.get('/laboratory?resource=tests&limit=2000'),
+      client.get('/radiology?resource=exams&limit=2000'),
       client.get('/clinical-kb/specialties'),
     ])
     if (cRes.status === 'fulfilled') setConsultations(cRes.value?.data ?? [])

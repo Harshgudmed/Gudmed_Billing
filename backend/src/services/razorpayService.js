@@ -47,13 +47,33 @@ export function verifySignature({ orderId, paymentId, signature }) {
   return expected === signature
 }
 
-// Verify payment link signature (webhook)
-export function verifyWebhookSignature(body, signature) {
-  const expected = crypto
-    .createHmac('sha256', process.env.RAZORPAY_KEY_SECRET)
-    .update(JSON.stringify(body))
-    .digest('hex')
-  return expected === signature
+// Authoritative amount/status for a payment — never trust the client's claim.
+export async function fetchPayment(paymentId) {
+  return razorpay.payments.fetch(paymentId)
+}
+
+/**
+ * Verify a Razorpay webhook.
+ *
+ * Two things this used to get wrong:
+ *  1. It signed with RAZORPAY_KEY_SECRET. Webhooks are signed with the separate
+ *     webhook secret configured in the Razorpay dashboard.
+ *  2. It hashed `JSON.stringify(req.body)`. The signature covers the RAW request
+ *     bytes; re-serialising a parsed object does not reproduce them.
+ *
+ * Fails closed: no secret configured → no webhook is ever accepted.
+ *
+ * @param rawBody   Buffer of the untouched request body
+ * @param signature value of the x-razorpay-signature header
+ */
+export function verifyWebhookSignature(rawBody, signature) {
+  const secret = process.env.RAZORPAY_WEBHOOK_SECRET
+  if (!secret || !signature || !Buffer.isBuffer(rawBody)) return false
+
+  const expected = crypto.createHmac('sha256', secret).update(rawBody).digest('hex')
+  const a = Buffer.from(expected)
+  const b = Buffer.from(String(signature))
+  return a.length === b.length && crypto.timingSafeEqual(a, b)
 }
 
 export default razorpay
