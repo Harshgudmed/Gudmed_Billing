@@ -11,7 +11,6 @@ import {
 } from "@/components/ui/select";
 import { Plus, Eye, XCircle } from "lucide-react";
 import { format } from "date-fns";
-import { PHARMACY_PO_PER_PAGE } from "../pharmacyConstants";
 import { statusBadge } from "../pharmacyHelpers";
 import { Pagination } from "@/components/common/Pagination";
 import { formatMoney } from "@/lib/format";
@@ -19,9 +18,11 @@ import { formatMoney } from "@/lib/format";
 export default function PurchaseOrdersTab({
   poStatusFilter,
   setPoStatusFilter,
-  filteredPOs,
-  poPage,
-  setPoPage,
+  purchaseOrders,
+  loading,
+  page,
+  setPage,
+  totalPages,
   setPoForm,
   setPoItems,
   setShowPoDialog,
@@ -30,6 +31,9 @@ export default function PurchaseOrdersTab({
   handleUpdatePO,
   openReceivePO,
 }) {
+  // The server returns exactly one page of rows (useServerPagination), so this
+  // renders them as-is — slicing here would drop rows from every page but the first.
+  const rows = purchaseOrders || [];
   return (
     <TabsContent value="purchase-orders" className="space-y-4">
       <div className="flex items-center justify-between gap-3">
@@ -75,7 +79,16 @@ export default function PurchaseOrdersTab({
               </TableRow>
             </TableHeader>
             <TableBody>
-              {filteredPOs.length === 0 ? (
+              {loading ? (
+                <TableRow>
+                  <TableCell
+                    colSpan={7}
+                    className="text-center py-8 text-gray-400"
+                  >
+                    Loading…
+                  </TableCell>
+                </TableRow>
+              ) : rows.length === 0 ? (
                 <TableRow>
                   <TableCell
                     colSpan={7}
@@ -84,11 +97,8 @@ export default function PurchaseOrdersTab({
                     No purchase orders
                   </TableCell>
                 </TableRow>
-              ) : (() => {
-                const startIdx = (poPage - 1) * PHARMACY_PO_PER_PAGE;
-                const endIdx = startIdx + PHARMACY_PO_PER_PAGE;
-                const paginatedPOs = filteredPOs.slice(startIdx, endIdx);
-                return paginatedPOs.map((po) => (
+              ) : (
+                rows.map((po) => (
                   <TableRow key={po.id}>
                     <TableCell className="font-mono">
                       {po.poNumber}
@@ -169,14 +179,14 @@ export default function PurchaseOrdersTab({
                       </div>
                     </TableCell>
                   </TableRow>
-                ));
-              })()}
+                ))
+              )}
             </TableBody>
           </Table>
           <Pagination
-            page={poPage}
-            totalPages={Math.ceil(filteredPOs.length / PHARMACY_PO_PER_PAGE)}
-            onPageChange={setPoPage}
+            page={page}
+            totalPages={totalPages}
+            onPageChange={setPage}
           />
         </CardContent>
       </Card>
