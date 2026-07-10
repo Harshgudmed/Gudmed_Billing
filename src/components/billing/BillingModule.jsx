@@ -391,10 +391,9 @@ export default function BillingModule({ onBack }) {
 
   // Real Lab test catalog search
   const searchLabTests = useCallback(async (query) => {
-    if (query.trim().length < 2) { setLabTests([]); return }
     setCatalogLoading(true)
     try {
-      const res = await client.get('/laboratory', { params: { resource: 'tests', search: query.trim(), limit: 30 } })
+      const res = await client.get('/laboratory', { params: { resource: 'tests', search: query.trim(), limit: 500 } })
       if (res.success) setLabTests(res.data || [])
     } catch { toast.error('Failed to search lab tests') }
     finally { setCatalogLoading(false) }
@@ -402,10 +401,9 @@ export default function BillingModule({ onBack }) {
 
   // Real Radiology exam catalog search
   const searchRadiologyExams = useCallback(async (query) => {
-    if (query.trim().length < 2) { setRadiologyExams([]); return }
     setCatalogLoading(true)
     try {
-      const res = await client.get('/radiology', { params: { resource: 'exams', search: query.trim(), limit: 30 } })
+      const res = await client.get('/radiology', { params: { resource: 'exams', search: query.trim(), limit: 500 } })
       if (res.success) setRadiologyExams(res.data || [])
     } catch { toast.error('Failed to search radiology exams') }
     finally { setCatalogLoading(false) }
@@ -414,10 +412,9 @@ export default function BillingModule({ onBack }) {
   // Real Pharmacy drug catalog — ~2 lakh drugs, so searched server-side (same
   // /pharmacy/drugs endpoint the Pharmacy module itself uses) rather than loaded whole.
   const searchPharmacyDrugs = useCallback(async (query) => {
-    if (query.trim().length < 2) { setPharmacyDrugs([]); return }
     setCatalogLoading(true)
     try {
-      const res = await client.get('/pharmacy/drugs', { params: { search: query.trim(), limit: 30 } })
+      const res = await client.get('/pharmacy/drugs', { params: { search: query.trim(), limit: 500 } })
       if (res.success) setPharmacyDrugs(res.data || [])
     } catch { toast.error('Failed to search pharmacy inventory') }
     finally { setCatalogLoading(false) }
@@ -1059,8 +1056,6 @@ export default function BillingModule({ onBack }) {
                       <p className="text-sm text-gray-400 text-center py-6"></p>
                     ) : catalogLoading ? (
                       <p className="text-sm text-gray-400 text-center py-4">Loading...</p>
-                    ) : activeCat === 'Pharmacy' && catSearch.trim().length < 2 ? (
-                      <p className="text-sm text-gray-400 text-center py-4">Type at least 2 characters to search medicines</p>
                     ) : catItems.length === 0 ? (
                       <p className="text-sm text-gray-400 text-center py-4">No items found</p>
                     ) : catItems.map(it => (

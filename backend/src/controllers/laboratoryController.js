@@ -1,5 +1,6 @@
 import { db } from '../config/db.js'
 import { getOrgId, getActor } from "../lib/reqContext.js";
+import { nextSeriesNumber } from "../lib/counters.js";
 import { resolveRequestedById } from '../lib/requestedBy.js'
 import { z } from 'zod'
 import { PATIENT_SNAPSHOT_SELECT } from '../utils/patientSnapshot.js'
@@ -246,30 +247,36 @@ export const create = async (req, res, next) => {
       const { patientId, consultationId, tests, clinicalIndication, provisionalDiagnosis, priority, notes } =
         parsed.data
 
-      const orderNumber = `LAB${Date.now()}`
-      const requestedById = await resolveRequestedById(db, ORGANIZATION_ID, getActor(req).id)
+      const actorId = getActor(req).id
+      // The order number is drawn from the atomic per-org counter inside the same
+      // transaction as the insert, so two orders raised in the same millisecond
+      // cannot collide on the @unique orderNumber (which `LAB${Date.now()}` did).
+      const data = await db.$transaction(async (tx) => {
+        const orderNumber = await nextSeriesNumber(tx, ORGANIZATION_ID, 'LAB_ORDER', 'LAB')
+        const requestedById = await resolveRequestedById(tx, ORGANIZATION_ID, actorId)
 
-      const data = await db.labOrder.create({
-        data: {
-          orderNumber,
-          organizationId: ORGANIZATION_ID,
-          patientId,
-          consultationId: consultationId || null,
-          requestedById,
-          tests: JSON.stringify(tests),
-          clinicalIndication,
-          provisionalDiagnosis,
-          priority,
-          notes,
-          status: 'pending',
-        },
-        // Return the patient too, so the freshly-created order shows the real
-        // name in the UI immediately (not "Unknown" until the next refresh).
-        include: {
-          patient: {
-            select: PATIENT_SNAPSHOT_SELECT,
+        return tx.labOrder.create({
+          data: {
+            orderNumber,
+            organizationId: ORGANIZATION_ID,
+            patientId,
+            consultationId: consultationId || null,
+            requestedById,
+            tests: JSON.stringify(tests),
+            clinicalIndication,
+            provisionalDiagnosis,
+            priority,
+            notes,
+            status: 'pending',
           },
-        },
+          // Return the patient too, so the freshly-created order shows the real
+          // name in the UI immediately (not "Unknown" until the next refresh).
+          include: {
+            patient: {
+              select: PATIENT_SNAPSHOT_SELECT,
+            },
+          },
+        })
       })
       return res.json({ success: true, data })
     }

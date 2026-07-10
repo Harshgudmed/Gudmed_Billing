@@ -93,8 +93,9 @@ export function printInvoice(bill, orgInfo, clinic, options = {}) {
       <td style="padding:6px 8px;border-bottom:1px solid #eee;font-size:8.5pt">${i + 1}</td>
       <td style="padding:6px 8px;border-bottom:1px solid #eee;font-family:monospace;color:#0b5cab;font-weight:bold">${esc(it.code || it.name.substring(0,4).toUpperCase())}</td>
       <td style="padding:6px 8px;border-bottom:1px solid #eee;font-size:8.5pt"><strong>${esc(it.name)}</strong>${it.sub ? `<br/><span style="font-size:8pt;color:#888">${esc(it.sub)}</span>` : ''}</td>
-      <td style="padding:6px 8px;border-bottom:1px solid #eee;font-size:8.5pt">${esc(bill.date)}</td>
-      <td style="padding:6px 8px;border-bottom:1px solid #eee;text-align:right;font-size:8.5pt;font-weight:bold">${inr(it.qty * it.amt)}</td>
+      <td style="padding:6px 8px;border-bottom:1px solid #eee;text-align:center;font-size:8.5pt">${it.qty || 1}</td>
+      <td style="padding:6px 8px;border-bottom:1px solid #eee;text-align:right;font-size:8.5pt">${inr(it.amt)}</td>
+      <td style="padding:6px 8px;border-bottom:1px solid #eee;text-align:right;font-size:8.5pt;font-weight:bold">${inr((it.qty || 1) * it.amt)}</td>
     </tr>`).join('')
   
   const calcSubtotal = bill.subtotal || (bill.items || []).reduce((a, i) => a + i.qty * i.amt, 0)
@@ -150,16 +151,14 @@ ${PAYMENT_TABLE_CSS}
     <div class="labnum">${esc(mrn)}</div>
   </div>
 </div>
-<div class="title">Bill Of Supply / Cash Receipt</div>
-<div class="subtitle">(PLEASE BRING THIS RECEIPT FOR REPORT COLLECTION)</div>
+<div class="title">Invoice / Cash Receipt</div>
 <div class="grid">
 <div class="cell"><span class="l">Invoice Number</span><span class="v">${esc(bill.invoiceNo)}</span></div><div class="cell"><span class="l">Patient ID / UHID</span><span class="v">${esc(mrn)}</span></div>
-<div class="cell"><span class="l">Lab ID</span><span class="v">${esc(mrn)}</span></div><div class="cell"><span class="l">Patient Name</span><span class="v">${esc(bill.patientName)}</span></div>
-<div class="cell"><span class="l">Date &amp; Time</span><span class="v">${esc(bill.date)}</span></div><div class="cell"><span class="l">Contact Number</span><span class="v">${esc(bill.phone || 'NA')}</span></div>
-<div class="cell"><span class="l">Reference Doctor</span><span class="v">${esc(bill.doctorName || 'self')}</span></div><div class="cell"><span class="l">GST No</span><span class="v">${esc(clinic.gstNo || 'NA')}</span></div>
-<div class="cell"><span class="l">Mode of Payment</span><span class="v">${esc(bill.mode || 'Cash')}</span></div><div class="cell"><span class="l"></span><span class="v"></span></div>
+<div class="cell"><span class="l">Date &amp; Time</span><span class="v">${esc(bill.date)}</span></div><div class="cell"><span class="l">Patient Name</span><span class="v">${esc(bill.patientName)}</span></div>
+<div class="cell"><span class="l">Reference Doctor</span><span class="v">${esc(bill.doctorName || 'self')}</span></div><div class="cell"><span class="l">Contact Number</span><span class="v">${esc(bill.phone || 'NA')}</span></div>
+<div class="cell"><span class="l">Mode of Payment</span><span class="v">${esc(bill.mode || 'Cash')}</span></div><div class="cell"><span class="l">GST No</span><span class="v">${esc(clinic.gstNo || 'NA')}</span></div>
 </div>
-<table><thead><tr><th style="width:34px">S.NO.</th><th style="width:110px">TEST CODE</th><th>TEST NAME</th><th style="width:130px">ESTIMATE OF REPORT BY</th><th style="width:80px;text-align:right">PRICE</th></tr></thead>
+<table><thead><tr><th style="width:34px">S.NO.</th><th style="width:110px">ITEM CODE</th><th>DESCRIPTION</th><th style="width:60px;text-align:center">QTY</th><th style="width:80px;text-align:right">RATE</th><th style="width:90px;text-align:right">AMOUNT</th></tr></thead>
 <tbody>${itemRows}</tbody></table>
 <div class="totwrap">
   ${formatOpt === 'invoice' ? `
@@ -173,7 +172,9 @@ ${PAYMENT_TABLE_CSS}
   `}
 <div class="totals">
 <div class="trow"><span>Order Value</span><span>${inr(calcSubtotal)}</span></div>
-<div class="trow b"><span>Total Order Value</span><span>${inr(calcSubtotal)}</span></div>
+${bill.homeCollection ? `<div class="trow"><span>Home Collection Charges</span><span>${inr(bill.homeCollection)}</span></div>` : ''}
+${bill.discount ? `<div class="trow"><span>Discount</span><span>-${inr(bill.discount)}</span></div>` : ''}
+<div class="trow b"><span>Total Order Value</span><span>${inr(calcSubtotal + Number(bill.homeCollection || 0) - Number(bill.discount || 0))}</span></div>
 <div class="trow net"><span>Net Payable Amount</span><span>${inr(bill.total)}</span></div>
 <div class="trow"><span>Paid Amount</span><span>${inr(bill.amountPaid)}</span></div>
 ${formatOpt === 'detailed' ? `<div class="trow" style="color:#b91c1c"><span>Balance Amount</span><span>${inr(bill.balanceDue)}</span></div>` : ''}
