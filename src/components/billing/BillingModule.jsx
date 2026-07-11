@@ -1303,94 +1303,106 @@ export default function BillingModule({ onBack }) {
                 {showInvoiceModal.uhid && <div><span className="text-gray-500">UHID: </span><span className="font-mono">{showInvoiceModal.uhid}</span></div>}
                 <div><span className="text-gray-500">Status: </span><PayBadge invoice={showInvoiceModal} /></div>
               </div>
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>#</TableHead>
-                    <TableHead>Description</TableHead>
-                    <TableHead className="text-center">Qty</TableHead>
-                    <TableHead className="text-right">Rate</TableHead>
-                    <TableHead className="text-right">Amount</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {(showInvoiceModal.items || []).map((it, i) => (
-                    <TableRow key={i}>
-                      <TableCell>{i + 1}</TableCell>
-                      <TableCell>
-                        <div>{it.name}</div>
-                        {it.sub && <div className="text-xs text-gray-400">{it.sub}</div>}
-                      </TableCell>
-                      <TableCell className="text-center">{it.qty}</TableCell>
-                      <TableCell className="text-right">{fmt(it.amt)}</TableCell>
-                      <TableCell className="text-right font-medium">{fmt(it.qty * it.amt)}</TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-              <div className="flex flex-col items-end gap-4">
-                <div className="w-64 space-y-1 border rounded-lg p-3">
-                  <div className="flex justify-between text-gray-600"><span>Subtotal</span><span>{fmt(showInvoiceModal.subtotal || 0)}</span></div>
-                  {(showInvoiceModal.discountAmt || 0) > 0 && <div className="flex justify-between text-green-600"><span>Discount</span><span>−{fmt(showInvoiceModal.discountAmt)}</span></div>}
-                  <div className="flex justify-between font-bold text-base border-t pt-1 mt-1"><span>Total</span><span>{fmt(showInvoiceModal.total)}</span></div>
-                  <div className="flex justify-between text-green-700 text-sm"><span>Amount Paid</span><span>{fmt(showInvoiceModal.amountPaid || 0)}</span></div>
-                  <div className="flex justify-between font-semibold text-red-600 text-sm"><span>Balance Due</span><span>{fmt(showInvoiceModal.balanceDue ?? (showInvoiceModal.total - (showInvoiceModal.amountPaid || 0)))}</span></div>
-                </div>
-                {/* Payment History */}
-                {(showInvoiceModal.payments || []).length > 0 && (
-                  <div className="w-full mt-2">
-                    <h4 className="text-sm font-semibold mb-2 text-gray-700">Payment History</h4>
+              {(() => {
+                const hccTag = String(showInvoiceModal.notes || '').match(/\[HCC:(\d+(?:\.\d+)?)\]/)
+                const hcc = hccTag ? Number(hccTag[1]) : 0
+                const displayItems = (showInvoiceModal.items || []).filter(it => !/home collection/i.test(it.name || ''))
+                const displaySubtotal = displayItems.reduce((s, it) => s + (it.amt || 0) * (it.qty || 1), 0)
+
+                return (
+                  <>
                     <Table>
-                      <TableHeader className="bg-gray-50">
+                      <TableHeader>
                         <TableRow>
-                          <TableHead className="h-8 py-1 text-xs">Date</TableHead>
-                          <TableHead className="h-8 py-1 text-xs">Receipt No</TableHead>
-                          <TableHead className="h-8 py-1 text-xs">Mode</TableHead>
-                          <TableHead className="h-8 py-1 text-xs text-right">Amount</TableHead>
-                          <TableHead className="h-8 py-1 text-xs text-right">Actions</TableHead>
+                          <TableHead>#</TableHead>
+                          <TableHead>Description</TableHead>
+                          <TableHead className="text-center">Qty</TableHead>
+                          <TableHead className="text-right">Rate</TableHead>
+                          <TableHead className="text-right">Amount</TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>
-                        {[...showInvoiceModal.payments].sort((a, b) => new Date(b.date || b.paymentDate || new Date()) - new Date(a.date || a.paymentDate || new Date())).map((p, i) => (
+                        {displayItems.map((it, i) => (
                           <TableRow key={i}>
-                            <TableCell className="py-2 text-xs text-gray-500">{p.date || p.paymentDate || showInvoiceModal.date}</TableCell>
-                            <TableCell className="py-2 text-xs font-mono">{p.receiptNo || p.receiptNumber || `RCPT-${i+1}`}</TableCell>
-                            <TableCell className="py-2 text-xs">
-                              {p.method || p.paymentMethod || showInvoiceModal.payMode || 'Cash'}
-                              {p.isRefund && (
-                                <Badge variant="outline" className="ml-2 text-[10px] text-red-600 bg-red-50 border-red-200">
-                                  Refund{p.status && p.status !== 'APPROVED' ? ` (${p.status === 'PENDING_APPROVAL' ? 'Pending' : 'Rejected'})` : ''}
-                                </Badge>
-                              )}
+                            <TableCell>{i + 1}</TableCell>
+                            <TableCell>
+                              <div>{it.name}</div>
+                              {it.sub && <div className="text-xs text-gray-400">{it.sub}</div>}
                             </TableCell>
-                            <TableCell className="py-2 text-xs text-right font-medium">{fmt(p.amount)}</TableCell>
-                            <TableCell className="py-2 text-xs text-right">
-                              <div className="flex gap-1 justify-end">
-                                <Button size="sm" variant="outline" className="h-6 px-2 text-[10px]" onClick={() => printReceipt({ ...p, invoice: showInvoiceModal }, orgInfo, clinic)}>
-                                  <Printer className="h-3 w-3 mr-1" />Print
-                                </Button>
-                                {(() => {
-                                  if (p.isRefund) return null;
-                                  const relatedRefunds = (showInvoiceModal?.payments || []).filter(pay => pay.isRefund && pay.originalPaymentId === p.id && pay.status !== 'REJECTED');
-                                  const refundedSoFar = relatedRefunds.reduce((sum, r) => sum + r.amount, 0);
-                                  if (refundedSoFar >= p.amount) {
-                                    return <Badge variant="outline" className="h-6 px-2 text-[10px] text-gray-500 bg-gray-100 border-gray-200">Fully Refunded</Badge>;
-                                  }
-                                  return (
-                                    <Button size="sm" variant="outline" className="h-6 px-2 text-[10px] text-red-600 border-red-200 hover:bg-red-50" onClick={() => handleRefund({ ...p, invoiceId: showInvoiceModal.dbId })}>
-                                      Refund {refundedSoFar > 0 ? `(Bal ₹${p.amount - refundedSoFar})` : ''}
-                                    </Button>
-                                  );
-                                })()}
-                              </div>
-                            </TableCell>
+                            <TableCell className="text-center">{it.qty}</TableCell>
+                            <TableCell className="text-right">{fmt(it.amt)}</TableCell>
+                            <TableCell className="text-right font-medium">{fmt(it.qty * it.amt)}</TableCell>
                           </TableRow>
                         ))}
                       </TableBody>
                     </Table>
-                  </div>
-                )}
-              </div>
+                    <div className="flex flex-col items-end gap-4">
+                      <div className="w-64 space-y-1 border rounded-lg p-3">
+                        <div className="flex justify-between text-gray-600"><span>Subtotal</span><span>{fmt(displaySubtotal)}</span></div>
+                        {hcc > 0 && <div className="flex justify-between text-gray-600"><span>Home Collection</span><span>{fmt(hcc)}</span></div>}
+                        {(showInvoiceModal.discountAmt || 0) > 0 && <div className="flex justify-between text-green-600"><span>Discount</span><span>−{fmt(showInvoiceModal.discountAmt)}</span></div>}
+                        <div className="flex justify-between font-bold text-base border-t pt-1 mt-1"><span>Total</span><span>{fmt(showInvoiceModal.total)}</span></div>
+                        <div className="flex justify-between text-green-700 text-sm"><span>Amount Paid</span><span>{fmt(showInvoiceModal.amountPaid || 0)}</span></div>
+                        <div className="flex justify-between font-semibold text-red-600 text-sm"><span>Balance Due</span><span>{fmt(showInvoiceModal.balanceDue ?? (showInvoiceModal.total - (showInvoiceModal.amountPaid || 0)))}</span></div>
+                      </div>
+                      {/* Payment History */}
+                      {(showInvoiceModal.payments || []).length > 0 && (
+                        <div className="w-full mt-2">
+                          <h4 className="text-sm font-semibold mb-2 text-gray-700">Payment History</h4>
+                          <Table>
+                            <TableHeader className="bg-gray-50">
+                              <TableRow>
+                                <TableHead className="h-8 py-1 text-xs">Date</TableHead>
+                                <TableHead className="h-8 py-1 text-xs">Receipt No</TableHead>
+                                <TableHead className="h-8 py-1 text-xs">Mode</TableHead>
+                                <TableHead className="h-8 py-1 text-xs text-right">Amount</TableHead>
+                                <TableHead className="h-8 py-1 text-xs text-right">Actions</TableHead>
+                              </TableRow>
+                            </TableHeader>
+                            <TableBody>
+                              {[...showInvoiceModal.payments].sort((a, b) => new Date(b.date || b.paymentDate || new Date()) - new Date(a.date || a.paymentDate || new Date())).map((p, i) => (
+                                <TableRow key={i}>
+                                  <TableCell className="py-2 text-xs text-gray-500">{p.date || p.paymentDate || showInvoiceModal.date}</TableCell>
+                                  <TableCell className="py-2 text-xs font-mono">{p.receiptNo || p.receiptNumber || `RCPT-${i+1}`}</TableCell>
+                                  <TableCell className="py-2 text-xs">
+                                    {p.method || p.paymentMethod || showInvoiceModal.payMode || 'Cash'}
+                                    {p.isRefund && (
+                                      <Badge variant="outline" className="ml-2 text-[10px] text-red-600 bg-red-50 border-red-200">
+                                        Refund{p.status && p.status !== 'APPROVED' ? ` (${p.status === 'PENDING_APPROVAL' ? 'Pending' : 'Rejected'})` : ''}
+                                      </Badge>
+                                    )}
+                                  </TableCell>
+                                  <TableCell className="py-2 text-xs text-right font-medium">{fmt(p.amount)}</TableCell>
+                                  <TableCell className="py-2 text-xs text-right">
+                                    <div className="flex gap-1 justify-end">
+                                      <Button size="sm" variant="outline" className="h-6 px-2 text-[10px]" onClick={() => printReceipt({ ...p, invoice: showInvoiceModal }, orgInfo, clinic)}>
+                                        <Printer className="h-3 w-3 mr-1" />Print
+                                      </Button>
+                                      {(() => {
+                                        if (p.isRefund) return null;
+                                        const relatedRefunds = (showInvoiceModal?.payments || []).filter(pay => pay.isRefund && pay.originalPaymentId === p.id && pay.status !== 'REJECTED');
+                                        const refundedSoFar = relatedRefunds.reduce((sum, r) => sum + r.amount, 0);
+                                        if (refundedSoFar >= p.amount) {
+                                          return <Badge variant="outline" className="h-6 px-2 text-[10px] text-gray-500 bg-gray-100 border-gray-200">Fully Refunded</Badge>;
+                                        }
+                                        return (
+                                          <Button size="sm" variant="outline" className="h-6 px-2 text-[10px] text-red-600 border-red-200 hover:bg-red-50" onClick={() => handleRefund({ ...p, invoiceId: showInvoiceModal.dbId })}>
+                                            Refund {refundedSoFar > 0 ? `(Bal ₹${p.amount - refundedSoFar})` : ''}
+                                          </Button>
+                                        );
+                                      })()}
+                                    </div>
+                                  </TableCell>
+                                </TableRow>
+                              ))}
+                            </TableBody>
+                          </Table>
+                        </div>
+                      )}
+                    </div>
+                  </>
+                )
+              })()}
             </div>
           )}
           <DialogFooter className="gap-2">
@@ -1448,7 +1460,16 @@ export default function BillingModule({ onBack }) {
                     })),
                   }, orgInfo, clinic, options)
                 } else {
-                  printInvoice(b, orgInfo, clinic, options)
+                  const hccTag = String(b.notes || '').match(/\[HCC:(\d+(?:\.\d+)?)\]/)
+                  const filteredItems = (b.items || []).filter(it => !/home collection/i.test(it.name || ''))
+                  const bPayload = { 
+                    ...b, 
+                    items: filteredItems,
+                    subtotal: filteredItems.reduce((s, it) => s + (it.amt || 0) * (it.qty || 1), 0),
+                    homeCollection: hccTag ? Number(hccTag[1]) : 0, 
+                    discount: b.discountAmt || 0 
+                  }
+                  printInvoice(bPayload, orgInfo, clinic, options)
                 }
               }
               return (
