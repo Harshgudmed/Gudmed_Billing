@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from 'react'
+import { useState, useEffect } from 'react'
 import { getOrgSettings } from '@/lib/orgSettings'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -6,11 +6,15 @@ import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
-import { FileText, Plus, Search, Printer, Edit, Trash2, FileCheck, Loader2, AlertCircle, Filter, X, ChevronLeft, ChevronRight } from 'lucide-react'
+import { FileText, Plus, Search, Printer, Edit, Trash2, FileCheck, Loader2, Filter, X } from 'lucide-react'
 import { format } from 'date-fns'
 import { toast } from 'sonner'
 import client from '@/api/client'
+import { useServerPagination } from '@/lib/useServerPagination'
+import { Pagination } from '@/components/common/Pagination'
 import DeathCertificateForm from './DeathCertificateForm'
+
+const ITEMS_PER_PAGE = 10
 
 export default function DeathCertificateModule() {
   const [view, setView] = useState('list')
@@ -18,41 +22,17 @@ export default function DeathCertificateModule() {
   const [selectedCertId, setSelectedCertId] = useState(null)
   const [searchQuery, setSearchQuery] = useState('')
   const [placeFilter, setPlaceFilter] = useState('all')
-  const [certificates, setCertificates] = useState([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState(null)
-  const [certificatesPage, setCertificatesPage] = useState(1)
 
-  async function fetchCerts() {
-    setLoading(true)
-    setError(null)
-    try {
-      const params = new URLSearchParams()
-      if (searchQuery) params.set('search', searchQuery)
-      if (placeFilter !== 'all') params.set('place', placeFilter)
-      const res = await client.get(`/death-certificates?${params}`)
-      if (res.success) setCertificates(res.data || [])
-      else setError(res.error || 'Failed to load')
-    } catch (e) {
-      setError(e.message)
-    } finally {
-      setLoading(false)
-    }
-  }
+  // Server-side pagination: the DB slices and returns one page, plus a `summary`
+  // block with the counts across the WHOLE filtered set for the stat cards.
+  const certificatesPagination = useServerPagination('/death-certificates', {
+    perPage: ITEMS_PER_PAGE,
+    params: { search: searchQuery, place: placeFilter },
+  })
+  const certificates = certificatesPagination.rows
+  const stats = certificatesPagination.summary || { total: 0, issued: 0, pendingIssuance: 0, maternal: 0 }
 
-  useEffect(() => { fetchCerts() }, [searchQuery, placeFilter])
   useEffect(() => { getOrgSettings().then(setOrgInfo) }, [])
-
-  useEffect(() => {
-    setCertificatesPage(1)
-  }, [searchQuery, placeFilter])
-
-  const stats = useMemo(() => ({
-    total: certificates.length,
-    issued: certificates.filter(c => c.issuedAt).length,
-    pendingIssuance: certificates.filter(c => !c.issuedAt).length,
-    maternal: certificates.filter(c => c.isMaternalDeath).length,
-  }), [certificates])
 
   function handlePrint(id) {
     const cert = certificates.find(c => c.id === id)
@@ -126,31 +106,18 @@ export default function DeathCertificateModule() {
     if (!confirm('Delete this certificate?')) return
     try {
       const res = await client.delete(`/death-certificates?id=${id}`)
-      if (res.success) { toast.success('Certificate deleted'); fetchCerts() }
+      if (res.success) { toast.success('Certificate deleted'); certificatesPagination.refresh() }
       else toast.error(res.error || 'Failed to delete')
     } catch { toast.error('Failed to delete') }
   }
 
   function handleCreateSuccess() {
     setView('list')
-    fetchCerts()
+    certificatesPagination.refresh()
   }
 
-  if (loading && certificates.length === 0) {
+  if (certificatesPagination.loading && certificates.length === 0) {
     return <div className="flex items-center justify-center p-12"><Loader2 className="h-8 w-8 animate-spin text-blue-600" /></div>
-  }
-
-  if (error) {
-    return (
-      <Card className="border-red-200 bg-red-50">
-        <CardContent className="flex flex-col items-center p-6 text-center">
-          <AlertCircle className="h-12 w-12 text-red-500 mb-4" />
-          <h3 className="text-lg font-semibold text-red-700">Failed to Load Certificates</h3>
-          <p className="text-red-600 mb-4">{error}</p>
-          <Button onClick={fetchCerts} variant="outline" className="border-red-300">Retry</Button>
-        </CardContent>
-      </Card>
-    )
   }
 
   if (view === 'create') {
@@ -246,13 +213,8 @@ export default function DeathCertificateModule() {
                     No death certificates found matching your criteria.
                   </TableCell>
                 </TableRow>
-              ) : (() => {
-                const ITEMS_PER_PAGE = 10
-                const totalPages = Math.ceil(certificates.length / ITEMS_PER_PAGE)
-                const startIdx = (certificatesPage - 1) * ITEMS_PER_PAGE
-                const endIdx = startIdx + ITEMS_PER_PAGE
-                const paginatedData = certificates.slice(startIdx, endIdx)
-                return paginatedData.map(cert => (
+              ) : (
+                certificates.map(cert => (
                   <TableRow key={cert.id}>
                     <TableCell className="font-mono font-medium">{cert.certificateNumber}</TableCell>
                     <TableCell>{cert.patient ? `${cert.patient.firstName} ${cert.patient.lastName}` : 'N/A'}</TableCell>
@@ -283,24 +245,10 @@ export default function DeathCertificateModule() {
                     </TableCell>
                   </TableRow>
                 ))
-              })()}
+              )}
             </TableBody>
           </Table>
-          {certificates.length > 10 && (() => {
-            const ITEMS_PER_PAGE = 10
-            const totalPages = Math.ceil(certificates.length / ITEMS_PER_PAGE)
-            return (
-              <div className="flex items-center justify-end gap-2 p-4 border-t">
-                <Button variant="outline" size="sm" onClick={() => setCertificatesPage(p => Math.max(1, p - 1))} disabled={certificatesPage === 1}>
-                  <ChevronLeft className="h-4 w-4 mr-1" />Previous
-                </Button>
-                <span className="text-sm text-gray-600">Page {certificatesPage} of {totalPages}</span>
-                <Button variant="outline" size="sm" onClick={() => setCertificatesPage(p => Math.min(totalPages, p + 1))} disabled={certificatesPage === totalPages}>
-                  Next<ChevronRight className="h-4 w-4 ml-1" />
-                </Button>
-              </div>
-            )
-          })()}
+          <Pagination page={certificatesPagination.page} totalPages={certificatesPagination.totalPages} onPageChange={certificatesPagination.setPage} />
         </CardContent>
       </Card>
     </div>

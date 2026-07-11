@@ -1,6 +1,7 @@
 import { db } from '../config/db.js'
 import { getOrgId } from "../lib/reqContext.js";
 import { isOwned } from "../lib/tenant.js";
+import { getPagination, paginationMeta } from "../lib/pagination.js";
 
 export async function getAll(req, res, next) {
   try {
@@ -16,15 +17,35 @@ export async function getAll(req, res, next) {
         { patient: { mrn: { contains: search, mode: 'insensitive' } } },
       ]
     }
-    const certificates = await db.deathCertificate.findMany({
-      where,
-      include: {
-        patient: { select: { id: true, firstName: true, middleName: true, lastName: true, mrn: true } },
-        certifiedBy: { select: { id: true, fullName: true } },
-      },
-      orderBy: { dateOfDeath: 'desc' },
+    const include = {
+      patient: { select: { id: true, firstName: true, middleName: true, lastName: true, mrn: true } },
+      certifiedBy: { select: { id: true, fullName: true } },
+    }
+    const orderBy = { dateOfDeath: 'desc' }
+
+    // Paginate only when asked (page/limit present); otherwise return the full
+    // list so any non-table consumer keeps working. Same rule as getUsers.
+    const wantsPage = req.query.page != null || req.query.limit != null
+    if (!wantsPage) {
+      const certificates = await db.deathCertificate.findMany({ where, include, orderBy })
+      return res.json({ success: true, data: certificates })
+    }
+
+    const { page, limit, skip } = getPagination(req.query)
+    // Summary is counted across the WHOLE filtered set (not just this page) so the
+    // stat cards stay correct even though the table only holds one page.
+    const [certificates, total, issued, maternal] = await Promise.all([
+      db.deathCertificate.findMany({ where, include, orderBy, skip, take: limit }),
+      db.deathCertificate.count({ where }),
+      db.deathCertificate.count({ where: { ...where, issuedAt: { not: null } } }),
+      db.deathCertificate.count({ where: { ...where, isMaternalDeath: true } }),
+    ])
+    res.json({
+      success: true,
+      data: certificates,
+      pagination: paginationMeta(page, limit, total),
+      summary: { total, issued, pendingIssuance: total - issued, maternal },
     })
-    res.json({ success: true, data: certificates })
   } catch (err) {
     next(err)
   }
