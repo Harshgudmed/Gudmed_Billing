@@ -419,6 +419,7 @@ model Appointment {
   doctor        User?               @relation("DoctorAppointments", fields: [doctorId], references: [id])
   checkedInBy   User?               @relation("CheckedInBy", fields: [checkedInById], references: [id])
   consultations Consultation[]
+  invoices      Invoice[]
   queueEntry    QueueManagement?
 
   @@index([organizationId])
@@ -1003,6 +1004,7 @@ model Invoice {
   // Relations
   patientId      String
   consultationId String?
+  appointmentId  String? // set when this invoice is the auto-voucher for an appointment
   parentInvoiceId String?
   parentInvoice   Invoice?  @relation("RevisedInvoices", fields: [parentInvoiceId], references: [id])
   revisedInvoices Invoice[] @relation("RevisedInvoices")
@@ -1050,6 +1052,7 @@ model Invoice {
   organization Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   patient      Patient       @relation(fields: [patientId], references: [id], onDelete: Cascade)
   consultation Consultation? @relation(fields: [consultationId], references: [id])
+  appointment  Appointment?  @relation(fields: [appointmentId], references: [id])
   createdBy    User?         @relation("InvoicesCreated", fields: [createdById], references: [id])
   cancelledBy  User?         @relation("InvoicesCancelled", fields: [cancelledById], references: [id])
   payments     Payment[]
@@ -1058,6 +1061,7 @@ model Invoice {
   @@index([patientId])
   @@index([invoiceNumber])
   @@index([paymentStatus])
+  @@index([appointmentId])
 }
 
 /// Payment
@@ -2478,7 +2482,7 @@ model QueueManagement {
   assignedRoom String?
 
   // Status
-  status String @default("waiting") // waiting, called, in_service, completed, cancelled, no_show
+  status String @default("waiting") // waiting, called, in_progress, completed, cancelled, no_show
 
   // Timestamps
   joinedQueueAt      DateTime  @default(now())
