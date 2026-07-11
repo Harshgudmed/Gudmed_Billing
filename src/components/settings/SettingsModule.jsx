@@ -9,7 +9,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import {
   Settings, Building2, Users, Package, Link2, Database,
   Save, Plus, Edit, Eye, CheckCircle, XCircle, AlertCircle, RefreshCw, Loader2, Clock, Palette,
-  MessageCircle, Bell, ChevronLeft, ChevronRight,
+  MessageCircle, Bell,
 } from 'lucide-react'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -25,9 +25,12 @@ import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form'
 import client from '@/api/client'
+import { useServerPagination } from '@/lib/useServerPagination'
+import { Pagination } from '@/components/common/Pagination'
 import IntegrationsHub from './IntegrationsHub'
 
 const ORG_ID = 'org-demo'
+const ITEMS_PER_PAGE = 10
 
 const ROLE_LABELS = {
   super_admin: 'Super Administrator',
@@ -85,12 +88,14 @@ export default function SettingsModule() {
   const [showUserDialog, setShowUserDialog] = useState(false)
   const [editingUser, setEditingUser] = useState(null)
   const [savingOrg, setSavingOrg] = useState(false)
-  const [users, setUsers] = useState([])
   const [departments, setDepartments] = useState([])
   const [organization, setOrganization] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
-  const [usersPage, setUsersPage] = useState(1)
+  // Server-side paginated users list (Settings → Users). The DB slices, so the
+  // browser only ever holds one page — the same endpoint still returns the full
+  // list to the app's doctor dropdowns when called without page/limit.
+  const usersDP = useServerPagination('/settings', { perPage: ITEMS_PER_PAGE, params: { resource: 'users' } })
 
   const [orgForm, setOrgForm] = useState({
     name: '', slug: '', email: '', phone: '', address: '', city: '',
@@ -115,9 +120,8 @@ export default function SettingsModule() {
     setLoading(true)
     setError(null)
     try {
-      const [orgRes, usersRes, deptsRes] = await Promise.all([
+      const [orgRes, deptsRes] = await Promise.all([
         client.get('/settings'),
-        client.get('/settings?resource=users'),
         client.get('/settings?resource=departments'),
       ])
       if (orgRes.success && orgRes.data) {
@@ -149,7 +153,6 @@ export default function SettingsModule() {
         })
         if (orgRes.data.modulesEnabled) setModules(prev => ({ ...prev, ...orgRes.data.modulesEnabled }))
       }
-      if (usersRes.success) setUsers(usersRes.data || [])
       if (deptsRes.success) setDepartments(deptsRes.data || [])
     } catch (e) {
       setError(e.message)
@@ -160,9 +163,6 @@ export default function SettingsModule() {
 
   useEffect(() => { fetchAll() }, [])
 
-  useEffect(() => {
-    setUsersPage(1)
-  }, [activeTab])
 
   useEffect(() => {
     if (editingUser) {
@@ -260,14 +260,14 @@ export default function SettingsModule() {
       setShowUserDialog(false)
       setEditingUser(null)
       userForm.reset()
-      fetchAll()
+      usersDP.refresh()
     } catch (e) { toast.error(e.message) }
   }
 
   async function handleToggleUserStatus(user) {
     try {
       const res = await client.patch('/settings', { resource: 'user-status', id: user.id, isActive: !user.isActive })
-      if (res.success) { toast.success('User status updated'); fetchAll() }
+      if (res.success) { toast.success('User status updated'); usersDP.refresh() }
       else toast.error(res.error || 'Failed')
     } catch { toast.error('Failed to update user status') }
   }
@@ -613,7 +613,7 @@ export default function SettingsModule() {
               </Dialog>
             </CardHeader>
             <CardContent>
-              {users.length === 0 ? (
+              {!usersDP.loading && usersDP.rows.length === 0 ? (
                 <div className="text-center py-8">
                   <Users className="h-12 w-12 mx-auto mb-4 text-gray-400" />
                   <h3 className="text-lg font-medium mb-2">No Users Found</h3>
@@ -633,13 +633,7 @@ export default function SettingsModule() {
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {(() => {
-                        const ITEMS_PER_PAGE = 10
-                        const totalPages = Math.ceil(users.length / ITEMS_PER_PAGE)
-                        const startIdx = (usersPage - 1) * ITEMS_PER_PAGE
-                        const endIdx = startIdx + ITEMS_PER_PAGE
-                        const paginatedUsers = users.slice(startIdx, endIdx)
-                        return paginatedUsers.map(user => (
+                      {usersDP.rows.map(user => (
                           <TableRow key={user.id}>
                             <TableCell>
                               <div className="flex items-center gap-2">
@@ -670,25 +664,10 @@ export default function SettingsModule() {
                               </div>
                             </TableCell>
                           </TableRow>
-                        ))
-                      })()}
+                        ))}
                     </TableBody>
                   </Table>
-                  {users.length > 10 && (() => {
-                    const ITEMS_PER_PAGE = 10
-                    const totalPages = Math.ceil(users.length / ITEMS_PER_PAGE)
-                    return (
-                      <div className="flex items-center justify-end gap-2 p-4 border-t">
-                        <Button variant="outline" size="sm" onClick={() => setUsersPage(p => Math.max(1, p - 1))} disabled={usersPage === 1}>
-                          <ChevronLeft className="h-4 w-4 mr-1" />Previous
-                        </Button>
-                        <span className="text-sm text-gray-600">Page {usersPage} of {totalPages}</span>
-                        <Button variant="outline" size="sm" onClick={() => setUsersPage(p => Math.min(totalPages, p + 1))} disabled={usersPage === totalPages}>
-                          Next<ChevronRight className="h-4 w-4 ml-1" />
-                        </Button>
-                      </div>
-                    )
-                  })()}
+                  <Pagination page={usersDP.page} totalPages={usersDP.totalPages} onPageChange={usersDP.setPage} />
                 </div>
               )}
             </CardContent>
