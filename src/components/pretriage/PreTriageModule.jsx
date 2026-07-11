@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect } from 'react'
 import { getOrgSettings } from '@/lib/orgSettings'
 import { cToF, fToC } from '@/lib/utils'
 import { useForm, useWatch } from 'react-hook-form'
@@ -8,8 +8,8 @@ import { toast } from 'sonner'
 import { format } from 'date-fns'
 import {
   History, Plus, Search, Thermometer, UserPlus,
-  ArrowRight, CheckCircle, Clock, Activity, AlertTriangle,
-  RefreshCw, Loader2, Eye, Pencil, Printer, ChevronLeft, ChevronRight,
+  ArrowRight, CheckCircle, Clock, Activity,
+  RefreshCw, Loader2, Eye, Pencil, Printer,
 } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -20,6 +20,8 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form'
 import client from '@/api/client'
+import { useServerPagination } from '@/lib/useServerPagination'
+import { Pagination } from '@/components/common/Pagination'
 import PatientLookup, { calculatePatientAge, getPatientFullName } from '@/components/common/PatientLookup'
 import { useDateFilter } from '@/components/common/DateFilter'
 
@@ -319,15 +321,25 @@ const STATUS_DB_MAP = {
 }
 
 export default function PreTriageModule() {
-  const [screenings,      setScreenings]      = useState([])
   const [orgInfo, setOrgInfo] = useState({ name: 'Hospital', address: '', city: '', phone: '', email: '' })
-  const [loading,         setLoading]         = useState(true)
-  const [error,           setError]           = useState(null)
   const [searchQuery,     setSearchQuery]     = useState('')
   const [activeFilter,    setActiveFilter]    = useState('all')
   const dateFilter = useDateFilter()
-  const [currentPage,     setCurrentPage]     = useState(1)
   const ITEMS_PER_PAGE = 10
+
+  // Server-side pagination: status/search/date all filter on the DB, and a
+  // `summary` block carries the stat-card counts across the whole filtered set.
+  const screeningsPagination = useServerPagination('/pre-triage', {
+    perPage: ITEMS_PER_PAGE,
+    params: {
+      status: activeFilter === 'all' ? 'all' : STATUS_DB_MAP[activeFilter],
+      search: searchQuery,
+      startDate: dateFilter.range.startDate,
+      endDate: dateFilter.range.endDate,
+    },
+  })
+  const screenings = screeningsPagination.rows
+  const stats = screeningsPagination.summary || { total: 0, pending: 0, routed: 0, registered: 0 }
   const [showFormDialog,  setShowFormDialog]  = useState(false)
   const [editingScreening, setEditingScreening] = useState(null)
   const [viewScreening,   setViewScreening]   = useState(null)
@@ -359,50 +371,9 @@ export default function PreTriageModule() {
   }, [watchedWeight, watchedHeight, form])
   useEffect(() => { getOrgSettings().then(setOrgInfo) }, [])
 
-  const fetchScreenings = async () => {
-    try {
-      setLoading(true)
-      setError(null)
-      // Pass limit=500 to ensure ALL records are fetched (backend default is limit=50)
-      const res = await client.get('/pre-triage?limit=500&offset=0')
-      setScreenings(res.data ?? [])
-    } catch (err) {
-      setError(err.message)
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  useEffect(() => { fetchScreenings() }, [])
-
-  useEffect(() => { setCurrentPage(1) }, [searchQuery, activeFilter, dateFilter.key])
-
-  const stats = useMemo(() => ({
-    total:      screenings.length,
-    pending:    screenings.filter(s => (s.status || '').toLowerCase() === 'screening').length,
-    routed:     screenings.filter(s => (s.status || '').toLowerCase() === 'routed').length,
-    registered: screenings.filter(s => (s.status || '').toLowerCase() === 'registered_as_patient').length,
-  }), [screenings])
-
-  const filteredScreenings = useMemo(() => {
-    let list = screenings
-    if (activeFilter !== 'all') {
-      const dbStatus = STATUS_DB_MAP[activeFilter]
-      list = list.filter(s => (s.status || '').toLowerCase() === dbStatus)
-    }
-    if (searchQuery) {
-      const lower = searchQuery.toLowerCase()
-      list = list.filter(s =>
-        (s.screeningNumber || '').toLowerCase().includes(lower) ||
-        (s.firstName || '').toLowerCase().includes(lower) ||
-        (s.lastName || '').toLowerCase().includes(lower) ||
-        (s.phone || '').includes(lower) ||
-        (s.patient?.mrn || '').toLowerCase().includes(lower)
-      )
-    }
-    list = list.filter(s => dateFilter.matches(s.createdAt))
-    return list
-  }, [screenings, activeFilter, searchQuery, dateFilter.key])
+  // Filtering + paging now happen on the server (see screeningsPagination above);
+  // the table renders exactly the page it returns.
+  const filteredScreenings = screenings
 
   // ── Patient lookup helpers ──────────────────────────────────────────────────
   const fillFromPatient = (patient) => {
@@ -473,7 +444,7 @@ export default function PreTriageModule() {
         toast.success('Screening recorded successfully')
       }
       closeFormDialog()
-      fetchScreenings()
+      screeningsPagination.refresh()
     } catch {
       toast.error(editingScreening ? 'Failed to update screening' : 'Failed to record screening')
     } finally {
@@ -485,29 +456,16 @@ export default function PreTriageModule() {
     try {
       const res = await client.post(`/pre-triage/${id}/convert`)
       toast.success(`Converted to patient. UHID: ${res.data.mrn}`)
-      fetchScreenings()
+      screeningsPagination.refresh()
     } catch {
       toast.error('Failed to convert to patient')
     }
   }
 
-  if (loading) return (
+  if (screeningsPagination.loading && screenings.length === 0) return (
     <div className="flex items-center justify-center p-12">
       <Loader2 className="h-8 w-8 animate-spin text-blue-600" />
     </div>
-  )
-
-  if (error) return (
-    <Card className="border-red-200 bg-red-50">
-      <CardContent className="flex flex-col items-center p-6 text-center">
-        <AlertTriangle className="h-12 w-12 text-red-500 mb-4" />
-        <h3 className="text-lg font-semibold text-red-700">Failed to Load Screenings</h3>
-        <p className="text-red-600 mb-4">{error}</p>
-        <Button onClick={fetchScreenings} variant="outline" className="border-red-300">
-          <RefreshCw className="mr-2 h-4 w-4" /> Retry
-        </Button>
-      </CardContent>
-    </Card>
   )
 
   return (
@@ -522,7 +480,7 @@ export default function PreTriageModule() {
           <p className="text-gray-500">Rapid assessment and routing for incoming patients</p>
         </div>
         <div className="flex gap-2">
-          <Button variant="outline" onClick={fetchScreenings}>
+          <Button variant="outline" onClick={screeningsPagination.refresh}>
             <RefreshCw className="h-4 w-4 mr-2" /> Refresh
           </Button>
           <Button onClick={openNewDialog}>
@@ -665,12 +623,8 @@ export default function PreTriageModule() {
                     No screenings found
                   </TableCell>
                 </TableRow>
-              ) : (() => {
-                const totalPages = Math.ceil(filteredScreenings.length / ITEMS_PER_PAGE)
-                const startIdx = (currentPage - 1) * ITEMS_PER_PAGE
-                const endIdx = startIdx + ITEMS_PER_PAGE
-                const paginatedScreenings = filteredScreenings.slice(startIdx, endIdx)
-                return paginatedScreenings.map((s) => (
+              ) : (
+                filteredScreenings.map((s) => (
                   <TableRow key={s.id}>
                     <TableCell className="font-medium">{s.screeningNumber}</TableCell>
                     <TableCell>
@@ -743,35 +697,14 @@ export default function PreTriageModule() {
                     </TableCell>
                   </TableRow>
                 ))
-              })()}
+              )}
             </TableBody>
           </Table>
-          {filteredScreenings.length > ITEMS_PER_PAGE && (() => {
-            const totalPages = Math.ceil(filteredScreenings.length / ITEMS_PER_PAGE)
-            return (
-              <div className="flex items-center justify-end gap-2 p-4 border-t">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
-                  disabled={currentPage === 1}
-                >
-                  <ChevronLeft className="h-4 w-4 mr-1" />Previous
-                </Button>
-                <span className="text-sm text-gray-600">
-                  Page {currentPage} of {totalPages}
-                </span>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
-                  disabled={currentPage === totalPages}
-                >
-                  Next<ChevronRight className="h-4 w-4 ml-1" />
-                </Button>
-              </div>
-            )
-          })()}
+          <Pagination
+            page={screeningsPagination.page}
+            totalPages={screeningsPagination.totalPages}
+            onPageChange={screeningsPagination.setPage}
+          />
         </CardContent>
       </Card>
 
