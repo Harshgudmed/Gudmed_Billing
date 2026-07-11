@@ -4,6 +4,7 @@
 // updates as the doctor types. Full doctor CRUD on the /consultations API.
 import { useState, useEffect, useCallback } from 'react'
 import { getOrgSettings } from '@/lib/orgSettings'
+import { getFullName, calcAge as getAge, initials } from '@/lib/patient'
 import { format } from 'date-fns'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -52,14 +53,6 @@ const DEFAULT_VITALS = {
   pulseRate: 72, oxygenSaturation: 98, weight: 70,
 }
 
-const getFullName = (p) => [p.firstName, p.middleName, p.lastName].filter(Boolean).join(' ')
-const getAge = (dob) => {
-  const d = new Date(dob), t = new Date()
-  let a = t.getFullYear() - d.getFullYear()
-  if (t.getMonth() < d.getMonth() || (t.getMonth() === d.getMonth() && t.getDate() < d.getDate())) a--
-  return a
-}
-const initials = (name) => name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2)
 const slug = (s) => String(s).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
 
 

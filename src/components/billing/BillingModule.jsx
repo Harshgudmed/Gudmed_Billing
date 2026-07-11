@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useOrgSettings } from '@/lib/useOrgSettings'
 import { formatMoney as fmt } from '@/lib/format'
+import { calcAge } from '@/lib/patient'
 import { toast } from 'sonner'
 import { format } from 'date-fns'
 import client from '@/api/client'
@@ -141,13 +142,6 @@ const DEFAULT_CLINIC = {
 // Money formatting lives in @/lib/format so every screen and receipt agrees.
 const todayStr = () => new Date().toISOString().slice(0, 10)
 const newInvNo = () => 'INV-' + Date.now().toString().slice(-8)
-const calcAge = (dob) => {
-  if (!dob) return ''
-  const d = new Date(dob); const t = new Date()
-  let a = t.getFullYear() - d.getFullYear()
-  if (t.getMonth() < d.getMonth() || (t.getMonth() === d.getMonth() && t.getDate() < d.getDate())) a--
-  return a
-}
 
 // ── Status badge helper ───────────────────────────────────────────────────────
 function PayBadge({ invoice }) {
