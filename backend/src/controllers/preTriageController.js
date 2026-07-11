@@ -1,5 +1,6 @@
 import { db } from '../config/db.js'
 import { getOrgId } from "../lib/reqContext.js";
+import { getPagination, paginationMeta } from "../lib/pagination.js";
 
 function generateScreeningNumber() {
   const date = new Date().toISOString().slice(0, 10).replace(/-/g, '')
@@ -11,31 +12,61 @@ function generateScreeningNumber() {
 export async function getAll(req, res, next) {
   try {
     const ORG_ID = getOrgId(req)
-    const { status = 'all' } = req.query
-    const limit = parseInt(req.query.limit || '50')
-    const offset = parseInt(req.query.offset || '0')
+    const { status = 'all', search = '', startDate = '', endDate = '' } = req.query
 
-    const where = { organizationId: ORG_ID }
+    // baseWhere = everything EXCEPT the status filter, so the summary counts show
+    // the full status distribution no matter which status tab is active.
+    const baseWhere = { organizationId: ORG_ID }
+    if (search) {
+      baseWhere.OR = [
+        { screeningNumber: { contains: search, mode: 'insensitive' } },
+        { firstName: { contains: search, mode: 'insensitive' } },
+        { lastName: { contains: search, mode: 'insensitive' } },
+        { phone: { contains: search } },
+        { patient: { mrn: { contains: search, mode: 'insensitive' } } },
+      ]
+    }
+    if (startDate || endDate) {
+      baseWhere.createdAt = {}
+      if (startDate) baseWhere.createdAt.gte = new Date(startDate)
+      if (endDate) { const e = new Date(endDate); e.setHours(23, 59, 59, 999); baseWhere.createdAt.lte = e }
+    }
+
+    const where = { ...baseWhere }
     if (status !== 'all') where.status = status
 
-    const [screenings, total] = await Promise.all([
-      db.preTriage.findMany({
-        where,
-        take: limit,
-        skip: offset,
-        orderBy: { screenedAt: 'desc' },
-        include: {
-          screenedBy: { select: { fullName: true } },
-          patient: { select: { id: true, mrn: true, firstName: true, lastName: true } },
-        },
-      }),
+    const include = {
+      screenedBy: { select: { fullName: true } },
+      patient: { select: { id: true, mrn: true, firstName: true, lastName: true } },
+    }
+    const orderBy = { screenedAt: 'desc' }
+
+    // Backward-compatible: without page/limit, return the (capped) list + meta, as
+    // the endpoint always did, so any other caller is unaffected.
+    const wantsPage = req.query.page != null || req.query.limit != null
+    if (!wantsPage) {
+      const screenings = await db.preTriage.findMany({ where, include, orderBy, take: 500 })
+      return res.json({ success: true, data: screenings, meta: { total: screenings.length } })
+    }
+
+    const { page, limit, skip } = getPagination(req.query)
+    // Counts run across baseWhere (all statuses) for the stat cards; the list runs
+    // across `where` (with the active status) for this page.
+    const [screenings, total, filteredTotal, pending, routed, registered] = await Promise.all([
+      db.preTriage.findMany({ where, include, orderBy, skip, take: limit }),
       db.preTriage.count({ where }),
+      db.preTriage.count({ where: baseWhere }),
+      db.preTriage.count({ where: { ...baseWhere, status: 'screening' } }),
+      db.preTriage.count({ where: { ...baseWhere, status: 'routed' } }),
+      db.preTriage.count({ where: { ...baseWhere, status: 'registered_as_patient' } }),
     ])
 
-    res.json({ 
-      success: true, 
+    res.json({
+      success: true,
       data: screenings,
-      meta: { total, limit, offset, hasMore: offset + limit < total }
+      pagination: paginationMeta(page, limit, total),
+      meta: { total },
+      summary: { total: filteredTotal, pending, routed, registered },
     })
   } catch (err) {
     next(err)
