@@ -1,4 +1,9 @@
 import { z } from 'zod';
+// The name/age/initials helpers live in one dependency-free module now; re-exported
+// here so existing `patientUtils` imports keep working against a single implementation.
+export { calcAge, getFullName, patientDisplayName, initials } from '@/lib/patient';
+// calculateAge kept as an alias for the many call sites that use the old name.
+export { calcAge as calculateAge } from '@/lib/patient';
 
 export const INDIAN_STATES = [
   'Andhra Pradesh', 'Arunachal Pradesh', 'Assam', 'Bihar', 'Chhattisgarh',
@@ -40,15 +45,3 @@ export const patientSchema = z.object({
   insuranceId: z.string().optional(),
 });
 
-export const getFullName = (p) => [p.firstName, p.middleName, p.lastName].filter(Boolean).join(' ');
-
-export const calculateAge = (dob) => {
-  const today = new Date();
-  const birthDate = new Date(dob);
-  let age = today.getFullYear() - birthDate.getFullYear();
-  const m = today.getMonth() - birthDate.getMonth();
-  if (m < 0 || (m === 0 && today.getDate() < birthDate.getDate())) age--;
-  return age;
-};
-
-export const initials = (name) => name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2);
