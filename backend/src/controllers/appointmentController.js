@@ -275,6 +275,7 @@ export async function create(req, res, next) {
         data: {
           organizationId,
           patientId: validatedData.patientId,
+          appointmentId: appointment.id, // proper FK link, not just a notes string
           invoiceNumber,
           items: JSON.stringify([{
             type: 'consultation',
