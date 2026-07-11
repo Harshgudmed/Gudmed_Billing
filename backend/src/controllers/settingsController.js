@@ -1,5 +1,6 @@
 import { db } from '../config/db.js'
 import { getOrgId } from "../lib/reqContext.js";
+import { getPagination, paginationMeta } from "../lib/pagination.js";
 import bcrypt from 'bcryptjs'
 
 function parseOrg(org) {
@@ -48,14 +49,37 @@ export async function updateOrganization(req, res, next) {
 export async function getUsers(req, res, next) {
   try {
     const ORG_ID = getOrgId(req)
-    const users = await db.user.findMany({
-      where: { organizationId: ORG_ID },
-      include: { department: { select: { id: true, name: true } } },
-      orderBy: { fullName: 'asc' },
-    })
+    const { search } = req.query
+
+    const where = { organizationId: ORG_ID }
+    if (search) {
+      where.OR = [
+        { fullName: { contains: search, mode: 'insensitive' } },
+        { email: { contains: search, mode: 'insensitive' } },
+      ]
+    }
+
+    const include = { department: { select: { id: true, name: true } } }
+    const orderBy = { fullName: 'asc' }
     // Never expose password hashes to the client.
-    const safe = users.map(({ passwordHash, ...u }) => u)
-    res.json({ success: true, data: safe })
+    const strip = ({ passwordHash, ...u }) => u
+
+    // Backward-compatible: this endpoint also populates doctor dropdowns across
+    // the app (register-patient, OPD, IPD, day-care…), which need the WHOLE list.
+    // Only paginate when the caller explicitly asks (page/limit present) — that's
+    // the Settings → Users table via useServerPagination.
+    const wantsPage = req.query.page != null || req.query.limit != null
+    if (!wantsPage) {
+      const users = await db.user.findMany({ where, include, orderBy })
+      return res.json({ success: true, data: users.map(strip) })
+    }
+
+    const { page, limit, skip } = getPagination(req.query)
+    const [users, total] = await Promise.all([
+      db.user.findMany({ where, include, orderBy, skip, take: limit }),
+      db.user.count({ where }),
+    ])
+    res.json({ success: true, data: users.map(strip), pagination: paginationMeta(page, limit, total) })
   } catch (err) { next(err) }
 }
 
