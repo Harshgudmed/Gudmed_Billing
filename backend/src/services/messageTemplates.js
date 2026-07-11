@@ -6,6 +6,8 @@
  * Keep lines short (~60 chars) for good mobile rendering.
  */
 
+import { formatRupee as rupee } from '../lib/money.js'
+
 function fmtDate(d) {
   if (!d) return '—'
   try {
@@ -20,9 +22,6 @@ function fmtDateTime(d) {
   } catch { return String(d) }
 }
 
-function rupee(n) {
-  return `₹${Number(n || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}`
-}
 
 function divider() { return '─'.repeat(28) }
 

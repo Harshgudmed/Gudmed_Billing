@@ -88,17 +88,21 @@ export function printInvoice(bill, orgInfo, clinic, options = {}) {
   const win = window.open('', '_blank', 'width=900,height=780')
   if (!win) { toast.error('Allow pop-ups to print'); return }
   
-  const itemRows = (bill.items || []).map((it, i) => `
+  const displayItems = (bill.items || []).filter(it => !/home collection/i.test(it.name || it.serviceName || ''))
+  
+  const itemRows = displayItems.map((it, i) => `
     <tr>
       <td style="padding:6px 8px;border-bottom:1px solid #eee;font-size:8.5pt">${i + 1}</td>
-      <td style="padding:6px 8px;border-bottom:1px solid #eee;font-family:monospace;color:#0b5cab;font-weight:bold">${esc(it.code || it.name.substring(0,4).toUpperCase())}</td>
-      <td style="padding:6px 8px;border-bottom:1px solid #eee;font-size:8.5pt"><strong>${esc(it.name)}</strong>${it.sub ? `<br/><span style="font-size:8pt;color:#888">${esc(it.sub)}</span>` : ''}</td>
-      <td style="padding:6px 8px;border-bottom:1px solid #eee;text-align:center;font-size:8.5pt">${it.qty || 1}</td>
-      <td style="padding:6px 8px;border-bottom:1px solid #eee;text-align:right;font-size:8.5pt">${inr(it.amt)}</td>
-      <td style="padding:6px 8px;border-bottom:1px solid #eee;text-align:right;font-size:8.5pt;font-weight:bold">${inr((it.qty || 1) * it.amt)}</td>
+      <td style="padding:6px 8px;border-bottom:1px solid #eee;font-family:monospace;color:#0b5cab;font-weight:bold">${esc(it.code || (it.name || it.serviceName || '').substring(0,4).toUpperCase())}</td>
+      <td style="padding:6px 8px;border-bottom:1px solid #eee;font-size:8.5pt"><strong>${esc(it.name || it.serviceName)}</strong>${it.sub ? `<br/><span style="font-size:8pt;color:#888">${esc(it.sub)}</span>` : ''}</td>
+      <td style="padding:6px 8px;border-bottom:1px solid #eee;text-align:center;font-size:8.5pt">${it.qty || it.quantity || 1}</td>
+      <td style="padding:6px 8px;border-bottom:1px solid #eee;text-align:right;font-size:8.5pt">${inr(it.amt || it.unitPrice || 0)}</td>
+      <td style="padding:6px 8px;border-bottom:1px solid #eee;text-align:right;font-size:8.5pt;font-weight:bold">${inr(it.total || ((it.qty || it.quantity || 1) * (it.amt || it.unitPrice || 0)))}</td>
     </tr>`).join('')
   
-  const calcSubtotal = bill.subtotal || (bill.items || []).reduce((a, i) => a + i.qty * i.amt, 0)
+  const calcSubtotal = bill.subtotal 
+    ? (bill.subtotal - (Number(bill.homeCollection) || 0)) 
+    : displayItems.reduce((a, i) => a + (i.total || ((i.qty || i.quantity || 1) * (i.amt || i.unitPrice || 0))), 0)
 
   let paymentList = [...(bill.payments || [])].sort((a, b) => new Date(b.paymentDate || b.date || new Date()) - new Date(a.paymentDate || a.date || new Date()))
   if (paymentList.length === 0 && Number(bill.amountPaid || 0) > 0) {

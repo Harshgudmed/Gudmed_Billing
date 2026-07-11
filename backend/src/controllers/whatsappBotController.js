@@ -1,12 +1,9 @@
 import { db } from '../config/db.js'
 import whatsapp from '../services/whatsappService.js'
 import { getSession, setSession, clearSession } from '../services/botStateService.js'
+import { formatRupee as rupee } from '../lib/money.js'
 
 const ORG_ID = process.env.ORGANIZATION_ID || 'org-demo' // used in non-req helpers (bot callbacks)
-
-function rupee(n) {
-  return `₹${Number(n || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}`
-}
 
 function normalisePhone(raw) {
   return String(raw || '').replace(/\D/g, '')

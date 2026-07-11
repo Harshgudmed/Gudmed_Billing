@@ -2,6 +2,7 @@ import { db } from '../config/db.js'
 import { getOrgId, getActor } from "../lib/reqContext.js";
 import { nextSeriesNumber } from "../lib/counters.js";
 import { resolveRequestedById } from '../lib/requestedBy.js'
+import { todayRange } from '../lib/dates.js'
 import { z } from 'zod'
 import { PATIENT_SNAPSHOT_SELECT } from '../utils/patientSnapshot.js'
 
@@ -58,14 +59,6 @@ const updateTestSchema = z.object({
 }).passthrough()
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
-
-function todayRange() {
-  const start = new Date()
-  start.setHours(0, 0, 0, 0)
-  const end = new Date()
-  end.setHours(23, 59, 59, 999)
-  return { gte: start, lte: end }
-}
 
 // ── Controllers ────────────────────────────────────────────────────────────────
 
