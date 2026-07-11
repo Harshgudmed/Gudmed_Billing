@@ -1,23 +1,8 @@
-// Shared pagination, sorting, and error helpers for pharmacy controllers
+// Shared sorting and error helpers for pharmacy controllers.
+// Pagination now lives in lib/pagination.js so non-pharmacy controllers can
+// use it too; re-exported here so existing pharmacy imports keep working.
 
-export function getPagination(query) {
-  const page = Math.max(Number(query.page) || 1, 1)
-  const limit = Math.min(Number(query.limit) || 20, 5000)
-  const skip = (page - 1) * limit
-  return { page, limit, skip }
-}
-
-export function paginationMeta(page, limit, total) {
-  const totalPages = Math.ceil(total / limit)
-  return {
-    page,
-    limit,
-    totalRecords: total,
-    totalPages,
-    hasNextPage: page < totalPages,
-    hasPreviousPage: page > 1,
-  }
-}
+export { getPagination, paginationMeta } from '../lib/pagination.js'
 
 // Returns true if the error was handled (sent response), false if caller should next(err)
 export function handleServiceError(res, err) {

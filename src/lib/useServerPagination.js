@@ -67,5 +67,14 @@ export function useServerPagination(endpoint, { perPage = 15, params = {} } = {}
   }, [paramKey]);
 
   const totalPages = Math.max(1, Math.ceil(total / perPage));
+
+  // If the row count shrank (a delete, or an action that drops the row from the
+  // current filter) while we're on a page that no longer exists, snap back to
+  // the last valid page — otherwise the table shows an empty page with the
+  // footer hidden, stranding the user until they touch a filter.
+  useEffect(() => {
+    if (page > totalPages) setPage(totalPages);
+  }, [page, totalPages]);
+
   return { rows, total, totalPages, page, setPage, loading, summary, refresh: fetchPage };
 }

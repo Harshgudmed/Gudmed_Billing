@@ -2,6 +2,7 @@ import { db } from '../config/db.js'
 import { getOrgId } from "../lib/reqContext.js";
 import { z } from 'zod'
 import { generateQueueNumber } from '../utils/queueNumber.js'
+import { getPagination, paginationMeta } from '../lib/pagination.js'
 
 const queueSchema = z.object({
   patientId: z.string(),
@@ -20,7 +21,7 @@ const queueSchema = z.object({
 // client-writable (mass-assignment protection — matches the pattern used in
 // appointmentController.js).
 const queueUpdateSchema = z.object({
-  status: z.enum(['waiting', 'called', 'in_service', 'completed', 'cancelled', 'no_show']).optional(),
+  status: z.enum(['waiting', 'called', 'in_progress', 'completed', 'cancelled', 'no_show']).optional(),
   priority: z.string().optional(),
   assignedToId: z.string().optional(),
   assignedRoom: z.string().optional(),
@@ -32,20 +33,44 @@ const queueUpdateSchema = z.object({
 export async function getQueue(req, res, next) {
   try {
     const ORG_ID = getOrgId(req)
-    const { serviceArea, status } = req.query
-    const limit = parseInt(req.query.limit || '10')
-    const offset = parseInt(req.query.offset || '0')
-    const where = { organizationId: ORG_ID }
-    if (serviceArea) where.serviceArea = serviceArea
-    if (status) where.status = status
+    const { serviceArea, status, search, startDate, endDate } = req.query
+    const { page, limit, skip } = getPagination(req.query)
+
+    // Everything except the status filter. The per-status tile counts are built
+    // from this so that clicking one tile (which sets `status`) narrows the
+    // table WITHOUT collapsing the other tiles to zero — the counts stay a
+    // stable breakdown of the current date/search scope.
+    const baseWhere = { organizationId: ORG_ID }
+    if (serviceArea && serviceArea !== 'all') baseWhere.serviceArea = serviceArea
+    if (startDate || endDate) {
+      baseWhere.joinedQueueAt = {}
+      if (startDate) baseWhere.joinedQueueAt.gte = new Date(`${startDate}T00:00:00`)
+      if (endDate) baseWhere.joinedQueueAt.lte = new Date(`${endDate}T23:59:59.999`)
+    }
+    if (search) {
+      baseWhere.OR = [
+        { queueNumber: { contains: search, mode: 'insensitive' } },
+        { patient: { firstName: { contains: search, mode: 'insensitive' } } },
+        { patient: { lastName: { contains: search, mode: 'insensitive' } } },
+        { patient: { mrn: { contains: search, mode: 'insensitive' } } },
+      ]
+    }
+
+    // The listed page (and its total) additionally honour the status filter.
+    const where = (status && status !== 'all')
+      ? { ...baseWhere, status }
+      : baseWhere
 
     const orderBy = [{ priority: 'desc' }, { joinedQueueAt: 'asc' }]
 
-    const [queue, total] = await Promise.all([
+    // Counts span the whole filtered set, not just this page — otherwise the
+    // header tiles would only ever count the rows currently on screen.
+    // `summary` is the shape useServerPagination already exposes to callers.
+    const [queue, total, byStatus] = await Promise.all([
       db.queueManagement.findMany({
         where,
         take: limit,
-        skip: offset,
+        skip,
         orderBy,
         include: {
           patient: {
@@ -54,6 +79,7 @@ export async function getQueue(req, res, next) {
         },
       }),
       db.queueManagement.count({ where }),
+      db.queueManagement.groupBy({ by: ['status'], where: baseWhere, _count: { _all: true } }),
     ])
 
     const now = new Date()
@@ -67,7 +93,8 @@ export async function getQueue(req, res, next) {
     res.json({
       success: true,
       data: queueWithWaitTime,
-      meta: { total, limit, offset, hasMore: offset + limit < total },
+      pagination: paginationMeta(page, limit, total),
+      summary: Object.fromEntries(byStatus.map(r => [r.status, r._count._all])),
     })
   } catch (err) {
     next(err)
@@ -135,7 +162,7 @@ export async function updateQueue(req, res, next) {
     const validatedData = queueUpdateSchema.parse(req.body)
     const data = { ...validatedData }
     if (validatedData.status === 'called') data.calledAt = new Date()
-    else if (validatedData.status === 'in_service') data.serviceStartedAt = new Date()
+    else if (validatedData.status === 'in_progress') data.serviceStartedAt = new Date()
     else if (validatedData.status === 'completed') data.serviceCompletedAt = new Date()
 
     const item = await db.queueManagement.update({
