@@ -95,7 +95,7 @@ export default function SettingsModule() {
   // Server-side paginated users list (Settings → Users). The DB slices, so the
   // browser only ever holds one page — the same endpoint still returns the full
   // list to the app's doctor dropdowns when called without page/limit.
-  const usersDP = useServerPagination('/settings', { perPage: ITEMS_PER_PAGE, params: { resource: 'users' } })
+  const usersPagination = useServerPagination('/settings', { perPage: ITEMS_PER_PAGE, params: { resource: 'users' } })
 
   const [orgForm, setOrgForm] = useState({
     name: '', slug: '', email: '', phone: '', address: '', city: '',
@@ -260,14 +260,14 @@ export default function SettingsModule() {
       setShowUserDialog(false)
       setEditingUser(null)
       userForm.reset()
-      usersDP.refresh()
+      usersPagination.refresh()
     } catch (e) { toast.error(e.message) }
   }
 
   async function handleToggleUserStatus(user) {
     try {
       const res = await client.patch('/settings', { resource: 'user-status', id: user.id, isActive: !user.isActive })
-      if (res.success) { toast.success('User status updated'); usersDP.refresh() }
+      if (res.success) { toast.success('User status updated'); usersPagination.refresh() }
       else toast.error(res.error || 'Failed')
     } catch { toast.error('Failed to update user status') }
   }
@@ -613,7 +613,7 @@ export default function SettingsModule() {
               </Dialog>
             </CardHeader>
             <CardContent>
-              {!usersDP.loading && usersDP.rows.length === 0 ? (
+              {!usersPagination.loading && usersPagination.rows.length === 0 ? (
                 <div className="text-center py-8">
                   <Users className="h-12 w-12 mx-auto mb-4 text-gray-400" />
                   <h3 className="text-lg font-medium mb-2">No Users Found</h3>
@@ -633,7 +633,7 @@ export default function SettingsModule() {
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {usersDP.rows.map(user => (
+                      {usersPagination.rows.map(user => (
                           <TableRow key={user.id}>
                             <TableCell>
                               <div className="flex items-center gap-2">
@@ -667,7 +667,7 @@ export default function SettingsModule() {
                         ))}
                     </TableBody>
                   </Table>
-                  <Pagination page={usersDP.page} totalPages={usersDP.totalPages} onPageChange={usersDP.setPage} />
+                  <Pagination page={usersPagination.page} totalPages={usersPagination.totalPages} onPageChange={usersPagination.setPage} />
                 </div>
               )}
             </CardContent>
