@@ -1,6 +1,6 @@
 import { db } from '../config/db.js'
 import { getOrgId } from "../lib/reqContext.js";
-import { getPagination, paginationMeta } from "../lib/pagination.js";
+import { listResponse } from "../lib/pagination.js";
 import bcrypt from 'bcryptjs'
 
 function parseOrg(org) {
@@ -60,26 +60,14 @@ export async function getUsers(req, res, next) {
     }
 
     const include = { department: { select: { id: true, name: true } } }
-    const orderBy = { fullName: 'asc' }
+    // This endpoint also populates doctor dropdowns app-wide (register-patient,
+    // OPD, IPD, day-care…), which need EVERY row — so fullListTake:null keeps the
+    // non-paginated branch uncapped. It only paginates when the Settings table
+    // passes page/limit.
+    const body = await listResponse(db.user, { where, include, orderBy: { fullName: 'asc' }, req, fullListTake: null })
     // Never expose password hashes to the client.
-    const strip = ({ passwordHash, ...u }) => u
-
-    // Backward-compatible: this endpoint also populates doctor dropdowns across
-    // the app (register-patient, OPD, IPD, day-care…), which need the WHOLE list.
-    // Only paginate when the caller explicitly asks (page/limit present) — that's
-    // the Settings → Users table via useServerPagination.
-    const wantsPage = req.query.page != null || req.query.limit != null
-    if (!wantsPage) {
-      const users = await db.user.findMany({ where, include, orderBy })
-      return res.json({ success: true, data: users.map(strip) })
-    }
-
-    const { page, limit, skip } = getPagination(req.query)
-    const [users, total] = await Promise.all([
-      db.user.findMany({ where, include, orderBy, skip, take: limit }),
-      db.user.count({ where }),
-    ])
-    res.json({ success: true, data: users.map(strip), pagination: paginationMeta(page, limit, total) })
+    body.data = body.data.map(({ passwordHash, ...u }) => u)
+    res.json(body)
   } catch (err) { next(err) }
 }
 

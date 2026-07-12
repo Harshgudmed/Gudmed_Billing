@@ -1,7 +1,7 @@
 import { db } from '../config/db.js'
 import { getOrgId } from "../lib/reqContext.js";
 import { nextSeriesNumber } from "../lib/counters.js";
-import { getPagination, paginationMeta } from "../lib/pagination.js";
+import { listResponse } from "../lib/pagination.js";
 import { scopedDoctorId } from '../utils/scope.js'
 
 export async function getAll(req, res, next) {
@@ -48,35 +48,22 @@ export async function getAll(req, res, next) {
         include: { exam: { select: { id: true, examName: true, examCode: true, examCategory: true, bodyPart: true } } },
       },
     }
-    const orderBy = { visitDate: 'desc' }
-
-    // Backward-compatible: without page/limit, behave exactly as before.
-    const wantsPage = req.query.page != null || req.query.limit != null
-    if (!wantsPage) {
-      const consultations = await db.consultation.findMany({ where, include, orderBy, take: 50 })
-      const total = await db.consultation.count({ where })
-      return res.json({ success: true, data: consultations, meta: { total } })
-    }
-
-    const { page, limit, skip } = getPagination(req.query)
-    const startOfToday = new Date(new Date().setHours(0, 0, 0, 0))
-    const weekAgo = new Date(Date.now() - 7 * 86400000)
-    const [consultations, total, todayCount, weekCount, withRxCount] = await Promise.all([
-      db.consultation.findMany({ where, include, orderBy, skip, take: limit }),
-      db.consultation.count({ where }),
-      db.consultation.count({ where: { ...baseWhere, visitDate: { gte: startOfToday } } }),
-      db.consultation.count({ where: { ...baseWhere, visitDate: { gte: weekAgo } } }),
-      db.consultation.count({ where: { ...baseWhere, prescriptions: { some: {} } } }),
-    ])
-    const baseTotal = await db.consultation.count({ where: baseWhere })
-
-    res.json({
-      success: true,
-      data: consultations,
-      pagination: paginationMeta(page, limit, total),
-      meta: { total },
-      summary: { total: baseTotal, today: todayCount, thisWeek: weekCount, withRx: withRxCount },
+    // Stat cards count across baseWhere (ignoring the active date tab).
+    const body = await listResponse(db.consultation, {
+      where, include, orderBy: { visitDate: 'desc' }, req, fullListTake: 50,
+      summary: async () => {
+        const startOfToday = new Date(new Date().setHours(0, 0, 0, 0))
+        const weekAgo = new Date(Date.now() - 7 * 86400000)
+        const [total, today, thisWeek, withRx] = await Promise.all([
+          db.consultation.count({ where: baseWhere }),
+          db.consultation.count({ where: { ...baseWhere, visitDate: { gte: startOfToday } } }),
+          db.consultation.count({ where: { ...baseWhere, visitDate: { gte: weekAgo } } }),
+          db.consultation.count({ where: { ...baseWhere, prescriptions: { some: {} } } }),
+        ])
+        return { total, today, thisWeek, withRx }
+      },
     })
+    res.json(body)
   } catch (err) {
     next(err)
   }
