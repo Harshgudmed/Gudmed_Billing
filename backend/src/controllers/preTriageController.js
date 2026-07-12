@@ -1,6 +1,6 @@
 import { db } from '../config/db.js'
 import { getOrgId } from "../lib/reqContext.js";
-import { getPagination, paginationMeta } from "../lib/pagination.js";
+import { listResponse } from "../lib/pagination.js";
 
 function generateScreeningNumber() {
   const date = new Date().toISOString().slice(0, 10).replace(/-/g, '')
@@ -39,35 +39,20 @@ export async function getAll(req, res, next) {
       screenedBy: { select: { fullName: true } },
       patient: { select: { id: true, mrn: true, firstName: true, lastName: true } },
     }
-    const orderBy = { screenedAt: 'desc' }
-
-    // Backward-compatible: without page/limit, return the (capped) list + meta, as
-    // the endpoint always did, so any other caller is unaffected.
-    const wantsPage = req.query.page != null || req.query.limit != null
-    if (!wantsPage) {
-      const screenings = await db.preTriage.findMany({ where, include, orderBy, take: 500 })
-      return res.json({ success: true, data: screenings, meta: { total: screenings.length } })
-    }
-
-    const { page, limit, skip } = getPagination(req.query)
-    // Counts run across baseWhere (all statuses) for the stat cards; the list runs
-    // across `where` (with the active status) for this page.
-    const [screenings, total, filteredTotal, pending, routed, registered] = await Promise.all([
-      db.preTriage.findMany({ where, include, orderBy, skip, take: limit }),
-      db.preTriage.count({ where }),
-      db.preTriage.count({ where: baseWhere }),
-      db.preTriage.count({ where: { ...baseWhere, status: 'screening' } }),
-      db.preTriage.count({ where: { ...baseWhere, status: 'routed' } }),
-      db.preTriage.count({ where: { ...baseWhere, status: 'registered_as_patient' } }),
-    ])
-
-    res.json({
-      success: true,
-      data: screenings,
-      pagination: paginationMeta(page, limit, total),
-      meta: { total },
-      summary: { total: filteredTotal, pending, routed, registered },
+    // Stat cards count across baseWhere (all statuses) so the tabs stay accurate.
+    const body = await listResponse(db.preTriage, {
+      where, include, orderBy: { screenedAt: 'desc' }, req,
+      summary: async () => {
+        const [total, pending, routed, registered] = await Promise.all([
+          db.preTriage.count({ where: baseWhere }),
+          db.preTriage.count({ where: { ...baseWhere, status: 'screening' } }),
+          db.preTriage.count({ where: { ...baseWhere, status: 'routed' } }),
+          db.preTriage.count({ where: { ...baseWhere, status: 'registered_as_patient' } }),
+        ])
+        return { total, pending, routed, registered }
+      },
     })
+    res.json(body)
   } catch (err) {
     next(err)
   }
