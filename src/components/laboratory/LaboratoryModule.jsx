@@ -303,9 +303,7 @@ export default function LaboratoryModule() {
     totalTests: 0
   })
 
-  // Pagination state for tests catalog
-  const [testsPage, setTestsPage] = useState(1)
-  // Pagination state for results
+  // Pagination state for the results-entry work queue (bounded, over capped orders)
   const [resultsPage, setResultsPage] = useState(1)
 
   // The Orders TABLE pages on the server (search/status/priority filter in the DB).
@@ -318,6 +316,17 @@ export default function LaboratoryModule() {
       search: searchQuery,
       status: statusFilter === 'all' ? '' : statusFilter,
       priority: priorityFilter === 'all' ? '' : priorityFilter,
+    },
+  })
+
+  // The Tests CATALOG table pages on the server too. The full `tests` state (capped)
+  // is still loaded separately for the order-creation picker and print lookups.
+  const testsTable = useServerPagination('/laboratory', {
+    perPage: LAB_ITEMS_PER_PAGE,
+    params: {
+      resource: 'tests',
+      search: searchQuery,
+      testCategory: categoryFilter === 'all' ? '' : categoryFilter,
     },
   })
 
@@ -439,12 +448,6 @@ export default function LaboratoryModule() {
 
   // Filtered data
   // Orders now filter + page on the server (see ordersTable above).
-  const filteredTests = tests.filter(test => {
-    const matchesSearch = test.testName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      test.testCode.toLowerCase().includes(searchQuery.toLowerCase())
-    const matchesCategory = categoryFilter === 'all' || test.testCategory === categoryFilter
-    return matchesSearch && matchesCategory
-  })
 
   // Recent orders requiring attention
   const recentOrdersAttention = orders.filter(o =>
@@ -466,6 +469,7 @@ export default function LaboratoryModule() {
       })
       setTests(prev => [transformApiTest(newTest), ...prev])
       toast.success('Test added to catalog successfully')
+      testsTable.refresh()
       setShowTestDialog(false)
       testForm.reset()
     } catch (error) {
@@ -885,6 +889,7 @@ tr:nth-child(even) td{background:#f9f9f9}
 
       setTests(prev => prev.filter(t => t.id !== testId))
       toast.success('Test removed from catalog')
+      testsTable.refresh()
     } catch (error) {
       console.error('Failed to delete test:', error)
       toast.error('Failed to remove test')
@@ -1302,16 +1307,10 @@ tr:nth-child(even) td{background:#f9f9f9}
                       placeholder="Search tests..."
                       className="pl-10 w-64"
                       value={searchQuery}
-                      onChange={(e) => {
-                        setSearchQuery(e.target.value)
-                        setTestsPage(1)
-                      }}
+                      onChange={(e) => setSearchQuery(e.target.value)}
                     />
                   </div>
-                  <Select value={categoryFilter} onValueChange={(value) => {
-                    setCategoryFilter(value)
-                    setTestsPage(1)
-                  }}>
+                  <Select value={categoryFilter} onValueChange={setCategoryFilter}>
                     <SelectTrigger className="w-40">
                       <SelectValue placeholder="Category" />
                     </SelectTrigger>
@@ -1331,35 +1330,22 @@ tr:nth-child(even) td{background:#f9f9f9}
               </div>
             </CardHeader>
             <CardContent className="space-y-4">
-              {testsLoading ? (
-                <div className="flex items-center justify-center py-12">
-                  <Loader2 className="h-8 w-8 animate-spin text-blue-600" />
-                </div>
-              ) : (
-                <>
-                  <div className="rounded-md border">
-                    <Table>
-                      <TableHeader>
-                        <TableRow>
-                          <TableHead>Test Name</TableHead>
-                          <TableHead>Code</TableHead>
-                          <TableHead>Category</TableHead>
-                          <TableHead>Sample Type</TableHead>
-                          <TableHead>TAT (hrs)</TableHead>
-                          <TableHead>Price (&#8377;)</TableHead>
-                          <TableHead>Status</TableHead>
-                          <TableHead className="w-24">Actions</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {filteredTests.length === 0 ? (
-                          <TableRow>
-                            <TableCell colSpan={8} className="text-center py-8 text-gray-500">
-                              No tests found. Add a test to get started.
-                            </TableCell>
-                          </TableRow>
-                        ) : (
-                          filteredTests.slice((testsPage - 1) * LAB_ITEMS_PER_PAGE, testsPage * LAB_ITEMS_PER_PAGE).map((test) => (
+              <div className="rounded-md border">
+                <PaginatedTable
+                  pagination={testsTable}
+                  transform={transformApiTest}
+                  empty="No tests found. Add a test to get started."
+                  columns={[
+                    { header: 'Test Name' },
+                    { header: 'Code' },
+                    { header: 'Category' },
+                    { header: 'Sample Type' },
+                    { header: 'TAT (hrs)' },
+                    { header: 'Price (₹)' },
+                    { header: 'Status' },
+                    { header: 'Actions', className: 'w-24' },
+                  ]}
+                  renderRow={(test) => (
                             <TableRow key={test.id} className="hover:bg-gray-50">
                               <TableCell>
                                 <div className="flex items-center gap-2">
@@ -1428,38 +1414,9 @@ tr:nth-child(even) td{background:#f9f9f9}
                                 </div>
                               </TableCell>
                             </TableRow>
-                          ))
-                        )}
-                      </TableBody>
-                    </Table>
-                  </div>
-
-                  {/* Pagination controls for tests */}
-                  {filteredTests.length > LAB_ITEMS_PER_PAGE && (
-                    <div className="flex items-center justify-end gap-4 pt-4 border-t">
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => setTestsPage(prev => Math.max(1, prev - 1))}
-                        disabled={testsPage === 1}
-                      >
-                        <ChevronLeft className="h-4 w-4 mr-1" />Previous
-                      </Button>
-                      <span className="text-sm text-gray-600">
-                        Page {testsPage} of {Math.ceil(filteredTests.length / LAB_ITEMS_PER_PAGE)}
-                      </span>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => setTestsPage(prev => Math.min(Math.ceil(filteredTests.length / LAB_ITEMS_PER_PAGE), prev + 1))}
-                        disabled={testsPage === Math.ceil(filteredTests.length / LAB_ITEMS_PER_PAGE)}
-                      >
-                        Next<ChevronRight className="h-4 w-4 ml-1" />
-                      </Button>
-                    </div>
                   )}
-                </>
-              )}
+                />
+              </div>
             </CardContent>
           </Card>
         </TabsContent>

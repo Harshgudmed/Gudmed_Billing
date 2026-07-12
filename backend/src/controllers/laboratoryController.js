@@ -87,32 +87,13 @@ export const getAll = async (req, res, next) => {
         ]
       }
 
-      const [data, total] = await Promise.all([
-        db.labTest.findMany({
-          where,
-          orderBy: [{ testCategory: 'asc' }, { testName: 'asc' }],
-          take: limit,
-          skip: offset,
-        }),
-        db.labTest.count({ where }),
-      ])
-
-      const hasMore = (offset + limit) < total
-      const page = Math.floor(offset / limit) + 1
-      const totalPages = Math.ceil(total / limit)
-
-      return res.json({
-        success: true,
-        data,
-        meta: {
-          total,
-          limit,
-          offset,
-          page,
-          totalPages,
-          hasMore
-        },
+      const body = await listResponse(db.labTest, {
+        where,
+        orderBy: [{ testCategory: 'asc' }, { testName: 'asc' }],
+        req,
+        fullListTake: 2000,
       })
+      return res.json(body)
     }
 
     if (resource === 'orders') {
@@ -138,38 +119,19 @@ export const getAll = async (req, res, next) => {
     }
 
     if (resource === 'results') {
-      const where = {}
+      const where = { organizationId: ORGANIZATION_ID }
       if (orderId) where.orderId = orderId
-
-      const [data, total] = await Promise.all([
-        db.labResult.findMany({
-          where,
-          include: {
-            test: true,
-            order: {
-              include: {
-                patient: {
-                  select: PATIENT_SNAPSHOT_SELECT,
-                },
-              },
-            },
-          },
-          orderBy: { createdAt: 'desc' },
-          take: limit,
-          skip: offset,
-        }),
-        db.labResult.count({ where }),
-      ])
-
-      const hasMore = (offset + limit) < total
-      const page = Math.floor(offset / limit) + 1
-      const totalPages = Math.ceil(total / limit)
-
-      return res.json({
-        success: true,
-        data,
-        meta: { total, limit, offset, page, totalPages, hasMore },
+      const body = await listResponse(db.labResult, {
+        where,
+        include: {
+          test: true,
+          order: { include: { patient: { select: PATIENT_SNAPSHOT_SELECT } } },
+        },
+        orderBy: { createdAt: 'desc' },
+        req,
+        fullListTake: 2000,
       })
+      return res.json(body)
     }
 
     if (resource === 'stats') {
