@@ -3,6 +3,7 @@ import { getOrgId, getActor } from "../lib/reqContext.js";
 import { nextSeriesNumber } from "../lib/counters.js";
 import { resolveRequestedById } from '../lib/requestedBy.js'
 import { todayRange } from '../lib/dates.js'
+import { listResponse } from '../lib/pagination.js'
 import { z } from 'zod'
 import { PATIENT_SNAPSHOT_SELECT } from '../utils/patientSnapshot.js'
 
@@ -118,34 +119,22 @@ export const getAll = async (req, res, next) => {
       const where = { organizationId: ORGANIZATION_ID }
       if (status) where.status = status
       if (priority) where.priority = priority
-
-      const [data, total] = await Promise.all([
-        db.labOrder.findMany({
-          where,
-          include: {
-            patient: {
-              select: PATIENT_SNAPSHOT_SELECT,
-            },
-            results: {
-              include: { test: true },
-            },
-          },
-          orderBy: { createdAt: 'desc' },
-          take: limit,
-          skip: offset,
-        }),
-        db.labOrder.count({ where }),
-      ])
-
-      const hasMore = (offset + limit) < total
-      const page = Math.floor(offset / limit) + 1
-      const totalPages = Math.ceil(total / limit)
-
-      return res.json({
-        success: true,
-        data,
-        meta: { total, limit, offset, page, totalPages, hasMore },
+      if (search) {
+        where.OR = [
+          { orderNumber: { contains: search, mode: 'insensitive' } },
+          { patient: { firstName: { contains: search, mode: 'insensitive' } } },
+          { patient: { lastName: { contains: search, mode: 'insensitive' } } },
+          { patient: { mrn: { contains: search, mode: 'insensitive' } } },
+        ]
+      }
+      const body = await listResponse(db.labOrder, {
+        where,
+        include: { patient: { select: PATIENT_SNAPSHOT_SELECT }, results: { include: { test: true } } },
+        orderBy: { createdAt: 'desc' },
+        req,
+        fullListTake: 2000,
       })
+      return res.json(body)
     }
 
     if (resource === 'results') {
