@@ -34,6 +34,8 @@ import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import BulkImportDialog from '@/components/common/BulkImportDialog'
 import { Progress } from '@/components/ui/progress'
 import client from '@/api/client'
+import { useServerPagination } from '@/lib/useServerPagination'
+import { PaginatedTable } from '@/components/common/PaginatedTable'
 import { drName } from '@/lib/utils'
 import PatientLookup from '@/components/common/PatientLookup'
 import { printLabReceipt } from '@/components/billing/utils/printBilling'
@@ -303,10 +305,21 @@ export default function LaboratoryModule() {
 
   // Pagination state for tests catalog
   const [testsPage, setTestsPage] = useState(1)
-  // Pagination state for orders
-  const [ordersPage, setOrdersPage] = useState(1)
   // Pagination state for results
   const [resultsPage, setResultsPage] = useState(1)
+
+  // The Orders TABLE pages on the server (search/status/priority filter in the DB).
+  // The overview dashboard keeps its own capped `orders` fetch for its aggregates,
+  // so this only drives the table — the two don't interfere.
+  const ordersTable = useServerPagination('/laboratory', {
+    perPage: LAB_ITEMS_PER_PAGE,
+    params: {
+      resource: 'orders',
+      search: searchQuery,
+      status: statusFilter === 'all' ? '' : statusFilter,
+      priority: priorityFilter === 'all' ? '' : priorityFilter,
+    },
+  })
 
   // Forms
   const testForm = useForm({
@@ -425,15 +438,7 @@ export default function LaboratoryModule() {
   useEffect(() => { setOrgInfo(hookOrgInfo) }, [hookOrgInfo])
 
   // Filtered data
-  const filteredOrders = orders.filter(order => {
-    const matchesSearch = order.patientName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      order.patientMrn.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      order.orderNumber.toLowerCase().includes(searchQuery.toLowerCase())
-    const matchesStatus = statusFilter === 'all' || order.status === statusFilter
-    const matchesPriority = priorityFilter === 'all' || order.priority === priorityFilter
-    return matchesSearch && matchesStatus && matchesPriority
-  })
-
+  // Orders now filter + page on the server (see ordersTable above).
   const filteredTests = tests.filter(test => {
     const matchesSearch = test.testName.toLowerCase().includes(searchQuery.toLowerCase()) ||
       test.testCode.toLowerCase().includes(searchQuery.toLowerCase())
@@ -527,6 +532,7 @@ export default function LaboratoryModule() {
       }
 
       toast.success('Lab order created successfully')
+      ordersTable.refresh()
       setShowOrderDialog(false)
       orderForm.reset()
       setSelectedPatient(null)
@@ -568,6 +574,7 @@ export default function LaboratoryModule() {
       ))
       toast.success('Sample collected successfully')
       fetchStats()
+      ordersTable.refresh()
     } catch (error) {
       console.error('Failed to update order:', error)
       toast.error('Failed to update order status')
@@ -596,6 +603,7 @@ export default function LaboratoryModule() {
       ))
       toast.success('Processing started')
       fetchStats()
+      ordersTable.refresh()
     } catch (error) {
       console.error('Failed to update order:', error)
       toast.error('Failed to update order status')
@@ -888,6 +896,7 @@ tr:nth-child(even) td{background:#f9f9f9}
     fetchOrders()
     fetchStats()
     fetchResults()
+    ordersTable.refresh()
     toast.success('Data refreshed')
   }
 
@@ -1467,16 +1476,10 @@ tr:nth-child(even) td{background:#f9f9f9}
                       placeholder="Search by patient, UHID, order #..."
                       className="pl-10 w-64"
                       value={searchQuery}
-                      onChange={(e) => {
-                        setSearchQuery(e.target.value)
-                        setOrdersPage(1)
-                      }}
+                      onChange={(e) => setSearchQuery(e.target.value)}
                     />
                   </div>
-                  <Select value={statusFilter} onValueChange={(value) => {
-                    setStatusFilter(value)
-                    setOrdersPage(1)
-                  }}>
+                  <Select value={statusFilter} onValueChange={setStatusFilter}>
                     <SelectTrigger className="w-40">
                       <SelectValue placeholder="Status" />
                     </SelectTrigger>
@@ -1489,10 +1492,7 @@ tr:nth-child(even) td{background:#f9f9f9}
                       <SelectItem value="cancelled">Cancelled</SelectItem>
                     </SelectContent>
                   </Select>
-                  <Select value={priorityFilter} onValueChange={(value) => {
-                    setPriorityFilter(value)
-                    setOrdersPage(1)
-                  }}>
+                  <Select value={priorityFilter} onValueChange={setPriorityFilter}>
                     <SelectTrigger className="w-32">
                       <SelectValue placeholder="Priority" />
                     </SelectTrigger>
@@ -1511,34 +1511,21 @@ tr:nth-child(even) td{background:#f9f9f9}
               </div>
             </CardHeader>
             <CardContent className="space-y-4">
-              {ordersLoading ? (
-                <div className="flex items-center justify-center py-12">
-                  <Loader2 className="h-8 w-8 animate-spin text-blue-600" />
-                </div>
-              ) : (
-                <>
-                  <div className="rounded-md border">
-                    <Table>
-                      <TableHeader>
-                        <TableRow>
-                          <TableHead className="w-32">Order #</TableHead>
-                          <TableHead>Patient</TableHead>
-                          <TableHead>Tests</TableHead>
-                          <TableHead>Priority</TableHead>
-                          <TableHead>Status</TableHead>
-                          <TableHead>Order Time</TableHead>
-                          <TableHead className="w-40">Actions</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {filteredOrders.length === 0 ? (
-                          <TableRow>
-                            <TableCell colSpan={7} className="text-center py-8 text-gray-500">
-                              No orders found. Create a new order to get started.
-                            </TableCell>
-                          </TableRow>
-                        ) : (
-                          filteredOrders.slice((ordersPage - 1) * LAB_ITEMS_PER_PAGE, ordersPage * LAB_ITEMS_PER_PAGE).map((order) => (
+              <div className="rounded-md border">
+                <PaginatedTable
+                  pagination={ordersTable}
+                  transform={transformApiOrder}
+                  empty="No orders found. Create a new order to get started."
+                  columns={[
+                    { header: 'Order #', className: 'w-32' },
+                    { header: 'Patient' },
+                    { header: 'Tests' },
+                    { header: 'Priority' },
+                    { header: 'Status' },
+                    { header: 'Order Time' },
+                    { header: 'Actions', className: 'w-40' },
+                  ]}
+                  renderRow={(order) => (
                             <TableRow key={order.id} className="hover:bg-gray-50">
                               <TableCell className="font-mono text-sm">{order.orderNumber}</TableCell>
                               <TableCell>
@@ -1646,38 +1633,9 @@ tr:nth-child(even) td{background:#f9f9f9}
                                 </div>
                               </TableCell>
                             </TableRow>
-                          ))
-                        )}
-                      </TableBody>
-                    </Table>
-                  </div>
-
-                  {/* Pagination controls for orders */}
-                  {filteredOrders.length > LAB_ITEMS_PER_PAGE && (
-                    <div className="flex items-center justify-end gap-4">
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => setOrdersPage(prev => Math.max(1, prev - 1))}
-                        disabled={ordersPage === 1}
-                      >
-                        Previous
-                      </Button>
-                      <span className="text-sm text-gray-600">
-                        Page {ordersPage} of {Math.ceil(filteredOrders.length / LAB_ITEMS_PER_PAGE)}
-                      </span>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => setOrdersPage(prev => Math.min(Math.ceil(filteredOrders.length / LAB_ITEMS_PER_PAGE), prev + 1))}
-                        disabled={ordersPage === Math.ceil(filteredOrders.length / LAB_ITEMS_PER_PAGE)}
-                      >
-                        Next
-                      </Button>
-                    </div>
                   )}
-                </>
-              )}
+                />
+              </div>
             </CardContent>
           </Card>
         </TabsContent>
