@@ -2,15 +2,7 @@ import { useState, useEffect } from 'react'
 import { Input } from '@/components/ui/input'
 import { Search, Loader2 } from 'lucide-react'
 import client from '@/api/client'
-
-function useDebounce(value, delay = 300) {
-  const [debouncedValue, setDebouncedValue] = useState(value)
-  useEffect(() => {
-    const timer = setTimeout(() => setDebouncedValue(value), delay)
-    return () => clearTimeout(timer)
-  }, [value, delay])
-  return debouncedValue
-}
+import { useDebounce } from '@/lib/useDebounce'
 
 /**
  * Debounced server-side drug picker.

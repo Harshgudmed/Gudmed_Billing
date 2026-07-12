@@ -1,14 +1,5 @@
 import { useState, useEffect } from 'react'
-
-// Debounce hook – returns the debounced value after `delay` ms of no changes
-function useDebounce(value, delay = 400) {
-  const [debouncedValue, setDebouncedValue] = useState(value)
-  useEffect(() => {
-    const timer = setTimeout(() => setDebouncedValue(value), delay)
-    return () => clearTimeout(timer)
-  }, [value, delay])
-  return debouncedValue
-}
+import { useDebounce } from '@/lib/useDebounce'
 import { Search, User, X, Loader2, UserPlus } from 'lucide-react'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
