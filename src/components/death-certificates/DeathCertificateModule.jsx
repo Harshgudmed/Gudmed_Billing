@@ -5,13 +5,13 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
+import { TableCell, TableRow } from '@/components/ui/table'
 import { FileText, Plus, Search, Printer, Edit, Trash2, FileCheck, Loader2, Filter, X } from 'lucide-react'
 import { format } from 'date-fns'
 import { toast } from 'sonner'
 import client from '@/api/client'
 import { useServerPagination } from '@/lib/useServerPagination'
-import { Pagination } from '@/components/common/Pagination'
+import { PaginatedTable } from '@/components/common/PaginatedTable'
 import DeathCertificateForm from './DeathCertificateForm'
 
 const ITEMS_PER_PAGE = 10
@@ -194,61 +194,50 @@ export default function DeathCertificateModule() {
           </div>
         </CardHeader>
         <CardContent>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Certificate #</TableHead>
-                <TableHead>Patient Name</TableHead>
-                <TableHead>UHID</TableHead>
-                <TableHead>Date of Death</TableHead>
-                <TableHead>Manner</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead className="text-right">Actions</TableHead>
+          <PaginatedTable
+            pagination={certificatesPagination}
+            empty="No death certificates found matching your criteria."
+            columns={[
+              { header: 'Certificate #' },
+              { header: 'Patient Name' },
+              { header: 'UHID' },
+              { header: 'Date of Death' },
+              { header: 'Manner' },
+              { header: 'Status' },
+              { header: 'Actions', className: 'text-right' },
+            ]}
+            renderRow={(cert) => (
+              <TableRow key={cert.id}>
+                <TableCell className="font-mono font-medium">{cert.certificateNumber}</TableCell>
+                <TableCell>{cert.patient ? `${cert.patient.firstName} ${cert.patient.lastName}` : 'N/A'}</TableCell>
+                <TableCell>{cert.patient?.mrn || 'N/A'}</TableCell>
+                <TableCell>{format(new Date(cert.dateOfDeath), 'dd MMM yyyy')}</TableCell>
+                <TableCell><Badge variant="outline" className="capitalize">{cert.mannerOfDeath}</Badge></TableCell>
+                <TableCell>
+                  {cert.issuedAt ? (
+                    <Badge className="bg-green-100 text-green-700 hover:bg-green-100 flex items-center gap-1 w-fit">
+                      <FileCheck className="h-3 w-3" /> Issued
+                    </Badge>
+                  ) : (
+                    <Badge variant="secondary" className="bg-orange-100 text-orange-700 hover:bg-orange-100 w-fit">Draft/Pending</Badge>
+                  )}
+                </TableCell>
+                <TableCell className="text-right">
+                  <div className="flex justify-end gap-2">
+                    <Button variant="ghost" size="icon" onClick={() => { setSelectedCertId(cert.id); setView('edit') }}>
+                      <Edit className="h-4 w-4" />
+                    </Button>
+                    <Button variant="ghost" size="icon" onClick={() => handlePrint(cert.id)}>
+                      <Printer className="h-4 w-4" />
+                    </Button>
+                    <Button variant="ghost" size="icon" className="text-red-600 hover:text-red-700 hover:bg-red-50" onClick={() => handleDelete(cert.id)}>
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </div>
+                </TableCell>
               </TableRow>
-            </TableHeader>
-            <TableBody>
-              {certificates.length === 0 ? (
-                <TableRow>
-                  <TableCell colSpan={7} className="text-center py-10 text-gray-500">
-                    No death certificates found matching your criteria.
-                  </TableCell>
-                </TableRow>
-              ) : (
-                certificates.map(cert => (
-                  <TableRow key={cert.id}>
-                    <TableCell className="font-mono font-medium">{cert.certificateNumber}</TableCell>
-                    <TableCell>{cert.patient ? `${cert.patient.firstName} ${cert.patient.lastName}` : 'N/A'}</TableCell>
-                    <TableCell>{cert.patient?.mrn || 'N/A'}</TableCell>
-                    <TableCell>{format(new Date(cert.dateOfDeath), 'dd MMM yyyy')}</TableCell>
-                    <TableCell><Badge variant="outline" className="capitalize">{cert.mannerOfDeath}</Badge></TableCell>
-                    <TableCell>
-                      {cert.issuedAt ? (
-                        <Badge className="bg-green-100 text-green-700 hover:bg-green-100 flex items-center gap-1 w-fit">
-                          <FileCheck className="h-3 w-3" /> Issued
-                        </Badge>
-                      ) : (
-                        <Badge variant="secondary" className="bg-orange-100 text-orange-700 hover:bg-orange-100 w-fit">Draft/Pending</Badge>
-                      )}
-                    </TableCell>
-                    <TableCell className="text-right">
-                      <div className="flex justify-end gap-2">
-                        <Button variant="ghost" size="icon" onClick={() => { setSelectedCertId(cert.id); setView('edit') }}>
-                          <Edit className="h-4 w-4" />
-                        </Button>
-                        <Button variant="ghost" size="icon" onClick={() => handlePrint(cert.id)}>
-                          <Printer className="h-4 w-4" />
-                        </Button>
-                        <Button variant="ghost" size="icon" className="text-red-600 hover:text-red-700 hover:bg-red-50" onClick={() => handleDelete(cert.id)}>
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                ))
-              )}
-            </TableBody>
-          </Table>
-          <Pagination page={certificatesPagination.page} totalPages={certificatesPagination.totalPages} onPageChange={certificatesPagination.setPage} />
+            )}
+          />
         </CardContent>
       </Card>
     </div>
