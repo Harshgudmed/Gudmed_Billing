@@ -5,6 +5,8 @@
 import { useState, useEffect, useCallback } from 'react'
 import { getOrgSettings } from '@/lib/orgSettings'
 import { getFullName, calcAge as getAge, initials } from '@/lib/patient'
+import { useServerPagination } from '@/lib/useServerPagination'
+import { Pagination } from '@/components/common/Pagination'
 import { format } from 'date-fns'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -15,7 +17,7 @@ import {
   Plus, Save, Printer, Stethoscope, ClipboardList, BookOpen,
   Pill, AlertTriangle, User, Loader2, RefreshCw, Check, Sparkles,
   FlaskConical, Scan, ArrowLeft, Eye, Edit, Search, Trash2,
-  ChevronLeft, ChevronRight, X, CalendarClock, ChevronDown, ChevronUp,
+  X, CalendarClock, ChevronDown, ChevronUp,
 } from 'lucide-react'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -107,7 +109,31 @@ export default function OpdModule() {
   const [specificDate, setSpecificDate] = useState('')
   const [customStart, setCustomStart] = useState('')
   const [customEnd, setCustomEnd] = useState('')
-  const [currentPage, setCurrentPage] = useState(1)
+
+  // Turn the today/week/month/specific/custom date modes into a concrete
+  // {startDate,endDate} the server can filter on.
+  const opdDateRange = (() => {
+    const ymd = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+    const now = new Date()
+    if (filterDate === 'today') return { startDate: ymd(now), endDate: ymd(now) }
+    if (filterDate === 'week') return { startDate: ymd(new Date(Date.now() - 7 * 86400000)), endDate: ymd(now) }
+    if (filterDate === 'month') return { startDate: ymd(new Date(now.getFullYear(), now.getMonth(), 1)), endDate: ymd(new Date(now.getFullYear(), now.getMonth() + 1, 0)) }
+    if (filterDate === 'specific') return { startDate: specificDate, endDate: specificDate }
+    if (filterDate === 'custom') return { startDate: customStart, endDate: customEnd }
+    return { startDate: '', endDate: '' }
+  })()
+  // Server-side paginated consultation list (the DB filters + slices).
+  const consultationsPagination = useServerPagination('/consultations', {
+    perPage: ITEMS_PER_PAGE,
+    params: {
+      search: filterSearch,
+      doctorId: filterDoctor === 'all' ? '' : filterDoctor,
+      startDate: opdDateRange.startDate,
+      endDate: opdDateRange.endDate,
+    },
+  })
+  const consultations = consultationsPagination.rows
+  const stats = consultationsPagination.summary || { total: 0, today: 0, thisWeek: 0, withRx: 0 }
 
   const [selectedPatientId, setSelectedPatientId] = useState('')
   const [selectedDoctorId, setSelectedDoctorId] = useState('')
@@ -133,7 +159,6 @@ export default function OpdModule() {
   const [drugs, setDrugs] = useState([])
   const [labTests, setLabTests] = useState([])
   const [radiologyExams, setRadiologyExams] = useState([])
-  const [consultations, setConsultations] = useState([])
   const [loading, setLoading] = useState(true)
 
   const vitalsForm = useForm({ resolver: zodResolver(vitalsSchema), defaultValues: DEFAULT_VITALS })
@@ -155,8 +180,7 @@ export default function OpdModule() {
 
   const fetchAll = useCallback(async () => {
     setLoading(true)
-    const [cRes, pRes, uRes, dRes, lRes, rRes, sRes] = await Promise.allSettled([
-      client.get('/consultations'),
+    const [pRes, uRes, dRes, lRes, rRes, sRes] = await Promise.allSettled([
       client.get('/patients?status=active&limit=500'),
       client.get('/settings?resource=users'),
       client.get('/pharmacy/drugs?limit=5000'),
@@ -169,7 +193,6 @@ export default function OpdModule() {
       client.get('/radiology?resource=exams&limit=2000'),
       client.get('/clinical-kb/specialties'),
     ])
-    if (cRes.status === 'fulfilled') setConsultations(cRes.value?.data ?? [])
     if (pRes.status === 'fulfilled') setPatients(pRes.value?.data ?? [])
     if (uRes.status === 'fulfilled') setDoctors((uRes.value?.data ?? []).filter(u => u.role === 'doctor' && u.isActive))
     if (dRes.status === 'fulfilled') setDrugs(dRes.value?.data ?? [])
@@ -225,32 +248,9 @@ export default function OpdModule() {
     }
   }
 
-  const filteredConsultations = consultations.filter(c => {
-    const name = c.patient ? getFullName(c.patient).toLowerCase() : ''
-    const q = filterSearch.toLowerCase()
-    const matchSearch = !filterSearch || name.includes(q) || (c.patient?.mrn || '').toLowerCase().includes(q) || (c.diagnosis || '').toLowerCase().includes(q)
-    const matchDoctor = filterDoctor === 'all' || c.doctorId === filterDoctor
-    let matchDate = true
-    if (filterDate !== 'all') {
-      const cDate = new Date(c.visitDate)
-      const today = new Date()
-      if (filterDate === 'today') {
-        matchDate = cDate.toDateString() === today.toDateString()
-      } else if (filterDate === 'week') {
-        matchDate = (today.getTime() - cDate.getTime()) < 7 * 86400000
-      } else if (filterDate === 'month') {
-        matchDate = cDate.getMonth() === today.getMonth() && cDate.getFullYear() === today.getFullYear()
-      } else if (filterDate === 'specific' && specificDate) {
-        matchDate = cDate.toDateString() === new Date(specificDate).toDateString()
-      } else if (filterDate === 'custom') {
-        const dStr = cDate.toISOString().split('T')[0]
-        if (customStart && dStr < customStart) matchDate = false
-        if (customEnd && dStr > customEnd) matchDate = false
-      }
-    }
-    return matchSearch && matchDoctor && matchDate
-  })
-  useEffect(() => { setCurrentPage(1) }, [filterSearch, filterDoctor, filterDate, specificDate, customStart, customEnd])
+  // Search / doctor / date filtering all happen on the server now; the list is
+  // exactly the page the hook returned.
+  const filteredConsultations = consultations
 
   const addDrug = () => {
     const drug = drugs.find(d => d.id === selectedDrug)
@@ -378,7 +378,7 @@ export default function OpdModule() {
         await client.post('/consultations', payload)
         toast.success('OPD prescription saved')
       }
-      resetForm(); fetchAll(); setView('list')
+      resetForm(); consultationsPagination.refresh(); setView('list')
     } catch {
       toast.error('Failed to save prescription')
     } finally {
@@ -392,7 +392,7 @@ export default function OpdModule() {
     try {
       await client.delete(`/consultations/${deleting.id}`)
       toast.success('Prescription deleted')
-      setConsultations(prev => prev.filter(c => c.id !== deleting.id))
+      consultationsPagination.refresh()
       setDeleting(null)
     } catch {
       toast.error('Failed to delete')
@@ -403,9 +403,7 @@ export default function OpdModule() {
 
   // ── LIST VIEW ──
   if (view === 'list') {
-    const totalPages = Math.ceil(filteredConsultations.length / ITEMS_PER_PAGE)
-    const startIdx = (currentPage - 1) * ITEMS_PER_PAGE
-    const paginated = filteredConsultations.slice(startIdx, startIdx + ITEMS_PER_PAGE)
+    const paginated = consultations
     return (
       <div className="space-y-6">
         {/* Clean white header matching the old Consultations module */}
@@ -416,16 +414,16 @@ export default function OpdModule() {
               <p className="text-gray-500 text-sm mt-1">View, manage and print patient consultation records</p>
             </div>
             <div className="flex gap-2">
-              <Button variant="outline" size="sm" onClick={fetchAll}><RefreshCw className="h-4 w-4 mr-1" />Refresh</Button>
+              <Button variant="outline" size="sm" onClick={consultationsPagination.refresh}><RefreshCw className="h-4 w-4 mr-1" />Refresh</Button>
               <Button size="sm" className="bg-blue-600 hover:bg-blue-700" onClick={() => { resetForm(); setView('form') }}><Plus className="h-4 w-4 mr-2" />New Consultation</Button>
             </div>
           </div>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
             {[
-              { label: 'Total', value: consultations.length, color: 'text-blue-600', bg: 'bg-blue-50' },
-              { label: 'Today', value: consultations.filter(c => new Date(c.visitDate).toDateString() === new Date().toDateString()).length, color: 'text-green-600', bg: 'bg-green-50' },
-              { label: 'This Week', value: consultations.filter(c => (Date.now() - new Date(c.visitDate).getTime()) < 7 * 86400000).length, color: 'text-purple-600', bg: 'bg-purple-50' },
-              { label: 'With Rx', value: consultations.filter(c => c.prescriptions && c.prescriptions.length > 0).length, color: 'text-orange-600', bg: 'bg-orange-50' },
+              { label: 'Total', value: stats.total, color: 'text-blue-600', bg: 'bg-blue-50' },
+              { label: 'Today', value: stats.today, color: 'text-green-600', bg: 'bg-green-50' },
+              { label: 'This Week', value: stats.thisWeek, color: 'text-purple-600', bg: 'bg-purple-50' },
+              { label: 'With Rx', value: stats.withRx, color: 'text-orange-600', bg: 'bg-orange-50' },
             ].map(s => (
               <Card key={s.label} className={`${s.bg} border-0 shadow-sm`}>
                 <CardContent className="p-4 flex justify-between items-center">
@@ -478,7 +476,7 @@ export default function OpdModule() {
           )}
         </div>
 
-        {loading ? (
+        {consultationsPagination.loading && consultations.length === 0 ? (
           <div className="flex items-center justify-center py-20"><Loader2 className="h-8 w-8 animate-spin text-[#2E4168]" /></div>
         ) : filteredConsultations.length === 0 ? (
           <Card className="border-dashed rounded-2xl">
@@ -557,13 +555,8 @@ export default function OpdModule() {
                 </Card>
               )
             })}
-            {totalPages > 1 && (
-              <div className="flex items-center justify-end gap-2 mt-6 pt-4 border-t">
-                <Button variant="outline" size="sm" onClick={() => setCurrentPage(p => Math.max(1, p - 1))} disabled={currentPage === 1}><ChevronLeft className="h-4 w-4 mr-1" />Previous</Button>
-                <span className="text-sm text-gray-600">Page {currentPage} of {totalPages}</span>
-                <Button variant="outline" size="sm" onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))} disabled={currentPage === totalPages}>Next<ChevronRight className="h-4 w-4 ml-1" /></Button>
-              </div>
-            )}
+            <Pagination page={consultationsPagination.page} totalPages={consultationsPagination.totalPages} onPageChange={consultationsPagination.setPage} />
+
           </div>
         )}
 

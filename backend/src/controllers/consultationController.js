@@ -1,59 +1,81 @@
 import { db } from '../config/db.js'
 import { getOrgId } from "../lib/reqContext.js";
 import { nextSeriesNumber } from "../lib/counters.js";
+import { getPagination, paginationMeta } from "../lib/pagination.js";
 import { scopedDoctorId } from '../utils/scope.js'
 
 export async function getAll(req, res, next) {
   try {
     const organizationId = getOrgId(req)
-    const { patientId, doctorId, date } = req.query
-    const limit = Math.min(Math.max(parseInt(req.query.limit) || 50, 1), 1000) // hard cap → no unbounded query DoS
-    const offset = parseInt(req.query.offset || '0')
+    const { patientId, doctorId, date, search = '', startDate = '', endDate = '' } = req.query
 
-    const where = { organizationId }
-
-    if (patientId) where.patientId = patientId
-    if (doctorId) where.doctorId = doctorId
+    // baseWhere = org + patient/doctor scope + search, but NOT the date filter, so
+    // the stat cards (Total / Today / This Week / With Rx) stay stable across tabs.
+    const baseWhere = { organizationId }
+    if (patientId) baseWhere.patientId = patientId
+    if (doctorId) baseWhere.doctorId = doctorId
     // A doctor only sees their own consultations.
     const myDoctorId = scopedDoctorId(req)
-    if (myDoctorId) where.doctorId = myDoctorId
-    if (date) {
-      const targetDate = new Date(date)
-      where.visitDate = {
-        gte: new Date(new Date(targetDate).setHours(0, 0, 0, 0)),
-        lte: new Date(new Date(targetDate).setHours(23, 59, 59, 999)),
-      }
+    if (myDoctorId) baseWhere.doctorId = myDoctorId
+    if (search) {
+      baseWhere.OR = [
+        { patient: { firstName: { contains: search, mode: 'insensitive' } } },
+        { patient: { lastName: { contains: search, mode: 'insensitive' } } },
+        { patient: { mrn: { contains: search, mode: 'insensitive' } } },
+        { diagnosis: { contains: search, mode: 'insensitive' } },
+      ]
     }
 
-    const [consultations, total] = await Promise.all([
-      db.consultation.findMany({
-        where,
-        take: limit,
-        skip: offset,
-        orderBy: { visitDate: 'desc' },
-        include: {
-          patient: {
-            select: { id: true, mrn: true, firstName: true, middleName: true, lastName: true, phonePrimary: true, gender: true, dateOfBirth: true, bloodGroup: true },
-          },
-          doctor: { select: { id: true, fullName: true, specialization: true } },
-          prescriptions: true,
-          labOrders: true,
-          // Include the exam so the consultation view/edit can show the exam name
-          // (radiologyOrder only stores examId).
-          radiologyOrders: {
-            include: {
-              exam: { select: { id: true, examName: true, examCode: true, examCategory: true, bodyPart: true } },
-            },
-          },
-        },
-      }),
-      db.consultation.count({ where })
+    const where = { ...baseWhere }
+    // A single `date` (legacy) OR a startDate/endDate range filters the list.
+    if (date) {
+      const t = new Date(date)
+      where.visitDate = { gte: new Date(new Date(t).setHours(0, 0, 0, 0)), lte: new Date(new Date(t).setHours(23, 59, 59, 999)) }
+    } else if (startDate || endDate) {
+      where.visitDate = {}
+      if (startDate) where.visitDate.gte = new Date(new Date(startDate).setHours(0, 0, 0, 0))
+      if (endDate) where.visitDate.lte = new Date(new Date(endDate).setHours(23, 59, 59, 999))
+    }
+
+    const include = {
+      patient: {
+        select: { id: true, mrn: true, firstName: true, middleName: true, lastName: true, phonePrimary: true, gender: true, dateOfBirth: true, bloodGroup: true },
+      },
+      doctor: { select: { id: true, fullName: true, specialization: true } },
+      prescriptions: true,
+      labOrders: true,
+      radiologyOrders: {
+        include: { exam: { select: { id: true, examName: true, examCode: true, examCategory: true, bodyPart: true } } },
+      },
+    }
+    const orderBy = { visitDate: 'desc' }
+
+    // Backward-compatible: without page/limit, behave exactly as before.
+    const wantsPage = req.query.page != null || req.query.limit != null
+    if (!wantsPage) {
+      const consultations = await db.consultation.findMany({ where, include, orderBy, take: 50 })
+      const total = await db.consultation.count({ where })
+      return res.json({ success: true, data: consultations, meta: { total } })
+    }
+
+    const { page, limit, skip } = getPagination(req.query)
+    const startOfToday = new Date(new Date().setHours(0, 0, 0, 0))
+    const weekAgo = new Date(Date.now() - 7 * 86400000)
+    const [consultations, total, todayCount, weekCount, withRxCount] = await Promise.all([
+      db.consultation.findMany({ where, include, orderBy, skip, take: limit }),
+      db.consultation.count({ where }),
+      db.consultation.count({ where: { ...baseWhere, visitDate: { gte: startOfToday } } }),
+      db.consultation.count({ where: { ...baseWhere, visitDate: { gte: weekAgo } } }),
+      db.consultation.count({ where: { ...baseWhere, prescriptions: { some: {} } } }),
     ])
+    const baseTotal = await db.consultation.count({ where: baseWhere })
 
     res.json({
       success: true,
       data: consultations,
-      meta: { total, limit, offset, hasMore: offset + limit < total }
+      pagination: paginationMeta(page, limit, total),
+      meta: { total },
+      summary: { total: baseTotal, today: todayCount, thisWeek: weekCount, withRx: withRxCount },
     })
   } catch (err) {
     next(err)
