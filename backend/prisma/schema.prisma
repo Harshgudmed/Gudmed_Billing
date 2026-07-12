@@ -2475,7 +2475,10 @@ model QueueManagement {
 
   // Queue Information
   queueNumber String
-  priority    String @default("normal") // urgent, normal, low
+  priority    String @default("normal") // urgent, high, medium, normal, low
+  // Numeric sort key derived from `priority` (see lib/queuePriority.js). The DB
+  // orders on this, not on the string — a string sort mis-ranked "high"/"medium".
+  priorityRank Int   @default(40)
 
   // Assignment
   assignedToId String?
@@ -2508,6 +2511,9 @@ model QueueManagement {
   @@index([organizationId])
   @@index([serviceArea, status])
   @@index([assignedToId])
+  // Matches the queue list's ORDER BY (priorityRank desc, joinedQueueAt asc)
+  // within a tenant, so the sorted page read stays index-backed.
+  @@index([organizationId, priorityRank, joinedQueueAt])
 }
 
 /// Day-Care Case (same-day admission/procedure with same-day discharge)

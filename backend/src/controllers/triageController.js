@@ -3,6 +3,7 @@ import { getOrgId } from "../lib/reqContext.js";
 import { z } from 'zod'
 import { generateQueueNumber } from '../utils/queueNumber.js'
 import { getPagination, paginationMeta } from '../lib/pagination.js'
+import { priorityRank } from '../lib/queuePriority.js'
 
 const queueSchema = z.object({
   patientId: z.string(),
@@ -61,7 +62,7 @@ export async function getQueue(req, res, next) {
       ? { ...baseWhere, status }
       : baseWhere
 
-    const orderBy = [{ priority: 'desc' }, { joinedQueueAt: 'asc' }]
+    const orderBy = [{ priorityRank: 'desc' }, { joinedQueueAt: 'asc' }]
 
     // Counts span the whole filtered set, not just this page — otherwise the
     // header tiles would only ever count the rows currently on screen.
@@ -83,12 +84,22 @@ export async function getQueue(req, res, next) {
     ])
 
     const now = new Date()
-    const queueWithWaitTime = queue.map(item => ({
-      ...item,
-      waitTime: item.joinedQueueAt
-        ? Math.floor((now.getTime() - new Date(item.joinedQueueAt).getTime()) / 60000)
-        : 0,
-    }))
+    const TERMINAL = ['completed', 'cancelled', 'no_show']
+    const queueWithWaitTime = queue.map(item => {
+      // Wait time = time spent waiting to be seen, so it must STOP counting once
+      // the patient leaves the waiting state — otherwise a patient seen days ago
+      // shows an ever-growing wait of hundreds of hours. Freeze at the first
+      // "attended" moment; fall back to updatedAt for a terminal row that was
+      // never called, and only keep ticking against `now` while still waiting.
+      const attendedAt = item.serviceStartedAt || item.calledAt || item.serviceCompletedAt
+      const endRef = attendedAt ? new Date(attendedAt)
+        : TERMINAL.includes(item.status) ? new Date(item.updatedAt)
+        : now
+      const waitTime = item.joinedQueueAt
+        ? Math.max(0, Math.floor((endRef.getTime() - new Date(item.joinedQueueAt).getTime()) / 60000))
+        : 0
+      return { ...item, waitTime }
+    })
 
     res.json({
       success: true,
@@ -108,6 +119,16 @@ export async function addToQueue(req, res, next) {
     const validatedData = queueSchema.parse(req.body)
     const patientInclude = { patient: { select: { id: true, mrn: true, firstName: true, lastName: true } } }
 
+    // Derive the numeric sort key from the priority string up front so both the
+    // upsert and the plain create store it (the queue is ordered on this).
+    const createData = {
+      organizationId: ORG_ID,
+      ...validatedData,
+      priorityRank: priorityRank(validatedData.priority),
+      queueNumber: generateQueueNumber(validatedData.serviceArea),
+      status: 'waiting',
+    }
+
     // appointmentId is @unique on QueueManagement — upsert instead of create
     // so re-submitting for the same appointment (e.g. a double-click, or the
     // appointment was already checked in via appointmentController.update())
@@ -115,22 +136,12 @@ export async function addToQueue(req, res, next) {
     const queueItem = validatedData.appointmentId
       ? await db.queueManagement.upsert({
           where: { appointmentId: validatedData.appointmentId },
-          create: {
-            organizationId: ORG_ID,
-            ...validatedData,
-            queueNumber: generateQueueNumber(validatedData.serviceArea),
-            status: 'waiting',
-          },
+          create: createData,
           update: {},
           include: patientInclude,
         })
       : await db.queueManagement.create({
-          data: {
-            organizationId: ORG_ID,
-            ...validatedData,
-            queueNumber: generateQueueNumber(validatedData.serviceArea),
-            status: 'waiting',
-          },
+          data: createData,
           include: patientInclude,
         })
 
@@ -164,6 +175,9 @@ export async function updateQueue(req, res, next) {
     if (validatedData.status === 'called') data.calledAt = new Date()
     else if (validatedData.status === 'in_progress') data.serviceStartedAt = new Date()
     else if (validatedData.status === 'completed') data.serviceCompletedAt = new Date()
+    // Keep the numeric sort key in step with the priority string so a priority
+    // change actually reorders the queue on the next read.
+    if (validatedData.priority !== undefined) data.priorityRank = priorityRank(validatedData.priority)
 
     const item = await db.queueManagement.update({
       where: { id },

@@ -4,6 +4,7 @@ import { RefreshCw, Users, Clock, CheckCircle, Phone, Search } from 'lucide-reac
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Pagination } from '@/components/common/Pagination'
@@ -22,6 +23,9 @@ const PRIORITY_COLORS = {
   normal: 'bg-blue-100 text-blue-800',
   low: 'bg-green-100 text-green-800',
 }
+
+// Ordered most-urgent first — mirrors the backend rank in lib/queuePriority.js.
+const PRIORITY_LEVELS = ['urgent', 'high', 'medium', 'normal', 'low']
 
 const QUEUE_STATUS_COLORS = {
   waiting: 'bg-yellow-100 text-yellow-800',
@@ -84,6 +88,26 @@ export default function QueueModule() {
       }
     } catch (err) {
       toast.error(err.message || 'Failed to update patient')
+    } finally {
+      setUpdatingId(null)
+    }
+  }
+
+  // Changing priority re-ranks the row on the server; refresh() re-reads the
+  // now-reordered queue (a higher priority floats the patient up).
+  const changePriority = async (entry, priority) => {
+    if (priority === entry.priority) return
+    setUpdatingId(`${entry.id}_priority`)
+    try {
+      const res = await client.patch(`/triage/${entry.id}`, { priority })
+      if (res.success) {
+        toast.success(`Priority set to ${priority}`)
+        refresh()
+      } else {
+        toast.error(res.error || 'Failed to change priority')
+      }
+    } catch (err) {
+      toast.error(err.message || 'Failed to change priority')
     } finally {
       setUpdatingId(null)
     }
@@ -217,7 +241,28 @@ export default function QueueModule() {
                             {fmtWait(entry.waitTime)}
                           </div>
                         </TableCell>
-                        <TableCell><StatusBadge status={priority} map={PRIORITY_COLORS} /></TableCell>
+                        <TableCell>
+                          {isCompleted ? (
+                            <StatusBadge status={priority} map={PRIORITY_COLORS} />
+                          ) : (
+                            <Select
+                              value={priority}
+                              onValueChange={val => changePriority(entry, val)}
+                              disabled={updatingId === `${entry.id}_priority`}
+                            >
+                              <SelectTrigger className="h-8 w-28">
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {PRIORITY_LEVELS.map(level => (
+                                  <SelectItem key={level} value={level} className="capitalize">
+                                    {level}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          )}
+                        </TableCell>
                         <TableCell>
                           <div className="flex gap-1 flex-wrap">
                             {!isCompleted && status !== 'called' && (
