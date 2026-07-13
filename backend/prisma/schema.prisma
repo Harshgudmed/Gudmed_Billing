@@ -666,7 +666,8 @@ model PharmacyDrug {
   gstRate          Float? // GST percentage
 
   // Identification
-  barcode      String? // EAN-13 / UPC / Code128 / QR payload scanned at the counter
+  barcode String?
+
   manufacturer String? // distinct from the free-text supplierName below
 
   // Storage
@@ -692,14 +693,11 @@ model PharmacyDrug {
   stockLedger   StockLedger[]
   eaptsMappings EaptsMedicationMapping[]
 
-  // Barcode uniqueness is enforced in the controller (see drug.controller.create/update),
-  // not via a DB unique constraint — a unique constraint makes `prisma db push` demand
-  // --accept-data-loss, which would break the Render deploy pipeline.
   @@index([organizationId])
+  @@index([barcode])
   @@index([drugName])
   @@index([drugCategory])
   @@index([quantityInStock])
-  @@index([barcode])
 }
 
 /// Pharmacy Batch (Batch/Lot Tracking)
@@ -1022,6 +1020,7 @@ model Invoice {
   discountAmount     Float @default(0)
   discountPercentage Float @default(0)
   taxAmount          Float @default(0)
+  taxPercentage      Float @default(0)
   totalAmount        Float
 
   // Payment

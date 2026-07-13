@@ -512,32 +512,41 @@ export default function BillingModule({ onBack }) {
     if (form.items.length === 0) { toast.error('Add at least one service'); return }
     setSaving(true)
     const deptLabel = DEPT_LABEL[department] || department
+    // Build item array for the backend. The backend enforces structure and
+    // computes its own subtotal.
+    const apiItems = form.items.map(it => {
+      const itemTotal = it.qty * it.amt
+      const itemDiscount = subtotal > 0 ? (itemTotal / subtotal) * discountAmt : 0
+      // If department is Pharmacy, prices are GST-inclusive. Otherwise, tax is computed from gstPct.
+      const itemTax = department === 'Pharmacy' ? 0 : Math.round((itemTotal - itemDiscount) * (form.gstPct || 0) / 100)
+      
+      return {
+        serviceName: it.name,
+        quantity:    it.qty,
+        unitPrice:   it.amt,
+        total:       itemTotal,
+        tax:         itemTax,
+        discount:    itemDiscount,
+        // Only the three clinical catalogues carry a master-data id; billing it
+        // decrements pharmacy stock / raises the lab-radiology order.
+        ...(it.id && SOURCE_TYPE[it.cat] ? { sourceType: SOURCE_TYPE[it.cat], sourceId: it.id } : {}),
+        // gstRate/batchNumber/expiryDate pass through for Pharmacy receipts
+        ...(it.gstRate ? { gstRate: Number(it.gstRate) } : {}),
+        ...(it.batchNumber ? { batchNumber: it.batchNumber } : {}),
+        ...(it.expiryDate ? { expiryDate: it.expiryDate } : {}),
+      }
+    })
     const bill = { ...form, department: deptLabel, subtotal, discountAmt, gstAmt, total, createdAt: new Date().toISOString(), id: form.invoiceNo }
     try {
       if (form.patientId) {
-        const apiItems = form.items.map(it => ({
-          serviceName: it.name,
-          quantity:    it.qty,
-          unitPrice:   it.amt,
-          total:       it.qty * it.amt,
-          // Pharmacy prices are GST-INCLUSIVE (MRP-based, the Indian retail norm),
-          // so tax is never added on top here — the receipt backs CGST/SGST out of
-          // the line total. Adding it as `tax` would overcharge the patient.
-          tax:         0,
-          // Only the three clinical catalogues carry a master-data id; billing it
-          // decrements pharmacy stock / raises the lab-radiology order.
-          ...(it.id && SOURCE_TYPE[it.cat] ? { sourceType: SOURCE_TYPE[it.cat], sourceId: it.id } : {}),
-          // Carried so the invoice's stored item (and the PharmacySale the backend
-          // records from it) can render the real GST breakdown on the receipt.
-          ...(it.gstRate ? { gstRate: Number(it.gstRate) } : {}),
-        }))
         // Home collection charge → its own line so the invoice total is correct.
         // Lab-only (see the department gate on the input above) — checked again
         // here so a stale value can never reach a non-Lab bill either.
-        if (department === 'Lab' && homeCharge > 0) apiItems.push({ serviceName: 'Home Collection Charges', quantity: 1, unitPrice: homeCharge, total: homeCharge, tax: 0 })
+        if (department === 'Lab' && homeCharge > 0) apiItems.push({ serviceName: 'Home Collection Charges', quantity: 1, unitPrice: homeCharge, total: homeCharge, tax: 0, discount: 0 })
         const result = await client.post('/billing', {
           resource: 'invoice', patientId: form.patientId, items: apiItems,
           discountAmount: discountAmt, discountPercentage: form.discount,
+          taxPercentage: form.gstPct || 0,
           // Tag the invoice with its department + home-collection so the receipt shows it.
           notes: `[${deptLabel}] ${form.notes || ''}${department === 'Lab' && homeCharge > 0 ? ` [HCC:${homeCharge}]` : ''}`.trim(),
         })
@@ -1116,6 +1125,11 @@ export default function BillingModule({ onBack }) {
                           <span className="text-sm text-gray-600 w-24">Discount %</span>
                           <Input type="number" min="0" max="100" className="h-7 w-20 text-sm text-center" value={Number.isNaN(form.discount) ? '' : form.discount} onChange={e => { const v = parseFloat(e.target.value); setForm(f => ({ ...f, discount: Number.isNaN(v) ? 0 : v })) }} />
                           {discountAmt > 0 && <span className="text-sm text-green-600 font-medium">− {fmt(discountAmt)}</span>}
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm text-gray-600 w-24">GST %</span>
+                          <Input type="number" min="0" max="100" className="h-7 w-20 text-sm text-center" value={Number.isNaN(form.gstPct) ? '' : form.gstPct} onChange={e => { const v = parseFloat(e.target.value); setForm(f => ({ ...f, gstPct: Number.isNaN(v) ? 0 : v })) }} />
+                          {gstAmt > 0 && <span className="text-sm text-gray-600 font-medium">+ {fmt(gstAmt)}</span>}
                         </div>
                         {/* Home collection — Laboratory only (sample pickup). Doesn't apply
                             to Pharmacy/Radiology/etc., so it no longer shows for them —

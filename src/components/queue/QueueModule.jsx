@@ -4,7 +4,6 @@ import { RefreshCw, Users, Clock, CheckCircle, Phone, Search } from 'lucide-reac
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Pagination } from '@/components/common/Pagination'
@@ -26,6 +25,14 @@ const PRIORITY_COLORS = {
 
 // Ordered most-urgent first — mirrors the backend rank in lib/queuePriority.js.
 const PRIORITY_LEVELS = ['urgent', 'high', 'medium', 'normal', 'low']
+
+// Single-button priority control: each click escalates to the next-more-urgent
+// level, wrapping from urgent back to low. Unknown values start from normal.
+function nextPriority(current) {
+  const idx = PRIORITY_LEVELS.indexOf(current)
+  const start = idx === -1 ? PRIORITY_LEVELS.indexOf('normal') : idx
+  return PRIORITY_LEVELS[(start - 1 + PRIORITY_LEVELS.length) % PRIORITY_LEVELS.length]
+}
 
 const QUEUE_STATUS_COLORS = {
   waiting: 'bg-yellow-100 text-yellow-800',
@@ -245,22 +252,15 @@ export default function QueueModule() {
                           {isCompleted ? (
                             <StatusBadge status={priority} map={PRIORITY_COLORS} />
                           ) : (
-                            <Select
-                              value={priority}
-                              onValueChange={val => changePriority(entry, val)}
+                            <button
+                              type="button"
                               disabled={updatingId === `${entry.id}_priority`}
+                              onClick={() => changePriority(entry, nextPriority(priority))}
+                              title="Click to change priority"
+                              className={`px-3 py-1 rounded text-xs font-semibold capitalize transition-opacity hover:opacity-80 disabled:opacity-50 ${PRIORITY_COLORS[priority] || 'bg-gray-100 text-gray-800'}`}
                             >
-                              <SelectTrigger className="h-8 w-28">
-                                <SelectValue />
-                              </SelectTrigger>
-                              <SelectContent>
-                                {PRIORITY_LEVELS.map(level => (
-                                  <SelectItem key={level} value={level} className="capitalize">
-                                    {level}
-                                  </SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
+                              {priority}
+                            </button>
                           )}
                         </TableCell>
                         <TableCell>

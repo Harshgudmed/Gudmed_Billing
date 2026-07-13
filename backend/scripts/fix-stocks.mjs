@@ -4,53 +4,49 @@ const db = new PrismaClient()
 
 async function main() {
   console.log('Fetching all pharmacy drugs...')
-  const drugs = await db.pharmacyDrug.findMany()
-  console.log(`Found ${drugs.length} drugs.`)
+  const drugs = await db.pharmacyDrug.findMany({
+    select: { id: true, organizationId: true }
+  })
+  console.log(`Found ${drugs.length} drugs in the database. Updating in bulk...`)
 
-  let updatedDrugs = 0
-  let updatedBatches = 0
+  // 1. Bulk update all drugs to have 1000 in stock
+  console.log('Bulk updating PharmacyDrug stock...')
+  await db.pharmacyDrug.updateMany({
+    data: { quantityInStock: 1000 }
+  })
 
-  for (const drug of drugs) {
-    // 1. Give every drug 1000 quantityInStock
-    await db.pharmacyDrug.update({
-      where: { id: drug.id },
-      data: { quantityInStock: 1000 }
+  // 2. Prepare batches to insert
+  console.log('Preparing new batches for all drugs...')
+  const expiry = new Date()
+  expiry.setFullYear(expiry.getFullYear() + 2)
+
+  // We will blindly create 1 new batch for every single drug in chunks
+  // This is much faster than checking sequentially if they already have one
+  const chunkSize = 10000
+  let batchesInserted = 0
+
+  for (let i = 0; i < drugs.length; i += chunkSize) {
+    const chunk = drugs.slice(i, i + chunkSize)
+    
+    const batchData = chunk.map(d => ({
+      organizationId: d.organizationId,
+      drugId: d.id,
+      batchNumber: `B-AUTO-${Math.floor(Math.random() * 10000)}`,
+      expiryDate: expiry,
+      quantityReceived: 1000,
+      quantityRemaining: 1000,
+    }))
+
+    await db.pharmacyBatch.createMany({
+      data: batchData,
+      skipDuplicates: true // Just in case
     })
-    updatedDrugs++
-
-    // 2. Find if it has batches
-    const batches = await db.pharmacyBatch.findMany({
-      where: { drugId: drug.id }
-    })
-
-    if (batches.length === 0) {
-      // Create a default batch with 1000 stock expiring far in the future
-      const expiry = new Date()
-      expiry.setFullYear(expiry.getFullYear() + 2)
-      
-      await db.pharmacyBatch.create({
-        data: {
-          organizationId: drug.organizationId,
-          drugId: drug.id,
-          batchNumber: `B-AUTO-${Math.floor(Math.random() * 10000)}`,
-          expiryDate: expiry,
-          quantityReceived: 1000,
-          quantityRemaining: 1000,
-        }
-      })
-      updatedBatches++
-    } else {
-      // Update the first batch to have 1000 remaining
-      // (This ensures stockService can find a valid batch when deducting stock)
-      await db.pharmacyBatch.update({
-        where: { id: batches[0].id },
-        data: { quantityRemaining: 1000 }
-      })
-      updatedBatches++
-    }
+    
+    batchesInserted += chunk.length
+    console.log(`Inserted ${batchesInserted} / ${drugs.length} batches...`)
   }
 
-  console.log(`✅ Success: Updated ${updatedDrugs} drugs and ensured ${updatedBatches} batches have 1000 stock each.`)
+  console.log(`✅ Success: Updated ${drugs.length} drugs and inserted ${batchesInserted} batches with 1000 stock each.`)
 }
 
 main()

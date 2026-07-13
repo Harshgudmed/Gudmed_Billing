@@ -45,6 +45,7 @@ const invoiceSchema = z.object({
   items: z.array(invoiceItemSchema).min(1),
   discountAmount: z.number().nonnegative().default(0),
   discountPercentage: z.number().nonnegative().default(0),
+  taxPercentage: z.number().nonnegative().default(0),
   notes: z.string().optional(),
 })
 
@@ -352,7 +353,7 @@ export async function create(req, res) {
         return res.status(400).json({ success: false, error: parsed.error.flatten() })
       }
 
-      const { patientId, consultationId, items, discountAmount, discountPercentage, notes } =
+      const { patientId, consultationId, items, discountAmount, discountPercentage, taxPercentage, notes } =
         parsed.data
 
       const subtotal = items.reduce((sum, item) => sum + item.total, 0)
@@ -393,6 +394,7 @@ export async function create(req, res) {
             items: JSON.stringify(items),
             subtotal,
             taxAmount,
+            taxPercentage,
             discountAmount,
             discountPercentage,
             totalAmount,
@@ -773,6 +775,7 @@ export async function create(req, res) {
             items: JSON.stringify(revisedItems),
             subtotal: newTotalAmount,
             taxAmount: oldInvoice.taxAmount,
+            taxPercentage: oldInvoice.taxPercentage,
             discountAmount: oldInvoice.discountAmount,
             discountPercentage: oldInvoice.discountPercentage,
             totalAmount: newTotalAmount,
