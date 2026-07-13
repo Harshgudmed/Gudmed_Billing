@@ -72,7 +72,7 @@ export default function QueueModule() {
   const debouncedSearch = useDebounce(search, 300)
   const dateFilter = useDateFilter('today')
 
-  const queuePage = useServerPagination('/triage', {
+  const queuePage = useServerPagination('/queue', {
     perPage: QUEUE_PER_PAGE,
     params: {
       search: debouncedSearch,
@@ -86,7 +86,7 @@ export default function QueueModule() {
   const setStatus = async (entry, status, successMessage) => {
     setUpdatingId(`${entry.id}_${status}`)
     try {
-      const res = await client.patch(`/triage/${entry.id}`, { status })
+      const res = await client.patch(`/queue/${entry.id}`, { status })
       if (res.success) {
         toast.success(successMessage)
         refresh()
@@ -108,7 +108,7 @@ export default function QueueModule() {
     if (priority === entry.priority) return
     setUpdatingId(`${entry.id}_priority`)
     try {
-      const res = await client.patch(`/triage/${entry.id}`, { priority })
+      const res = await client.patch(`/queue/${entry.id}`, { priority })
       if (res.success) {
         toast.success(`Priority set to ${priority}`)
         await refresh()
