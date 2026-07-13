@@ -153,25 +153,22 @@ export default function QueueModule() {
             {STAT_TILES.map(tile => {
               const selected = statusFilter === tile.status
               return (
-                <Card
+                // A real <button>, not a focusable div: a div with tabIndex draws a
+                // text caret when focused, which made the tile look editable.
+                <button
                   key={tile.status}
-                  role="button"
-                  tabIndex={0}
+                  type="button"
                   aria-pressed={selected}
                   onClick={() => setStatusFilter(selected ? 'all' : tile.status)}
-                  onKeyDown={e => {
-                    if (e.key === 'Enter' || e.key === ' ') {
-                      e.preventDefault()
-                      setStatusFilter(selected ? 'all' : tile.status)
-                    }
-                  }}
-                  className={`cursor-pointer transition-shadow hover:shadow-md ${selected ? 'ring-2 ring-blue-500' : ''}`}
+                  className="text-left rounded-lg"
                 >
-                  <CardContent className="pt-4">
-                    <p className="text-xs text-gray-500">{tile.label}</p>
-                    <p className={`text-2xl font-bold ${tile.color}`}>{summary?.[tile.status] ?? 0}</p>
-                  </CardContent>
-                </Card>
+                  <Card className={`transition-shadow hover:shadow-md ${selected ? 'ring-2 ring-blue-500' : ''}`}>
+                    <CardContent className="pt-4">
+                      <p className="text-xs text-gray-500">{tile.label}</p>
+                      <p className={`text-2xl font-bold ${tile.color}`}>{summary?.[tile.status] ?? 0}</p>
+                    </CardContent>
+                  </Card>
+                </button>
               )
             })}
           </div>

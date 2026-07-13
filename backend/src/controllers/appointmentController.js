@@ -3,6 +3,7 @@ import { Prisma } from '@prisma/client'
 import { getOrgId } from "../lib/reqContext.js";
 import { nextSeriesNumber, invoiceProbe } from "../lib/counters.js";
 import { startOfDay, endOfDay, todayIST } from '../utils/dates.js'
+import { normalizeTimeHHMM } from '../lib/dates.js'
 import { scopedDoctorId } from '../utils/scope.js'
 import { computeConsultationFee } from '../services/appointmentFees.js'
 import { generateQueueNumber } from '../utils/queueNumber.js'
@@ -187,6 +188,9 @@ export async function create(req, res, next) {
   try {
     const organizationId = getOrgId(req)
     const validatedData = req.validatedBody
+    // Pad once, here: the slot-clash lookup below and the row we store must agree,
+    // and the stored value is string-sorted (see normalizeTimeHHMM).
+    validatedData.appointmentTime = normalizeTimeHHMM(validatedData.appointmentTime)
 
     const apptDate = new Date(validatedData.appointmentDate)
     let consultationFee = null
@@ -365,7 +369,7 @@ export async function update(req, res, next) {
     // organizationId, patientId, invoiceId are never touched.
     const updates = {}
     if (body.appointmentDate    !== undefined) updates.appointmentDate    = body.appointmentDate
-    if (body.appointmentTime    !== undefined) updates.appointmentTime    = body.appointmentTime
+    if (body.appointmentTime    !== undefined) updates.appointmentTime    = normalizeTimeHHMM(body.appointmentTime)
     if (body.appointmentType    !== undefined) updates.appointmentType    = body.appointmentType
     if (body.doctorId           !== undefined) updates.doctorId           = body.doctorId
     if (body.chiefComplaint     !== undefined) updates.chiefComplaint     = body.chiefComplaint
@@ -437,7 +441,11 @@ export async function reschedule(req, res, next) {
   try {
     const organizationId = getOrgId(req)
     const { id } = req.params
-    const { appointmentDate, appointmentTime } = req.body
+    const { appointmentDate } = req.body
+    // This route has no `validate()` middleware, so req.body reaches the DB
+    // unchecked — it is how unpadded times like "9:00" got in, which then sort
+    // BELOW "10:00" and drop the 9am patient to the bottom of the day.
+    const appointmentTime = normalizeTimeHHMM(req.body.appointmentTime)
 
     if (!appointmentDate || !appointmentTime) {
       return res.status(400).json({ success: false, error: 'appointmentDate and appointmentTime are required' })
