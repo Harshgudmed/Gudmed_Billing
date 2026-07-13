@@ -5,6 +5,7 @@
 // OrderTask row per occurrence, shared across LAB / RADIOLOGY / PHARMACY /
 // PROCEDURE so every order type uses the same chart and mechanism.
 import { db } from '../config/db.js'
+import { startOfDay } from '../utils/dates.js'
 
 // Daily clock-times per standard frequency code. Kept in sync with the eMAR
 // slots in the frontend (NursingStation MAR_SLOTS).
@@ -70,9 +71,9 @@ export function expandSchedule({ frequency, duration, startAt } = {}) {
 
   const days = parseDurationDays(duration)
   const out = []
-  // Day 0 begins on the order's calendar date.
-  const day0 = new Date(start)
-  day0.setHours(0, 0, 0, 0)
+  // Day 0 begins on the order's calendar date — in the HOSPITAL's timezone, so a
+  // UTC server doesn't schedule the first dose on the wrong day (see lib/dates.js).
+  const day0 = startOfDay(start)
 
   for (let d = 0; d < days && out.length < MAX_TASKS; d++) {
     for (const t of times) {

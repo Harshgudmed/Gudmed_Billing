@@ -1,4 +1,5 @@
 import { db } from '../config/db.js'
+import { dayRange } from '../lib/dates.js'
 import { getOrgId } from "../lib/reqContext.js";
 import { listResponse } from "../lib/pagination.js";
 
@@ -26,10 +27,9 @@ export async function getAll(req, res, next) {
         { patient: { mrn: { contains: search, mode: 'insensitive' } } },
       ]
     }
+    // Hospital-timezone day boundaries (see lib/dates.js).
     if (startDate || endDate) {
-      baseWhere.createdAt = {}
-      if (startDate) baseWhere.createdAt.gte = new Date(startDate)
-      if (endDate) { const e = new Date(endDate); e.setHours(23, 59, 59, 999); baseWhere.createdAt.lte = e }
+      baseWhere.createdAt = dayRange(startDate, endDate)
     }
 
     const where = { ...baseWhere }

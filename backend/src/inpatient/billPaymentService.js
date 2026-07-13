@@ -1,6 +1,7 @@
 // Phase 2 — IPD payment ledger. Signed, immutable, numbered receipts.
 // paidTotal/balanceDue are recomputed on the Bill from its SUCCESS payments.
 import { db } from '../config/db.js'
+import { dayRange } from '../lib/dates.js'
 import { financialYear } from './billService.js'
 import { round2 } from '../lib/money.js'
 
@@ -119,10 +120,10 @@ export async function ensureLegacyDepositAdvance(tx, organizationId, admissionId
 // Daily / shift collection report for cashier reconciliation.
 export async function collections(organizationId, { from, to, cashierId } = {}) {
   const where = { organizationId, status: 'SUCCESS' }
+  // Whole calendar days in the HOSPITAL's timezone (see lib/dates.js) — a
+  // collections report must not shift by 5h30m just because prod runs in UTC.
   if (from || to) {
-    where.paidAt = {}
-    if (from) where.paidAt.gte = new Date(`${from}T00:00:00`)
-    if (to) where.paidAt.lte = new Date(`${to}T23:59:59.999`)
+    where.paidAt = dayRange(from, to)
   }
   if (cashierId) where.receivedById = cashierId
   const rows = await db.billPayment.findMany({ where, select: { amount: true, method: true, type: true, receivedById: true, receivedByName: true } })

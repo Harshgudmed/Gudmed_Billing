@@ -1,11 +1,12 @@
 import { db } from '../../config/db.js'
 import { getOrgId } from "../../lib/reqContext.js";
+import { startOfToday } from '../../lib/dates.js'
 
 export async function getStats(req, res, next) {
   try {
     const ORGANIZATION_ID = getOrgId(req)
-    const today = new Date()
-    today.setHours(0, 0, 0, 0)
+    // "Today" = the hospital's day, not the server's (see lib/dates.js).
+    const today = startOfToday()
     const tomorrow = new Date(today)
     tomorrow.setDate(tomorrow.getDate() + 1)
     const in90Days = new Date()
