@@ -220,8 +220,37 @@ export default function QueueModule() {
                     <TableRow>
                       <TableCell colSpan={7} className="text-center py-10 text-gray-400">
                         <Clock className="h-8 w-8 mx-auto mb-2 text-gray-300" />
-                        <p>No patients in queue</p>
-                        <p className="text-xs mt-1">Queue entries from triage will appear here</p>
+                        {/* The queue defaults to TODAY. An empty screen with no
+                            explanation reads as "the queue is broken" when in fact
+                            the filters simply exclude everything — say so, and give
+                            a one-click way out. */}
+                        {dateFilter.active || statusFilter !== 'all' || debouncedSearch ? (
+                          <>
+                            <p className="text-gray-600">No patients match the current filters</p>
+                            <p className="text-xs mt-1">
+                              Showing {dateFilter.active ? <b>{dateFilter.mode === 'today' ? "today" : "the selected dates"}</b> : 'all dates'}
+                              {statusFilter !== 'all' && <> · status <b>{statusFilter}</b></>}
+                              {debouncedSearch && <> · search <b>“{debouncedSearch}”</b></>}
+                            </p>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="mt-3"
+                              onClick={() => {
+                                dateFilter.reset()
+                                setStatusFilter('all')
+                                setSearch('')
+                              }}
+                            >
+                              Clear filters &amp; show all
+                            </Button>
+                          </>
+                        ) : (
+                          <>
+                            <p>No patients in queue</p>
+                            <p className="text-xs mt-1">Queue entries from triage and appointment check-ins appear here</p>
+                          </>
+                        )}
                       </TableCell>
                     </TableRow>
                   ) : queue.map((entry, idx) => {
