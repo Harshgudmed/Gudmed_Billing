@@ -162,7 +162,7 @@ export async function updateQueue(req, res, next) {
     // any authenticated caller could modify any other org's queue item).
     const existing = await db.queueManagement.findFirst({
       where: { id, organizationId: ORG_ID },
-      select: { id: true },
+      select: { id: true, priorityRank: true },
     })
     if (!existing) {
       return res.status(404).json({ success: false, error: 'Queue item not found' })
@@ -175,9 +175,17 @@ export async function updateQueue(req, res, next) {
     if (validatedData.status === 'called') data.calledAt = new Date()
     else if (validatedData.status === 'in_progress') data.serviceStartedAt = new Date()
     else if (validatedData.status === 'completed') data.serviceCompletedAt = new Date()
+    
     // Keep the numeric sort key in step with the priority string so a priority
     // change actually reorders the queue on the next read.
-    if (validatedData.priority !== undefined) data.priorityRank = priorityRank(validatedData.priority)
+    if (validatedData.priority !== undefined) {
+      const newRank = priorityRank(validatedData.priority)
+      // Scenario 2: Reset joinedQueueAt to current time if priority is escalated
+      if (existing.priorityRank !== undefined && newRank > existing.priorityRank) {
+        data.joinedQueueAt = new Date()
+      }
+      data.priorityRank = newRank
+    }
 
     const item = await db.queueManagement.update({
       where: { id },

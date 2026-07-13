@@ -2512,7 +2512,8 @@ model QueueManagement {
   @@index([assignedToId])
   // Matches the queue list's ORDER BY (priorityRank desc, joinedQueueAt asc)
   // within a tenant, so the sorted page read stays index-backed.
-  @@index([organizationId, priorityRank, joinedQueueAt])
+  @@index([organizationId, status, priorityRank, joinedQueueAt])
+  @@index([organizationId, serviceArea, status, priorityRank, joinedQueueAt])
 }
 
 /// Day-Care Case (same-day admission/procedure with same-day discharge)
