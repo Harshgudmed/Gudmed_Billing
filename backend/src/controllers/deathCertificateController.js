@@ -1,6 +1,7 @@
 import { db } from '../config/db.js'
 import { getOrgId } from "../lib/reqContext.js";
 import { isOwned } from "../lib/tenant.js";
+import { listResponse } from "../lib/pagination.js";
 
 export async function getAll(req, res, next) {
   try {
@@ -16,15 +17,23 @@ export async function getAll(req, res, next) {
         { patient: { mrn: { contains: search, mode: 'insensitive' } } },
       ]
     }
-    const certificates = await db.deathCertificate.findMany({
-      where,
-      include: {
-        patient: { select: { id: true, firstName: true, middleName: true, lastName: true, mrn: true } },
-        certifiedBy: { select: { id: true, fullName: true } },
+    const include = {
+      patient: { select: { id: true, firstName: true, middleName: true, lastName: true, mrn: true } },
+      certifiedBy: { select: { id: true, fullName: true } },
+    }
+    // Stat cards count across the WHOLE filtered set, not just this page.
+    const body = await listResponse(db.deathCertificate, {
+      where, include, orderBy: { dateOfDeath: 'desc' }, req,
+      summary: async () => {
+        const [total, issued, maternal] = await Promise.all([
+          db.deathCertificate.count({ where }),
+          db.deathCertificate.count({ where: { ...where, issuedAt: { not: null } } }),
+          db.deathCertificate.count({ where: { ...where, isMaternalDeath: true } }),
+        ])
+        return { total, issued, pendingIssuance: total - issued, maternal }
       },
-      orderBy: { dateOfDeath: 'desc' },
     })
-    res.json({ success: true, data: certificates })
+    res.json(body)
   } catch (err) {
     next(err)
   }

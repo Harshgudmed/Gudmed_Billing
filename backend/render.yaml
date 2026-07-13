@@ -2,6 +2,7 @@ services:
   - type: web
     name: gudmed-api
     env: node
+    rootDir: backend
     # Prisma MIGRATIONS (not db push). The first deploy baselines the existing
     # db-push'd database by marking 0_init as already-applied (|| true so a
     # re-run is harmless), then `migrate deploy` applies any new migrations.

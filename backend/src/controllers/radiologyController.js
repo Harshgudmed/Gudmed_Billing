@@ -1,6 +1,8 @@
 import { db } from '../config/db.js'
 import { getOrgId, getActor } from "../lib/reqContext.js";
+import { nextSeriesNumber } from "../lib/counters.js";
 import { resolveRequestedById } from '../lib/requestedBy.js'
+import { todayRange } from '../lib/dates.js'
 import { z } from 'zod'
 import { PATIENT_SNAPSHOT_SELECT } from '../utils/patientSnapshot.js'
 
@@ -97,14 +99,6 @@ const examUpdateSchema = z.object({
 
 // Shared patient snapshot fields — single source of truth (see utils/patientSnapshot).
 const patientSelect = PATIENT_SNAPSHOT_SELECT
-
-function todayRange() {
-  const start = new Date()
-  start.setHours(0, 0, 0, 0)
-  const end = new Date()
-  end.setHours(23, 59, 59, 999)
-  return { gte: start, lte: end }
-}
 
 // ── GET /api/radiology ─────────────────────────────────────────────────────────
 
@@ -295,28 +289,34 @@ export const create = async (req, res, next) => {
         urgency, scheduledDate, notes,
       } = parsed.data
 
-      const orderNumber = `RAD${Date.now()}`
+      const actorId = getActor(req).id
+      // Atomic per-org counter inside the insert's transaction — `RAD${Date.now()}`
+      // collided on the @unique orderNumber for two orders in the same millisecond.
+      const data = await db.$transaction(async (tx) => {
+        const orderNumber = await nextSeriesNumber(tx, ORGANIZATION_ID, 'RAD_ORDER', 'RAD')
+        const requestedById = await resolveRequestedById(tx, ORGANIZATION_ID, actorId)
 
-      const data = await db.radiologyOrder.create({
-        data: {
-          organizationId: ORGANIZATION_ID,
-          orderNumber,
-          patientId,
-          examId,
-          requestedById: await resolveRequestedById(db, ORGANIZATION_ID, getActor(req).id),
-          status: 'pending',
-          ...(consultationId !== undefined ? { consultationId } : {}),
-          ...(clinicalIndication !== undefined ? { clinicalIndication } : {}),
-          ...(provisionalDiagnosis !== undefined ? { provisionalDiagnosis } : {}),
-          ...(relevantHistory !== undefined ? { relevantHistory } : {}),
-          ...(urgency !== undefined ? { urgency } : {}),
-          ...(scheduledDate !== undefined ? { scheduledDate: new Date(scheduledDate) } : {}),
-          ...(notes !== undefined ? { notes } : {}),
-        },
-        include: {
-          patient: { select: patientSelect },
-          exam: true,
-        },
+        return tx.radiologyOrder.create({
+          data: {
+            organizationId: ORGANIZATION_ID,
+            orderNumber,
+            patientId,
+            examId,
+            requestedById,
+            status: 'pending',
+            ...(consultationId !== undefined ? { consultationId } : {}),
+            ...(clinicalIndication !== undefined ? { clinicalIndication } : {}),
+            ...(provisionalDiagnosis !== undefined ? { provisionalDiagnosis } : {}),
+            ...(relevantHistory !== undefined ? { relevantHistory } : {}),
+            ...(urgency !== undefined ? { urgency } : {}),
+            ...(scheduledDate !== undefined ? { scheduledDate: new Date(scheduledDate) } : {}),
+            ...(notes !== undefined ? { notes } : {}),
+          },
+          include: {
+            patient: { select: patientSelect },
+            exam: true,
+          },
+        })
       })
       return res.json({ success: true, data })
     }

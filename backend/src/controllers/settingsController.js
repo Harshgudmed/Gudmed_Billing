@@ -1,5 +1,6 @@
 import { db } from '../config/db.js'
 import { getOrgId } from "../lib/reqContext.js";
+import { listResponse } from "../lib/pagination.js";
 import bcrypt from 'bcryptjs'
 
 function parseOrg(org) {
@@ -48,14 +49,25 @@ export async function updateOrganization(req, res, next) {
 export async function getUsers(req, res, next) {
   try {
     const ORG_ID = getOrgId(req)
-    const users = await db.user.findMany({
-      where: { organizationId: ORG_ID },
-      include: { department: { select: { id: true, name: true } } },
-      orderBy: { fullName: 'asc' },
-    })
+    const { search } = req.query
+
+    const where = { organizationId: ORG_ID }
+    if (search) {
+      where.OR = [
+        { fullName: { contains: search, mode: 'insensitive' } },
+        { email: { contains: search, mode: 'insensitive' } },
+      ]
+    }
+
+    const include = { department: { select: { id: true, name: true } } }
+    // This endpoint also populates doctor dropdowns app-wide (register-patient,
+    // OPD, IPD, day-care…), which need EVERY row — so fullListTake:null keeps the
+    // non-paginated branch uncapped. It only paginates when the Settings table
+    // passes page/limit.
+    const body = await listResponse(db.user, { where, include, orderBy: { fullName: 'asc' }, req, fullListTake: null })
     // Never expose password hashes to the client.
-    const safe = users.map(({ passwordHash, ...u }) => u)
-    res.json({ success: true, data: safe })
+    body.data = body.data.map(({ passwordHash, ...u }) => u)
+    res.json(body)
   } catch (err) { next(err) }
 }
 

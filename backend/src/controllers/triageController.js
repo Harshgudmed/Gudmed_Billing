@@ -2,6 +2,8 @@ import { db } from '../config/db.js'
 import { getOrgId } from "../lib/reqContext.js";
 import { z } from 'zod'
 import { generateQueueNumber } from '../utils/queueNumber.js'
+import { getPagination, paginationMeta } from '../lib/pagination.js'
+import { priorityRank } from '../lib/queuePriority.js'
 
 const queueSchema = z.object({
   patientId: z.string(),
@@ -20,7 +22,7 @@ const queueSchema = z.object({
 // client-writable (mass-assignment protection — matches the pattern used in
 // appointmentController.js).
 const queueUpdateSchema = z.object({
-  status: z.enum(['waiting', 'called', 'in_service', 'completed', 'cancelled', 'no_show']).optional(),
+  status: z.enum(['waiting', 'called', 'in_progress', 'completed', 'cancelled', 'no_show']).optional(),
   priority: z.string().optional(),
   assignedToId: z.string().optional(),
   assignedRoom: z.string().optional(),
@@ -32,20 +34,44 @@ const queueUpdateSchema = z.object({
 export async function getQueue(req, res, next) {
   try {
     const ORG_ID = getOrgId(req)
-    const { serviceArea, status } = req.query
-    const limit = parseInt(req.query.limit || '10')
-    const offset = parseInt(req.query.offset || '0')
-    const where = { organizationId: ORG_ID }
-    if (serviceArea) where.serviceArea = serviceArea
-    if (status) where.status = status
+    const { serviceArea, status, search, startDate, endDate } = req.query
+    const { page, limit, skip } = getPagination(req.query)
 
-    const orderBy = [{ priority: 'desc' }, { joinedQueueAt: 'asc' }]
+    // Everything except the status filter. The per-status tile counts are built
+    // from this so that clicking one tile (which sets `status`) narrows the
+    // table WITHOUT collapsing the other tiles to zero — the counts stay a
+    // stable breakdown of the current date/search scope.
+    const baseWhere = { organizationId: ORG_ID }
+    if (serviceArea && serviceArea !== 'all') baseWhere.serviceArea = serviceArea
+    if (startDate || endDate) {
+      baseWhere.joinedQueueAt = {}
+      if (startDate) baseWhere.joinedQueueAt.gte = new Date(`${startDate}T00:00:00`)
+      if (endDate) baseWhere.joinedQueueAt.lte = new Date(`${endDate}T23:59:59.999`)
+    }
+    if (search) {
+      baseWhere.OR = [
+        { queueNumber: { contains: search, mode: 'insensitive' } },
+        { patient: { firstName: { contains: search, mode: 'insensitive' } } },
+        { patient: { lastName: { contains: search, mode: 'insensitive' } } },
+        { patient: { mrn: { contains: search, mode: 'insensitive' } } },
+      ]
+    }
 
-    const [queue, total] = await Promise.all([
+    // The listed page (and its total) additionally honour the status filter.
+    const where = (status && status !== 'all')
+      ? { ...baseWhere, status }
+      : baseWhere
+
+    const orderBy = [{ priorityRank: 'desc' }, { joinedQueueAt: 'asc' }]
+
+    // Counts span the whole filtered set, not just this page — otherwise the
+    // header tiles would only ever count the rows currently on screen.
+    // `summary` is the shape useServerPagination already exposes to callers.
+    const [queue, total, byStatus] = await Promise.all([
       db.queueManagement.findMany({
         where,
         take: limit,
-        skip: offset,
+        skip,
         orderBy,
         include: {
           patient: {
@@ -54,20 +80,32 @@ export async function getQueue(req, res, next) {
         },
       }),
       db.queueManagement.count({ where }),
+      db.queueManagement.groupBy({ by: ['status'], where: baseWhere, _count: { _all: true } }),
     ])
 
     const now = new Date()
-    const queueWithWaitTime = queue.map(item => ({
-      ...item,
-      waitTime: item.joinedQueueAt
-        ? Math.floor((now.getTime() - new Date(item.joinedQueueAt).getTime()) / 60000)
-        : 0,
-    }))
+    const TERMINAL = ['completed', 'cancelled', 'no_show']
+    const queueWithWaitTime = queue.map(item => {
+      // Wait time = time spent waiting to be seen, so it must STOP counting once
+      // the patient leaves the waiting state — otherwise a patient seen days ago
+      // shows an ever-growing wait of hundreds of hours. Freeze at the first
+      // "attended" moment; fall back to updatedAt for a terminal row that was
+      // never called, and only keep ticking against `now` while still waiting.
+      const attendedAt = item.serviceStartedAt || item.calledAt || item.serviceCompletedAt
+      const endRef = attendedAt ? new Date(attendedAt)
+        : TERMINAL.includes(item.status) ? new Date(item.updatedAt)
+        : now
+      const waitTime = item.joinedQueueAt
+        ? Math.max(0, Math.floor((endRef.getTime() - new Date(item.joinedQueueAt).getTime()) / 60000))
+        : 0
+      return { ...item, waitTime }
+    })
 
     res.json({
       success: true,
       data: queueWithWaitTime,
-      meta: { total, limit, offset, hasMore: offset + limit < total },
+      pagination: paginationMeta(page, limit, total),
+      summary: Object.fromEntries(byStatus.map(r => [r.status, r._count._all])),
     })
   } catch (err) {
     next(err)
@@ -81,6 +119,16 @@ export async function addToQueue(req, res, next) {
     const validatedData = queueSchema.parse(req.body)
     const patientInclude = { patient: { select: { id: true, mrn: true, firstName: true, lastName: true } } }
 
+    // Derive the numeric sort key from the priority string up front so both the
+    // upsert and the plain create store it (the queue is ordered on this).
+    const createData = {
+      organizationId: ORG_ID,
+      ...validatedData,
+      priorityRank: priorityRank(validatedData.priority),
+      queueNumber: generateQueueNumber(validatedData.serviceArea),
+      status: 'waiting',
+    }
+
     // appointmentId is @unique on QueueManagement — upsert instead of create
     // so re-submitting for the same appointment (e.g. a double-click, or the
     // appointment was already checked in via appointmentController.update())
@@ -88,22 +136,12 @@ export async function addToQueue(req, res, next) {
     const queueItem = validatedData.appointmentId
       ? await db.queueManagement.upsert({
           where: { appointmentId: validatedData.appointmentId },
-          create: {
-            organizationId: ORG_ID,
-            ...validatedData,
-            queueNumber: generateQueueNumber(validatedData.serviceArea),
-            status: 'waiting',
-          },
+          create: createData,
           update: {},
           include: patientInclude,
         })
       : await db.queueManagement.create({
-          data: {
-            organizationId: ORG_ID,
-            ...validatedData,
-            queueNumber: generateQueueNumber(validatedData.serviceArea),
-            status: 'waiting',
-          },
+          data: createData,
           include: patientInclude,
         })
 
@@ -135,8 +173,11 @@ export async function updateQueue(req, res, next) {
     const validatedData = queueUpdateSchema.parse(req.body)
     const data = { ...validatedData }
     if (validatedData.status === 'called') data.calledAt = new Date()
-    else if (validatedData.status === 'in_service') data.serviceStartedAt = new Date()
+    else if (validatedData.status === 'in_progress') data.serviceStartedAt = new Date()
     else if (validatedData.status === 'completed') data.serviceCompletedAt = new Date()
+    // Keep the numeric sort key in step with the priority string so a priority
+    // change actually reorders the queue on the next read.
+    if (validatedData.priority !== undefined) data.priorityRank = priorityRank(validatedData.priority)
 
     const item = await db.queueManagement.update({
       where: { id },

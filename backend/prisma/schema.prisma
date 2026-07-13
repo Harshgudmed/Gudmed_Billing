@@ -419,6 +419,7 @@ model Appointment {
   doctor        User?               @relation("DoctorAppointments", fields: [doctorId], references: [id])
   checkedInBy   User?               @relation("CheckedInBy", fields: [checkedInById], references: [id])
   consultations Consultation[]
+  invoices      Invoice[]
   queueEntry    QueueManagement?
 
   @@index([organizationId])
@@ -665,7 +666,8 @@ model PharmacyDrug {
   gstRate          Float? // GST percentage
 
   // Identification
-  barcode      String? // EAN-13 / UPC / Code128 / QR payload scanned at the counter
+  barcode String?
+
   manufacturer String? // distinct from the free-text supplierName below
 
   // Storage
@@ -691,14 +693,11 @@ model PharmacyDrug {
   stockLedger   StockLedger[]
   eaptsMappings EaptsMedicationMapping[]
 
-  // Barcode uniqueness is enforced in the controller (see drug.controller.create/update),
-  // not via a DB unique constraint — a unique constraint makes `prisma db push` demand
-  // --accept-data-loss, which would break the Render deploy pipeline.
   @@index([organizationId])
+  @@index([barcode])
   @@index([drugName])
   @@index([drugCategory])
   @@index([quantityInStock])
-  @@index([barcode])
 }
 
 /// Pharmacy Batch (Batch/Lot Tracking)
@@ -1003,6 +1002,7 @@ model Invoice {
   // Relations
   patientId      String
   consultationId String?
+  appointmentId  String? // set when this invoice is the auto-voucher for an appointment
   parentInvoiceId String?
   parentInvoice   Invoice?  @relation("RevisedInvoices", fields: [parentInvoiceId], references: [id])
   revisedInvoices Invoice[] @relation("RevisedInvoices")
@@ -1020,6 +1020,7 @@ model Invoice {
   discountAmount     Float @default(0)
   discountPercentage Float @default(0)
   taxAmount          Float @default(0)
+  taxPercentage      Float @default(0)
   totalAmount        Float
 
   // Payment
@@ -1050,6 +1051,7 @@ model Invoice {
   organization Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   patient      Patient       @relation(fields: [patientId], references: [id], onDelete: Cascade)
   consultation Consultation? @relation(fields: [consultationId], references: [id])
+  appointment  Appointment?  @relation(fields: [appointmentId], references: [id])
   createdBy    User?         @relation("InvoicesCreated", fields: [createdById], references: [id])
   cancelledBy  User?         @relation("InvoicesCancelled", fields: [cancelledById], references: [id])
   payments     Payment[]
@@ -1058,6 +1060,7 @@ model Invoice {
   @@index([patientId])
   @@index([invoiceNumber])
   @@index([paymentStatus])
+  @@index([appointmentId])
 }
 
 /// Payment
@@ -2471,14 +2474,17 @@ model QueueManagement {
 
   // Queue Information
   queueNumber String
-  priority    String @default("normal") // urgent, normal, low
+  priority    String @default("normal") // urgent, high, medium, normal, low
+  // Numeric sort key derived from `priority` (see lib/queuePriority.js). The DB
+  // orders on this, not on the string — a string sort mis-ranked "high"/"medium".
+  priorityRank Int   @default(40)
 
   // Assignment
   assignedToId String?
   assignedRoom String?
 
   // Status
-  status String @default("waiting") // waiting, called, in_service, completed, cancelled, no_show
+  status String @default("waiting") // waiting, called, in_progress, completed, cancelled, no_show
 
   // Timestamps
   joinedQueueAt      DateTime  @default(now())
@@ -2504,6 +2510,9 @@ model QueueManagement {
   @@index([organizationId])
   @@index([serviceArea, status])
   @@index([assignedToId])
+  // Matches the queue list's ORDER BY (priorityRank desc, joinedQueueAt asc)
+  // within a tenant, so the sorted page read stays index-backed.
+  @@index([organizationId, priorityRank, joinedQueueAt])
 }
 
 /// Day-Care Case (same-day admission/procedure with same-day discharge)

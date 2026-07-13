@@ -64,8 +64,8 @@ export function dateRangeFor({ mode, specificDate, customStart, customEnd }) {
   return { startDate: "", endDate: "" };
 }
 
-export function useDateFilter() {
-  const [mode, setMode] = useState("all");
+export function useDateFilter(initialMode = "all") {
+  const [mode, setMode] = useState(initialMode);
   const [specificDate, setSpecificDate] = useState("");
   const [customStart, setCustomStart] = useState("");
   const [customEnd, setCustomEnd] = useState("");
