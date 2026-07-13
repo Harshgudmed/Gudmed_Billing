@@ -29,7 +29,7 @@ export async function getAll(req, res, next) {
     }
     // Hospital-timezone day boundaries (see lib/dates.js).
     if (startDate || endDate) {
-      baseWhere.createdAt = dayRange(startDate, endDate)
+      baseWhere.screenedAt = dayRange(startDate, endDate)
     }
 
     const where = { ...baseWhere }

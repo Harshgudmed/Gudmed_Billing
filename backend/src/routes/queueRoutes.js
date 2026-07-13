@@ -1,5 +1,5 @@
 import { Router } from 'express'
-import { getQueue, addToQueue, updateQueue } from '../controllers/triageController.js'
+import { getQueue, addToQueue, updateQueue } from '../controllers/queueController.js'
 
 const router = Router()
 
