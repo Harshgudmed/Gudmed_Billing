@@ -2,6 +2,50 @@ import { useState, useEffect } from 'react'
 import { toast } from 'sonner'
 import client from '@/api/client'
 
+const DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
+
+/** 'yyyy-MM-dd' for a Date, in the browser's local calendar. */
+function toYmd(dateObj) {
+  const yyyy = dateObj.getFullYear()
+  const mm = String(dateObj.getMonth() + 1).padStart(2, '0')
+  const dd = String(dateObj.getDate()).padStart(2, '0')
+  return `${yyyy}-${mm}-${dd}`
+}
+
+/**
+ * The discrete slots a doctor sits on one date, from their saved timetable —
+ * PURE, so callers that need many days at once (e.g. the weekly slot grid) can
+ * reuse the same rule instead of re-deriving it.
+ *
+ * Returns [] when the doctor is off that day or the date is an exception.
+ */
+export function slotsForDate(timetable, date) {
+  if (!timetable || !date) return []
+  const dateObj = new Date(date)
+  if (isNaN(dateObj.getTime())) return []
+
+  if (timetable.exceptions?.some((ex) => ex.date === toYmd(dateObj))) return []
+
+  const dayConfig = timetable.weeklySlots?.[DAY_NAMES[dateObj.getDay()]]
+  if (!dayConfig?.active || !dayConfig.shifts?.length) return []
+
+  const duration = timetable.slotDuration || 15
+  const slots = []
+  for (const shift of dayConfig.shifts) {
+    const [startH, startM] = String(shift.start).split(':').map(Number)
+    const [endH, endM] = String(shift.end).split(':').map(Number)
+    let minutes = startH * 60 + startM
+    const endMinutes = endH * 60 + endM
+    while (minutes + duration <= endMinutes) {
+      const h = Math.floor(minutes / 60)
+      const m = minutes % 60
+      slots.push(`${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`)
+      minutes += duration
+    }
+  }
+  return slots
+}
+
 /**
  * Custom hook to manage fetching and calculating a doctor's available time slots.
  * This abstracts away the heavy math and API calls from the UI components.
@@ -37,66 +81,19 @@ export function useDoctorTimetable(doctorId, appointmentDate, onSlotsGenerated) 
 
   // 2. Compute available time slots based on selected date & doctor timetable
   useEffect(() => {
-    if (!appointmentDate || !doctorTimetable) {
-      setAvailableTimeSlots([])
-      if (onSlotsGenerated) onSlotsGenerated([])
-      return
-    }
-
-    const dateObj = new Date(appointmentDate)
-    if (isNaN(dateObj.getTime())) {
-      setAvailableTimeSlots([])
-      if (onSlotsGenerated) onSlotsGenerated([])
-      return
-    }
-
-    const yyyy = dateObj.getFullYear()
-    const mm = String(dateObj.getMonth() + 1).padStart(2, '0')
-    const dd = String(dateObj.getDate()).padStart(2, '0')
-    const dateStr = `${yyyy}-${mm}-${dd}`
-
-    const isException = doctorTimetable.exceptions?.some(ex => ex.date === dateStr)
-    if (isException) {
-      setAvailableTimeSlots([])
-      if (onSlotsGenerated) onSlotsGenerated([])
-      toast.error("Doctor is on leave/vacation on this date")
-      return
-    }
-
-    const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
-    const dayName = days[dateObj.getDay()]
-
-    const dayConfig = doctorTimetable.weeklySlots?.[dayName]
-    if (!dayConfig || !dayConfig.active || !dayConfig.shifts || dayConfig.shifts.length === 0) {
-      setAvailableTimeSlots([])
-      if (onSlotsGenerated) onSlotsGenerated([])
-      return
-    }
-
-    const duration = doctorTimetable.slotDuration || 15
-    const slots = []
-
-    // Mathematical loop to generate discrete time slots from continuous shifts
-    dayConfig.shifts.forEach(shift => {
-      const [startH, startM] = shift.start.split(':').map(Number)
-      const [endH, endM] = shift.end.split(':').map(Number)
-
-      let currentMinutes = startH * 60 + startM
-      const endMinutes = endH * 60 + endM
-
-      while (currentMinutes + duration <= endMinutes) {
-        const h = Math.floor(currentMinutes / 60)
-        const m = currentMinutes % 60
-        const timeStr = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`
-        slots.push(timeStr)
-        currentMinutes += duration
-      }
-    })
-
+    const slots = slotsForDate(doctorTimetable, appointmentDate)
     setAvailableTimeSlots(slots)
     if (onSlotsGenerated) onSlotsGenerated(slots)
 
+    // A date the doctor has explicitly blocked out is worth saying out loud —
+    // "no slots" alone reads like a loading state.
+    if (slots.length === 0 && doctorTimetable && appointmentDate) {
+      const d = new Date(appointmentDate)
+      if (!isNaN(d.getTime()) && doctorTimetable.exceptions?.some((ex) => ex.date === toYmd(d))) {
+        toast.error('Doctor is on leave/vacation on this date')
+      }
+    }
   }, [appointmentDate, doctorTimetable])
 
-  return { availableTimeSlots, timetableLoading }
+  return { availableTimeSlots, timetableLoading, doctorTimetable }
 }

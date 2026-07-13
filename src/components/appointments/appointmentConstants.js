@@ -26,6 +26,11 @@ export const TIME_SLOTS = [
 
 export const APPOINTMENTS_LIST_PER_PAGE = 15;
 
+// Weekly view: rows fetched per day, and the size of each "Load more" chunk.
+// The day column is now internally scrollable, so this can be generous without
+// growing the page.
+export const WEEKLY_DAY_PAGE_SIZE = 50;
+
 // Status → label, colors, and icon (used by badges across every view)
 export const STATUS_CONFIG = {
   scheduled:   { label: "Scheduled",   color: "text-blue-700",   bgColor: "bg-blue-100",   icon: CalendarDays },
