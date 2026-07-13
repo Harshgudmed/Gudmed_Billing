@@ -149,6 +149,13 @@ export function printInvoice(bill, orgInfo, clinic, options = {}) {
   }
 
   const mrn = bill.uhid || "NA";
+  const gstAmt = Number(bill.gstAmt || bill.taxAmount || 0);
+  const gstPct = Number(bill.gstPct || bill.taxPercentage || 0);
+  const cgstStr = gstPct > 0 ? `CGST (${gstPct / 2}%)` : "CGST";
+  const sgstStr = gstPct > 0 ? `SGST (${gstPct / 2}%)` : "SGST";
+  const gstHtml = gstAmt > 0 ? `
+<div class="trow"><span>${cgstStr}</span><span>${inr(gstAmt / 2)}</span></div>
+<div class="trow"><span>${sgstStr}</span><span>${inr(gstAmt / 2)}</span></div>` : "";
 
   const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Invoice ${bill.invoiceNo}</title><style>
 *{box-sizing:border-box;margin:0;padding:0}body{font-family:Arial,Helvetica,sans-serif;font-size:9pt;color:#000;background:#f3f4f6;padding:20px}
@@ -183,9 +190,7 @@ ${PAYMENT_TABLE_CSS}
       </div>
     </div>
   </div>
-  <div>
-    <svg xmlns="http://www.w3.org/2000/svg" width="220" height="44" viewBox="0 0 336.00 44" preserveAspectRatio="none" fill="#000" style="display:block;margin-left:auto;max-width:250px;height:44px"><rect x="0.00" y="0" width="1.50" height="44"/><rect x="6.00" y="0" width="1.50" height="44"/><rect x="9.00" y="0" width="4.50" height="44"/><rect x="15.00" y="0" width="4.50" height="44"/><rect x="21.00" y="0" width="1.50" height="44"/><rect x="24.00" y="0" width="4.50" height="44"/><rect x="30.00" y="0" width="1.50" height="44"/><rect x="33.00" y="0" width="1.50" height="44"/><rect x="39.00" y="0" width="1.50" height="44"/><rect x="42.00" y="0" width="4.50" height="44"/><rect x="48.00" y="0" width="4.50" height="44"/><rect x="54.00" y="0" width="4.50" height="44"/><rect x="60.00" y="0" width="1.50" height="44"/><rect x="66.00" y="0" width="1.50" height="44"/><rect x="69.00" y="0" width="1.50" height="44"/><rect x="72.00" y="0" width="4.50" height="44"/><rect x="78.00" y="0" width="4.50" height="44"/><rect x="84.00" y="0" width="1.50" height="44"/><rect x="90.00" y="0" width="1.50" height="44"/><rect x="93.00" y="0" width="1.50" height="44"/><rect x="96.00" y="0" width="1.50" height="44"/><rect x="102.00" y="0" width="1.50" height="44"/><rect x="105.00" y="0" width="1.50" height="44"/><rect x="108.00" y="0" width="4.50" height="44"/><rect x="114.00" y="0" width="4.50" height="44"/><rect x="120.00" y="0" width="1.50" height="44"/><rect x="123.00" y="0" width="1.50" height="44"/><rect x="126.00" y="0" width="4.50" height="44"/><rect x="135.00" y="0" width="1.50" height="44"/><rect x="138.00" y="0" width="4.50" height="44"/><rect x="144.00" y="0" width="4.50" height="44"/><rect x="150.00" y="0" width="1.50" height="44"/><rect x="153.00" y="0" width="4.50" height="44"/><rect x="162.00" y="0" width="1.50" height="44"/><rect x="165.00" y="0" width="1.50" height="44"/><rect x="168.00" y="0" width="4.50" height="44"/><rect x="174.00" y="0" width="4.50" height="44"/><rect x="180.00" y="0" width="1.50" height="44"/><rect x="183.00" y="0" width="1.50" height="44"/><rect x="189.00" y="0" width="1.50" height="44"/><rect x="192.00" y="0" width="4.50" height="44"/><rect x="198.00" y="0" width="1.50" height="44"/><rect x="201.00" y="0" width="4.50" height="44"/><rect x="207.00" y="0" width="1.50" height="44"/><rect x="213.00" y="0" width="1.50" height="44"/><rect x="216.00" y="0" width="1.50" height="44"/><rect x="222.00" y="0" width="1.50" height="44"/><rect x="225.00" y="0" width="1.50" height="44"/><rect x="228.00" y="0" width="4.50" height="44"/><rect x="234.00" y="0" width="4.50" height="44"/><rect x="240.00" y="0" width="4.50" height="44"/><rect x="246.00" y="0" width="1.50" height="44"/><rect x="249.00" y="0" width="1.50" height="44"/><rect x="255.00" y="0" width="4.50" height="44"/><rect x="261.00" y="0" width="1.50" height="44"/><rect x="264.00" y="0" width="1.50" height="44"/><rect x="267.00" y="0" width="4.50" height="44"/><rect x="273.00" y="0" width="1.50" height="44"/><rect x="276.00" y="0" width="1.50" height="44"/><rect x="282.00" y="0" width="4.50" height="44"/><rect x="288.00" y="0" width="1.50" height="44"/><rect x="291.00" y="0" width="1.50" height="44"/><rect x="297.00" y="0" width="1.50" height="44"/><rect x="300.00" y="0" width="4.50" height="44"/><rect x="306.00" y="0" width="4.50" height="44"/><rect x="312.00" y="0" width="1.50" height="44"/><rect x="318.00" y="0" width="1.50" height="44"/><rect x="321.00" y="0" width="4.50" height="44"/><rect x="327.00" y="0" width="4.50" height="44"/><rect x="333.00" y="0" width="1.50" height="44"/></svg>
-    <div class="labnum">${esc(mrn)}</div>
+  <div style="text-align:right">
   </div>
 </div>
 <div class="title"> Receipt</div>
@@ -215,7 +220,8 @@ ${PAYMENT_TABLE_CSS}
 <div class="trow"><span>Order Value</span><span>${inr(calcSubtotal)}</span></div>
 ${bill.homeCollection ? `<div class="trow"><span>Home Collection Charges</span><span>${inr(bill.homeCollection)}</span></div>` : ""}
 ${bill.discount ? `<div class="trow"><span>Discount</span><span>-${inr(bill.discount)}</span></div>` : ""}
-<div class="trow b"><span>Total Order Value</span><span>${inr(calcSubtotal + Number(bill.homeCollection || 0) - Number(bill.discount || 0))}</span></div>
+${gstHtml}
+<div class="trow b"><span>Total Order Value</span><span>${inr(calcSubtotal + Number(bill.homeCollection || 0) - Number(bill.discount || 0) + gstAmt)}</span></div>
 <div class="trow net"><span>Net Payable Amount</span><span>${inr(bill.total)}</span></div>
 <div class="trow"><span>Paid Amount</span><span>${inr(bill.amountPaid)}</span></div>
 ${formatOpt === "detailed" ? `<div class="trow" style="color:#b91c1c"><span>Balance Amount</span><span>${inr(bill.balanceDue)}</span></div>` : ""}
@@ -312,9 +318,7 @@ export function printReceipt(p, orgInfo, clinic) {
       </div>
     </div>
   </div>
-  <div>
-    <svg xmlns="http://www.w3.org/2000/svg" width="220" height="44" viewBox="0 0 336.00 44" preserveAspectRatio="none" fill="#000" style="display:block;margin-left:auto;max-width:250px;height:44px"><rect x="0.00" y="0" width="1.50" height="44"/><rect x="6.00" y="0" width="1.50" height="44"/><rect x="9.00" y="0" width="4.50" height="44"/><rect x="15.00" y="0" width="4.50" height="44"/><rect x="21.00" y="0" width="1.50" height="44"/><rect x="24.00" y="0" width="4.50" height="44"/><rect x="30.00" y="0" width="1.50" height="44"/><rect x="33.00" y="0" width="1.50" height="44"/><rect x="39.00" y="0" width="1.50" height="44"/><rect x="42.00" y="0" width="4.50" height="44"/><rect x="48.00" y="0" width="4.50" height="44"/><rect x="54.00" y="0" width="4.50" height="44"/><rect x="60.00" y="0" width="1.50" height="44"/><rect x="66.00" y="0" width="1.50" height="44"/><rect x="69.00" y="0" width="1.50" height="44"/><rect x="72.00" y="0" width="4.50" height="44"/><rect x="78.00" y="0" width="4.50" height="44"/><rect x="84.00" y="0" width="1.50" height="44"/><rect x="90.00" y="0" width="1.50" height="44"/><rect x="93.00" y="0" width="1.50" height="44"/><rect x="96.00" y="0" width="1.50" height="44"/><rect x="102.00" y="0" width="1.50" height="44"/><rect x="105.00" y="0" width="1.50" height="44"/><rect x="108.00" y="0" width="4.50" height="44"/><rect x="114.00" y="0" width="4.50" height="44"/><rect x="120.00" y="0" width="1.50" height="44"/><rect x="123.00" y="0" width="1.50" height="44"/><rect x="126.00" y="0" width="4.50" height="44"/><rect x="135.00" y="0" width="1.50" height="44"/><rect x="138.00" y="0" width="4.50" height="44"/><rect x="144.00" y="0" width="4.50" height="44"/><rect x="150.00" y="0" width="1.50" height="44"/><rect x="153.00" y="0" width="4.50" height="44"/><rect x="162.00" y="0" width="1.50" height="44"/><rect x="165.00" y="0" width="1.50" height="44"/><rect x="168.00" y="0" width="4.50" height="44"/><rect x="174.00" y="0" width="4.50" height="44"/><rect x="180.00" y="0" width="1.50" height="44"/><rect x="183.00" y="0" width="1.50" height="44"/><rect x="189.00" y="0" width="1.50" height="44"/><rect x="192.00" y="0" width="4.50" height="44"/><rect x="198.00" y="0" width="1.50" height="44"/><rect x="201.00" y="0" width="4.50" height="44"/><rect x="207.00" y="0" width="1.50" height="44"/><rect x="213.00" y="0" width="1.50" height="44"/><rect x="216.00" y="0" width="1.50" height="44"/><rect x="222.00" y="0" width="1.50" height="44"/><rect x="225.00" y="0" width="1.50" height="44"/><rect x="228.00" y="0" width="4.50" height="44"/><rect x="234.00" y="0" width="4.50" height="44"/><rect x="240.00" y="0" width="4.50" height="44"/><rect x="246.00" y="0" width="1.50" height="44"/><rect x="249.00" y="0" width="1.50" height="44"/><rect x="255.00" y="0" width="4.50" height="44"/><rect x="261.00" y="0" width="1.50" height="44"/><rect x="264.00" y="0" width="1.50" height="44"/><rect x="267.00" y="0" width="4.50" height="44"/><rect x="273.00" y="0" width="1.50" height="44"/><rect x="276.00" y="0" width="1.50" height="44"/><rect x="282.00" y="0" width="4.50" height="44"/><rect x="288.00" y="0" width="1.50" height="44"/><rect x="291.00" y="0" width="1.50" height="44"/><rect x="297.00" y="0" width="1.50" height="44"/><rect x="300.00" y="0" width="4.50" height="44"/><rect x="306.00" y="0" width="4.50" height="44"/><rect x="312.00" y="0" width="1.50" height="44"/><rect x="318.00" y="0" width="1.50" height="44"/><rect x="321.00" y="0" width="4.50" height="44"/><rect x="327.00" y="0" width="4.50" height="44"/><rect x="333.00" y="0" width="1.50" height="44"/></svg>
-    <div class="labnum">${esc(mrn || p.receiptNumber)}</div>
+  <div style="text-align:right">
   </div>
 </div>
 <div class="title">PAYMENT RECEIPT</div>
@@ -447,76 +451,6 @@ export function amountInWords(num) {
   if (thou) out += three(thou) + " Thousand ";
   if (num) out += three(num);
   return out.trim();
-}
-
-// ── Code 39 barcode → inline SVG (scannable, no external library) ───────────────
-export function barcode39(text, height = 44) {
-  const C39 = {
-    0: "nnnwwnwnn",
-    1: "wnnwnnnnw",
-    2: "nnwwnnnnw",
-    3: "wnwwnnnnn",
-    4: "nnnwwnnnw",
-    5: "wnnwwnnnn",
-    6: "nnwwwnnnn",
-    7: "nnnwnnwnw",
-    8: "wnnwnnwnn",
-    9: "nnwwnnwnn",
-    A: "wnnnnwnnw",
-    B: "nnwnnwnnw",
-    C: "wnwnnwnnn",
-    D: "nnnnwwnnw",
-    E: "wnnnwwnnn",
-    F: "nnwnwwnnn",
-    G: "nnnnnwwnw",
-    H: "wnnnnwwnn",
-    I: "nnwnnwwnn",
-    J: "nnnnwwwnn",
-    K: "wnnnnnnww",
-    L: "nnwnnnnww",
-    M: "wnwnnnnwn",
-    N: "nnnnwnnww",
-    O: "wnnnwnnwn",
-    P: "nnwnwnnwn",
-    Q: "nnnnnnwww",
-    R: "wnnnnnwwn",
-    S: "nnwnnnwwn",
-    T: "nnnnwnwwn",
-    U: "wwnnnnnnw",
-    V: "nwwnnnnnw",
-    W: "wwwnnnnnn",
-    X: "nwnnwnnnw",
-    Y: "wwnnwnnnn",
-    Z: "nwwnwnnnn",
-    "-": "nwnnnnwnw",
-    ".": "wwnnnnwnn",
-    " ": "nwwnnnwnn",
-    "*": "nwnnwnwnn",
-  };
-  const data =
-    "*" +
-    String(text)
-      .toUpperCase()
-      .replace(/[^0-9A-Z\-. ]/g, "") +
-    "*";
-  const N = 1.5,
-    W = N * 3;
-  let x = 0;
-  const rects = [];
-  for (const ch of data) {
-    const pat = C39[ch];
-    if (!pat) continue;
-    for (let i = 0; i < 9; i++) {
-      const w = pat[i] === "w" ? W : N;
-      if (i % 2 === 0)
-        rects.push(
-          `<rect x="${x.toFixed(2)}" y="0" width="${w.toFixed(2)}" height="${height}"/>`,
-        );
-      x += w;
-    }
-    x += N; // inter-character gap
-  }
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="${x.toFixed(2)}" height="${height}" viewBox="0 0 ${x.toFixed(2)} ${height}" preserveAspectRatio="none" fill="#000" style="display:block;margin-left:auto;max-width:240px;height:${height}px">${rects.join("")}</svg>`;
 }
 
 // ── SHARED Dr-Lal-PathLabs-style diagnostic receipt (Lab + Radiology) ───────────
@@ -734,7 +668,7 @@ ${PAYMENT_TABLE_CSS}
     </div>
     ${regLines ? `<div class="reg">${regLines}</div>` : ""}
   </div>
-  <div class="labid">${barcode39(r.labId || r.invoiceNo || "")}<div class="labnum">${esc(r.labId || r.invoiceNo || "")}</div></div>
+  <div class="labid"></div>
 </div>
 <div class="title">Receipt</div>
 <div class="subtitle">(PLEASE BRING THIS RECEIPT FOR REPORT COLLECTION)</div>
@@ -897,6 +831,10 @@ export function printPharmacyReceipt(
   const netPayable = mrpTotal - discount;
   const balance = netPayable - paid;
 
+  const activeSlabs = SLABS.filter((slab) => bySlab[slab].tax > 0);
+  const cgstLabel = activeSlabs.length > 0 ? `CGST (${activeSlabs.map((s) => s / 2 + "%").join(", ")})` : "CGST";
+  const sgstLabel = activeSlabs.length > 0 ? `SGST (${activeSlabs.map((s) => s / 2 + "%").join(", ")})` : "SGST";
+
   if (payments.length === 0 && paid > 0) {
     payments = [
       {
@@ -1020,7 +958,7 @@ ${PAYMENT_TABLE_CSS}
     </div>
     ${regLines ? `<div class="reg">${regLines}</div>` : ""}
   </div>
-  <div class="labid">${barcode39(invoiceNo)}<div class="labnum">${esc(invoiceNo)}</div></div>
+  <div class="labid"></div>
 </div>
 <div class="title">Receipt</div>
 <div class="subtitle">(PLEASE BRING THIS RECEIPT FOR NEXT COLLECTION)</div>
@@ -1045,8 +983,8 @@ ${PAYMENT_TABLE_CSS}
   }
   <div class="totals">
     <div class="trow"><span>MRP Total</span><span>${inr(mrpTotal)}</span></div>
-    <div class="trow"><span>CGST</span><span>${inr(cgstTotal)}</span></div>
-    <div class="trow"><span>SGST</span><span>${inr(sgstTotal)}</span></div>
+    <div class="trow"><span>${cgstLabel}</span><span>${inr(cgstTotal)}</span></div>
+    <div class="trow"><span>${sgstLabel}</span><span>${inr(sgstTotal)}</span></div>
     ${discount ? `<div class="trow"><span>Discount</span><span>-${inr(discount)}</span></div>` : ""}
     <div class="trow net"><span>Net Payable Amount</span><span>${inr(netPayable)}</span></div>
     <div class="trow"><span>Paid Amount</span><span>${inr(paid)}</span></div>
