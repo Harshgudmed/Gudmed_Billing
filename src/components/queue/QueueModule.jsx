@@ -100,8 +100,10 @@ export default function QueueModule() {
     }
   }
 
-  // Changing priority re-ranks the row on the server; refresh() re-reads the
-  // now-reordered queue (a higher priority floats the patient up).
+  // Changing priority re-ranks the row on the server (priority -> priorityRank),
+  // so the queue must be re-read: the whole point is that the patient MOVES.
+  // Mutating `entry.priority` in place did nothing — it is not React state, so
+  // React never re-rendered and the row appeared stuck where it was.
   const changePriority = async (entry, priority) => {
     if (priority === entry.priority) return
     setUpdatingId(`${entry.id}_priority`)
@@ -109,7 +111,7 @@ export default function QueueModule() {
       const res = await client.patch(`/triage/${entry.id}`, { priority })
       if (res.success) {
         toast.success(`Priority set to ${priority}`)
-        refresh()
+        await refresh()
       } else {
         toast.error(res.error || 'Failed to change priority')
       }
