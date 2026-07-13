@@ -1,6 +1,7 @@
+import { useEffect, useRef } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { ChevronLeft, ChevronRight } from "lucide-react";
+import { ChevronLeft, ChevronRight, Loader2 } from "lucide-react";
 import {
   format,
   addDays,
@@ -15,13 +16,92 @@ import { StatusBadge } from "./AppointmentBadges";
 
 // weekData is keyed by day ("yyyy-MM-dd") → { rows, total }. rows is a bounded
 // preview (first N) the server already returns sorted by time; total is the real
-// per-day count used for the "+N more" footer and the bottom summary.
+// per-day count, used to know whether there is more to auto-load.
 const emptyDay = { rows: [], total: 0 };
+
+// One day's column — owns the scroll container AND the IntersectionObserver that
+// watches its own bottom sentinel, so scrolling near the end of a day silently
+// fetches the next chunk from the server (real pagination, not a client-side
+// reveal) instead of a "+N more" the user had to click.
+function DayColumn({ day, dayAppointments, total, isCurrentDay, getPatient, onLoadMoreDay, loadingMoreDay }) {
+  const ymd = format(day, "yyyy-MM-dd");
+  const hidden = total - dayAppointments.length;
+  const isLoadingThis = loadingMoreDay === ymd;
+
+  const scrollRef = useRef(null);
+  const sentinelRef = useRef(null);
+  // Guards against firing a second request for this day while one is already
+  // in flight — the parent's loadingMoreDay only tracks ONE day at a time, but
+  // the observer can re-fire on every intersection frame.
+  const requestingRef = useRef(false);
+
+  useEffect(() => {
+    if (loadingMoreDay !== ymd) requestingRef.current = false;
+  }, [loadingMoreDay, ymd]);
+
+  useEffect(() => {
+    if (hidden <= 0) return undefined; // fully loaded — nothing to watch
+    const root = scrollRef.current;
+    const target = sentinelRef.current;
+    if (!root || !target) return undefined;
+
+    const io = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting && !requestingRef.current) {
+          requestingRef.current = true;
+          onLoadMoreDay(ymd);
+        }
+      },
+      { root, rootMargin: "150px", threshold: 0 },
+    );
+    io.observe(target);
+    return () => io.disconnect();
+  }, [ymd, hidden, onLoadMoreDay]);
+
+  return (
+    <div
+      ref={scrollRef}
+      className={`border-r last:border-r-0 p-2 space-y-1 max-h-[65vh] overflow-y-auto no-scrollbar ${isCurrentDay ? "bg-blue-50/30" : ""}`}
+    >
+      {total === 0 && <p className="text-xs text-gray-300 text-center mt-4">—</p>}
+      {dayAppointments.map((appointment) => {
+        const patient = appointment.patient || getPatient(appointment.patientId);
+        const patientName = patient
+          ? `${patient.firstName} ${patient.lastName}`.trim()
+          : "Unknown";
+        const statusConfig = STATUS_CONFIG[appointment.status] || STATUS_CONFIG.scheduled;
+        return (
+          <div
+            key={appointment.id}
+            className={`rounded p-1.5 text-xs cursor-pointer hover:opacity-80 ${statusConfig.bgColor}`}
+          >
+            <div className="font-semibold truncate">{appointment.appointmentTime}</div>
+            <div className="truncate">{patientName}</div>
+            {appointment.doctor && (
+              <div className="truncate text-gray-500">{drName(appointment.doctor.fullName)}</div>
+            )}
+            <StatusBadge status={appointment.status} showIcon={false} className="text-[9px] px-1 py-0" />
+          </div>
+        );
+      })}
+      {/* Bottom sentinel: invisible unless a fetch is in flight. Its mere
+          presence in the viewport (via the observer above) is the trigger —
+          no button, no "+N more" label. */}
+      {hidden > 0 && (
+        <div ref={sentinelRef} className="h-6 flex items-center justify-center">
+          {isLoadingThis && <Loader2 className="h-3 w-3 animate-spin text-gray-300" />}
+        </div>
+      )}
+    </div>
+  );
+}
 
 export default function WeeklyView({
   currentWeek,
   setCurrentWeek,
   weekData,
+  onLoadMoreDay,
+  loadingMoreDay,
   getPatient,
 }) {
   return (
@@ -90,52 +170,17 @@ export default function WeeklyView({
               const day = addDays(currentWeek, i);
               const { rows: dayAppointments, total } =
                 weekData[format(day, "yyyy-MM-dd")] || emptyDay;
-              const hidden = total - dayAppointments.length;
-              const isCurrentDay = isToday(day);
               return (
-                <div
+                <DayColumn
                   key={i}
-                  className={`border-r last:border-r-0 p-2 space-y-1 ${isCurrentDay ? "bg-blue-50/30" : ""}`}
-                >
-                  {total === 0 && (
-                    <p className="text-xs text-gray-300 text-center mt-4">—</p>
-                  )}
-                  {dayAppointments.map((appointment) => {
-                    const patient =
-                      appointment.patient || getPatient(appointment.patientId);
-                    const patientName = patient
-                      ? `${patient.firstName} ${patient.lastName}`.trim()
-                      : "Unknown";
-                    const statusConfig =
-                      STATUS_CONFIG[appointment.status] || STATUS_CONFIG.scheduled;
-                    return (
-                      <div
-                        key={appointment.id}
-                        className={`rounded p-1.5 text-xs cursor-pointer hover:opacity-80 ${statusConfig.bgColor}`}
-                      >
-                        <div className="font-semibold truncate">
-                          {appointment.appointmentTime}
-                        </div>
-                        <div className="truncate">{patientName}</div>
-                        {appointment.doctor && (
-                          <div className="truncate text-gray-500">
-                            {drName(appointment.doctor.fullName)}
-                          </div>
-                        )}
-                        <StatusBadge
-                          status={appointment.status}
-                          showIcon={false}
-                          className="text-[9px] px-1 py-0"
-                        />
-                      </div>
-                    );
-                  })}
-                  {hidden > 0 && (
-                    <p className="text-[10px] text-gray-400 text-center pt-1">
-                      +{hidden} more
-                    </p>
-                  )}
-                </div>
+                  day={day}
+                  dayAppointments={dayAppointments}
+                  total={total}
+                  isCurrentDay={isToday(day)}
+                  getPatient={getPatient}
+                  onLoadMoreDay={onLoadMoreDay}
+                  loadingMoreDay={loadingMoreDay}
+                />
               );
             })}
           </div>

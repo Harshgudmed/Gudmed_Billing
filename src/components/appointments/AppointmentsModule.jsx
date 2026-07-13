@@ -20,7 +20,7 @@ import client from "@/api/client";
 import { drName } from "@/lib/utils";
 import { appointmentSchema, editAppointmentSchema } from "./appointmentSchema";
 import { printAppointmentCard } from "./appointmentPrint";
-import { APPOINTMENTS_LIST_PER_PAGE, APPOINTMENT_STATUSES } from "./appointmentConstants";
+import { APPOINTMENTS_LIST_PER_PAGE, APPOINTMENT_STATUSES, WEEKLY_DAY_PAGE_SIZE } from "./appointmentConstants";
 import { useAppointments } from "./useAppointments";
 import { parseDate, getPatientFullName, byTime } from "./appointmentHelpers";
 import CancelAppointmentDialog from "./CancelAppointmentDialog";
@@ -380,7 +380,7 @@ export default function AppointmentsModule() {
           days.map((date) =>
             fetchAppointmentsPage({
               page: 1,
-              pageSize: APPOINTMENTS_LIST_PER_PAGE,
+              pageSize: WEEKLY_DAY_PAGE_SIZE,
               date,
             }),
           ),
@@ -402,6 +402,37 @@ export default function AppointmentsModule() {
       cancelled = true;
     };
   }, [activeTab, dates.currentWeek, fetchAppointmentsPage, mutationCount, refreshCount]);
+
+  // "+N more" in the Weekly view fetches the NEXT chunk for that one day and
+  // appends it — a real server round-trip (limit/offset), not a client-side
+  // reveal. loadedCount is always a multiple of WEEKLY_DAY_PAGE_SIZE (every
+  // chunk, initial or appended, uses the same size), so it maps to the next
+  // page number exactly.
+  const [loadingMoreDay, setLoadingMoreDay] = useState(null);
+  const loadMoreWeekDay = useCallback(
+    async (date) => {
+      setLoadingMoreDay(date);
+      try {
+        const loadedCount = weekData[date]?.rows.length ?? 0;
+        const nextPage = Math.floor(loadedCount / WEEKLY_DAY_PAGE_SIZE) + 1;
+        const { rows, total } = await fetchAppointmentsPage({
+          page: nextPage,
+          pageSize: WEEKLY_DAY_PAGE_SIZE,
+          date,
+        });
+        setWeekData((prev) => ({
+          ...prev,
+          [date]: { rows: [...(prev[date]?.rows ?? []), ...rows], total },
+        }));
+      } catch (err) {
+        console.error("Failed to load more appointments for", date, err);
+        toast.error("Failed to load more appointments");
+      } finally {
+        setLoadingMoreDay(null);
+      }
+    },
+    [weekData, fetchAppointmentsPage],
+  );
 
   // Today's appointments split by lifecycle stage and sorted by time. Computed
   // once here so the "Today" tab's empty-check and its list render share one
@@ -865,6 +896,8 @@ export default function AppointmentsModule() {
             currentWeek={dates.currentWeek}
             setCurrentWeek={(week) => setDatesField("currentWeek", week)}
             weekData={weekData}
+            onLoadMoreDay={loadMoreWeekDay}
+            loadingMoreDay={loadingMoreDay}
             getPatient={getPatient}
           />
         </TabsContent>
