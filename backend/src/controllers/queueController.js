@@ -5,6 +5,7 @@ import { generateQueueNumber } from '../utils/queueNumber.js'
 import { getPagination, paginationMeta } from '../lib/pagination.js'
 import { priorityRank } from '../lib/queuePriority.js'
 import { dayRange } from '../lib/dates.js'
+import { syncAppointmentsToQueue } from '../lib/queueSync.js'
 
 const queueSchema = z.object({
   patientId: z.string(),
@@ -37,6 +38,13 @@ export async function getQueue(req, res, next) {
     const ORG_ID = getOrgId(req)
     const { serviceArea, status, search, startDate, endDate } = req.query
     const { page, limit, skip } = getPagination(req.query)
+
+    // The queue is derived from appointments — a patient with an appointment today
+    // is in the queue, with no check-in step (client's rule). Do this before the
+    // read so the list is never a day behind. Idempotent: a no-op once synced.
+    if (startDate || endDate) {
+      await syncAppointmentsToQueue(ORG_ID, startDate, endDate)
+    }
 
     // Everything except the status filter. The per-status tile counts are built
     // from this so that clicking one tile (which sets `status`) narrows the

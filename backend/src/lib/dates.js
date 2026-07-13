@@ -82,3 +82,31 @@ export function dayRangeOf(date, timeZone = HOSPITAL_TZ) {
   const ymd = ymdInZone(new Date(date), timeZone)
   return dayRange(ymd, ymd, timeZone)
 }
+
+/**
+ * A clock time → zero-padded 'HH:MM'.
+ *
+ * Appointment times are stored as a String and sorted as one
+ * (`orderBy: { appointmentTime: 'asc' }`), so an unpadded '9:00' sorts AFTER
+ * '10:00' — the 9am patient lands at the bottom of the day. Padding is what makes
+ * the string sort chronological, so every write must go through this.
+ */
+export function normalizeTimeHHMM(timeStr) {
+  const [h, m] = String(timeStr ?? '').split(':')
+  const hh = Number(h)
+  const mm = Number(m)
+  if (!Number.isFinite(hh) || !Number.isFinite(mm)) return timeStr
+  return `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`
+}
+
+/**
+ * A wall-clock 'YYYY-MM-DD' + 'H:MM' in the hospital's timezone → the real UTC
+ * instant. Appointment times are stored as free-text and come through in both
+ * '9:00' and '09:00' form, so the parts are parsed numerically rather than by
+ * string layout.
+ */
+export function zonedDateTimeToUtc(ymd, timeStr, timeZone = HOSPITAL_TZ) {
+  const [y, m, d] = String(ymd).slice(0, 10).split('-').map(Number)
+  const [hh, mm] = String(timeStr || '0:0').split(':')
+  return zonedWallTimeToUtc(y, m, d, Number(hh) || 0, Number(mm) || 0, 0, 0, timeZone)
+}
