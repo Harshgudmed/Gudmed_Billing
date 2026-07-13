@@ -1,4 +1,5 @@
 import { db } from '../config/db.js'
+import { dayRange } from '../lib/dates.js'
 import { getOrgId } from "../lib/reqContext.js";
 import { z } from 'zod'
 
@@ -95,10 +96,10 @@ export async function getAll(req, res, next) {
 
     // Registration-date range filter (Today / This Week / This Month / custom).
     const { startDate, endDate } = req.query
+    // Day boundaries in the hospital's timezone (see lib/dates.js) — the old parse
+    // used the SERVER's timezone, so prod (UTC) and dev (IST) disagreed by 5h30m.
     if (startDate || endDate) {
-      where.createdAt = {}
-      if (startDate) where.createdAt.gte = new Date(`${startDate}T00:00:00`)
-      if (endDate) where.createdAt.lte = new Date(`${endDate}T23:59:59.999`)
+      where.createdAt = dayRange(startDate, endDate)
     }
 
     if (search) {

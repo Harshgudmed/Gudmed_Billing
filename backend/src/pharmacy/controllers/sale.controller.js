@@ -1,5 +1,6 @@
 import { db } from '../../config/db.js'
 import { getOrgId } from "../../lib/reqContext.js";
+import { dayRange } from '../../lib/dates.js'
 import { createSaleSchema } from '../validations/sale.validation.js'
 import { getPagination, paginationMeta, handleServiceError, makeError } from '../utils.js'
 import { recordStockChange, consumeFromBatches } from '../stockService.js'
@@ -16,15 +17,10 @@ export async function list(req, res, next) {
     const where = { organizationId: ORGANIZATION_ID }
     if (patientId) where.patientId = patientId
     if (paymentStatus) where.paymentStatus = paymentStatus
+    // Whole calendar days in the HOSPITAL's timezone (see lib/dates.js) — the old
+    // parse used the server's, so prod (UTC) and dev (IST) disagreed by 5h30m.
     if (startDate || endDate) {
-      where.createdAt = {}
-      if (startDate) where.createdAt.gte = new Date(startDate)
-      if (endDate) {
-        // Include the full end day through 23:59:59.999
-        const end = new Date(endDate)
-        end.setHours(23, 59, 59, 999)
-        where.createdAt.lte = end
-      }
+      where.createdAt = dayRange(startDate, endDate)
     }
 
     const orderBy = SORTABLE_FIELDS.includes(sortBy)

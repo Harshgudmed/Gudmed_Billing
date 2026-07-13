@@ -1,14 +1,84 @@
-// Shared date helpers. Kept tiny and pure so any controller can reuse them
-// instead of re-declaring the same range logic (lab + radiology both did).
+// Shared date helpers — all day boundaries are computed in the HOSPITAL's
+// timezone, never the server's.
+//
+// WHY: `new Date("2026-07-13T00:00:00")` and `d.setHours(0,0,0,0)` both resolve
+// against the SERVER's local timezone. A dev laptop runs in IST, Render runs in
+// UTC — so "today" silently shifted by 5h30m in production. A patient who joined
+// the queue at 03:00 IST landed at 21:30 UTC the *previous* day and vanished from
+// the queue's "today" filter in production while showing up fine locally.
+//
+// Everything here takes/returns real UTC instants; only the wall-clock boundary
+// is interpreted in the hospital timezone.
+
+// The hospital's timezone. Override per-deployment with HOSPITAL_TIMEZONE.
+export const HOSPITAL_TZ = process.env.HOSPITAL_TIMEZONE || 'Asia/Kolkata'
+
+/** How far `instant`'s wall-clock in `timeZone` sits from UTC, in ms. */
+function tzOffsetMs(instant, timeZone) {
+  const dtf = new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    hour12: false,
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', second: '2-digit',
+  })
+  const p = Object.fromEntries(dtf.formatToParts(instant).map((x) => [x.type, x.value]))
+  const hour = p.hour === '24' ? 0 : Number(p.hour) // some ICU builds render midnight as 24
+  const asIfUtc = Date.UTC(Number(p.year), Number(p.month) - 1, Number(p.day), hour, Number(p.minute), Number(p.second))
+  return asIfUtc - instant.getTime()
+}
 
 /**
- * A Prisma date filter covering the whole of the local "today" — from
- * 00:00:00.000 to 23:59:59.999 — for `{ gte, lte }` range queries.
+ * A wall-clock time in `timeZone` → the real UTC instant it refers to.
+ * The offset is measured on a millisecond-free instant: Intl.formatToParts has no
+ * millisecond field, so feeding it 23:59:59.999 lost the .999 and skewed the
+ * result by a second.
  */
-export function todayRange() {
-  const start = new Date()
-  start.setHours(0, 0, 0, 0)
-  const end = new Date()
-  end.setHours(23, 59, 59, 999)
-  return { gte: start, lte: end }
+function zonedWallTimeToUtc(y, m, d, hh, mm, ss, ms, timeZone) {
+  const whole = new Date(Date.UTC(y, m - 1, d, hh, mm, ss, 0))
+  const offset = tzOffsetMs(whole, timeZone)
+  return new Date(Date.UTC(y, m - 1, d, hh, mm, ss, ms) - offset)
+}
+
+/** The calendar date (YYYY-MM-DD) that `instant` falls on in `timeZone`. */
+export function ymdInZone(instant = new Date(), timeZone = HOSPITAL_TZ) {
+  // en-CA formats as YYYY-MM-DD.
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone, year: 'numeric', month: '2-digit', day: '2-digit',
+  }).format(instant)
+}
+
+/**
+ * A Prisma `{ gte, lte }` filter covering whole calendar days in the hospital's
+ * timezone. Pass 'YYYY-MM-DD' strings (either may be omitted).
+ *
+ *   where.joinedQueueAt = dayRange(startDate, endDate)
+ */
+export function dayRange(startDate, endDate, timeZone = HOSPITAL_TZ) {
+  const range = {}
+  if (startDate) {
+    const [y, m, d] = String(startDate).slice(0, 10).split('-').map(Number)
+    range.gte = zonedWallTimeToUtc(y, m, d, 0, 0, 0, 0, timeZone)
+  }
+  if (endDate) {
+    const [y, m, d] = String(endDate).slice(0, 10).split('-').map(Number)
+    range.lte = zonedWallTimeToUtc(y, m, d, 23, 59, 59, 999, timeZone)
+  }
+  return range
+}
+
+/** `{ gte, lte }` covering the whole of TODAY in the hospital's timezone. */
+export function todayRange(timeZone = HOSPITAL_TZ) {
+  const today = ymdInZone(new Date(), timeZone)
+  return dayRange(today, today, timeZone)
+}
+
+/** The UTC instant at which today began in the hospital's timezone. */
+export function startOfToday(timeZone = HOSPITAL_TZ) {
+  return todayRange(timeZone).gte
+}
+
+/** `{ gte, lte }` covering the single calendar day `date` falls on. */
+export function dayRangeOf(date, timeZone = HOSPITAL_TZ) {
+  const ymd = ymdInZone(new Date(date), timeZone)
+  return dayRange(ymd, ymd, timeZone)
 }

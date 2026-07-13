@@ -1,4 +1,5 @@
 import { db } from '../config/db.js'
+import { dayRange } from '../lib/dates.js'
 import { getOrgId, safeMoney } from "../lib/reqContext.js";
 import { isOwned } from "../lib/tenant.js";
 
@@ -18,10 +19,9 @@ export async function getAll(req, res, next) {
     const where = { organizationId: ORG_ID }
     if (status && status !== 'all') where.status = status
     if (type && type !== 'all') where.ambulanceType = type
+    // Hospital-timezone day boundaries (see lib/dates.js).
     if (startDate || endDate) {
-      where.tripDate = {}
-      if (startDate) where.tripDate.gte = new Date(`${startDate}T00:00:00`)
-      if (endDate) where.tripDate.lte = new Date(`${endDate}T23:59:59.999`)
+      where.tripDate = dayRange(startDate, endDate)
     }
     if (search) {
       where.OR = [

@@ -4,6 +4,7 @@ import { z } from 'zod'
 import { generateQueueNumber } from '../utils/queueNumber.js'
 import { getPagination, paginationMeta } from '../lib/pagination.js'
 import { priorityRank } from '../lib/queuePriority.js'
+import { dayRange } from '../lib/dates.js'
 
 const queueSchema = z.object({
   patientId: z.string(),
@@ -43,10 +44,11 @@ export async function getQueue(req, res, next) {
     // stable breakdown of the current date/search scope.
     const baseWhere = { organizationId: ORG_ID }
     if (serviceArea && serviceArea !== 'all') baseWhere.serviceArea = serviceArea
+    // Day boundaries in the HOSPITAL's timezone, not the server's — a dev laptop
+    // runs in IST and Render runs in UTC, so the old parse shifted "today" by 5h30m
+    // and hid patients from the production queue.
     if (startDate || endDate) {
-      baseWhere.joinedQueueAt = {}
-      if (startDate) baseWhere.joinedQueueAt.gte = new Date(`${startDate}T00:00:00`)
-      if (endDate) baseWhere.joinedQueueAt.lte = new Date(`${endDate}T23:59:59.999`)
+      baseWhere.joinedQueueAt = dayRange(startDate, endDate)
     }
     if (search) {
       baseWhere.OR = [

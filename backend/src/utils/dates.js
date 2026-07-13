@@ -1,18 +1,21 @@
 // Small, readable date helpers — no external library needed.
 // Each one copies the input first, so the original date is never mutated.
+//
+// NOTE: day boundaries are the HOSPITAL's, not the server's. `setHours(0,0,0,0)`
+// resolves against the server's timezone, so a dev laptop (IST) and Render (UTC)
+// disagreed by 5h30m and "today" silently meant different things. These now
+// delegate to lib/dates.js, which pins the boundary to the hospital timezone.
 
-/** Start of the given day → 00:00:00.000 (same calendar day). */
+import { dayRangeOf } from '../lib/dates.js'
+
+/** Start of the given day (00:00:00.000) in the HOSPITAL's timezone. */
 export function startOfDay(date) {
-  const d = new Date(date)
-  d.setHours(0, 0, 0, 0)
-  return d
+  return dayRangeOf(date).gte
 }
 
-/** End of the given day → 23:59:59.999 (same calendar day). */
+/** End of the given day (23:59:59.999) in the HOSPITAL's timezone. */
 export function endOfDay(date) {
-  const d = new Date(date)
-  d.setHours(23, 59, 59, 999)
-  return d
+  return dayRangeOf(date).lte
 }
 
 /** A new Date that is `days` days BEFORE the given date (same time of day). */

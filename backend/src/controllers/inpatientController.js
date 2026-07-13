@@ -1,5 +1,6 @@
 import { db } from "../config/db.js";
 import { getOrgId, getActor, svcErr } from "../lib/reqContext.js";
+import { todayRange } from "../lib/dates.js";
 import { round2 as r2 } from "../lib/money.js";
 import { z } from "zod";
 import {
@@ -400,10 +401,8 @@ async function getClinicalNotesLegacy(req, res, context) {
 
 async function getStats(req, res, context) {
   const { orgId } = context;
-  const todayStart = new Date();
-  todayStart.setHours(0, 0, 0, 0);
-  const todayEnd = new Date();
-  todayEnd.setHours(23, 59, 59, 999);
+  // "Today" = the hospital's day, not the server's (see lib/dates.js).
+  const { gte: todayStart, lte: todayEnd } = todayRange();
 
   const [totalBeds, occupiedBeds, todayAdmissions, todayDischarges] =
     await Promise.all([

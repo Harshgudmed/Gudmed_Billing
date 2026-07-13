@@ -1,5 +1,6 @@
 import { db } from '../config/db.js'
 import { getOrgId, getActor } from "../lib/reqContext.js";
+import { todayRange } from '../lib/dates.js'
 import { nextSeriesNumber, invoiceProbe } from "../lib/counters.js";
 import { recalcInvoice, refundableAmount } from "../lib/invoiceLedger.js";
 import { fulfillInvoiceItems } from "../lib/invoiceFulfillment.js";
@@ -260,10 +261,8 @@ export async function getAll(req, res) {
     }
 
     if (resource === 'stats') {
-      const todayStart = new Date()
-      todayStart.setHours(0, 0, 0, 0)
-      const todayEnd = new Date()
-      todayEnd.setHours(23, 59, 59, 999)
+      // "Today" = the hospital's day, not the server's (see lib/dates.js).
+      const { gte: todayStart, lte: todayEnd } = todayRange()
 
       const [
         todayRevenueResult,

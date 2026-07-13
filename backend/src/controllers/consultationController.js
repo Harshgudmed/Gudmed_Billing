@@ -1,3 +1,4 @@
+import { dayRange, dayRangeOf, startOfToday as hospitalStartOfToday } from '../lib/dates.js'
 import { db } from '../config/db.js'
 import { getOrgId } from "../lib/reqContext.js";
 import { nextSeriesNumber } from "../lib/counters.js";
@@ -28,13 +29,11 @@ export async function getAll(req, res, next) {
 
     const where = { ...baseWhere }
     // A single `date` (legacy) OR a startDate/endDate range filters the list.
+    // Day boundaries come from the hospital's timezone, not the server's.
     if (date) {
-      const t = new Date(date)
-      where.visitDate = { gte: new Date(new Date(t).setHours(0, 0, 0, 0)), lte: new Date(new Date(t).setHours(23, 59, 59, 999)) }
+      where.visitDate = dayRangeOf(date)
     } else if (startDate || endDate) {
-      where.visitDate = {}
-      if (startDate) where.visitDate.gte = new Date(new Date(startDate).setHours(0, 0, 0, 0))
-      if (endDate) where.visitDate.lte = new Date(new Date(endDate).setHours(23, 59, 59, 999))
+      where.visitDate = dayRange(startDate, endDate)
     }
 
     const include = {
@@ -52,7 +51,8 @@ export async function getAll(req, res, next) {
     const body = await listResponse(db.consultation, {
       where, include, orderBy: { visitDate: 'desc' }, req, fullListTake: 50,
       summary: async () => {
-        const startOfToday = new Date(new Date().setHours(0, 0, 0, 0))
+        // "Today" is the hospital's today, not the server's.
+        const startOfToday = hospitalStartOfToday()
         const weekAgo = new Date(Date.now() - 7 * 86400000)
         const [total, today, thisWeek, withRx] = await Promise.all([
           db.consultation.count({ where: baseWhere }),
