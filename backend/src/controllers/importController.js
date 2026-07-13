@@ -174,3 +174,53 @@ export async function importData(req, res) {
     return res.status(500).json({ success: false, error: err.message, results, errors })
   }
 }
+
+// POST /api/import/stock-refresh   (header: x-import-secret)
+//
+// Sets a realistic stock level on every active drug for this org in ONE SQL
+// statement, and reports the before/after counts.
+//
+// This exists as an endpoint rather than a local script because the production
+// database accepts no external connections (Render free tier allows no IP
+// allowlist), so `update-stocks.js` can only ever reach the LOCAL db. Pushing the
+// ~200k drug rows through the row-by-row /import path instead would take about an
+// hour. Running the UPDATE server-side — where the DB *is* reachable — is instant.
+export async function stockRefresh(req, res) {
+  if (!importSecretValid(req.headers['x-import-secret'])) {
+    return res.status(403).json({ error: 'Forbidden' })
+  }
+
+  const orgId = process.env.ORGANIZATION_ID || 'org-demo'
+  const min = Math.max(0, Number(req.body?.min ?? 50))
+  const max = Math.max(min + 1, Number(req.body?.max ?? 500))
+  const span = max - min
+
+  try {
+    const [before] = await db.$queryRaw`
+      SELECT COUNT(*)::int AS total,
+             COUNT(*) FILTER (WHERE "quantityInStock" > 0)::int AS "withStock"
+      FROM "PharmacyDrug"
+      WHERE "organizationId" = ${orgId} AND "isActive" = true
+    `
+    const updated = await db.$executeRaw`
+      UPDATE "PharmacyDrug"
+      SET "quantityInStock" = floor(random() * ${span} + ${min})::int
+      WHERE "organizationId" = ${orgId} AND "isActive" = true
+    `
+    const [after] = await db.$queryRaw`
+      SELECT COUNT(*) FILTER (WHERE "quantityInStock" > 0)::int AS "withStock"
+      FROM "PharmacyDrug"
+      WHERE "organizationId" = ${orgId} AND "isActive" = true
+    `
+    return res.json({
+      success: true,
+      orgId,
+      drugsTotal: before.total,
+      withStockBefore: before.withStock,
+      updated,
+      withStockAfter: after.withStock,
+    })
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err.message })
+  }
+}
