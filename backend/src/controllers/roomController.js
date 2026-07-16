@@ -1,7 +1,7 @@
 import { z } from 'zod'
 import { db } from '../config/db.js'
 import { getOrgId, getActor } from '../lib/reqContext.js'
-import { resolveActiveDoctor, otherConcurrentDoctors } from '../lib/activeDoctor.js'
+import { resolveActiveDoctor, otherConcurrentDoctors, nextSessionForRoom } from '../lib/activeDoctor.js'
 import { parseTimetable, shiftsForRoom } from '../lib/doctorTimetable.js'
 
 export const DOCTOR_SELECT = { id: true, fullName: true, preferences: true }
@@ -36,6 +36,16 @@ export function toRoomDTO(room) {
   // concurrent, not list every doctor who takes a turn at a different hour.
   const otherActiveDoctors = otherConcurrentDoctors(room.id, shiftCandidates, { override: activeOverrideOpt, activeDoctorId: active.doctorId })
 
+  // "Nobody here right now" is not one state — the session may not have started,
+  // may have ended, may be a lunch gap, the clinic may be shut for the day, or
+  // the doctor may be on leave. The board said "On break" for all of them, which
+  // reads as "back shortly" and answers none of them. A patient wants one thing:
+  // how long. Only computed when there IS nobody, so an occupied room costs
+  // nothing.
+  const nextSession = (active.doctorId || active.unassigned)
+    ? null
+    : nextSessionForRoom(room.id, shiftCandidates)
+
   return {
     id: room.id,
     roomNumber: room.roomNumber,
@@ -47,6 +57,7 @@ export function toRoomDTO(room) {
     override,
     activeDoctor: active,
     otherActiveDoctors,
+    nextSession, // null when someone is here, or when no doctor is linked at all
   }
 }
 

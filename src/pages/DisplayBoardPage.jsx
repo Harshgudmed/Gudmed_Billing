@@ -34,6 +34,34 @@ function departmentColorClass(departmentId) {
   return DEPARTMENT_COLORS[Math.abs(hash) % DEPARTMENT_COLORS.length]
 }
 
+/**
+ * What to put on a room where nobody is sitting right now.
+ *
+ * This used to be the single word "On break", which reads as "back in a minute"
+ * and was shown for every reason a room can be empty: the session has not
+ * started, it ended hours ago, it is a lunch gap, the clinic is shut for the
+ * day, or the doctor is on leave. At 11pm every room said "On break". A patient
+ * in the waiting area is asking one question — how long — so answer it from the
+ * next scheduled session, and say "closed" plainly when there isn't one.
+ *
+ * `nextSession` comes from the API ({ dayName, start, today }); null means
+ * nobody is scheduled here in the next week.
+ */
+function emptyRoomLabel(nextSession) {
+  if (!nextSession) return 'Consultations closed'
+  if (nextSession.today) return `Next session ${to12h(nextSession.start)}`
+  return `Closed today · Next ${nextSession.dayName.slice(0, 3)} ${to12h(nextSession.start)}`
+}
+
+/** "14:00" -> "2:00 PM". A waiting room reads clock time, not 24h. */
+function to12h(hhmm) {
+  const [h, m] = String(hhmm || '').split(':').map(Number)
+  if (!Number.isFinite(h) || !Number.isFinite(m)) return hhmm || ''
+  const suffix = h < 12 ? 'AM' : 'PM'
+  const hour = h % 12 === 0 ? 12 : h % 12
+  return `${hour}:${String(m).padStart(2, '0')} ${suffix}`
+}
+
 function useLiveClock() {
   const [now, setNow] = useState(new Date())
   useEffect(() => {
@@ -238,8 +266,8 @@ function FloorScreen() {
                     </span>
                   </div>
                   <div className="mt-2 font-bold text-gray-900">
-                    {a.unassigned ? <span className="text-gray-400 italic font-normal">No doctor linked</span>
-                      : a.onBreak ? <span className="text-gray-400 italic font-normal">On break</span>
+                    {a.unassigned ? <span className="text-gray-400 italic font-normal">No doctor assigned</span>
+                      : a.onBreak ? <span className="text-gray-500 font-medium">{emptyRoomLabel(r.nextSession)}</span>
                       : drName(a.doctorName)}
                     {!a.unassigned && a.manual && <span className="ml-1.5 text-[9px] font-bold uppercase text-amber-700 bg-amber-50 rounded-full px-1.5 py-0.5 align-middle">Cover</span>}
                   </div>
@@ -292,8 +320,8 @@ function RoomScreen() {
         <div className="mb-6">
           <div className="text-sm font-mono text-[#2E4168] font-semibold tracking-wide">ROOM {room.roomNumber} · {room.department?.name}</div>
           <h1 className="text-3xl font-bold text-gray-900 mt-1">
-            {a.unassigned ? <span className="text-gray-400 italic">No doctor linked to this room</span>
-              : a.onBreak ? <span className="text-gray-400 italic">No doctor currently scheduled</span>
+            {a.unassigned ? <span className="text-gray-400 italic">No doctor assigned to this room</span>
+              : a.onBreak ? <span className="text-gray-500">{emptyRoomLabel(data.nextSession)}</span>
               : <>{drName(a.doctorName)}{a.manual && <span className="ml-2 text-xs font-bold uppercase text-amber-700 bg-amber-50 rounded-full px-2 py-1 align-middle">Covering</span>}</>}
           </h1>
         </div>
