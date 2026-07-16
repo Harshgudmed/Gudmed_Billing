@@ -1,0 +1,128 @@
+# Runs on every push and PR. Its whole job is to fail HERE instead of on Render.
+#
+# Deploys to this project have broken repeatedly for one structural reason:
+# nothing ever built the database the way production does. A developer's
+# database grows through `prisma db push` and hand-applied SQL; production is
+# built by `prisma migrate deploy` from the migration files alone. Those two
+# drift apart silently, and the first thing to notice is the deploy.
+#
+# It has cost real outages:
+#   - Invoice.taxPercentage lived only in dev (via `db push`); production had no
+#     such column and every invoice read failed.
+#   - CREATE INDEX CONCURRENTLY passed locally (applied by hand, no transaction)
+#     and could never work under `migrate deploy`, which wraps each migration in
+#     one.
+#   - A unique index assumed clean data because someone had cleaned it by hand,
+#     on one machine.
+#
+# So `migrate-deploy-from-scratch` below is the important job: it builds an
+# empty Postgres and runs the real migrate deploy against it, exactly as Render
+# will. If it is green, Render will not be the first to find the problem.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  database:
+    name: Migrations apply the way production applies them
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: ci_db
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/ci_db
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Install
+        working-directory: backend
+        run: npm ci
+
+      # The one that matters: a fresh database, migrations only, no shortcuts.
+      # Catches CONCURRENTLY-in-a-transaction, bad ordering, and SQL that only
+      # ever ran through `db execute`.
+      - name: migrate deploy against an empty database
+        working-directory: backend
+        run: npx prisma migrate deploy
+
+      # Catches anything schema.prisma declares that no migration creates —
+      # i.e. everything that reached a dev database through `db push`.
+      - name: No schema-vs-migrations drift
+        working-directory: backend
+        run: npm run check:drift
+
+      # A second `migrate deploy` must be a clean no-op.
+      - name: Migrations are idempotent
+        working-directory: backend
+        run: npx prisma migrate deploy
+
+  tests:
+    name: Unit tests
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: ci_db
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/ci_db
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - name: Install
+        working-directory: backend
+        run: npm ci
+      - name: Prepare database
+        working-directory: backend
+        run: npx prisma migrate deploy
+      - name: Unit tests
+        working-directory: backend
+        run: npm run test:unit
+
+  frontend:
+    name: Frontend builds
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - name: Install
+        run: npm ci
+      # A doctor's name is stored both with and without the title, so only
+      # drName() at render makes them agree. This keeps new screens honest.
+      - name: Doctor names all go through drName()
+        run: node e2e/lint-drname.mjs
+      - name: Build
+        run: npm run build

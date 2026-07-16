@@ -7,7 +7,7 @@
   "scripts": {
     "start": "prisma migrate deploy && node server.js",
     "dev": "nodemon server.js",
-    "postinstall": "prisma generate",
+    "postinstall": "prisma generate && node scripts/heal-migrations.mjs",
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",
     "db:push": "prisma db push",
