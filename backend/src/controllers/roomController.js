@@ -160,15 +160,19 @@ export async function suggestRoomNumber(req, res, next) {
     const floorIndex = floors.findIndex((f) => f.id === floorId)
     if (floorIndex === -1) return res.status(404).json({ success: false, error: 'Floor not found' })
 
-    // Floor 1 (first in the org's floor list) -> 100-199, floor 2 -> 200-299,
-    // and so on — matches building convention (first digit(s) = floor number).
-    const blockStart = (floorIndex + 1) * 100
+    // A floor's block is its OWN number, the way every building numbers rooms:
+    // 1st floor is the 100s, 2nd the 200s, 3rd the 300s. `sortOrder` puts the
+    // ground floor first, so it is index 0 and takes 1-99 (there is no room 0).
+    // This was `(floorIndex + 1) * 100`, which shifted every floor up by one and
+    // put rooms 300-399 on the 2nd floor.
+    const blockStart = floorIndex === 0 ? 1 : floorIndex * 100
+    const blockEnd = floorIndex === 0 ? 99 : blockStart + 99
     const roomsOnFloor = await db.room.findMany({ where: { organizationId: ORG_ID, floorId }, select: { roomNumber: true } })
     const used = new Set(roomsOnFloor.map((r) => Number(r.roomNumber)).filter(Number.isFinite))
 
     let suggestion = blockStart
     while (used.has(suggestion)) suggestion++
-    res.json({ success: true, data: { suggested: String(suggestion), blockStart, blockEnd: blockStart + 99 } })
+    res.json({ success: true, data: { suggested: String(suggestion), blockStart, blockEnd } })
   } catch (err) { next(err) }
 }
 

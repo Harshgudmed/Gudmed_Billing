@@ -158,7 +158,12 @@ async function main() {
     const floor = await db.floor.create({ data: { organizationId: ORG_ID, name: floorName, sortOrder: floorIdx } })
     // (floorIdx + 1) so the FIRST floor in the list starts its block at 100,
     // not 0 — matches building convention (100s = floor 1, 200s = floor 2, ...).
-    const blockStart = (floorIdx + 1) * FLOOR_BLOCK_SIZE
+    // The block is the floor's OWN number, not its position + 1: 1st floor is
+    // the 100s, 2nd the 200s, 3rd the 300s — the way every building numbers
+    // rooms. Ground Floor is index 0 and takes 1-99 (there is no room 0).
+    // `(floorIdx + 1) * 100` shifted every floor up by one, which is how the
+    // 2nd floor ended up holding rooms 300-399.
+    const blockStart = floorIdx === 0 ? 1 : floorIdx * FLOOR_BLOCK_SIZE
     let nextRoomNumber = blockStart
     let floorRoomCount = 0
     let floorDoctorCount = 0
