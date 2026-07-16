@@ -236,7 +236,7 @@ export default function PatientsModule() {
         <CardContent className="p-0">
           {loading ? (
             <div className="flex items-center justify-center py-16">
-              <Loader2 className="h-8 w-8 animate-spin text-blue-500" />
+              <Loader2 className="h-8 w-8 animate-spin text-[#2E4168]" />
             </div>
           ) : error ? (
             <div className="text-center py-16">

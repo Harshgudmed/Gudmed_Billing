@@ -1,4 +1,5 @@
 import { UserPlus, User, BedDouble, Stethoscope, IndianRupee, Loader2 } from 'lucide-react'
+import { drName } from '@/lib/utils'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -93,7 +94,7 @@ export default function NewAdmissionTab({
                       <Label className="text-xs">Attending Physician *</Label>
                       <Select value={admitForm.doctorId || ''} onValueChange={v => setAdmitForm(p => ({ ...p, doctorId: v }))} disabled={!admitForm.departmentId}>
                         <SelectTrigger className="mt-1"><SelectValue placeholder={admitForm.departmentId ? 'Select physician' : 'Select department first'} /></SelectTrigger>
-                        <SelectContent>{doctors.filter(d => d.departmentId === admitForm.departmentId).map(d => <SelectItem key={d.id} value={d.id}>{d.fullName}</SelectItem>)}</SelectContent>
+                        <SelectContent>{doctors.filter(d => d.departmentId === admitForm.departmentId).map(d => <SelectItem key={d.id} value={d.id}>{drName(d.fullName)}</SelectItem>)}</SelectContent>
                       </Select>
                     </div>
                   </div>

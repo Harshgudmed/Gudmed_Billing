@@ -75,7 +75,7 @@ export default function CollectionsReport({ orgInfo = {} }) {
         </div>
       </CardContent></Card>
 
-      {loading && !data ? <div className="py-8 text-center"><Loader2 className="h-5 w-5 animate-spin text-gray-400 mx-auto" /></div> : data && (
+      {loading && !data ? <div className="py-8 text-center"><Loader2 className="h-5 w-5 animate-spin text-[#2E4168] mx-auto" /></div> : data && (
         <>
           {/* By method */}
           <div className="grid grid-cols-2 md:grid-cols-6 gap-3">

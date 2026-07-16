@@ -1003,7 +1003,7 @@ tr:nth-child(even) td{background:#f9f9f9}
           {/* Stats Cards */}
           {statsLoading ? (
             <div className="flex items-center justify-center py-12">
-              <Loader2 className="h-8 w-8 animate-spin text-blue-600" />
+              <Loader2 className="h-8 w-8 animate-spin text-[#2E4168]" />
             </div>
           ) : (
             <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
@@ -1137,7 +1137,7 @@ tr:nth-child(even) td{background:#f9f9f9}
                 <ScrollArea className="h-[200px]">
                   {ordersLoading ? (
                     <div className="flex items-center justify-center py-8">
-                      <Loader2 className="h-6 w-6 animate-spin text-gray-400" />
+                      <Loader2 className="h-6 w-6 animate-spin text-[#2E4168]" />
                     </div>
                   ) : recentOrdersAttention.length === 0 ? (
                     <p className="text-center text-gray-500 py-8">No orders requiring attention</p>
@@ -1214,7 +1214,7 @@ tr:nth-child(even) td{background:#f9f9f9}
                   </div>
                   <ScrollArea className="h-[260px]">
                     {ordersLoading ? (
-                      <div className="flex items-center justify-center py-8"><Loader2 className="h-5 w-5 animate-spin text-gray-400" /></div>
+                      <div className="flex items-center justify-center py-8"><Loader2 className="h-5 w-5 animate-spin text-[#2E4168]" /></div>
                     ) : orders.filter(o => o.status !== 'completed' && o.status !== 'cancelled').length === 0 ? (
                       <div className="text-center py-8 text-gray-400">
                         <CheckCircle className="h-10 w-10 mx-auto mb-2 text-green-400" />
@@ -1253,7 +1253,7 @@ tr:nth-child(even) td{background:#f9f9f9}
                   </div>
                   <ScrollArea className="h-[260px]">
                     {ordersLoading ? (
-                      <div className="flex items-center justify-center py-8"><Loader2 className="h-5 w-5 animate-spin text-gray-400" /></div>
+                      <div className="flex items-center justify-center py-8"><Loader2 className="h-5 w-5 animate-spin text-[#2E4168]" /></div>
                     ) : orders.filter(o => o.status === 'completed').length === 0 ? (
                       <div className="text-center py-8 text-gray-400">
                         <FlaskConical className="h-10 w-10 mx-auto mb-2 opacity-40" />
@@ -1626,7 +1626,7 @@ tr:nth-child(even) td{background:#f9f9f9}
                 <ScrollArea className="h-[400px]">
                   {ordersLoading ? (
                     <div className="flex items-center justify-center py-8">
-                      <Loader2 className="h-6 w-6 animate-spin text-gray-400" />
+                      <Loader2 className="h-6 w-6 animate-spin text-[#2E4168]" />
                     </div>
                   ) : orders.filter(o => o.status === 'in_progress' || o.status === 'sample_collected').length === 0 ? (
                     <p className="text-center text-gray-500 py-8">No orders ready for results</p>
@@ -1842,7 +1842,7 @@ tr:nth-child(even) td{background:#f9f9f9}
                 <ScrollArea className="h-[400px]">
                   {ordersLoading ? (
                     <div className="flex items-center justify-center py-12">
-                      <Loader2 className="h-8 w-8 animate-spin text-gray-400" />
+                      <Loader2 className="h-8 w-8 animate-spin text-[#2E4168]" />
                     </div>
                   ) : orders.filter(o => o.status === 'completed').length === 0 ? (
                     <div className="text-center py-12 text-gray-500">
@@ -2245,7 +2245,7 @@ tr:nth-child(even) td{background:#f9f9f9}
                     <div className="border rounded-lg p-4 max-h-60 overflow-y-auto">
                       {testsLoading ? (
                         <div className="flex items-center justify-center py-4">
-                          <Loader2 className="h-6 w-6 animate-spin text-gray-400" />
+                          <Loader2 className="h-6 w-6 animate-spin text-[#2E4168]" />
                         </div>
                       ) : tests.filter(t => t.isActive).length === 0 ? (
                         <p className="text-center text-gray-500 py-4">No tests available. Add tests to the catalog first.</p>

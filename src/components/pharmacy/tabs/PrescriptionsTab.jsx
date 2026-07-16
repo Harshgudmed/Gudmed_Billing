@@ -2,6 +2,7 @@
 // the current page (status filter applied in the DB). State + handlers come
 // from PharmacyModule.
 import { TabsContent } from "@/components/ui/tabs";
+import { drName } from "@/lib/utils";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import {
@@ -61,7 +62,7 @@ export default function PrescriptionsTab({
               {loading ? (
                 <TableRow>
                   <TableCell colSpan={7} className="text-center py-10">
-                    <Loader2 className="h-6 w-6 animate-spin text-gray-400 mx-auto" />
+                    <Loader2 className="h-6 w-6 animate-spin text-[#2E4168] mx-auto" />
                   </TableCell>
                 </TableRow>
               ) : prescriptions.length === 0 ? (
@@ -93,7 +94,7 @@ export default function PrescriptionsTab({
                       <TableCell className="font-mono">
                         {rx.patient?.mrn || "—"}
                       </TableCell>
-                      <TableCell>{rx.doctor?.fullName || "—"}</TableCell>
+                      <TableCell>{rx.doctor?.fullName ? drName(rx.doctor.fullName) : "—"}</TableCell>
                       <TableCell>
                         {rx.prescriptionDate
                           ? format(

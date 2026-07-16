@@ -189,7 +189,7 @@ ${rows || '<tr><td colspan="5" style="text-align:center;color:#999">No service l
     w.document.write(html); w.document.close(); w.focus(); setTimeout(() => w.print(), 300)
   }
 
-  if (loading && !bill && !live) return <div className="py-8 text-center"><Loader2 className="h-5 w-5 animate-spin text-gray-400 mx-auto" /></div>
+  if (loading && !bill && !live) return <div className="py-8 text-center"><Loader2 className="h-5 w-5 animate-spin text-[#2E4168] mx-auto" /></div>
 
   // Totals: persisted bill if present, else live preview.
   const T = bill || { bedTotal: live?.bedCharges?.total, serviceTotal: live?.serviceCharges?.total, subtotal: live?.subtotal, taxTotal: live?.taxTotal, discountTotal: 0, depositTotal: 0, payableTotal: live?.grandTotal }

@@ -5,6 +5,9 @@ import { Toaster } from 'sonner'
 import { LogOut, ShieldCheck, Stethoscope, ConciergeBell, HeartPulse, ChevronRight, ClipboardList } from 'lucide-react'
 import client from '@/api/client'
 import Logo from '@/components/Logo'
+// The app's one spinner — see components/ui/spinner.jsx for the
+// button-vs-standalone colour rule.
+import { PageLoader } from '@/components/ui/spinner'
 import { useAuth } from '@/lib/auth'
 import ProtectedRoute from '@/components/ProtectedRoute'
 import RoleLogin from '@/pages/RoleLogin'
@@ -43,6 +46,9 @@ const InsurancePage            = lazy(() => import('./pages/InsurancePage.jsx'))
 const DeathCertificatePage     = lazy(() => import('./pages/DeathCertificatePage.jsx'))
 const InpatientPage            = lazy(() => import('./pages/InpatientPage.jsx'))
 const NotFoundPage             = lazy(() => import('./pages/NotFoundPage.jsx'))
+// No Shell (no sidebar/header) — this runs full-screen on a lobby TV/second
+// monitor, so it's mounted outside both the legacy and role-based Shell trees.
+const DisplayBoardPage         = lazy(() => import('./pages/DisplayBoardPage.jsx'))
 
 // Module key → page component. Shared by both legacy and role-based routing.
 const PAGE_BY_MODULE = {
@@ -63,14 +69,6 @@ const PAGE_BY_MODULE = {
   billing:              BillingPage,
   doctorAccountability: DoctorAccountabilityPage,
   settings:             SettingsPage,
-}
-
-function PageLoader() {
-  return (
-    <div className="flex h-64 items-center justify-center text-gray-400 text-sm">
-      Loading…
-    </div>
-  )
 }
 
 // Legacy sidebar order (used when AUTH_ENFORCED is off). Mirrors the historical nav.
@@ -374,28 +372,33 @@ function RolePicker() {
   )
 }
 
-export default function App() {
-  if (!AUTH_ENFORCED) {
-    return (
-      <>
-        <LegacyApp />
-        <Toaster richColors position="top-right" />
-      </>
-    )
-  }
+// Everything that goes through the staff/patient Shell — unchanged from
+// before, just extracted so /display/* can be matched ahead of it.
+function AuthedApp() {
+  return (
+    <Routes>
+      <Route path="/" element={<RootRoute />} />
+      {/* Patient portal — separate from the staff role layout */}
+      <Route path="/patient/login" element={<PatientLogin />} />
+      <Route path="/patient/*" element={<PatientPortal />} />
+      {/* Staff roles */}
+      <Route path="/:role/login" element={<RoleLogin />} />
+      <Route path="/:role/*" element={<ProtectedRoute><RoleLayout /></ProtectedRoute>} />
+      <Route path="*" element={<Navigate to="/" replace />} />
+    </Routes>
+  )
+}
 
+export default function App() {
   return (
     <>
-      <Routes>
-        <Route path="/" element={<RootRoute />} />
-        {/* Patient portal — separate from the staff role layout */}
-        <Route path="/patient/login" element={<PatientLogin />} />
-        <Route path="/patient/*" element={<PatientPortal />} />
-        {/* Staff roles */}
-        <Route path="/:role/login" element={<RoleLogin />} />
-        <Route path="/:role/*" element={<ProtectedRoute><RoleLayout /></ProtectedRoute>} />
-        <Route path="*" element={<Navigate to="/" replace />} />
-      </Routes>
+      <Suspense fallback={<PageLoader />}>
+        <Routes>
+          {/* Queue display board — no Shell, full-screen, second-monitor use */}
+          <Route path="/display/*" element={<DisplayBoardPage />} />
+          <Route path="*" element={AUTH_ENFORCED ? <AuthedApp /> : <LegacyApp />} />
+        </Routes>
+      </Suspense>
       <Toaster richColors position="top-right" />
     </>
   )

@@ -60,7 +60,7 @@ export default function AdmissionsTab({
                   </TableHeader>
                   <TableBody>
                     {loading ? (
-                      <TableRow><TableCell colSpan={10} className="text-center py-10"><Loader2 className="h-6 w-6 animate-spin text-gray-400 mx-auto" /></TableCell></TableRow>
+                      <TableRow><TableCell colSpan={10} className="text-center py-10"><Loader2 className="h-6 w-6 animate-spin text-[#2E4168] mx-auto" /></TableCell></TableRow>
                     ) : admissions.length === 0 ? (
                       <TableRow><TableCell colSpan={10} className="text-center py-8 text-gray-400">No admissions found</TableCell></TableRow>
                     ) : admissions.map(a => {

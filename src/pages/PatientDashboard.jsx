@@ -117,7 +117,7 @@ export default function PatientDashboard() {
   }, [data?.branding?.hospitalName])
 
   if (loading) {
-    return <div className="min-h-screen flex items-center justify-center"><Loader2 className="h-6 w-6 animate-spin text-gray-400" /></div>
+    return <div className="min-h-screen flex items-center justify-center"><Loader2 className="h-6 w-6 animate-spin text-[#2E4168]" /></div>
   }
   if (!data) {
     return <div className="min-h-screen flex items-center justify-center text-gray-500">Could not load your data.</div>

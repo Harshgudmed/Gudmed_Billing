@@ -291,11 +291,16 @@ export default function BillingModule({ onBack }) {
           let items = []
           try { items = typeof inv.items === 'string' ? JSON.parse(inv.items) : (inv.items || []) } catch { items = [] }
           const patName = inv.patient ? `${inv.patient.firstName} ${inv.patient.lastName}` : 'Unknown'
-          // Normalise DB items ({serviceName,quantity,unitPrice}) to the print shape ({name,qty,amt}).
+          // Normalise DB items to the print shape ({name,qty,amt}). Invoice items
+          // are written in two shapes and BOTH must be read here:
+          //   {serviceName,quantity,unitPrice}                — billing/lab/radiology
+          //   {type,description,quantity,unitPrice,total,...} — appointment booking
+          // Missing `description` is why every appointment invoice printed its
+          // line as the literal fallback "Item".
           // gstRate/batchNumber/expiryDate ride along when present (Pharmacy
           // items only) so printPharmacyReceipt can show the real GST breakdown.
           const normItems = (items || []).map(it => ({
-            name: it.name || it.serviceName || 'Item',
+            name: it.name || it.serviceName || it.description || 'Item',
             qty: it.qty || it.quantity || 1,
             amt: it.amt ?? it.unitPrice ?? 0,
             sub: it.sub || '',

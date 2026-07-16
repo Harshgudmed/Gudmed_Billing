@@ -74,6 +74,9 @@ import {
   checkDrugInteractions,
   printViaIframe,
 } from "./pharmacyConstants";
+// The shared GudMed letterhead — see lib/printTemplate.js. The label used to be
+// hand-rolled bare HTML, so it printed as unstyled browser default.
+import { gudmedDocument, infoBox, escapeHtml } from "@/lib/printTemplate";
 import { stockBadge, statusBadge } from "./pharmacyHelpers";
 import DashboardTab from "./tabs/DashboardTab";
 import InventoryTab from "./tabs/InventoryTab";
@@ -353,10 +356,55 @@ export default function PharmacyModule() {
     let items = [];
     try { items = typeof rx.items === "string" ? JSON.parse(rx.items) : rx.items || []; } catch { items = []; }
     const name = rx.patient ? `${rx.patient.firstName} ${rx.patient.lastName || ""}`.trim() : "Unknown";
-    const today = format(new Date(), "dd MMM yyyy HH:mm");
     const totalCost = items.reduce((s, i) => s + (i.unitPrice || 0) * i.quantity, 0);
-    const rows = items.map((i) => `<tr><td>${i.drugName || "—"}</td><td>${i.dosage || "—"}</td><td>${i.quantity}</td><td>${i.duration || "—"}</td><td>₹${((i.unitPrice || 0) * i.quantity).toFixed(2)}</td></tr>`).join("");
-    printViaIframe(`<!DOCTYPE html><html><body><h1>${orgInfo.name} — Pharmacy Label</h1><div>Patient: ${name}</div><table><thead><tr><th>Drug</th><th>Dosage</th><th>Qty</th><th>Duration</th><th>Amount</th></tr></thead><tbody>${rows}</tbody></table></body></html>`);
+    const rxDate = rx.prescriptionDate ? format(new Date(rx.prescriptionDate), "dd MMM yyyy") : "—";
+
+    // Shape of an item (schema.prisma → Prescription.items JSON):
+    // { drugId, drugName, dosage, frequency, duration, quantity, instructions }
+    // unitPrice is added by the dispense flow, so it stays optional.
+    const rows = items.length
+      ? items.map((i) => `<tr>
+          <td>
+            <strong>${escapeHtml(i.drugName || "—")}</strong>
+            ${i.instructions ? `<div style="font-size:8pt;color:#555;margin-top:2px">${escapeHtml(i.instructions)}</div>` : ""}
+          </td>
+          <td>${escapeHtml(i.dosage || "—")}</td>
+          <td>${escapeHtml(i.frequency || "—")}</td>
+          <td>${escapeHtml(String(i.quantity ?? "—"))}</td>
+          <td>${escapeHtml(i.duration || "—")}</td>
+          <td style="text-align:right">${i.unitPrice ? `₹${((i.unitPrice || 0) * i.quantity).toFixed(2)}` : "—"}</td>
+        </tr>`).join("")
+      : `<tr><td colspan="6" style="color:#888;font-style:italic;text-align:center;padding:14px">No items on this prescription</td></tr>`;
+
+    const body = `
+${infoBox("Patient Information", [
+  { label: "Patient Name", html: `<strong>${escapeHtml(name)}</strong>` },
+  { label: "UHID", value: rx.patient?.mrn || "—" },
+  { label: "Prescribed By", value: rx.doctor?.fullName ? drName(rx.doctor.fullName) : "—" },
+  { label: "Prescription Date", value: rxDate },
+])}
+<table>
+  <thead><tr>
+    <th style="width:30%">DRUG</th><th style="width:14%">DOSAGE</th><th style="width:16%">FREQUENCY</th>
+    <th style="width:8%">QTY</th><th style="width:16%">DURATION</th><th style="width:16%;text-align:right">AMOUNT</th>
+  </tr></thead>
+  <tbody>${rows}</tbody>
+  ${totalCost > 0 ? `<tfoot><tr><td colspan="5" style="text-align:right">Total</td><td style="text-align:right">₹${totalCost.toFixed(2)}</td></tr></tfoot>` : ""}
+</table>
+${rx.notes ? `<div class="note-bar"><strong>Notes:</strong> ${escapeHtml(rx.notes)}</div>` : ""}
+<div class="note-bar">Take medicines exactly as prescribed. Complete the full course. Contact the hospital if you notice any adverse reaction.</div>`;
+
+    printViaIframe(gudmedDocument({
+      orgInfo,
+      title: `Pharmacy Label — ${name}`,
+      subtitle: "Pharmacy Department",
+      banner: "PHARMACY LABEL",
+      // Prescription has no number column (schema.prisma) — its id is the only
+      // real identifier, so show a short, traceable form of it rather than
+      // inventing an "Rx #".
+      headerRight: `Rx Ref: <strong>${escapeHtml(String(rx.id || "").slice(-8).toUpperCase())}</strong><br/>Status: ${escapeHtml((rx.status || "").replace(/_/g, " "))}<br/>Printed: ${format(new Date(), "dd MMM yyyy HH:mm")}`,
+      body,
+    }));
   };
 
   const afterDispense = async (rx) => {

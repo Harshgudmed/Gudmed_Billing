@@ -117,7 +117,7 @@ export default function DeathCertificateModule() {
   }
 
   if (certificatesPagination.loading && certificates.length === 0) {
-    return <div className="flex items-center justify-center p-12"><Loader2 className="h-8 w-8 animate-spin text-blue-600" /></div>
+    return <div className="flex items-center justify-center p-12"><Loader2 className="h-8 w-8 animate-spin text-[#2E4168]" /></div>
   }
 
   if (view === 'create') {

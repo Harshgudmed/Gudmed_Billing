@@ -89,7 +89,7 @@ export default function SalesReportsTab({
               {loading ? (
                 <TableRow>
                   <TableCell colSpan={8} className="text-center py-10">
-                    <Loader2 className="h-6 w-6 animate-spin text-gray-400 mx-auto" />
+                    <Loader2 className="h-6 w-6 animate-spin text-[#2E4168] mx-auto" />
                   </TableCell>
                 </TableRow>
               ) : sales.length === 0 ? (

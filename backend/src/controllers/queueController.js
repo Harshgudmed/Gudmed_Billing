@@ -1,11 +1,12 @@
 import { db } from '../config/db.js'
 import { getOrgId } from "../lib/reqContext.js";
 import { z } from 'zod'
-import { generateQueueNumber } from '../utils/queueNumber.js'
+import { nextQueueNumber } from '../utils/queueNumber.js'
 import { getPagination, paginationMeta } from '../lib/pagination.js'
 import { priorityRank } from '../lib/queuePriority.js'
 import { dayRange } from '../lib/dates.js'
 import { syncAppointmentsToQueue } from '../lib/queueSync.js'
+import { isOwned } from '../lib/tenant.js'
 
 const queueSchema = z.object({
   patientId: z.string(),
@@ -18,6 +19,11 @@ const queueSchema = z.object({
   priority: z.string().default('normal'),
   assignedToId: z.string().optional(),
   assignedRoom: z.string().optional(),
+  roomId: z.string().optional(),
+  visitType: z.enum(['new', 'follow_up']).default('new'),
+  // Only meaningful for a 'follow_up' entry in a shared (multiple-doctor)
+  // room — see lib/activeDoctor.js. Ignored otherwise.
+  followUpDoctorId: z.string().optional(),
 })
 
 // PATCH /:id — whitelist only. organizationId/patientId/queueNumber are never
@@ -28,6 +34,9 @@ const queueUpdateSchema = z.object({
   priority: z.string().optional(),
   assignedToId: z.string().optional(),
   assignedRoom: z.string().optional(),
+  roomId: z.string().optional(),
+  visitType: z.enum(['new', 'follow_up']).optional(),
+  followUpDoctorId: z.string().nullable().optional(),
   estimatedWaitMinutes: z.number().optional(),
   displayMessage: z.string().optional(),
 })
@@ -36,7 +45,7 @@ const queueUpdateSchema = z.object({
 export async function getQueue(req, res, next) {
   try {
     const ORG_ID = getOrgId(req)
-    const { serviceArea, status, search, startDate, endDate } = req.query
+    const { serviceArea, status, search, startDate, endDate, roomId } = req.query
     const { page, limit, skip } = getPagination(req.query)
 
     // The queue is derived from appointments — a patient with an appointment today
@@ -52,6 +61,7 @@ export async function getQueue(req, res, next) {
     // stable breakdown of the current date/search scope.
     const baseWhere = { organizationId: ORG_ID }
     if (serviceArea && serviceArea !== 'all') baseWhere.serviceArea = serviceArea
+    if (roomId) baseWhere.roomId = roomId
     // Day boundaries in the HOSPITAL's timezone, not the server's — a dev laptop
     // runs in IST and Render runs in UTC, so the old parse shifted "today" by 5h30m
     // and hid patients from the production queue.
@@ -127,6 +137,9 @@ export async function addToQueue(req, res, next) {
   try {
     const ORG_ID = getOrgId(req)
     const validatedData = queueSchema.parse(req.body)
+    if (validatedData.roomId && !(await isOwned('room', validatedData.roomId, ORG_ID))) {
+      return res.status(400).json({ success: false, error: 'Room not found' })
+    }
     const patientInclude = { patient: { select: { id: true, mrn: true, firstName: true, lastName: true } } }
 
     // Derive the numeric sort key from the priority string up front so both the
@@ -135,7 +148,7 @@ export async function addToQueue(req, res, next) {
       organizationId: ORG_ID,
       ...validatedData,
       priorityRank: priorityRank(validatedData.priority),
-      queueNumber: generateQueueNumber(validatedData.serviceArea),
+      queueNumber: await nextQueueNumber(db, ORG_ID, validatedData.serviceArea),
       status: 'waiting',
     }
 
@@ -181,6 +194,12 @@ export async function updateQueue(req, res, next) {
     // Whitelist + auto-set the matching timestamp on a status change — the old
     // code passed `req.body` straight to Prisma with no validation at all.
     const validatedData = queueUpdateSchema.parse(req.body)
+    if (validatedData.roomId && !(await isOwned('room', validatedData.roomId, ORG_ID))) {
+      return res.status(400).json({ success: false, error: 'Room not found' })
+    }
+    if (validatedData.followUpDoctorId && !(await isOwned('user', validatedData.followUpDoctorId, ORG_ID))) {
+      return res.status(400).json({ success: false, error: 'Doctor not found' })
+    }
     const data = { ...validatedData }
     if (validatedData.status === 'called') data.calledAt = new Date()
     else if (validatedData.status === 'in_progress') data.serviceStartedAt = new Date()
@@ -190,8 +209,9 @@ export async function updateQueue(req, res, next) {
     // change actually reorders the queue on the next read.
     if (validatedData.priority !== undefined) {
       const newRank = priorityRank(validatedData.priority)
-      // Scenario 2: Reset joinedQueueAt to current time if priority is escalated
-      if (existing.priorityRank !== undefined && newRank > existing.priorityRank) {
+      // Reset joinedQueueAt to current time when priority is changed (up or down)
+      // so they go to the bottom of their new priority group.
+      if (existing.priorityRank !== undefined && newRank !== existing.priorityRank) {
         data.joinedQueueAt = new Date()
       }
       data.priorityRank = newRank
@@ -203,6 +223,48 @@ export async function updateQueue(req, res, next) {
       include: {
         patient: { select: { id: true, mrn: true, firstName: true, lastName: true } },
       },
+    })
+    res.json({ success: true, data: item })
+  } catch (err) {
+    next(err)
+  }
+}
+
+// POST /api/queue/:id/prescription-uploaded — the display board's actual
+// "you are next" trigger (see Smart Waiting Time in the client requirements):
+// stamped by the GudMed/Scribble prescription-upload webhook once it exists,
+// and by a manual "Prescription Ready" staff button in the meantime — both
+// call this same function so the display board never has to know which one
+// fired it.
+export async function markPrescriptionUploaded(req, res, next) {
+  try {
+    const ORG_ID = getOrgId(req)
+    const { id } = req.params
+    const existing = await db.queueManagement.findFirst({ where: { id, organizationId: ORG_ID }, select: { id: true } })
+    if (!existing) return res.status(404).json({ success: false, error: 'Queue item not found' })
+
+    const item = await db.queueManagement.update({
+      where: { id },
+      data: { prescriptionUploadedAt: new Date() },
+    })
+    res.json({ success: true, data: item })
+  } catch (err) {
+    next(err)
+  }
+}
+
+// DELETE /api/queue/:id/prescription-uploaded — undo a misclick, or reset
+// when a different patient is called into the room before the marked one.
+export async function clearPrescriptionUploaded(req, res, next) {
+  try {
+    const ORG_ID = getOrgId(req)
+    const { id } = req.params
+    const existing = await db.queueManagement.findFirst({ where: { id, organizationId: ORG_ID }, select: { id: true } })
+    if (!existing) return res.status(404).json({ success: false, error: 'Queue item not found' })
+
+    const item = await db.queueManagement.update({
+      where: { id },
+      data: { prescriptionUploadedAt: null },
     })
     res.json({ success: true, data: item })
   } catch (err) {
