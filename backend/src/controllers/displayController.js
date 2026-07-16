@@ -151,6 +151,8 @@ export async function getRoomQueue(req, res, next) {
       data: {
         room: { id: room.id, roomNumber: room.roomNumber, sittingType: room.sittingType, floor: roomDTO.floor, department: roomDTO.department },
         activeDoctor: roomDTO.activeDoctor,
+        // Lets the room screen say WHEN, instead of the old catch-all "On break".
+        nextSession: roomDTO.nextSession,
         inProgress,
         waitingGroups,
       },

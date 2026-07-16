@@ -14,12 +14,73 @@
 // keeps this module trivially unit-testable against a fixed clock instead
 // of the real wall clock.
 
-import { normalizeTimeHHMM, nowInZone } from './dates.js'
+import { normalizeTimeHHMM, nowInZone, ymdInZone } from './dates.js'
 import { DAY_NAMES, shiftsForRoom } from './doctorTimetable.js'
 
 function toMinutes(hhmm) {
   const [h, m] = normalizeTimeHHMM(hhmm).split(':').map(Number)
   return h * 60 + m
+}
+
+/**
+ * Is this doctor on leave on `ymd` ('YYYY-MM-DD')?
+ *
+ * Doctor Timetable saves leave as `timetable.exceptions: [{date, reason}]`, and
+ * nothing here ever read it — a doctor on leave still resolved as sitting in
+ * their room, because their weekly shift says so. The exception list is the
+ * only thing that says otherwise.
+ */
+export function isOnLeave(timetable, ymd) {
+  const exceptions = timetable?.exceptions
+  if (!Array.isArray(exceptions)) return false
+  return exceptions.some((e) => String(e?.date || '').slice(0, 10) === ymd)
+}
+
+/**
+ * When does someone next sit in this room, and who?
+ *
+ * The board used to answer "no doctor right now" with "On break", which reads as
+ * "back in a minute" whatever the real reason — the session has not started, it
+ * ended hours ago, it is a lunch gap, the clinic is shut for the day, or the
+ * doctor is on leave. A patient is asking one question: how long? So answer that
+ * instead, and let the caller phrase it.
+ *
+ * Looks at today from `now` onward, then each following day, up to a week.
+ * Doctors on leave that day are skipped — their shift exists, they do not.
+ *
+ * @returns { doctorId, doctorName, dayName, start, today } | null
+ */
+export function nextSessionForRoom(roomId, doctors, opts = {}) {
+  const clock = opts.now || nowInZone()
+  const todayYmd = opts.todayYmd || ymdInZone()
+  const cur = toMinutes(clock.hhmm)
+
+  for (let offset = 0; offset < 7; offset++) {
+    const dayName = DAY_NAMES[(clock.dayOfWeek + offset) % 7]
+    // The date `offset` days from today, still in the hospital's timezone.
+    const ymd = offset === 0
+      ? todayYmd
+      : new Date(Date.parse(`${todayYmd}T00:00:00Z`) + offset * 86400000).toISOString().slice(0, 10)
+
+    const candidates = []
+    for (const d of doctors || []) {
+      if (isOnLeave(d.timetable, ymd)) continue
+      for (const shift of shiftsForRoom(d.timetable, roomId)) {
+        if (shift.dayName !== dayName) continue
+        const start = toMinutes(shift.start)
+        if (!Number.isFinite(start)) continue
+        // Today, only sessions that have not started yet.
+        if (offset === 0 && start <= cur) continue
+        candidates.push({ doctorId: d.doctorId, doctorName: d.doctorName, dayName, start: shift.start, mins: start })
+      }
+    }
+    if (candidates.length) {
+      candidates.sort((a, b) => a.mins - b.mins)
+      const n = candidates[0]
+      return { doctorId: n.doctorId, doctorName: n.doctorName, dayName: n.dayName, start: n.start, today: offset === 0 }
+    }
+  }
+  return null
 }
 
 /**
@@ -36,7 +97,7 @@ function toMinutes(hhmm) {
  * @returns {{ doctorId, doctorName, manual, unassigned, onBreak }}
  */
 export function resolveActiveDoctor(roomId, doctors, opts = {}) {
-  const { override = null, now } = opts
+  const { override = null, now, todayYmd } = opts
 
   if (override) {
     return { doctorId: override.doctorId, doctorName: override.doctorName, manual: true, unassigned: false, onBreak: false }
@@ -47,11 +108,16 @@ export function resolveActiveDoctor(roomId, doctors, opts = {}) {
   }
 
   const clock = now || nowInZone()
+  const ymd = todayYmd || ymdInZone()
   const dayName = DAY_NAMES[clock.dayOfWeek]
   const cur = toMinutes(clock.hhmm)
 
   const matches = []
   for (const d of doctors) {
+    // A doctor on leave is not in the room, whatever their weekly shift says.
+    // This is the whole point of Doctor Timetable's leave list, and nothing
+    // read it — so the board showed doctors on leave as sitting and waiting.
+    if (isOnLeave(d.timetable, ymd)) continue
     for (const shift of shiftsForRoom(d.timetable, roomId)) {
       if (shift.dayName !== dayName) continue
       const start = toMinutes(shift.start)
@@ -90,16 +156,18 @@ export function resolveActiveDoctor(roomId, doctors, opts = {}) {
  *          or when nobody else's shift matches right now.
  */
 export function otherConcurrentDoctors(roomId, doctors, opts = {}) {
-  const { override = null, activeDoctorId = null, now } = opts
+  const { override = null, activeDoctorId = null, now, todayYmd } = opts
   if (override || !doctors || doctors.length === 0) return []
 
   const clock = now || nowInZone()
+  const ymd = todayYmd || ymdInZone()
   const dayName = DAY_NAMES[clock.dayOfWeek]
   const cur = toMinutes(clock.hhmm)
 
   const result = []
   for (const d of doctors) {
     if (d.doctorId === activeDoctorId) continue
+    if (isOnLeave(d.timetable, ymd)) continue
     for (const shift of shiftsForRoom(d.timetable, roomId)) {
       if (shift.dayName !== dayName) continue
       const start = toMinutes(shift.start)
