@@ -245,8 +245,13 @@ function FloorScreen() {
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {rooms.map((r) => {
               const a = r.activeDoctor
-              const isShared = r.sittingType === 'multiple'
+              // Count the doctors actually linked — never the `sittingType`
+              // label. That label is set by hand when a room is created and
+              // nothing updates it as doctors come and go, so Room 100 read
+              // "Single" while three doctors sat in it. The link count is the
+              // truth; the label is a leftover.
               const doctorCount = r.doctorLinks?.length || 0
+              const isShared = doctorCount > 1
               // Only doctors GENUINELY scheduled in this room at this exact
               // moment — not everyone who ever takes a shift here. Shifts in
               // a shared room are non-overlapping by design (different hours,

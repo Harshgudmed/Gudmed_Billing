@@ -261,15 +261,22 @@ function RoomRow({ room, floorId, departments, doctors, onChanged }) {
         <TableCell className="font-mono font-semibold text-[#2E4168]">{room.roomNumber}</TableCell>
         <TableCell className="text-sm">{room.department?.name || <span className="text-gray-400">—</span>}</TableCell>
         <TableCell>
-          {/* Deliberately quiet: a solid badge on every row fought the actual
-              content (room + doctor) for attention. Tint, don't shout. */}
-          <span className={`text-[11px] font-medium rounded-full px-2 py-0.5 border ${
-            room.sittingType === 'multiple'
-              ? 'bg-[#2E4168]/8 text-[#2E4168] border-[#2E4168]/20'
-              : 'bg-gray-50 text-gray-500 border-gray-200'
-          }`}>
-            {room.sittingType === 'multiple' ? `Shared · ${room.doctorLinks?.length || 0}` : 'Single'}
-          </span>
+          {/* Counts the doctors actually linked, never the `sittingType` label:
+              that label is picked by hand when the room is created and nothing
+              touches it afterwards, so a room read "Single" with three doctors
+              in it. Deliberately quiet — a solid badge on every row fought the
+              room number and doctor name for attention. */}
+          {(() => {
+            const n = room.doctorLinks?.length || 0
+            const shared = n > 1
+            return (
+              <span className={`text-[11px] font-medium rounded-full px-2 py-0.5 border ${
+                shared ? 'bg-[#2E4168]/8 text-[#2E4168] border-[#2E4168]/20' : 'bg-gray-50 text-gray-500 border-gray-200'
+              }`}>
+                {shared ? `Shared · ${n}` : n === 1 ? 'Single' : 'Empty'}
+              </span>
+            )
+          })()}
         </TableCell>
         <TableCell className="text-sm">
           {active.unassigned ? <span className="text-gray-400 italic">No doctor linked</span>
