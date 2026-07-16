@@ -18,13 +18,43 @@ import { toRoomDTO, ROOM_INCLUDE, DOCTOR_SELECT } from './roomController.js'
 import { todayRange, nowInZone } from '../lib/dates.js'
 import { DAY_NAMES } from '../lib/doctorTimetable.js'
 import { groupWaitingByDoctor } from '../lib/queueGrouping.js'
+import { syncAppointmentsToQueue } from '../lib/queueSync.js'
+import { ymdInZone } from '../lib/dates.js'
 
 const WAITING_STATUSES = ['waiting', 'called']
+
+// The board read whatever was already in QueueManagement and never derived it.
+// Only the Queue screen called syncAppointmentsToQueue, so the board silently
+// depended on a member of staff having opened that screen first: on a day nobody
+// did, today's appointments had no queue row (or a row with no roomId, from
+// before their doctor had a room), and the board showed empty rooms while the
+// patients sat in the corridor. A wall display cannot depend on someone else
+// clicking something.
+//
+// The sync is idempotent and its writes are upserts, so running it from here is
+// safe — but the board polls every 3s and the sync scans the day's appointments,
+// so it is throttled and never awaited: the poll that triggers it returns the
+// current data, and the next one (3s later) sees the healed rows.
+const SYNC_EVERY_MS = 60_000
+const lastSyncAt = new Map() // organizationId -> epoch ms
+let syncInFlight = false
+
+function healTodaysQueue(organizationId) {
+  const now = Date.now()
+  if (syncInFlight || now - (lastSyncAt.get(organizationId) || 0) < SYNC_EVERY_MS) return
+  lastSyncAt.set(organizationId, now)
+  syncInFlight = true
+  const today = ymdInZone()
+  syncAppointmentsToQueue(organizationId, today, today)
+    .catch((e) => console.error('[display] queue sync failed:', e.message))
+    .finally(() => { syncInFlight = false })
+}
 
 // GET /api/display/floors — floor tiles with a live waiting-room headcount.
 export async function getFloorsOverview(req, res, next) {
   try {
     const ORG_ID = getOrgId(req)
+    healTodaysQueue(ORG_ID) // fire-and-forget; see the note above
     // A passport-office display board is inherently "right now" — same
     // "today-only entries" rule as the main Queue screen. Without this, every
     // appointment ever synced (queueSync stamps every non-cancelled

@@ -599,10 +599,14 @@ export default function DoctorTiming() {
                                     value={shift.roomId || ''}
                                     onChange={(v) => handleUpdateShift(day, sIdx, 'roomId', v)}
                                     options={roomsForDoctor.map((r) => {
+                                      // From the real link count, not the
+                                      // `sittingType` label — that is set once by
+                                      // hand at creation and never updated, so a
+                                      // room with three doctors still read "Single".
                                       const sharedCount = r._count?.doctorLinks || 0
-                                      const sittingLabel = r.sittingType === 'multiple'
-                                        ? `Shared · ${sharedCount} doctor${sharedCount === 1 ? '' : 's'}`
-                                        : 'Single doctor'
+                                      const sittingLabel = sharedCount > 1
+                                        ? `Shared · ${sharedCount} doctors`
+                                        : sharedCount === 1 ? 'Single doctor' : 'Empty'
                                       return {
                                         value: r.id,
                                         label: `Room ${r.roomNumber}`,
