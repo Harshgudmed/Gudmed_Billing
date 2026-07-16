@@ -251,7 +251,7 @@ export default function PrescriptionPurchaseModal({
             <div className="space-y-3">
               {loadingPrices ? (
                 <div className="flex items-center justify-center py-8">
-                  <Loader2 className="h-5 w-5 animate-spin text-gray-400 mr-2" />
+                  <Loader2 className="h-5 w-5 animate-spin text-[#2E4168] mr-2" />
                   <span className="text-sm text-gray-500">Fetching prices…</span>
                 </div>
               ) : (

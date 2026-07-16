@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
+import { drName } from '@/lib/utils'
 import { format } from 'date-fns'
 import { toast } from 'sonner'
 import {
@@ -161,7 +162,7 @@ export default function ConsultationsTab({ admission, doctors = [], departments 
       {/* Loading spinner */}
       {loading && (
         <div className="flex justify-center py-8">
-          <Loader2 className="h-5 w-5 animate-spin text-gray-400" />
+          <Loader2 className="h-5 w-5 animate-spin text-[#2E4168]" />
         </div>
       )}
 
@@ -203,7 +204,7 @@ export default function ConsultationsTab({ admission, doctors = [], departments 
             <div className="h-6 w-6 rounded-full bg-blue-100 flex items-center justify-center text-xs font-bold text-blue-700 shrink-0">
               {c.consultingDoctor?.fullName?.[0] || 'D'}
             </div>
-            <span className="font-medium">{c.consultingDoctor?.fullName || '—'}</span>
+            <span className="font-medium">{c.consultingDoctor?.fullName ? drName(c.consultingDoctor.fullName) : '—'}</span>
             {c.requestedBy && (
               <span className="text-xs text-gray-400">· Requested by {c.requestedBy.fullName}</span>
             )}

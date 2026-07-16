@@ -795,7 +795,7 @@ export default function AppointmentsModule() {
     return (
       <div className="flex items-center justify-center min-h-[400px]">
         <div className="text-center">
-          <Loader2 className="h-12 w-12 animate-spin text-blue-600 mx-auto mb-4" />
+          <Loader2 className="h-12 w-12 animate-spin text-[#2E4168] mx-auto mb-4" />
           <p className="text-gray-500">Loading appointments...</p>
         </div>
       </div>

@@ -18,6 +18,7 @@ import {
 } from 'lucide-react'
 import client from '@/api/client'
 import DoctorTiming from './DoctorTiming'
+import { drName } from '@/lib/utils'
 
 // formatMoney also survives null/undefined — the old local `fmt` threw on them.
 import { formatMoney as fmt } from '@/lib/format'
@@ -237,7 +238,7 @@ function DoctorsTab() {
                 const ready = cfg && doc.consultationFee != null
                 return (
                   <TableRow key={doc.id}>
-                    <TableCell className="font-medium">{doc.fullName}</TableCell>
+                    <TableCell className="font-medium">{drName(doc.fullName)}</TableCell>
                     <TableCell className="text-gray-500">{doc.specialization || '—'}</TableCell>
                     <TableCell>
                       {doc.consultationFee != null
@@ -286,7 +287,7 @@ function DoctorsTab() {
       {/* Configure dialog: base fee + follow-up ranges + commission in one place */}
       <Dialog open={cfgOpen} onOpenChange={setCfgOpen}>
         <DialogContent className="max-w-2xl max-h-[88vh] overflow-y-auto">
-          <DialogHeader><DialogTitle>Configure — {cfgDoctor?.fullName}</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle>Configure — {cfgDoctor?.fullName ? drName(cfgDoctor.fullName) : ''}</DialogTitle></DialogHeader>
           <div className="space-y-6 pt-2">
             {/* ① New Patient base fee */}
             <section>
@@ -603,7 +604,7 @@ function CommissionsTab({ openAddSignal }) {
 @media print{body{padding:12px}}</style></head><body>
 <div class="hosp">${orgInfo.name}</div>
 <div class="title">Commission Settlement Receipt</div>
-<div class="row"><span class="lbl">Doctor</span><span class="val">${c.doctor.fullName}</span></div>
+<div class="row"><span class="lbl">Doctor</span><span class="val">${drName(c.doctor.fullName)}</span></div>
 <div class="row"><span class="lbl">Invoice ID</span><span class="val">${c.invoiceId || '—'}</span></div>
 <div class="row"><span class="lbl">Invoice Amount</span><span class="val">${fmt(c.invoiceAmount)}</span></div>
 <div class="row"><span class="lbl">Commission Rate</span><span class="val">${c.commissionType === 'percentage' ? `${c.commissionRate}%` : fmt(c.commissionRate)}</span></div>
@@ -621,7 +622,7 @@ function CommissionsTab({ openAddSignal }) {
       ['Date', 'Doctor', 'Invoice ID', 'Invoice Amount (₹)', 'Rate', 'Commission (₹)', 'Status', 'Settlement Ref'],
       ...displayed.map(c => [
         format(new Date(c.createdAt), 'dd/MM/yyyy'),
-        c.doctor.fullName,
+        drName(c.doctor.fullName),
         c.invoiceId || '',
         c.invoiceAmount,
         c.commissionType === 'percentage' ? `${c.commissionRate}%` : `₹${c.commissionRate}`,
@@ -650,7 +651,7 @@ function CommissionsTab({ openAddSignal }) {
           <SelectTrigger className="w-44"><SelectValue placeholder="All Doctors" /></SelectTrigger>
           <SelectContent>
             <SelectItem value="all">All Doctors</SelectItem>
-            {doctors.map(d => <SelectItem key={d.id} value={d.id}>{d.fullName}</SelectItem>)}
+            {doctors.map(d => <SelectItem key={d.id} value={d.id}>{drName(d.fullName)}</SelectItem>)}
           </SelectContent>
         </Select>
         <Select value={filterStatus} onValueChange={setFilterStatus}>
@@ -722,7 +723,7 @@ function CommissionsTab({ openAddSignal }) {
                       ) : null}
                     </TableCell>
                     <TableCell className="text-sm">{format(new Date(c.createdAt), 'dd MMM yyyy')}</TableCell>
-                    <TableCell className="font-medium">{c.doctor.fullName}</TableCell>
+                    <TableCell className="font-medium">{drName(c.doctor.fullName)}</TableCell>
                     <TableCell className="text-gray-500 text-sm">{c.invoiceId || '—'}</TableCell>
                     <TableCell>{fmt(c.invoiceAmount)}</TableCell>
                     <TableCell className="text-gray-500 text-sm">{c.commissionType === 'percentage' ? `${c.commissionRate}%` : fmt(c.commissionRate)}</TableCell>
@@ -791,7 +792,7 @@ function CommissionsTab({ openAddSignal }) {
                 onChange={v => setForm(f => ({ ...f, doctorId: v }))}
                 options={doctors.map(d => ({
                   value: d.id,
-                  label: d.fullName,
+                  label: drName(d.fullName),
                   sublabel: d.commissionConfig
                     ? `Commission ${d.commissionConfig.commissionType === 'percentage' ? `${d.commissionConfig.commissionRate}%` : fmt(d.commissionConfig.commissionRate)}`
                     : (d.specialization || undefined),
@@ -830,7 +831,7 @@ function CommissionsTab({ openAddSignal }) {
       {/* Edit Commission Dialog */}
       <Dialog open={editDialog} onOpenChange={setEditDialog}>
         <DialogContent className="max-w-md">
-          <DialogHeader><DialogTitle>Edit Commission — {editEntry?.doctor?.fullName}</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle>Edit Commission — {editEntry?.doctor?.fullName ? drName(editEntry.doctor.fullName) : ''}</DialogTitle></DialogHeader>
           <div className="space-y-4 pt-2">
             <div>
               <Label>Invoice Amount (₹) *</Label>
@@ -863,7 +864,7 @@ function CommissionsTab({ openAddSignal }) {
           {settleEntry && (
             <div className="space-y-4 pt-2">
               <div className="bg-green-50 border border-green-200 rounded-lg p-3 text-sm space-y-1">
-                <div className="font-semibold text-green-800">{settleEntry.doctor?.fullName}</div>
+                <div className="font-semibold text-green-800">{settleEntry.doctor?.fullName ? drName(settleEntry.doctor.fullName) : ''}</div>
                 <div className="text-gray-600">Commission: <span className="font-bold text-green-700">{fmt(settleEntry.commissionAmount)}</span></div>
               </div>
               <div>
@@ -958,7 +959,7 @@ function SettlementTab() {
                   <TableCell>
                     <input type="checkbox" checked={selected.has(c.id)} onChange={() => toggle(c.id)} className="h-4 w-4 cursor-pointer" />
                   </TableCell>
-                  <TableCell className="font-medium">{c.doctor.fullName}</TableCell>
+                  <TableCell className="font-medium">{drName(c.doctor.fullName)}</TableCell>
                   <TableCell>{fmt(c.invoiceAmount)}</TableCell>
                   <TableCell className="font-semibold text-green-700">{fmt(c.commissionAmount)}</TableCell>
                   <TableCell className="text-sm text-gray-500">{periodLabel(c.period)}</TableCell>
@@ -1139,7 +1140,7 @@ function FeeStructureTab() {
           onChange={handleSelectDoctor}
           options={doctors.map(doc => ({
             value: doc.id,
-            label: doc.fullName,
+            label: drName(doc.fullName),
             sublabel: doc.specialization || undefined,
           }))}
           placeholder="Choose a doctor to set fees..."
@@ -1291,7 +1292,7 @@ function ReportsTab() {
     const rows = [
       ['Doctor', 'Rate', 'Commission Type', 'Total Invoiced (₹)', 'Total Entries', 'Pending (₹)', 'Pending Count', 'Settled (₹)', 'Settled Count', 'Status'],
       ...stats.map(s => [
-        s.doctorName,
+        drName(s.doctorName),
         s.isActive ? (s.commissionType === 'percentage' ? `${s.commissionRate}%` : `₹${s.commissionRate}`) : 'Not configured',
         s.commissionType || '',
         s.totalInvoiceAmount,
@@ -1348,7 +1349,7 @@ function ReportsTab() {
                 const paginatedStats = stats.slice(startIdx, endIdx)
                 return paginatedStats.map(s => (
                   <TableRow key={s.doctorId}>
-                    <TableCell className="font-medium">{s.doctorName}</TableCell>
+                    <TableCell className="font-medium">{drName(s.doctorName)}</TableCell>
                     <TableCell className="text-gray-500">
                       {s.isActive
                         ? s.commissionType === 'percentage' ? `${s.commissionRate}%` : fmt(s.commissionRate)

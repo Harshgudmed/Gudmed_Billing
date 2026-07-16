@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -6,10 +6,58 @@ import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
 import { SearchableSelect } from '@/components/ui/searchable-select'
 import { toast } from 'sonner'
-import { Clock, Plus, Trash2, Calendar, ShieldCheck, HelpCircle, Save, Loader2, Sparkles, CheckCircle } from 'lucide-react'
+import { Clock, Plus, Trash2, Calendar, ShieldCheck, HelpCircle, Save, Loader2, Sparkles, CheckCircle, ChevronRight, Search, Stethoscope, User, Heart, Brain, Ear, Eye, Bone, Baby, Ribbon, Smile } from 'lucide-react'
 import client from '@/api/client'
+import { drName } from '@/lib/utils'
 
 const DAYS_OF_WEEK = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
+
+// A specialty-appropriate icon per department, matched by keyword so it works
+// for real department names (not a fixed list). Falls back to the stethoscope
+// for anything unmatched (General Medicine, Unassigned, etc.).
+const DEPARTMENT_ICONS = [
+  { match: ['cardio', 'heart'], Icon: Heart },
+  { match: ['neuro'], Icon: Brain },
+  { match: ['psych', 'mental'], Icon: Smile },
+  { match: ['ent', 'ear', 'nose', 'throat'], Icon: Ear },
+  { match: ['ophthal', 'eye', 'optom'], Icon: Eye },
+  { match: ['ortho', 'bone', 'joint'], Icon: Bone },
+  { match: ['pediatr', 'paediatr', 'child', 'neonat'], Icon: Baby },
+  { match: ['onco', 'cancer', 'tumor', 'tumour'], Icon: Ribbon },
+  { match: ['derma', 'skin', 'cosmet'], Icon: Sparkles },
+]
+function departmentIcon(name) {
+  const n = (name || '').toLowerCase()
+  for (const { match, Icon } of DEPARTMENT_ICONS) {
+    if (match.some((m) => n.includes(m))) return Icon
+  }
+  return Stethoscope
+}
+
+// Professional, cohesive palette for a healthcare SaaS — muted jewel tones
+// anchored on the brand navy (#2E4168, the same color as the sidebar and the
+// Display Board), NOT a bright consumer rainbow. Each department gets a
+// stable color (hashed by its key) so cards stay tellable apart, but they all
+// sit at a similar depth/saturation so the grid reads as one brand system.
+const BRAND_NAVY = '#2E4168'
+const DEPARTMENT_COLORS = [
+  '#2E4168', // brand navy
+  '#1F6F78', // deep teal
+  '#3E5C8A', // steel blue
+  '#4C4A82', // muted indigo
+  '#2F6B4A', // deep green
+  '#8A5A3C', // warm bronze
+  '#7A4A6E', // muted plum
+  '#455A74', // slate
+]
+function departmentColor(key) {
+  let hash = 0
+  for (let i = 0; i < key.length; i++) hash = (hash * 31 + key.charCodeAt(i)) | 0
+  return DEPARTMENT_COLORS[Math.abs(hash) % DEPARTMENT_COLORS.length]
+}
+// A subtle top-light / bottom-dark sheen over any solid brand color — gives
+// the header depth (premium feel) without needing a second hex per color.
+const CARD_SHEEN = 'linear-gradient(160deg, rgba(255,255,255,0.14), rgba(0,0,0,0.18))'
 
 export default function DoctorTiming() {
   const [doctors, setDoctors] = useState([])
@@ -17,10 +65,22 @@ export default function DoctorTiming() {
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [timetable, setTimetable] = useState(null)
-  
+  // The doctor row's updatedAt at the moment we loaded it — sent back on save
+  // as expectedUpdatedAt so a stale save (someone else changed this timetable
+  // in between) gets rejected instead of silently overwriting their change.
+  const [timetableUpdatedAt, setTimetableUpdatedAt] = useState(null)
+  const [rooms, setRooms] = useState([])
+
   // New vacation exception state
   const [exceptionDate, setExceptionDate] = useState('')
   const [exceptionReason, setExceptionReason] = useState('')
+
+  // Drill-down navigation: Departments -> Doctors (in that department,
+  // filterable) -> Timetable (full CRUD). Mirrors the Display Board's own
+  // Floor -> Department -> Room drill-down pattern.
+  const [view, setView] = useState('departments') // 'departments' | 'doctors' | 'timetable'
+  const [selectedDepartmentKey, setSelectedDepartmentKey] = useState(null)
+  const [doctorSearch, setDoctorSearch] = useState('')
 
   // Load all active doctors
   const loadDoctors = useCallback(async () => {
@@ -28,15 +88,56 @@ export default function DoctorTiming() {
     const res = await client.get('/doctor-accountability?resource=doctors')
     if (res.success) {
       setDoctors(res.data)
-      // Auto-select first doctor if available
-      if (res.data.length > 0) {
-        setSelectedDoctorId(res.data[0].id)
-      }
     } else {
       toast.error(res.error || 'Failed to load doctors')
     }
     setLoading(false)
   }, [])
+
+  // Group doctors into department cards — key is the department id, or
+  // 'unassigned' for a doctor with no department set.
+  const departments = useMemo(() => {
+    const map = new Map()
+    for (const doc of doctors) {
+      const key = doc.department?.id || 'unassigned'
+      const name = doc.department?.name || 'Unassigned'
+      if (!map.has(key)) map.set(key, { key, name, count: 0 })
+      map.get(key).count++
+    }
+    return Array.from(map.values()).sort((a, b) => a.name.localeCompare(b.name))
+  }, [doctors])
+
+  const doctorsInSelectedDepartment = useMemo(() => {
+    if (!selectedDepartmentKey) return []
+    const filtered = doctors.filter((d) => (d.department?.id || 'unassigned') === selectedDepartmentKey)
+    const q = doctorSearch.trim().toLowerCase()
+    if (!q) return filtered
+    return filtered.filter((d) => d.fullName.toLowerCase().includes(q) || (d.specialization || '').toLowerCase().includes(q))
+  }, [doctors, selectedDepartmentKey, doctorSearch])
+
+  const selectedDepartment = departments.find((d) => d.key === selectedDepartmentKey)
+
+  const goToDepartment = (key) => {
+    setSelectedDepartmentKey(key)
+    setDoctorSearch('')
+    setView('doctors')
+  }
+  const goToDoctor = (docId) => {
+    setSelectedDoctorId(docId)
+    setView('timetable')
+  }
+  const backToDepartments = () => { setView('departments'); setSelectedDepartmentKey(null) }
+  const backToDoctors = () => { setView('doctors'); setSelectedDoctorId('') }
+
+  // Every room, for the per-shift "where do they sit" picker — this is the
+  // one place room + timing are set together, so no separate "link a doctor
+  // to a room" step exists elsewhere.
+  const loadRooms = useCallback(async () => {
+    const res = await client.get('/rooms/picker-list')
+    if (res.success) setRooms(res.data)
+  }, [])
+
+  useEffect(() => { loadRooms() }, [loadRooms])
 
   // Load timetable for selected doctor
   const loadTimetable = useCallback(async (docId) => {
@@ -45,6 +146,7 @@ export default function DoctorTiming() {
     const res = await client.get(`/doctor-accountability?resource=timetable&doctorId=${docId}`)
     if (res.success) {
       setTimetable(res.data.timetable)
+      setTimetableUpdatedAt(res.data.updatedAt || null)
     } else {
       toast.error(res.error || 'Failed to load timetable')
     }
@@ -71,7 +173,7 @@ export default function DoctorTiming() {
     
     // Add default shift if activating and none exist
     if (newActive && newShifts.length === 0) {
-      newShifts = [{ start: '09:00', end: '17:00' }]
+      newShifts = [{ start: '09:00', end: '17:00', roomId: null }]
     }
     
     updatedWeeklySlots[day] = {
@@ -107,7 +209,9 @@ export default function DoctorTiming() {
     updatedWeeklySlots[day] = {
       ...dayData,
       active: true,
-      shifts: [...dayData.shifts, { start: nextStart, end: nextEnd }]
+      // Carry over the previous shift's room — adding a second shift on the
+      // same day is usually the same room, different hours.
+      shifts: [...dayData.shifts, { start: nextStart, end: nextEnd, roomId: lastShift?.roomId ?? null }]
     }
 
     setTimetable({
@@ -250,42 +354,160 @@ export default function DoctorTiming() {
   const handleSave = async () => {
     if (!validateTimetable()) return
     setSaving(true)
-    const res = await client.post(`/doctor-accountability?resource=timetable`, {
-      doctorId: selectedDoctorId,
-      timetable
-    })
-    if (res.success) {
-      toast.success('Doctor timetable saved successfully')
-    } else {
-      toast.error(res.error || 'Failed to save timetable')
+    try {
+      const res = await client.post(`/doctor-accountability?resource=timetable`, {
+        doctorId: selectedDoctorId,
+        timetable,
+        expectedUpdatedAt: timetableUpdatedAt,
+      })
+      if (res.success) {
+        toast.success('Doctor timetable saved successfully')
+        setTimetableUpdatedAt(res.data?.updatedAt || null)
+      } else {
+        toast.error(res.error || 'Failed to save timetable')
+      }
+    } catch (err) {
+      if (err.status === 409) {
+        toast.error('Someone else changed this doctor\'s timetable in the meantime. Reloading the latest version…')
+        await loadTimetable(selectedDoctorId)
+      } else {
+        toast.error(err.message || 'Failed to save timetable')
+      }
+    } finally {
+      setSaving(false)
     }
-    setSaving(false)
   }
 
   const selectedDoctor = doctors.find(d => d.id === selectedDoctorId)
 
-  return (
-    <div className="space-y-6">
-      <div className="flex flex-wrap items-end justify-between gap-4 bg-gradient-to-r from-blue-50/50 to-indigo-50/30 p-4 rounded-xl border border-blue-100/50 shadow-sm">
-        <div className="flex-1 min-w-[280px] max-w-md">
-          <Label className="text-xs font-semibold uppercase tracking-wider text-blue-800">Select Doctor to Manage Timetable</Label>
-          <SearchableSelect
-            className="mt-1.5 w-full bg-white shadow-sm transition-all duration-200 border-gray-200 focus:border-blue-500"
-            value={selectedDoctorId || ''}
-            onChange={setSelectedDoctorId}
-            options={doctors.map(doc => ({
-              value: doc.id,
-              label: doc.fullName,
-              sublabel: doc.specialization || undefined,
-            }))}
-            placeholder="Choose a doctor..."
-            searchPlaceholder="Search doctor by name..."
-            emptyText="No doctors found"
+  // A doctor sits in their OWN department's rooms — a Cardiology doctor
+  // shouldn't be assignable to a 3rd-floor Oncology room. So the room picker
+  // is scoped to the doctor's department. (Falls back to all rooms only when
+  // the doctor has no department, or their department has no rooms yet, so
+  // the picker is never uselessly empty.) A room's `department` comes from
+  // /rooms/picker-list; the doctor's from the doctors list.
+  const roomsForDoctor = useMemo(() => {
+    const deptId = selectedDoctor?.department?.id
+    if (!deptId) return rooms
+    const own = rooms.filter((r) => r.department?.id === deptId)
+    return own.length ? own : rooms
+  }, [rooms, selectedDoctor])
+
+  // ── Departments grid (step 1) ──────────────────────────────────────────
+  if (loading && doctors.length === 0) {
+    return (
+      <div className="flex flex-col items-center justify-center py-20 space-y-4">
+        <Loader2 className="h-10 w-10 text-indigo-600 animate-spin" />
+        <span className="text-sm font-medium text-gray-500">Loading departments...</span>
+      </div>
+    )
+  }
+
+  if (view === 'departments') {
+    return (
+      <div className="space-y-6">
+        <div>
+          <h2 className="text-xl font-bold text-gray-900">Doctor Timetable</h2>
+          <p className="text-sm text-gray-500 mt-1">Choose a department to see its doctors, then a doctor to manage their weekly schedule + room.</p>
+        </div>
+        {departments.length === 0 ? (
+          <p className="text-gray-400">No doctors found.</p>
+        ) : (
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+            {departments.map((dept) => {
+              const color = departmentColor(dept.key)
+              const Icon = departmentIcon(dept.name)
+              return (
+                <button
+                  key={dept.key}
+                  onClick={() => goToDepartment(dept.key)}
+                  className="group text-left bg-white border border-gray-200 rounded-xl overflow-hidden hover:shadow-md hover:border-gray-300 hover:-translate-y-0.5 transition-all duration-200"
+                >
+                  <div className="h-14 flex items-center gap-3 px-4" style={{ backgroundColor: color, backgroundImage: CARD_SHEEN }}>
+                    <span className="h-9 w-9 rounded-lg bg-white/15 flex items-center justify-center shrink-0">
+                      <Icon className="h-5 w-5 text-white" />
+                    </span>
+                    <span className="font-semibold text-white truncate">{dept.name}</span>
+                  </div>
+                  <div className="px-4 py-3 flex items-center justify-between">
+                    <span className="text-xs text-gray-500">{dept.count} doctor{dept.count === 1 ? '' : 's'}</span>
+                    <ChevronRight className="h-4 w-4 text-gray-300 group-hover:text-gray-500 group-hover:translate-x-0.5 transition-all" />
+                  </div>
+                </button>
+              )
+            })}
+          </div>
+        )}
+      </div>
+    )
+  }
+
+  // ── Doctors grid, filtered, within the selected department (step 2) ────
+  if (view === 'doctors') {
+    return (
+      <div className="space-y-6">
+        <div className="flex items-center gap-1.5 text-sm">
+          <button onClick={backToDepartments} className="text-gray-500 hover:text-[#2E4168] font-medium">All Departments</button>
+          <ChevronRight className="h-3.5 w-3.5 text-gray-400" />
+          <span className="font-semibold text-gray-800">{selectedDepartment?.name}</span>
+          <span className="text-gray-400">· {doctorsInSelectedDepartment.length} doctor{doctorsInSelectedDepartment.length === 1 ? '' : 's'}</span>
+        </div>
+        <div className="relative max-w-sm">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+          <Input
+            value={doctorSearch}
+            onChange={(e) => setDoctorSearch(e.target.value)}
+            placeholder="Filter doctors by name or specialization..."
+            className="pl-9 bg-white border-gray-200 focus-visible:ring-[#2E4168]/30"
           />
         </div>
-        
+        {doctorsInSelectedDepartment.length === 0 ? (
+          <p className="text-gray-400">No doctors match this filter.</p>
+        ) : (
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+            {doctorsInSelectedDepartment.map((doc) => {
+              const color = departmentColor(selectedDepartmentKey || '')
+              const initials = doc.fullName.replace(/^dr\.?\s+/i, '').split(' ').filter(Boolean).slice(0, 2).map((w) => w[0]).join('').toUpperCase()
+              return (
+                <button
+                  key={doc.id}
+                  onClick={() => goToDoctor(doc.id)}
+                  className="group text-left bg-white border border-gray-200 rounded-xl p-4 hover:shadow-md hover:border-gray-300 hover:-translate-y-0.5 transition-all duration-200 flex items-center gap-3"
+                >
+                  <div className="h-11 w-11 rounded-full flex items-center justify-center shrink-0 text-white text-sm font-bold" style={{ backgroundColor: color, backgroundImage: CARD_SHEEN }}>
+                    {initials || <User className="h-5 w-5" />}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="font-semibold text-gray-900 truncate">{drName(doc.fullName)}</div>
+                    <div className="text-xs text-gray-500 mt-0.5 truncate">{doc.specialization || selectedDepartment?.name}</div>
+                  </div>
+                  <ChevronRight className="h-4 w-4 text-gray-300 group-hover:text-gray-500 group-hover:translate-x-0.5 transition-all shrink-0" />
+                </button>
+              )
+            })}
+          </div>
+        )}
+      </div>
+    )
+  }
+
+  // ── Timetable editor (step 3) ───────────────────────────────────────────
+  return (
+    <div className="space-y-6">
+      <div className="flex flex-wrap items-end justify-between gap-4 bg-gradient-to-r from-slate-50 to-[#2E4168]/5 p-4 rounded-xl border border-gray-200 shadow-sm">
+        <div>
+          <div className="flex items-center gap-1.5 text-sm mb-1.5">
+            <button onClick={backToDepartments} className="text-gray-500 hover:text-[#2E4168] font-medium">All Departments</button>
+            <ChevronRight className="h-3.5 w-3.5 text-gray-400" />
+            <button onClick={backToDoctors} className="text-gray-500 hover:text-[#2E4168] font-medium">{selectedDepartment?.name}</button>
+            <ChevronRight className="h-3.5 w-3.5 text-gray-400" />
+            <span className="font-semibold text-gray-800">{drName(selectedDoctor?.fullName)}</span>
+          </div>
+          <Label className="text-xs font-semibold uppercase tracking-wider text-[#2E4168]">Managing Timetable</Label>
+        </div>
+
         {timetable && (
-          <Button onClick={handleSave} disabled={saving} className="bg-indigo-600 hover:bg-indigo-700 text-white font-medium shadow-md shadow-indigo-100 px-6 py-2 transition-all duration-200 flex items-center gap-2">
+          <Button onClick={handleSave} disabled={saving} className="bg-[#2E4168] hover:bg-[#243352] text-white font-medium shadow-md px-6 py-2 transition-all duration-200 flex items-center gap-2">
             {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
             {saving ? 'Saving changes...' : 'Save Doctor Timetable'}
           </Button>
@@ -367,6 +589,30 @@ export default function DoctorTiming() {
                                     value={shift.end}
                                     onChange={(e) => handleUpdateShift(day, sIdx, 'end', e.target.value)}
                                     className="h-8 py-0.5 px-2 text-sm w-28 bg-white border-gray-200 rounded"
+                                  />
+                                </div>
+                                <div className="flex items-center gap-2 flex-1 min-w-[240px]">
+                                  <span className="text-xs text-gray-400 whitespace-nowrap">Room</span>
+                                  <SearchableSelect
+                                    className="h-8 w-full bg-white border-gray-200 text-sm"
+                                    contentClassName="w-[360px]"
+                                    value={shift.roomId || ''}
+                                    onChange={(v) => handleUpdateShift(day, sIdx, 'roomId', v)}
+                                    options={roomsForDoctor.map((r) => {
+                                      const sharedCount = r._count?.doctorLinks || 0
+                                      const sittingLabel = r.sittingType === 'multiple'
+                                        ? `Shared · ${sharedCount} doctor${sharedCount === 1 ? '' : 's'}`
+                                        : 'Single doctor'
+                                      return {
+                                        value: r.id,
+                                        label: `Room ${r.roomNumber}`,
+                                        sublabel: `${sittingLabel} · ${r.floor.name}${r.department ? ' · ' + r.department.name : ''}`,
+                                        keywords: `${r.floor.name} ${r.department?.name || ''} ${sittingLabel}`,
+                                      }
+                                    })}
+                                    placeholder="No room"
+                                    searchPlaceholder="Search floor, department, room…"
+                                    emptyText="No rooms found"
                                   />
                                 </div>
                                 <Button

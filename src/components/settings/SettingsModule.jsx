@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { clearOrgCache } from '@/lib/orgSettings'
+import { drName } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { PasswordInput } from '@/components/ui/password-input'
@@ -9,7 +10,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import {
   Settings, Building2, Users, Package, Link2, Database,
   Save, Plus, Edit, Eye, CheckCircle, XCircle, AlertCircle, RefreshCw, Loader2, Clock, Palette,
-  MessageCircle, Bell,
+  MessageCircle, Bell, DoorOpen,
 } from 'lucide-react'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -28,6 +29,7 @@ import client from '@/api/client'
 import { useServerPagination } from '@/lib/useServerPagination'
 import { Pagination } from '@/components/common/Pagination'
 import IntegrationsHub from './IntegrationsHub'
+import RoomsManager from './RoomsManager'
 
 const ORG_ID = 'org-demo'
 const ITEMS_PER_PAGE = 10
@@ -276,7 +278,7 @@ export default function SettingsModule() {
     return (
       <div className="flex items-center justify-center min-h-[400px]">
         <div className="text-center">
-          <Loader2 className="h-8 w-8 animate-spin mx-auto mb-4 text-gray-400" />
+          <Loader2 className="h-8 w-8 animate-spin mx-auto mb-4 text-[#2E4168]" />
           <p className="text-gray-500">Loading settings...</p>
         </div>
       </div>
@@ -310,12 +312,13 @@ export default function SettingsModule() {
       </div>
 
       <Tabs value={activeTab} onValueChange={setActiveTab}>
-        <TabsList className="grid w-full grid-cols-5">
+        <TabsList className="grid w-full grid-cols-6">
           <TabsTrigger value="organization"><Building2 className="h-4 w-4 mr-2" />Organization</TabsTrigger>
           <TabsTrigger value="users"><Users className="h-4 w-4 mr-2" />Users</TabsTrigger>
+          <TabsTrigger value="rooms"><DoorOpen className="h-4 w-4 mr-2" />Rooms</TabsTrigger>
           <TabsTrigger value="modules"><Package className="h-4 w-4 mr-2" />Modules</TabsTrigger>
           <TabsTrigger value="integrations"><Link2 className="h-4 w-4 mr-2" />Integrations</TabsTrigger>
-          {/* Notifications tab hidden — to show again: uncomment this trigger AND its <TabsContent>, then set grid-cols to 6 */}
+          {/* Notifications tab hidden — to show again: uncomment this trigger AND its <TabsContent>, then bump grid-cols by one */}
           {/* <TabsTrigger value="notifications"><MessageCircle className="h-4 w-4 mr-2" />Notifications</TabsTrigger> */}
           <TabsTrigger value="backup"><Database className="h-4 w-4 mr-2" />Backup</TabsTrigger>
         </TabsList>
@@ -641,7 +644,11 @@ export default function SettingsModule() {
                                   <AvatarFallback>{user.fullName.split(' ').map(n => n[0]).join('').slice(0, 2)}</AvatarFallback>
                                 </Avatar>
                                 <div>
-                                  <p className="font-medium">{user.fullName}</p>
+                                  {/* Only doctors carry the title — a coordinator or
+                                      admin must not become "Dr.". drName() is
+                                      idempotent, so a name already stored as
+                                      "Dr. Aanya" doesn't become "Dr. Dr. Aanya". */}
+                                  <p className="font-medium">{user.role === 'doctor' ? drName(user.fullName) : user.fullName}</p>
                                   <p className="text-xs text-gray-500">{user.email}</p>
                                 </div>
                               </div>
@@ -703,6 +710,11 @@ export default function SettingsModule() {
               </div>
             </CardContent>
           </Card>
+        </TabsContent>
+
+        {/* Rooms Tab — Floors/Rooms, doctor linking, Doctor Sitting Type, schedules, overrides */}
+        <TabsContent value="rooms" className="space-y-4">
+          <RoomsManager />
         </TabsContent>
 
         {/* Integrations Tab — 4-card launcher; click a card to open its screen */}

@@ -117,6 +117,10 @@ model Organization {
   insuranceCases      InsuranceCase[]
   insuranceClaims     InsuranceClaim[]
   deathCertificates   DeathCertificate[]
+  floors                Floor[]
+  rooms                 Room[]
+  doctorRoomAssignments DoctorRoomAssignment[]
+  consultationSchedules ConsultationSchedule[]
 }
 
 /// User (Staff)
@@ -200,6 +204,13 @@ model User {
   admittingAdmissions Admission[] @relation("AdmittingDoctor")
   dischargeAdmissions Admission[] @relation("DischargeDoctor")
 
+  // Doctor Sitting Type — which room(s) this doctor is linked to, and when
+  roomAssignments        DoctorRoomAssignment[] @relation("DoctorRoomLinks")
+  consultationSchedules  ConsultationSchedule[] @relation("DoctorSchedules")
+  followUpQueueEntries   QueueManagement[]      @relation("QueueFollowUpDoctor")
+  roomOverridesAsDoctor  Room[]                 @relation("RoomOverrideDoctor")
+  roomOverridesSetBy     Room[]                 @relation("RoomOverrideSetBy")
+
   // Pre-Triage screening
   preTriagesScreened  PreTriage[] @relation("ScreenedBy")
   preTriagesRouted    PreTriage[] @relation("RoutedBy")
@@ -236,6 +247,7 @@ model Department {
   users            User[]
   wards            Ward[]
   ipdConsultations IpdConsultation[]
+  rooms            Room[]
 
   // One department name per organization — prevents the duplicate-department
   // rows that the frontend used to compensate for.
@@ -430,6 +442,12 @@ model Appointment {
   @@index([organizationId, appointmentDate, status])
   @@index([appointmentDate, appointmentTime])
   @@index([status])
+  // NOTE: a partial unique index — (organizationId, doctorId, appointmentDate,
+  // appointmentTime) WHERE doctorId IS NOT NULL AND status NOT IN (cancelled,
+  // no_show, rescheduled) — also exists on this table, preventing the same
+  // doctor from being double-booked into the same slot. Prisma's schema DSL
+  // can't express a WHERE-filtered unique constraint, so it's not declared
+  // here as `@@unique` — see migration 20260716100500_appointment_slot_unique.
 }
 
 /// Consultation (Visit Record)
@@ -2479,9 +2497,27 @@ model QueueManagement {
   // orders on this, not on the string — a string sort mis-ranked "high"/"medium".
   priorityRank Int   @default(40)
 
+  // new: any walk-in/appointment takes whoever the room's schedule says is
+  // active right now. follow_up: may carry followUpDoctorId — the doctor
+  // this patient actually saw before, who can be someone OTHER than whoever
+  // is active in a shared room right now (e.g. booked with the 2pm doctor,
+  // arrived during the 9am doctor's slot). See lib/activeDoctor.js.
+  visitType        String    @default("new") // new | follow_up
+  followUpDoctorId String?
+
   // Assignment
   assignedToId String?
-  assignedRoom String?
+  assignedRoom String? // legacy free-text room label — kept for backward compatibility
+  // Links this entry to a real Room row for the display board's per-room
+  // grouping. Free-text `assignedRoom` is ambiguous across floors (two floors
+  // can both have a "Room 204"); this is not.
+  roomId       String?
+
+  // Stamped by the GudMed/Scribble prescription-upload webhook (or, until
+  // that integration exists, a manual "Prescription Ready" staff action) —
+  // this is the actual "you are next" trigger for the display board, NOT a
+  // countdown timer. See markPrescriptionUploaded() in queueController.js.
+  prescriptionUploadedAt DateTime?
 
   // Status
   status String @default("waiting") // waiting, called, in_progress, completed, cancelled, no_show
@@ -2502,18 +2538,142 @@ model QueueManagement {
   updatedAt DateTime @updatedAt
 
   // Relations
-  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  patient      Patient?     @relation(fields: [patientId], references: [id])
-  assignedTo   User?        @relation("QueueAssignedTo", fields: [assignedToId], references: [id])
-  appointment  Appointment? @relation(fields: [appointmentId], references: [id])
+  organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  patient         Patient?     @relation(fields: [patientId], references: [id])
+  assignedTo      User?        @relation("QueueAssignedTo", fields: [assignedToId], references: [id])
+  appointment     Appointment? @relation(fields: [appointmentId], references: [id])
+  followUpDoctor  User?        @relation("QueueFollowUpDoctor", fields: [followUpDoctorId], references: [id])
+  room            Room?        @relation(fields: [roomId], references: [id])
 
   @@index([organizationId])
   @@index([serviceArea, status])
   @@index([assignedToId])
+  @@index([followUpDoctorId])
+  @@index([roomId, status])
   // Matches the queue list's ORDER BY (priorityRank desc, joinedQueueAt asc)
   // within a tenant, so the sorted page read stays index-backed.
   @@index([organizationId, status, priorityRank, joinedQueueAt])
   @@index([organizationId, serviceArea, status, priorityRank, joinedQueueAt])
+  // Backs the Display Board's "today only" queries (displayController.js).
+  // Almost every row defaults to status='waiting' (queueSync stamps one per
+  // non-cancelled appointment), so status alone barely narrows anything once
+  // the table holds a year of history — this index lets the date range do
+  // the actual filtering instead of a near-full-table scan.
+  @@index([organizationId, status, joinedQueueAt])
+  // Backs lib/utils/queueNumber.js#nextQueueNumber's atomic counter — without
+  // this, two concurrent inserts could silently hand two patients the same
+  // displayed queue token (proven in practice: a full-history resync of this
+  // dataset produced 127,073 colliding rows before this constraint + the
+  // atomic generator existed).
+  @@unique([organizationId, queueNumber])
+}
+
+/// A physical floor of the hospital — the top level of the display board's
+/// drill-down (All Floors > Floor > Department > Room).
+model Floor {
+  id             String   @id @default(cuid())
+  organizationId String
+  name           String
+  // Explicit display order (Ground=0, 1st=1, 2nd=2, ...) — NOT inferred from
+  // name (alphabetical sorts "1st Floor" before "Ground Floor": '1' < 'G')
+  // or createdAt (an implicit, fragile proxy for intended order that breaks
+  // the moment a floor gets added out of physical sequence). Set explicitly
+  // at creation time (next available slot); a future admin UI to reorder
+  // floors would just update this column.
+  sortOrder      Int      @default(0)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  rooms        Room[]
+
+  @@unique([organizationId, name])
+  @@index([organizationId])
+}
+
+/// A consulting room. `sittingType` is the client-facing "Doctor Sitting
+/// Type" setting: 'single' — one doctor, always (doctorLinks has one row,
+/// no schedule needed). 'multiple' — several doctors share the room; which
+/// one is "active" right now is resolved from ConsultationSchedule, not
+/// stored directly (see lib/activeDoctor.js).
+model Room {
+  id             String   @id @default(cuid())
+  organizationId String
+  floorId        String
+  departmentId   String?
+  roomNumber     String
+  sittingType    String   @default("single") // single | multiple
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  // Staff-forced "who's really sitting here" (the absent-doctor case) —
+  // persisted, not in-memory, so every terminal and the public display board
+  // agree, and it survives a server restart. Cleared back to null once the
+  // scheduled doctor returns. See lib/activeDoctor.js#resolveActiveDoctor.
+  overrideDoctorId String?
+  overrideSetAt    DateTime?
+  overrideSetById  String?
+
+  organization  Organization           @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  floor         Floor                  @relation(fields: [floorId], references: [id], onDelete: Cascade)
+  department    Department?            @relation(fields: [departmentId], references: [id])
+  doctorLinks   DoctorRoomAssignment[]
+  schedules     ConsultationSchedule[]
+  queueEntries   QueueManagement[]
+  overrideDoctor User?                 @relation("RoomOverrideDoctor", fields: [overrideDoctorId], references: [id])
+  overrideSetBy  User?                 @relation("RoomOverrideSetBy", fields: [overrideSetById], references: [id])
+
+  @@unique([organizationId, floorId, roomNumber])
+  @@index([organizationId])
+  @@index([floorId])
+  @@index([departmentId])
+  @@index([overrideDoctorId])
+}
+
+/// Which doctors are linked to a room ("wo link karega"). For a 'single'
+/// sitting-type room this is exactly one row. For 'multiple', one row per
+/// doctor who sits there — ConsultationSchedule then says when each of them
+/// is the active one.
+model DoctorRoomAssignment {
+  id             String   @id @default(cuid())
+  organizationId String
+  doctorId       String
+  roomId         String
+  createdAt      DateTime @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  doctor       User         @relation("DoctorRoomLinks", fields: [doctorId], references: [id], onDelete: Cascade)
+  room         Room         @relation(fields: [roomId], references: [id], onDelete: Cascade)
+
+  @@unique([doctorId, roomId])
+  @@index([organizationId])
+  @@index([roomId])
+}
+
+/// A doctor's recurring weekly slot in a shared room — e.g. Dr. Patel
+/// 09:00-13:00, Dr. Verma 14:00-18:00 in the same room. Only meaningful for
+/// Room.sittingType = 'multiple'; a 'single' room's doctor is always active
+/// and needs no schedule row. Overlapping slots for the same room/day are a
+/// data-entry error to prevent at the settings UI, not to resolve at read
+/// time (see lib/activeDoctor.js).
+model ConsultationSchedule {
+  id             String   @id @default(cuid())
+  organizationId String
+  doctorId       String
+  roomId         String
+  dayOfWeek      Int      // 0=Sunday .. 6=Saturday, matches JS Date#getDay()
+  startTime      String   // "HH:mm", 24h, room-local
+  endTime        String   // "HH:mm", 24h, room-local
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  doctor       User         @relation("DoctorSchedules", fields: [doctorId], references: [id], onDelete: Cascade)
+  room         Room         @relation(fields: [roomId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@index([roomId, dayOfWeek])
+  @@index([doctorId])
 }
 
 /// Day-Care Case (same-day admission/procedure with same-day discharge)

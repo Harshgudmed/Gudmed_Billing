@@ -141,7 +141,7 @@ export default function ReportsTab({ admissionId }) {
   }, [admissionId])
 
   if (loading) {
-    return <div className="py-14 text-center"><Loader2 className="h-5 w-5 animate-spin mx-auto text-gray-400" /></div>
+    return <div className="py-14 text-center"><Loader2 className="h-5 w-5 animate-spin mx-auto text-[#2E4168]" /></div>
   }
   if (!reports.length) {
     return (

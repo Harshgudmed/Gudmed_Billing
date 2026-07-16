@@ -124,7 +124,7 @@ export default function AmbulanceModule() {
           </CardHeader>
           <CardContent>
             {loading && trips.length === 0 ? (
-              <div className="flex justify-center p-10"><Loader2 className="h-7 w-7 animate-spin text-blue-600" /></div>
+              <div className="flex justify-center p-10"><Loader2 className="h-7 w-7 animate-spin text-[#2E4168]" /></div>
             ) : error ? (
               <div className="flex flex-col items-center p-8 text-center text-red-600">
                 <AlertCircle className="h-8 w-8 mb-2" />{error}

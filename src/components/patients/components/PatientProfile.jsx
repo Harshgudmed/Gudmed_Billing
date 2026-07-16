@@ -1,4 +1,5 @@
 import { format } from 'date-fns';
+import { drName } from '@/lib/utils';
 import { formatMoney as fmtMoney } from '@/lib/format';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -216,7 +217,7 @@ body{font-family:Arial,Helvetica,sans-serif;font-size:10.5pt;color:#000;backgrou
           <Badge className="bg-gray-100 text-gray-600 border-0 capitalize">{a.appointmentType?.replace(/_/g, ' ')}</Badge>
         </div>
         <p className="text-xs text-gray-500 mt-1">
-          {a.doctor?.fullName || 'Doctor —'}{a.department?.name ? ` · ${a.department.name}` : ''}
+          {a.doctor?.fullName ? drName(a.doctor.fullName) : 'Doctor —'}{a.department?.name ? ` · ${a.department.name}` : ''}
           {a.consultationFee != null ? ` · Fee ${fmtMoney(a.consultationFee)}` : ''}
         </p>
       </div>
@@ -319,7 +320,7 @@ body{font-family:Arial,Helvetica,sans-serif;font-size:10.5pt;color:#000;backgrou
               {/* Appointments & Billing */}
               <TabsContent value="appointments" className="mt-4">
                 {recordsLoading ? (
-                  <div className="flex justify-center py-12"><Loader2 className="h-6 w-6 animate-spin text-blue-500" /></div>
+                  <div className="flex justify-center py-12"><Loader2 className="h-6 w-6 animate-spin text-[#2E4168]" /></div>
                 ) : (
                   <div className="space-y-4">
                     {/* Billing summary */}
@@ -373,7 +374,7 @@ body{font-family:Arial,Helvetica,sans-serif;font-size:10.5pt;color:#000;backgrou
               <TabsContent value="lab" className="mt-4">
                 <ScrollArea className="h-[360px] pr-3">
                   {recordsLoading ? (
-                    <div className="flex justify-center py-12"><Loader2 className="h-6 w-6 animate-spin text-blue-500" /></div>
+                    <div className="flex justify-center py-12"><Loader2 className="h-6 w-6 animate-spin text-[#2E4168]" /></div>
                   ) : records.labOrders.length === 0 ? (
                     <div className="text-center py-12 text-gray-500">
                       <FlaskConical className="h-10 w-10 mx-auto mb-2 opacity-40" />
@@ -447,7 +448,7 @@ body{font-family:Arial,Helvetica,sans-serif;font-size:10.5pt;color:#000;backgrou
               <TabsContent value="radiology" className="mt-4">
                 <ScrollArea className="h-[360px] pr-3">
                   {recordsLoading ? (
-                    <div className="flex justify-center py-12"><Loader2 className="h-6 w-6 animate-spin text-blue-500" /></div>
+                    <div className="flex justify-center py-12"><Loader2 className="h-6 w-6 animate-spin text-[#2E4168]" /></div>
                   ) : records.radiologyOrders.length === 0 ? (
                     <div className="text-center py-12 text-gray-500">
                       <Scan className="h-10 w-10 mx-auto mb-2 opacity-40" />
@@ -506,7 +507,7 @@ body{font-family:Arial,Helvetica,sans-serif;font-size:10.5pt;color:#000;backgrou
               <TabsContent value="ipd" className="mt-4">
                 <ScrollArea className="h-[360px] pr-3">
                   {recordsLoading ? (
-                    <div className="flex justify-center py-12"><Loader2 className="h-6 w-6 animate-spin text-blue-500" /></div>
+                    <div className="flex justify-center py-12"><Loader2 className="h-6 w-6 animate-spin text-[#2E4168]" /></div>
                   ) : records.admissions.length === 0 ? (
                     <div className="text-center py-12 text-gray-500">
                       <BedDouble className="h-10 w-10 mx-auto mb-2 opacity-40" />
@@ -549,7 +550,7 @@ body{font-family:Arial,Helvetica,sans-serif;font-size:10.5pt;color:#000;backgrou
               <TabsContent value="documents" className="mt-4">
                 <ScrollArea className="h-[360px] pr-3">
                   {recordsLoading ? (
-                    <div className="flex justify-center py-12"><Loader2 className="h-6 w-6 animate-spin text-blue-500" /></div>
+                    <div className="flex justify-center py-12"><Loader2 className="h-6 w-6 animate-spin text-[#2E4168]" /></div>
                   ) : !records.patientDocuments || records.patientDocuments.length === 0 ? (
                     <div className="text-center py-12 text-gray-500">
                       <FileText className="h-10 w-10 mx-auto mb-2 opacity-40" />

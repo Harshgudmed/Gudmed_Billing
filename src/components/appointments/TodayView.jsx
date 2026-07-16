@@ -5,6 +5,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { drName } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
@@ -72,7 +73,7 @@ export default function TodayView({
                             {getPatientFullName(patient || null)}
                           </div>
                           <div className="text-sm text-gray-500">
-                            {doctor?.fullName} • {patient?.mrn}
+                            {doctor?.fullName ? drName(doctor.fullName) : "—"} • {patient?.mrn}
                           </div>
                           <div className="text-sm mt-1">
                             {appointment.chiefComplaint}
@@ -195,7 +196,7 @@ export default function TodayView({
                             {getPatientFullName(patient || null)}
                           </div>
                           <div className="text-sm text-gray-400">
-                            {doctor?.fullName} • {patient?.mrn}
+                            {doctor?.fullName ? drName(doctor.fullName) : "—"} • {patient?.mrn}
                           </div>
                           <div className="text-sm mt-1 text-gray-500">
                             {appointment.chiefComplaint}

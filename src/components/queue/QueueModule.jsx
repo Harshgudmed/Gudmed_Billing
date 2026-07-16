@@ -1,11 +1,12 @@
 import { useState } from 'react'
 import { toast } from 'sonner'
-import { RefreshCw, Users, Clock, CheckCircle, Phone, Search } from 'lucide-react'
+import { RefreshCw, Users, Clock, CheckCircle, Phone, Search, MonitorPlay } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Pagination } from '@/components/common/Pagination'
 import { StatusBadge } from '@/components/common/StatusBadge'
 import { useDateFilter } from '@/components/common/DateFilter'
@@ -26,13 +27,7 @@ const PRIORITY_COLORS = {
 // Ordered most-urgent first — mirrors the backend rank in lib/queuePriority.js.
 const PRIORITY_LEVELS = ['urgent', 'high', 'medium', 'normal', 'low']
 
-// Single-button priority control: each click escalates to the next-more-urgent
-// level, wrapping from urgent back to low. Unknown values start from normal.
-function nextPriority(current) {
-  const idx = PRIORITY_LEVELS.indexOf(current)
-  const start = idx === -1 ? PRIORITY_LEVELS.indexOf('normal') : idx
-  return PRIORITY_LEVELS[(start - 1 + PRIORITY_LEVELS.length) % PRIORITY_LEVELS.length]
-}
+
 
 const QUEUE_STATUS_COLORS = {
   waiting: 'bg-yellow-100 text-yellow-800',
@@ -133,10 +128,19 @@ export default function QueueModule() {
           </h1>
           <p className="text-gray-500">{TODAY_LABEL}</p>
         </div>
-        <Button variant="outline" onClick={refresh} disabled={loading}>
-          <RefreshCw className={`h-4 w-4 mr-1 ${loading ? 'animate-spin' : ''}`} />
-          Refresh
-        </Button>
+        <div className="flex items-center gap-2">
+          {/* Opens in a new tab/window, not a Tabs entry — /display is a
+              full-screen route with no sidebar, meant to be dragged onto a
+              second monitor, not to replace this staff view in place. */}
+          <Button variant="outline" onClick={() => window.open('/display', '_blank', 'noopener')}>
+            <MonitorPlay className="h-4 w-4 mr-1" />
+            Open Display Board
+          </Button>
+          <Button variant="outline" onClick={refresh} disabled={loading}>
+            <RefreshCw className={`h-4 w-4 mr-1 ${loading ? 'animate-spin' : ''}`} />
+            Refresh
+          </Button>
+        </div>
       </div>
 
       <Tabs value={activeTab} onValueChange={setActiveTab}>
@@ -280,15 +284,22 @@ export default function QueueModule() {
                           {isCompleted ? (
                             <StatusBadge status={priority} map={PRIORITY_COLORS} />
                           ) : (
-                            <button
-                              type="button"
+                            <Select 
+                              value={priority} 
+                              onValueChange={(value) => changePriority(entry, value)}
                               disabled={updatingId === `${entry.id}_priority`}
-                              onClick={() => changePriority(entry, nextPriority(priority))}
-                              title="Click to change priority"
-                              className={`px-3 py-1 rounded text-xs font-semibold capitalize transition-opacity hover:opacity-80 disabled:opacity-50 ${PRIORITY_COLORS[priority] || 'bg-gray-100 text-gray-800'}`}
                             >
-                              {priority}
-                            </button>
+                              <SelectTrigger className={`h-7 w-[110px] px-2 py-1 border-none focus:ring-0 capitalize font-semibold text-xs ${PRIORITY_COLORS[priority] || 'bg-gray-100 text-gray-800'}`}>
+                                <SelectValue placeholder="Priority" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {PRIORITY_LEVELS.map(level => (
+                                  <SelectItem key={level} value={level} className="capitalize text-xs font-medium">
+                                    {level}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
                           )}
                         </TableCell>
                         <TableCell>

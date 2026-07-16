@@ -6,7 +6,8 @@ import { startOfDay, endOfDay, todayIST } from '../utils/dates.js'
 import { normalizeTimeHHMM } from '../lib/dates.js'
 import { scopedDoctorId } from '../utils/scope.js'
 import { computeConsultationFee } from '../services/appointmentFees.js'
-import { generateQueueNumber } from '../utils/queueNumber.js'
+import { nextQueueNumber } from '../utils/queueNumber.js'
+import { deriveRoomAndVisitType } from '../lib/queueDerivation.js'
 
 export async function getAll(req, res, next) {
   try {
@@ -239,8 +240,17 @@ export async function create(req, res, next) {
       })
     }
 
-    // Create appointment, invoice, AND commission in transaction
-    const { appointment, draftInvoiceNumber, commission } = await db.$transaction(async (tx) => {
+    // Create appointment, invoice, AND commission in transaction. The
+    // findFirst check above is only a fast, friendly pre-check — it runs
+    // outside any transaction/lock, so two requests within the same ~100ms
+    // window can both pass it and both reach this create. The real guard is
+    // the partial unique index on (organizationId, doctorId, appointmentDate,
+    // appointmentTime) (migration 20260716100500_appointment_slot_unique) —
+    // the loser's create throws P2002, caught below and translated to the
+    // same SLOT_TAKEN response the pre-check gives the common case.
+    let appointment, draftInvoiceNumber, commission
+    try {
+      ({ appointment, draftInvoiceNumber, commission } = await db.$transaction(async (tx) => {
       const appointment = await tx.appointment.create({
         data: {
           organizationId,
@@ -269,7 +279,19 @@ export async function create(req, res, next) {
         orderBy: { createdAt: 'asc' },
       })
       const unitPrice = consultationFee ?? opdService?.unitPrice ?? 500
-      const description = opdService?.serviceName ?? `${aptType} Consultation`
+      // The line must say WHAT was billed, so reception/patient/audit can tell an
+      // OPD visit from a follow-up on the receipt itself. Naming the service
+      // alone ("OPD Consultation") made every appointment type — including
+      // follow-ups and emergencies — print the same line.
+      const VISIT_LABEL = {
+        follow_up: 'Follow-up Consultation',
+        new_patient: 'OPD Consultation (New Patient)',
+        emergency: 'Emergency Consultation',
+      }
+      const visitLabel = VISIT_LABEL[aptType] || opdService?.serviceName || `${aptType} Consultation`
+      const description = appointment.doctor?.fullName
+        ? `${visitLabel} — ${appointment.doctor.fullName}`
+        : visitLabel
       // Same atomic per-org/FY series the billing counter draws from, so an
       // appointment invoice and a counter invoice share one numbering scheme and
       // cannot collide on the @unique column when created in the same millisecond.
@@ -330,7 +352,17 @@ export async function create(req, res, next) {
       }
 
       return { appointment, draftInvoiceNumber: invoice.invoiceNumber, commission }
-    })
+      }))
+    } catch (err) {
+      if (err.code === 'P2002' && String(err.meta?.target || '').includes('Appointment_doctor_active_slot_key')) {
+        return res.status(409).json({
+          success: false,
+          code: 'SLOT_TAKEN',
+          error: `That doctor already has an appointment at ${validatedData.appointmentTime} on this date. Pick another slot.`,
+        })
+      }
+      throw err
+    }
 
     const messageLines = [
       `Appointment scheduled`,
@@ -410,6 +442,9 @@ export async function update(req, res, next) {
       })
 
       if (body.status === 'checked_in') {
+        // Room + new-vs-follow-up are derived from the doctor/patient, not
+        // asked at check-in — see lib/queueDerivation.js.
+        const { roomId, visitType } = await deriveRoomAndVisitType({ doctorId: updated.doctorId, patientId: updated.patientId })
         await tx.queueManagement.upsert({
           where: { appointmentId: id },
           create: {
@@ -418,8 +453,10 @@ export async function update(req, res, next) {
             appointmentId: id,
             serviceArea: 'opd',
             assignedToId: updated.doctorId,
+            roomId,
+            visitType,
             status: 'waiting',
-            queueNumber: generateQueueNumber('opd'),
+            queueNumber: await nextQueueNumber(tx, organizationId, 'opd'),
           },
           update: {}, // already queued (e.g. re-check-in after an edit) — leave as-is
         })

@@ -105,7 +105,7 @@ export function printInvoice(bill, orgInfo, clinic, options = {}) {
   }
 
   const displayItems = (bill.items || []).filter(
-    (it) => !/home collection/i.test(it.name || it.serviceName || ""),
+    (it) => !/home collection/i.test(it.name || it.serviceName || it.description || ""),
   );
 
   const itemRows = displayItems
@@ -113,8 +113,8 @@ export function printInvoice(bill, orgInfo, clinic, options = {}) {
       (it, i) => `
     <tr>
       <td style="padding:6px 8px;border-bottom:1px solid #eee;font-size:8.5pt">${i + 1}</td>
-      <td style="padding:6px 8px;border-bottom:1px solid #eee;font-family:monospace;color:#0b5cab;font-weight:bold">${esc(it.code || (it.name || it.serviceName || "").substring(0, 4).toUpperCase())}</td>
-      <td style="padding:6px 8px;border-bottom:1px solid #eee;font-size:8.5pt"><strong>${esc(it.name || it.serviceName)}</strong>${it.sub ? `<br/><span style="font-size:8pt;color:#888">${esc(it.sub)}</span>` : ""}</td>
+      <td style="padding:6px 8px;border-bottom:1px solid #eee;font-family:monospace;color:#0b5cab;font-weight:bold">${esc(it.code || (it.name || it.serviceName || it.description || "").substring(0, 4).toUpperCase())}</td>
+      <td style="padding:6px 8px;border-bottom:1px solid #eee;font-size:8.5pt"><strong>${esc(it.name || it.serviceName || it.description || "—")}</strong>${it.sub ? `<br/><span style="font-size:8pt;color:#888">${esc(it.sub)}</span>` : ""}</td>
       <td style="padding:6px 8px;border-bottom:1px solid #eee;text-align:center;font-size:8.5pt">${it.qty || it.quantity || 1}</td>
       <td style="padding:6px 8px;border-bottom:1px solid #eee;text-align:right;font-size:8.5pt">${inr(it.amt || it.unitPrice || 0)}</td>
       <td style="padding:6px 8px;border-bottom:1px solid #eee;text-align:right;font-size:8.5pt;font-weight:bold">${inr(it.total || (it.qty || it.quantity || 1) * (it.amt || it.unitPrice || 0))}</td>

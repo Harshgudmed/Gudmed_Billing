@@ -5,6 +5,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { drName } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import {
   CalendarDays,
@@ -211,7 +212,7 @@ export default function MonthlyView({
                           {getPatientFullName(patient || null)}
                         </div>
                         <div className="text-xs text-gray-500">
-                          {patient?.mrn} • {doctor?.fullName}
+                          {patient?.mrn} • {doctor?.fullName ? drName(doctor.fullName) : "—"}
                         </div>
                         <div className="mt-2 text-sm text-gray-600">
                           {appointment.chiefComplaint}
