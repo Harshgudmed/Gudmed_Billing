@@ -4,7 +4,19 @@ import { todayRange } from '../lib/dates.js'
 import { nextSeriesNumber, invoiceProbe } from "../lib/counters.js";
 import { recalcInvoice, refundableAmount } from "../lib/invoiceLedger.js";
 import { fulfillInvoiceItems } from "../lib/invoiceFulfillment.js";
+import { round2 } from "../lib/money.js";
 import { z } from 'zod'
+
+// A line's amount is quantity x unitPrice — the SERVER decides it, never the
+// client. The old code trusted the `total` in the request body, so a caller
+// could bill 10 x Rs.5000 as Rs.1 (the amount left the till, the stock still
+// left the shelf). Recompute every line here and drop the client's `total` on
+// the floor. Kept as one helper so the create path and the add-item path can't
+// drift apart. tax rides along untouched; only the money math is reclaimed.
+function priceLine(item) {
+  const total = round2((Number(item.quantity) || 0) * (Number(item.unitPrice) || 0))
+  return { ...item, total }
+}
 
 // Validation schemas
 const serviceSchema = z.object({
@@ -352,11 +364,13 @@ export async function create(req, res) {
         return res.status(400).json({ success: false, error: parsed.error.flatten() })
       }
 
-      const { patientId, consultationId, items, discountAmount, discountPercentage, taxPercentage, notes } =
+      const { patientId, consultationId, discountAmount, discountPercentage, taxPercentage, notes } =
         parsed.data
 
-      const subtotal = items.reduce((sum, item) => sum + item.total, 0)
-      const taxAmount = items.reduce((sum, item) => sum + (item.tax || 0), 0)
+      // Reprice every line from quantity x unitPrice before it is trusted or stored.
+      const items = parsed.data.items.map(priceLine)
+      const subtotal = round2(items.reduce((sum, item) => sum + item.total, 0))
+      const taxAmount = round2(items.reduce((sum, item) => sum + (item.tax || 0), 0))
       
       if (discountAmount > subtotal + taxAmount) {
         return res.status(400).json({ success: false, error: 'Discount cannot exceed the total value of the items' })
@@ -827,11 +841,13 @@ export async function create(req, res) {
 
         let items = []
         try { items = JSON.parse(invoice.items || '[]') } catch { items = [] }
-        items.push({ ...item, status: 'ordered' })
+        // Same rule on the add-item path: the server prices the new line, not
+        // the client. Existing lines are left as stored (already priced when added).
+        items.push({ ...priceLine(item), status: 'ordered' })
 
-        const subtotal = items.reduce((s, i) => s + (i.total || 0), 0)
-        const taxAmount = items.reduce((s, i) => s + (i.tax || 0), 0)
-        const totalAmount = subtotal - (invoice.discountAmount || 0) + taxAmount
+        const subtotal = round2(items.reduce((s, i) => s + (i.total || 0), 0))
+        const taxAmount = round2(items.reduce((s, i) => s + (i.tax || 0), 0))
+        const totalAmount = round2(subtotal - (invoice.discountAmount || 0) + taxAmount)
 
         await tx.invoice.update({
           where: { id: invoiceId },
