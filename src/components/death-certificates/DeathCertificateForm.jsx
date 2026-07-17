@@ -104,7 +104,10 @@ export default function DeathCertificateForm({ initialData, onSuccess }) {
     const dob = new Date(patient.dateOfBirth)
     const now = new Date()
     form.setValue('ageAtDeathYears', now.getFullYear() - dob.getFullYear())
-    form.setValue('address', [patient.region, patient.zone, patient.woreda].filter(Boolean).join(', '))
+    form.setValue('address', [
+      patient.houseNumber, patient.street, patient.locality,
+      patient.city, patient.district, patient.state,
+    ].filter(Boolean).join(', ') + (patient.pincode ? ` - ${patient.pincode}` : ''))
     setPatientSearch('')
   }
 

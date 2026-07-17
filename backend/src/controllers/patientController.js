@@ -49,6 +49,17 @@ const patientSchema = z.object({
   phonePrimary: z.string().optional(),
   phoneSecondary: z.string().optional(),
   email: z.string().email().optional().or(z.literal('')),
+  // Address. These are listed here because zod strips anything it does not name:
+  // dropping them from this object (commit b055d1f) silently deleted the address
+  // in transit — the form collected it, the table had columns for it, the API
+  // answered 201, and the row was written without it. No error, nobody told.
+  houseNumber: z.string().optional(),
+  street: z.string().optional(),
+  locality: z.string().optional(),
+  city: z.string().optional(),
+  district: z.string().optional(),
+  state: z.string().optional(),
+  pincode: z.string().regex(/^\d{6}$/, 'PIN code must be 6 digits').optional().or(z.literal('')),
   emergencyContactName: z.string().optional(),
   emergencyContactPhone: z.string().optional(),
   emergencyContactRelationship: z.string().optional(),
@@ -73,7 +84,9 @@ const patientSchema = z.object({
 // request body can't overwrite them (mass-assignment protection).
 const PATIENT_EDITABLE_FIELDS = [
   'firstName', 'middleName', 'lastName', 'dateOfBirth', 'gender',
-  'phonePrimary', 'phoneSecondary', 'email', 'emergencyContactName',
+  'phonePrimary', 'phoneSecondary', 'email',
+  'houseNumber', 'street', 'locality', 'city', 'district', 'state', 'pincode',
+  'emergencyContactName',
   'emergencyContactPhone', 'emergencyContactRelationship', 'bloodGroup',
   'allergies', 'chronicConditions', 'currentMedications', 'hasInsurance',
   'insuranceProvider', 'insuranceId', 'insuranceExpiryDate', 'maritalStatus',
@@ -267,6 +280,13 @@ export async function create(req, res, next) {
       phonePrimary: validatedData.phonePrimary,
       phoneSecondary: validatedData.phoneSecondary,
       email: validatedData.email || null,
+      houseNumber: validatedData.houseNumber,
+      street: validatedData.street,
+      locality: validatedData.locality,
+      city: validatedData.city,
+      district: validatedData.district,
+      state: validatedData.state,
+      pincode: validatedData.pincode || null,
       emergencyContactName: validatedData.emergencyContactName,
       emergencyContactPhone: validatedData.emergencyContactPhone,
       emergencyContactRelationship: validatedData.emergencyContactRelationship,
