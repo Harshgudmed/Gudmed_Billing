@@ -14,13 +14,8 @@
 // keeps this module trivially unit-testable against a fixed clock instead
 // of the real wall clock.
 
-import { normalizeTimeHHMM, nowInZone, ymdInZone } from './dates.js'
-import { DAY_NAMES, shiftsForRoom } from './doctorTimetable.js'
-
-function toMinutes(hhmm) {
-  const [h, m] = normalizeTimeHHMM(hhmm).split(':').map(Number)
-  return h * 60 + m
-}
+import { nowInZone, ymdInZone } from './dates.js'
+import { DAY_NAMES, shiftsForRoom, toMinutes } from './doctorTimetable.js'
 
 /**
  * Is this doctor on leave on `ymd` ('YYYY-MM-DD')?
