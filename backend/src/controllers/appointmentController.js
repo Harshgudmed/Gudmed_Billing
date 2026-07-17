@@ -193,7 +193,16 @@ export async function create(req, res, next) {
     // and the stored value is string-sorted (see normalizeTimeHHMM).
     validatedData.appointmentTime = normalizeTimeHHMM(validatedData.appointmentTime)
 
-    const apptDate = new Date(validatedData.appointmentDate)
+    // Pin to midnight of the hospital's day. `appointmentDate` is the DAY; the
+    // time of day lives in `appointmentTime`. The browser sends a full instant
+    // (the form defaults to `new Date()` and posts .toISOString()), so storing
+    // it raw put the booking's own creation moment in the date — 2026-07-17
+    // T11:40:15.915Z rather than midnight. That silently disabled the
+    // double-booking guard: the unique index is on (organizationId, doctorId,
+    // appointmentDate, appointmentTime), so a date unique to the millisecond
+    // can never collide, and one doctor ended up with 13 bookings in the same
+    // 10:00 slot. Normalising here is what gives that index something to catch.
+    const apptDate = startOfDay(validatedData.appointmentDate)
     let consultationFee = null
     let appliedSlabInfo = null
 
@@ -222,13 +231,20 @@ export async function create(req, res, next) {
 
     // Prevent double-booking: no two live appointments for the SAME doctor at the
     // same date + time slot. Cancelled appointments free the slot again.
+    //
+    // Matched across the whole calendar DAY rather than on `apptDate` exactly:
+    // every appointment written before the normalisation above carries a
+    // creation-instant date, so an equality test would miss all of them and
+    // happily double-book on top of existing rows. `rescheduled` is excluded to
+    // match the partial index's own WHERE clause — a superseded row must not
+    // keep holding the slot it was moved out of.
     const slotClash = await db.appointment.findFirst({
       where: {
         organizationId,
         doctorId: validatedData.doctorId,
-        appointmentDate: apptDate,
+        appointmentDate: { gte: startOfDay(apptDate), lte: endOfDay(apptDate) },
         appointmentTime: validatedData.appointmentTime,
-        status: { notIn: ['cancelled', 'no_show'] },
+        status: { notIn: ['cancelled', 'no_show', 'rescheduled'] },
       },
       select: { id: true },
     })
@@ -331,11 +347,19 @@ export async function create(req, res, next) {
           where: { doctorId: validatedData.doctorId },
         })
 
-        if (commissionConfig && commissionConfig.isActive && unitPrice > 0) {
+        if (commissionConfig && commissionConfig.isActive) {
+          // A percentage doctor earns a share of what was actually charged, so a
+          // free follow-up (unitPrice 0) correctly earns nothing. A fixed
+          // per-consultation doctor is paid for SEEING the patient, so they earn
+          // their flat amount even on a free follow-up. Guarding on the computed
+          // amount (not on unitPrice) gives both: fixed pays out at ₹0 fee,
+          // percentage stays zero. The old `unitPrice > 0` guard silently
+          // withheld the fixed doctor's fee on every free follow-up.
           const commissionAmount = commissionConfig.commissionType === 'percentage'
             ? (unitPrice * commissionConfig.commissionRate) / 100
             : commissionConfig.commissionRate
 
+          if (commissionAmount > 0) {
           commission = await tx.doctorCommission.create({
             data: {
               organizationId,
@@ -348,13 +372,24 @@ export async function create(req, res, next) {
               status: 'pending',
             },
           })
+          }
         }
       }
 
       return { appointment, draftInvoiceNumber: invoice.invoiceNumber, commission }
       }))
     } catch (err) {
-      if (err.code === 'P2002' && String(err.meta?.target || '').includes('Appointment_doctor_active_slot_key')) {
+      // P2002's `target` is the constraint NAME on some Prisma versions and the
+      // list of FIELD names on others — this Postgres client reports the fields
+      // ("organizationId,doctorId,appointmentDate,appointmentTime"), so matching
+      // only the index name never hit, and a taken slot would surface as a 500
+      // instead of SLOT_TAKEN. It went unnoticed because the index itself could
+      // never fire until appointmentDate stopped carrying a time-of-day (see
+      // create()'s startOfDay call). `appointmentTime` is unique to this index —
+      // it is the only unique constraint on Appointment that mentions it.
+      const target = String(err.meta?.target || '')
+      if (err.code === 'P2002'
+        && (target.includes('Appointment_doctor_active_slot_key') || target.includes('appointmentTime'))) {
         return res.status(409).json({
           success: false,
           code: 'SLOT_TAKEN',
@@ -400,7 +435,9 @@ export async function update(req, res, next) {
     // Whitelist: only these fields can be changed — sensitive fields like
     // organizationId, patientId, invoiceId are never touched.
     const updates = {}
-    if (body.appointmentDate    !== undefined) updates.appointmentDate    = body.appointmentDate
+    // Same day-pinning as create() — an edit must not reintroduce a
+    // time-of-day into the date and slip back past the slot unique index.
+    if (body.appointmentDate    !== undefined) updates.appointmentDate    = startOfDay(body.appointmentDate)
     if (body.appointmentTime    !== undefined) updates.appointmentTime    = normalizeTimeHHMM(body.appointmentTime)
     if (body.appointmentType    !== undefined) updates.appointmentType    = body.appointmentType
     if (body.doctorId           !== undefined) updates.doctorId           = body.doctorId
@@ -444,7 +481,14 @@ export async function update(req, res, next) {
       if (body.status === 'checked_in') {
         // Room + new-vs-follow-up are derived from the doctor/patient, not
         // asked at check-in — see lib/queueDerivation.js.
-        const { roomId, visitType } = await deriveRoomAndVisitType({ doctorId: updated.doctorId, patientId: updated.patientId })
+        const { roomId, visitType } = await deriveRoomAndVisitType({
+          doctorId: updated.doctorId,
+          patientId: updated.patientId,
+          // The room comes from the shift covering THIS appointment's slot, so
+          // the slot has to come along — see lib/queueDerivation.js.
+          appointmentDate: updated.appointmentDate,
+          appointmentTime: updated.appointmentTime,
+        })
         await tx.queueManagement.upsert({
           where: { appointmentId: id },
           create: {
@@ -459,6 +503,19 @@ export async function update(req, res, next) {
             queueNumber: await nextQueueNumber(tx, organizationId, 'opd'),
           },
           update: {}, // already queued (e.g. re-check-in after an edit) — leave as-is
+        })
+      }
+
+      // Cancelling or no-showing an appointment must also drop the patient OUT of
+      // the queue. Check-in creates a 'waiting' QueueManagement row; without this
+      // the row stayed 'waiting' after a cancel, so the patient the receptionist
+      // just cancelled was still called by staff and still shown on the public
+      // display board. updateMany (not update) so it is a harmless no-op when the
+      // appointment was never checked in and has no queue row.
+      if (body.status === 'cancelled' || body.status === 'no_show') {
+        await tx.queueManagement.updateMany({
+          where: { appointmentId: id, status: { notIn: ['completed', 'cancelled', 'no_show'] } },
+          data: { status: body.status },
         })
       }
 
@@ -502,7 +559,7 @@ export async function reschedule(req, res, next) {
           organizationId,
           patientId: original.patientId,
           doctorId: original.doctorId,
-          appointmentDate: new Date(appointmentDate),
+          appointmentDate: startOfDay(appointmentDate), // day only — see create()
           appointmentTime,
           appointmentType: original.appointmentType || 'new_patient',
           departmentId: original.departmentId,
