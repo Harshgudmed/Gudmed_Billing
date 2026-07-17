@@ -536,13 +536,19 @@ export async function reschedule(req, res, next) {
     const organizationId = getOrgId(req)
     const { id } = req.params
     const { appointmentDate } = req.body
-    // This route has no `validate()` middleware, so req.body reaches the DB
-    // unchecked — it is how unpadded times like "9:00" got in, which then sort
-    // BELOW "10:00" and drop the 9am patient to the bottom of the day.
+    // This route has no `validate()` middleware, so validate req.body here — it
+    // is how unpadded times like "9:00" and impossible ones like "25:00" got in,
+    // which then sort wrong on the board.
     const appointmentTime = normalizeTimeHHMM(req.body.appointmentTime)
 
     if (!appointmentDate || !appointmentTime) {
       return res.status(400).json({ success: false, error: 'appointmentDate and appointmentTime are required' })
+    }
+    if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(appointmentTime)) {
+      return res.status(400).json({ success: false, error: 'Time must be HH:mm between 00:00 and 23:59' })
+    }
+    if (Number.isNaN(new Date(appointmentDate).getTime())) {
+      return res.status(400).json({ success: false, error: 'Invalid appointmentDate' })
     }
 
     const scopeWhere = { id, organizationId }
@@ -553,7 +559,22 @@ export async function reschedule(req, res, next) {
       return res.status(404).json({ success: false, error: 'Appointment not found' })
     }
 
-    const created = await db.$transaction(async (tx) => {
+    // R5 — a finished or voided visit is not a thing you move. Only a live
+    // upcoming appointment can be rescheduled; a cancelled/no-show/completed/
+    // already-rescheduled one must not spawn a fresh live appointment.
+    if (['cancelled', 'no_show', 'completed', 'rescheduled'].includes(original.status)) {
+      return res.status(400).json({ success: false, error: `A ${original.status} appointment cannot be rescheduled` })
+    }
+
+    // R6 — you cannot reschedule into the past. Compare on the hospital DAY so a
+    // same-day reschedule is still allowed.
+    if (startOfDay(appointmentDate) < startOfDay(new Date())) {
+      return res.status(400).json({ success: false, error: 'Cannot reschedule to a date in the past' })
+    }
+
+    let created
+    try {
+      created = await db.$transaction(async (tx) => {
       const newAppointment = await tx.appointment.create({
         data: {
           organizationId,
@@ -579,8 +600,45 @@ export async function reschedule(req, res, next) {
         where: { id: original.id },
         data: { status: 'rescheduled', rescheduledToId: newAppointment.id },
       })
+
+      // R1 — the old appointment is now 'rescheduled', so it must not keep the
+      // patient in the queue. If they were checked in, close that queue row;
+      // otherwise the patient stayed 'waiting' on the OLD slot's board and, on
+      // checking into the new slot, showed up twice. updateMany = no-op when
+      // there's no queue row.
+      await tx.queueManagement.updateMany({
+        where: { appointmentId: original.id, status: { notIn: ['completed', 'cancelled', 'no_show'] } },
+        data: { status: 'rescheduled' },
+      })
+
+      // R2 — carry the draft invoice to the NEW appointment so the visit the
+      // patient actually attends is the one that's billed. create() attaches a
+      // draft invoice to every appointment; without this the invoice stayed on
+      // the superseded 'rescheduled' row and the real visit looked unbilled.
+      // Only an untouched draft is moved — a real invoice someone has since
+      // acted on is left exactly where it is.
+      await tx.invoice.updateMany({
+        where: { appointmentId: original.id, status: 'draft', paymentStatus: 'unpaid' },
+        data: { appointmentId: newAppointment.id },
+      })
+
       return newAppointment
     })
+    } catch (err) {
+      // R4 — a reschedule onto a slot the doctor already has hits the partial
+      // unique index and throws P2002. Translate it to the same clean SLOT_TAKEN
+      // the create() path returns, instead of leaking a raw Prisma error.
+      const target = String(err.meta?.target || '')
+      if (err.code === 'P2002'
+        && (target.includes('Appointment_doctor_active_slot_key') || target.includes('appointmentTime'))) {
+        return res.status(409).json({
+          success: false,
+          code: 'SLOT_TAKEN',
+          error: `That doctor already has an appointment at ${appointmentTime} on this date. Pick another slot.`,
+        })
+      }
+      throw err
+    }
 
     res.status(201).json({ success: true, data: created, message: 'Appointment rescheduled' })
   } catch (err) {

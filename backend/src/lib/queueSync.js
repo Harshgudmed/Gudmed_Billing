@@ -2,7 +2,8 @@ import { db } from '../config/db.js'
 import { nextQueueNumber } from '../utils/queueNumber.js'
 import { priorityRank } from './queuePriority.js'
 import { dayRange, ymdInZone, zonedDateTimeToUtc } from './dates.js'
-import { deriveRoomAndVisitType } from './queueDerivation.js'
+import { deriveVisitType, resolveRoom } from './queueDerivation.js'
+import { parseTimetable } from './doctorTimetable.js'
 
 // Business rule from the client: there is NO check-in step. A patient who has an
 // appointment today IS in the queue — ordered by their appointment time, with
@@ -67,9 +68,32 @@ export async function syncAppointmentsToQueue(organizationId, startDate, endDate
 async function syncBatch(organizationId, appointments) {
   const existing = await db.queueManagement.findMany({
     where: { organizationId, appointmentId: { in: appointments.map((a) => a.id) } },
-    select: { appointmentId: true, joinedQueueAt: true, roomId: true },
+    select: { appointmentId: true, joinedQueueAt: true, roomId: true, status: true },
   })
   const byAppointment = new Map(existing.map((q) => [q.appointmentId, q]))
+
+  // Every doctor in this batch, fetched ONCE. Resolving a room needs the
+  // doctor's timetable, and a batch is thousands of appointments across a
+  // handful of doctors — asking per appointment would be thousands of queries
+  // per sync, on the same connection pool the display board polls against.
+  const doctorIds = [...new Set(appointments.map((a) => a.doctorId).filter(Boolean))]
+  const [doctors, links] = await Promise.all([
+    db.user.findMany({ where: { id: { in: doctorIds } }, select: { id: true, preferences: true } }),
+    db.doctorRoomAssignment.findMany({
+      where: { doctorId: { in: doctorIds } },
+      orderBy: { createdAt: 'asc' },
+      select: { doctorId: true, roomId: true },
+    }),
+  ])
+  const timetables = new Map(doctors.map((d) => [d.id, parseTimetable(d.preferences)]))
+  const fallbackRooms = new Map() // oldest link per doctor — matches deriveRoomAndVisitType's fallback
+  for (const l of links) if (!fallbackRooms.has(l.doctorId)) fallbackRooms.set(l.doctorId, l.roomId)
+  const roomFor = (a) => resolveRoom(
+    timetables.get(a.doctorId) ?? null,
+    fallbackRooms.get(a.doctorId) ?? null,
+    a.appointmentDate,
+    a.appointmentTime,
+  )
 
   const ops = []
   for (const a of appointments) {
@@ -79,7 +103,8 @@ async function syncBatch(organizationId, appointments) {
     if (!current) {
       // Room + new-vs-follow-up are derived from the doctor/patient, not
       // asked at check-in — see lib/queueDerivation.js.
-      const { roomId, visitType } = await deriveRoomAndVisitType({ doctorId: a.doctorId, patientId: a.patientId })
+      const roomId = roomFor(a)
+      const visitType = await deriveVisitType(a.doctorId, a.patientId)
       ops.push(db.queueManagement.upsert({
         where: { appointmentId: a.id },
         create: {
@@ -107,24 +132,33 @@ async function syncBatch(organizationId, appointments) {
     }
 
     const slotChanged = current.joinedQueueAt?.getTime() !== slot.getTime()
-    // Self-healing: a row created before roomId/visitType derivation existed
-    // (or whose doctor didn't have a room yet at the time) heals itself the
-    // next time this sync runs, instead of staying stale forever — see the
-    // client demo incident this was written for (2670 today-rows all had
-    // roomId null because they predated this fix).
-    const needsRoomBackfill = current.roomId == null
-    if (slotChanged || needsRoomBackfill) {
+    // Self-healing: a row created before roomId derivation existed (or whose
+    // doctor didn't have a room yet at the time) heals itself the next time
+    // this sync runs, instead of staying stale forever — see the client demo
+    // incident this was written for (2670 today-rows all had roomId null
+    // because they predated that fix).
+    //
+    // A row in the WRONG room heals the same way, and for the same reason: it
+    // is just as invisible as one with no room. Every row written while the
+    // room came from the oldest DoctorRoomAssignment link is potentially in the
+    // wrong room, and there are ~1M of them — they must not need a hand-run
+    // script each time a doctor's timetable moves.
+    //
+    // But only while the patient is still WAITING: once staff have called them
+    // or started the consultation, they are physically somewhere, and moving
+    // their row would contradict the room they were actually called into.
+    const derivedRoom = roomFor(a)
+    const roomNeedsFix = derivedRoom != null
+      && current.roomId !== derivedRoom
+      && (current.roomId == null || current.status === 'waiting')
+
+    if (slotChanged || roomNeedsFix) {
       const data = {}
       if (slotChanged) data.joinedQueueAt = slot
-      if (needsRoomBackfill) {
-        const { roomId, visitType } = await deriveRoomAndVisitType({ doctorId: a.doctorId, patientId: a.patientId })
-        if (roomId) { data.roomId = roomId; data.visitType = visitType }
-      }
+      if (roomNeedsFix) data.roomId = derivedRoom
       // Status and priority are deliberately left alone here — staff may
       // since have called the patient or bumped them up by hand.
-      if (Object.keys(data).length > 0) {
-        ops.push(db.queueManagement.update({ where: { appointmentId: a.id }, data }))
-      }
+      ops.push(db.queueManagement.update({ where: { appointmentId: a.id }, data }))
     }
   }
 

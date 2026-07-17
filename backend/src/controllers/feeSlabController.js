@@ -42,6 +42,16 @@ export async function createSlab(req, res, next) {
       return res.status(400).json({ success: false, error: 'Missing required fields' })
     }
 
+    // Money and day-counts can never be negative. Without this, feeAmount:-100
+    // flowed end-to-end into a negative invoice + negative commission — every
+    // follow-up turned into a credit note.
+    if (Number(feeAmount) < 0) {
+      return res.status(400).json({ success: false, error: 'feeAmount cannot be negative' })
+    }
+    if (Number(fromDays) < 0 || Number(toDays) < 0) {
+      return res.status(400).json({ success: false, error: 'fromDays and toDays cannot be negative' })
+    }
+
     if (fromDays >= toDays) {
       return res.status(400).json({ success: false, error: 'fromDays must be less than toDays' })
     }
