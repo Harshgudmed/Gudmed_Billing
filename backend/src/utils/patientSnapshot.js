@@ -18,12 +18,13 @@ export const PATIENT_SNAPSHOT_SELECT = {
   phonePrimary: true,
   phoneSecondary: true,
   email: true,
-  region: true,
-  zone: true,
-  woreda: true,
-  kebele: true,
   houseNumber: true,
-  postalCode: true,
+  street: true,
+  locality: true,
+  city: true,
+  district: true,
+  state: true,
+  pincode: true,
   addressDescription: true,
 }
 
@@ -43,10 +44,15 @@ export function ageFromDob(dob) {
 // back to the legacy free-text `addressDescription` when they're empty.
 export function formatPatientAddress(p) {
   if (!p) return ''
-  const parts = [p.houseNumber, p.kebele, p.woreda, p.zone, p.region, p.postalCode]
+  // Narrowest to widest, the way an Indian address is written and read out.
+  const parts = [p.houseNumber, p.street, p.locality, p.city, p.district, p.state]
     .map((x) => (x == null ? '' : String(x).trim()))
     .filter(Boolean)
-  if (parts.length) return parts.join(', ')
+  const pin = p.pincode ? String(p.pincode).trim() : ''
+  // PIN hangs off the end with a dash, not as another comma-separated part:
+  // "…, Mumbai Suburban, Maharashtra - 400053"
+  if (parts.length) return parts.join(', ') + (pin ? ` - ${pin}` : '')
+  if (pin) return pin
   return (p.addressDescription || '').trim()
 }
 

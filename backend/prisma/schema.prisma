@@ -280,13 +280,19 @@ model Patient {
   phoneSecondary String?
   email          String?
 
-  // Address (Ethiopian format)
-  region             String?
-  zone               String?
-  woreda             String?
-  kebele             String?
-  houseNumber        String?
-  postalCode         String? // PIN code
+  // Address (Indian format). These columns were named for Ethiopian
+  // administrative divisions (region/zone/woreda/kebele) by the codebase this
+  // was forked from; renamed to what an Indian hospital's front desk actually
+  // asks for. The rename follows the data that was already in them:
+  //   region "Telangana" -> state · zone "Chennai" -> city
+  //   woreda "City Center" -> locality · kebele "Block V" -> street
+  houseNumber        String? // House / Flat / Building No.
+  street             String? // Street / Block
+  locality           String? // Locality / Area
+  city               String? // Village / Town / City
+  district           String?
+  state              String?
+  pincode            String? // 6-digit PIN
   addressDescription String? // legacy free-text address — kept so existing data isn't dropped
 
   // Emergency Contact

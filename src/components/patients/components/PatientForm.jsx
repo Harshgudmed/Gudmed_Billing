@@ -70,11 +70,47 @@ export default function PatientForm({ form, isSubmitting, onSubmitFn, submitLabe
           )} />
         </div>
 
-        {/* State & Blood Group */}
+        {/* Address — the whole thing. This screen used to collect State alone,
+            so a patient's house, street, locality, city, district and PIN had
+            nowhere to be typed even though the table has a column for each. */}
         <div className="grid grid-cols-2 gap-3">
-          <FormField control={form.control} name="region" render={({ field }) => (
+          <FormField control={form.control} name="houseNumber" render={({ field }) => (
             <FormItem>
-              <FormLabel>State / Region</FormLabel>
+              <FormLabel>House / Flat No.</FormLabel>
+              <FormControl><Input placeholder="e.g. A-1204" {...field} value={field.value || ''} /></FormControl>
+            </FormItem>
+          )} />
+          <FormField control={form.control} name="street" render={({ field }) => (
+            <FormItem>
+              <FormLabel>Street / Block</FormLabel>
+              <FormControl><Input placeholder="e.g. Block G, MG Road" {...field} value={field.value || ''} /></FormControl>
+            </FormItem>
+          )} />
+        </div>
+        <div className="grid grid-cols-2 gap-3">
+          <FormField control={form.control} name="locality" render={({ field }) => (
+            <FormItem>
+              <FormLabel>Locality / Area</FormLabel>
+              <FormControl><Input placeholder="e.g. Andheri West" {...field} value={field.value || ''} /></FormControl>
+            </FormItem>
+          )} />
+          <FormField control={form.control} name="city" render={({ field }) => (
+            <FormItem>
+              <FormLabel>Village / Town / City</FormLabel>
+              <FormControl><Input placeholder="e.g. Mumbai" {...field} value={field.value || ''} /></FormControl>
+            </FormItem>
+          )} />
+        </div>
+        <div className="grid grid-cols-3 gap-3">
+          <FormField control={form.control} name="district" render={({ field }) => (
+            <FormItem>
+              <FormLabel>District</FormLabel>
+              <FormControl><Input placeholder="e.g. Mumbai Suburban" {...field} value={field.value || ''} /></FormControl>
+            </FormItem>
+          )} />
+          <FormField control={form.control} name="state" render={({ field }) => (
+            <FormItem>
+              <FormLabel>State</FormLabel>
               <Select onValueChange={field.onChange} value={field.value || ''}>
                 <FormControl><SelectTrigger><SelectValue placeholder="Select state" /></SelectTrigger></FormControl>
                 <SelectContent>
@@ -83,6 +119,23 @@ export default function PatientForm({ form, isSubmitting, onSubmitFn, submitLabe
               </Select>
             </FormItem>
           )} />
+          <FormField control={form.control} name="pincode" render={({ field }) => (
+            <FormItem>
+              <FormLabel>PIN Code</FormLabel>
+              <FormControl>
+                <Input
+                  placeholder="6-digit PIN" inputMode="numeric" maxLength={6}
+                  {...field} value={field.value || ''}
+                  onChange={(e) => field.onChange(e.target.value.replace(/\D/g, ''))}
+                />
+              </FormControl>
+              <FormMessage />
+            </FormItem>
+          )} />
+        </div>
+
+        {/* Blood Group */}
+        <div className="grid grid-cols-2 gap-3">
           <FormField control={form.control} name="bloodGroup" render={({ field }) => (
             <FormItem>
               <FormLabel>Blood Group</FormLabel>

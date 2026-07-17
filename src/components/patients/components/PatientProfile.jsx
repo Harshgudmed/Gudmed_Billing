@@ -304,7 +304,14 @@ body{font-family:Arial,Helvetica,sans-serif;font-size:10.5pt;color:#000;backgrou
                     { label: 'Blood Group', val: selectedPatient.bloodGroup || '—' },
                     { label: 'Phone', val: selectedPatient.phonePrimary || '—' },
                     { label: 'Email', val: selectedPatient.email || '—' },
-                    { label: 'Region', val: selectedPatient.region || '—' },
+                    // One readable line, the way an address is actually read out:
+                    // "A-1204, Block G, Andheri West, Mumbai, Mumbai Suburban, Maharashtra - 400053"
+                    { label: 'Address', val: [
+                        selectedPatient.houseNumber, selectedPatient.street, selectedPatient.locality,
+                        selectedPatient.city, selectedPatient.district, selectedPatient.state,
+                      ].filter(Boolean).join(', ')
+                        + (selectedPatient.pincode ? ` - ${selectedPatient.pincode}` : '')
+                      || selectedPatient.addressDescription || '—' },
                     { label: 'Insurance', val: selectedPatient.hasInsurance ? (selectedPatient.insuranceProvider || 'Yes') : 'No' },
                     { label: 'Emergency Contact', val: selectedPatient.emergencyContactName || '—' },
                     { label: 'Contact Phone', val: selectedPatient.emergencyContactPhone || '—' },
