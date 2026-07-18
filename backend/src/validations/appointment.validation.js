@@ -28,7 +28,11 @@ export const updateAppointmentSchema = z.object({
   chiefComplaint: z.string().optional(),
   notes: z.string().optional(),
   cancellationReason: z.string().optional(),
-  consultationFee: z.coerce.number().nonnegative().optional(),
+  // consultationFee is intentionally NOT accepted here. The fee is derived from
+  // the doctor's slabs at create() time and drives the linked Invoice + Doctor
+  // Commission; letting a PATCH set it on the appointment alone left those three
+  // in a three-way disagreement. Fee changes must go through a re-price flow, not
+  // a raw appointment edit.
   reminderSent: z.boolean().optional(),
   status: z.enum([
     'scheduled',

@@ -1032,7 +1032,12 @@ model Invoice {
   revisedInvoices Invoice[] @relation("RevisedInvoices")
 
   // Invoice Details
-  invoiceNumber String    @unique
+  // Scoped-unique per hospital, NOT globally: the number is minted by a per-org +
+  // per-financial-year counter (counters.js#nextSeriesNumber), so every org's
+  // series independently starts at INV-<FY>-000001. A column-level @unique made
+  // that global — the second hospital to commit the same number hit P2002 and
+  // could not invoice at all. See @@unique([organizationId, invoiceNumber]) below.
+  invoiceNumber String
   invoiceDate   DateTime  @default(now())
   dueDate       DateTime?
 
@@ -1080,6 +1085,7 @@ model Invoice {
   cancelledBy  User?         @relation("InvoicesCancelled", fields: [cancelledById], references: [id])
   payments     Payment[]
 
+  @@unique([organizationId, invoiceNumber])
   @@index([organizationId])
   @@index([patientId])
   @@index([invoiceNumber])

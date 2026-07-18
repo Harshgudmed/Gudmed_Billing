@@ -257,6 +257,32 @@ export async function create(req, res, next) {
       })
     }
 
+    // Prevent the SAME patient being booked with two different doctors at the
+    // same date + time — a person cannot be in two rooms at once. The DB only
+    // has a doctor-side partial unique index, so nothing stops this at the
+    // database level yet. Mirror the doctor-side check across the whole calendar
+    // day, excluding voided/superseded rows, matching ANY doctor.
+    // FOLLOW-UP: add a partial unique index on
+    // (organizationId, patientId, appointmentDate, appointmentTime) — schema.prisma
+    // is owned by another engineer this round, so this app-level guard stands in.
+    const patientClash = await db.appointment.findFirst({
+      where: {
+        organizationId,
+        patientId: validatedData.patientId,
+        appointmentDate: { gte: startOfDay(apptDate), lte: endOfDay(apptDate) },
+        appointmentTime: validatedData.appointmentTime,
+        status: { notIn: ['cancelled', 'no_show', 'rescheduled'] },
+      },
+      select: { id: true },
+    })
+    if (patientClash) {
+      return res.status(409).json({
+        success: false,
+        code: 'PATIENT_DOUBLE_BOOKED',
+        error: `This patient already has an appointment at ${validatedData.appointmentTime} on this date. A patient cannot be booked with two doctors at the same time.`,
+      })
+    }
+
     // Create appointment, invoice, AND commission in transaction. The
     // findFirst check above is only a fast, friendly pre-check — it runs
     // outside any transaction/lock, so two requests within the same ~100ms
@@ -445,7 +471,11 @@ export async function update(req, res, next) {
     if (body.chiefComplaint     !== undefined) updates.chiefComplaint     = body.chiefComplaint
     if (body.notes              !== undefined) updates.notes              = body.notes
     if (body.cancellationReason !== undefined) updates.cancellationReason = body.cancellationReason
-    if (body.consultationFee    !== undefined) updates.consultationFee    = body.consultationFee
+    // consultationFee is deliberately NOT settable via PATCH: it is derived from
+    // the doctor's slabs at create() and is what the linked Invoice + Doctor
+    // Commission were built from. Changing it here alone put the appointment,
+    // its invoice and its commission in a three-way disagreement. (The field is
+    // also stripped from updateAppointmentSchema, so it never reaches here.)
     if (body.reminderSent       !== undefined) updates.reminderSent       = body.reminderSent
 
     // Status change → auto-set the matching timestamp
@@ -490,6 +520,14 @@ export async function update(req, res, next) {
           appointmentDate: updated.appointmentDate,
           appointmentTime: updated.appointmentTime,
         })
+        // No room means the queue row would carry roomId=null and appear on NO
+        // board — the patient would wait forever, unseen. Refuse the check-in so
+        // staff assign a room first, rather than silently creating an invisible
+        // queue row. Thrown here (inside the tx) so the status change rolls back
+        // too; translated to a clean 400 in the catch below.
+        if (!roomId) {
+          throw Object.assign(new Error('This doctor has no room assigned — assign a room before checking in'), { code: 'NO_ROOM' })
+        }
         await tx.queueManagement.upsert({
           where: { appointmentId: id },
           create: {
@@ -525,6 +563,11 @@ export async function update(req, res, next) {
 
     res.json({ success: true, data: appointment })
   } catch (err) {
+    // Check-in was refused because the doctor has no room to seat the patient in
+    // (see the NO_ROOM guard above). Surface it as a clean, actionable 400.
+    if (err.code === 'NO_ROOM') {
+      return res.status(400).json({ success: false, code: 'NO_ROOM', error: err.message })
+    }
     next(err)
   }
 }
