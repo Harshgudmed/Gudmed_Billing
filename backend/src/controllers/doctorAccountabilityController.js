@@ -140,6 +140,17 @@ export async function handlePost(req, res, next) {
     const ORG_ID = getOrgId(req)
     const { resource } = req.query
 
+    // A doctor may only write their OWN accountability data. handleGet already
+    // scopes reads to scopedDoctorId; the write paths (config / commission /
+    // timetable) all take doctorId straight from the body and never checked it,
+    // so any logged-in doctor could rewrite a colleague's timetable or set their
+    // commission rate. Admins/coordinators (scopedDoctorId === null) are
+    // unrestricted, as before.
+    const myDoctorId = scopedDoctorId(req)
+    if (myDoctorId && req.body?.doctorId && req.body.doctorId !== myDoctorId) {
+      return res.status(403).json({ success: false, error: 'You can only modify your own record' })
+    }
+
     if (resource === 'config') {
       const { doctorId, commissionType, commissionRate, isActive, notes, consultationFee, followUpDays } = req.body
 
