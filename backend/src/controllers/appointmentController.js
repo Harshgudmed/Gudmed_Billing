@@ -1,6 +1,7 @@
 import { db } from '../config/db.js'
 import { Prisma } from '@prisma/client'
 import { getOrgId } from "../lib/reqContext.js";
+import { drName } from "../lib/drName.js";
 import { nextSeriesNumber, invoiceProbe } from "../lib/counters.js";
 import { startOfDay, endOfDay, todayIST } from '../utils/dates.js'
 import { normalizeTimeHHMM } from '../lib/dates.js'
@@ -306,7 +307,7 @@ export async function create(req, res, next) {
       }
       const visitLabel = VISIT_LABEL[aptType] || opdService?.serviceName || `${aptType} Consultation`
       const description = appointment.doctor?.fullName
-        ? `${visitLabel} — ${appointment.doctor.fullName}`
+        ? `${visitLabel} — ${drName(appointment.doctor.fullName)}`
         : visitLabel
       // Same atomic per-org/FY series the billing counter draws from, so an
       // appointment invoice and a counter invoice share one numbering scheme and

@@ -6,6 +6,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { format } from "date-fns";
 import { Plus, Loader2 } from "lucide-react";
+import { drName } from "@/lib/utils";
 import PatientLookup from "@/components/common/PatientLookup";
 import { SearchableSelect } from "@/components/ui/searchable-select";
 import { STATUS_CONFIG } from "./appointmentConstants";
@@ -131,8 +132,8 @@ export default function AppointmentFormDialog({
                     <SearchableSelect
                       className="w-full"
                       options={isEdit 
-                        ? (doctors || []).map(d => ({ value: d.id, label: `${d.fullName} - ${d.specialization}` }))
-                        : (availableDoctors || []).map(d => ({ value: d.id, label: `${d.fullName}${d.consultationFee != null ? ` (₹${d.consultationFee})` : ""}`, sublabel: d.specialization }))
+                        ? (doctors || []).map(d => ({ value: d.id, label: `${drName(d.fullName)} - ${d.specialization}` }))
+                        : (availableDoctors || []).map(d => ({ value: d.id, label: `${drName(d.fullName)}${d.consultationFee != null ? ` (₹${d.consultationFee})` : ""}`, sublabel: d.specialization }))
                       }
                       value={field.value}
                       onChange={(val) => {
