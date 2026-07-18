@@ -721,32 +721,38 @@ export async function create(req, res) {
         const oldInvoice = payment.invoice
         const refundedAmount = payment.amount
 
-        // An invoice can only be revised ONCE. Without this, two refunds left
-        // pending on the same invoice could both be approved, and each would
-        // derive its revised invoice from the SAME (already superseded) totals —
-        // refunding the money twice. The second request must be re-raised against
-        // the revised invoice instead.
-        if (oldInvoice.isArchived) {
+        // An invoice can only be revised ONCE. CLAIM IT ATOMICALLY: the conditional
+        // update matches only while the invoice is still un-archived, so of two
+        // refunds approved concurrently on the same invoice exactly one wins the
+        // compare-and-swap and the loser sees count===0 and gets a clean 409.
+        //
+        // The previous guard read `oldInvoice.isArchived` from a snapshot taken
+        // BEFORE this line (payment.invoice, loaded at the top of the tx), then set
+        // isArchived in a separate unconditional update below — a check-then-act
+        // race. Under concurrency both approvals read isArchived:false, both passed
+        // the guard, and each derived a revised invoice from the SAME superseded
+        // totals, refunding the money twice with no book entry for the second.
+        // Folding the check and the set into one conditional write closes the race.
+        // Mirrors the bed-claiming compare-and-swap in inpatientController.js (~1013).
+        const claimed = await tx.invoice.updateMany({
+          where: { id: oldInvoice.id, organizationId: ORGANIZATION_ID, isArchived: false },
+          data: {
+            paymentStatus: 'refunded',
+            isArchived: true, // lock it: immutable, kept as-is for the audit trail
+          },
+        })
+        if (claimed.count !== 1) {
           const err = new Error('This invoice has already been revised by an approved refund. Re-raise this request against the revised invoice.')
           err.status = 409; throw err
         }
 
-        // 1. Update Payment
+        // 1. Update Payment (only the CAS winner reaches here)
         const approvedPayment = await tx.payment.update({
           where: { id: paymentId },
           data: {
             status: 'APPROVED',
             approvedByUserId: actor.id,
             approvalDate: new Date()
-          }
-        })
-
-        // 2. Lock Old Invoice (immutable — kept exactly as-is for the audit trail)
-        await tx.invoice.update({
-          where: { id: oldInvoice.id },
-          data: {
-            paymentStatus: 'refunded',
-            isArchived: true,
           }
         })
 

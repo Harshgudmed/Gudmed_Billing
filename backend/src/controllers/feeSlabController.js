@@ -127,6 +127,16 @@ export async function updateSlab(req, res, next) {
     const newFromDays = fromDays !== undefined ? parseInt(fromDays) : existing.fromDays
     const newToDays = toDays !== undefined ? parseInt(toDays) : existing.toDays
 
+    // Same non-negative guard as createSlab — the edit path was unguarded, so a
+    // PATCH could set feeAmount:-500 and turn every matching follow-up into a
+    // credit note even though create() blocked it.
+    if (feeAmount !== undefined && Number(feeAmount) < 0) {
+      return res.status(400).json({ success: false, error: 'feeAmount cannot be negative' })
+    }
+    if (newFromDays < 0 || newToDays < 0) {
+      return res.status(400).json({ success: false, error: 'fromDays and toDays cannot be negative' })
+    }
+
     if (newFromDays >= newToDays) {
       return res.status(400).json({ success: false, error: 'fromDays must be less than toDays' })
     }

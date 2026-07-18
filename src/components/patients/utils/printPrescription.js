@@ -1,14 +1,24 @@
 import { format } from 'date-fns';
 import { toast } from 'sonner';
+import { escapeHtml } from '@/lib/printTemplate';
 import { getFullName, calculateAge } from './patientUtils';
 
 export const printOpdPrescription = (patient, orgInfo) => {
-  const name = getFullName(patient);
-  const age = patient.dateOfBirth ? `${calculateAge(patient.dateOfBirth)} Yrs` : '0 Yrs';
-  const gender = patient.gender ? patient.gender.charAt(0).toUpperCase() + patient.gender.slice(1) : '—';
+  // Every value below is interpolated into raw HTML via document.write, so any
+  // patient- or org-controlled string MUST be HTML-escaped first. A patient whose
+  // name is `<img src=x onerror=...>` otherwise fires script on print (stored XSS).
+  const name = escapeHtml(getFullName(patient));
+  const mrn = escapeHtml(patient.mrn);
+  const age = escapeHtml(patient.dateOfBirth ? `${calculateAge(patient.dateOfBirth)} Yrs` : '0 Yrs');
+  const gender = escapeHtml(patient.gender ? patient.gender.charAt(0).toUpperCase() + patient.gender.slice(1) : '—');
+  const phone = escapeHtml(patient.phonePrimary || '—');
+  const bloodGroup = escapeHtml(patient.bloodGroup || '—');
+  const orgName = escapeHtml(orgInfo.name || '123 Hospital');
+  const orgPhone = escapeHtml(orgInfo.phone || '—');
+  const orgEmail = escapeHtml(orgInfo.email || '—');
   const printedAt = format(new Date(), 'dd/MM/yyyy HH:mm');
   const dateStr = format(new Date(), 'dd / MM / yyyy');
-  const orgAddr = [orgInfo.address, orgInfo.city].filter(Boolean).join(', ');
+  const orgAddr = escapeHtml([orgInfo.address, orgInfo.city].filter(Boolean).join(', '));
   
   const win = window.open('', '_blank', 'width=800,height=1050');
   if (!win) { 
@@ -17,7 +27,7 @@ export const printOpdPrescription = (patient, orgInfo) => {
   }
   
   win.document.write(`<!DOCTYPE html><html>
-<head><title>Prescription — ${patient.mrn}</title>
+<head><title>Prescription — ${mrn}</title>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:Arial,Helvetica,sans-serif;font-size:10pt;color:#000;background:#fff;padding:0}
@@ -70,15 +80,15 @@ body{font-family:Arial,Helvetica,sans-serif;font-size:10pt;color:#000;background
 <div class="page">
   <div class="meta-top">
     <span>${printedAt}</span>
-    <span style="font-weight:bold;color:#1e3a8a">Prescription — ${patient.mrn}</span>
+    <span style="font-weight:bold;color:#1e3a8a">Prescription — ${mrn}</span>
   </div>
 
   <div class="header">
     <div>
-      <div class="hosp-name">${orgInfo.name || '123 Hospital'}</div>
+      <div class="hosp-name">${orgName}</div>
       <div class="hosp-sub">OPD Prescription</div>
       <div class="hosp-sub" style="font-size:8pt;margin-top:2px">${orgAddr || ''}</div>
-      <div class="hosp-sub" style="font-size:8pt">Tel: ${orgInfo.phone || '—'} | Email: ${orgInfo.email || '—'}</div>
+      <div class="hosp-sub" style="font-size:8pt">Tel: ${orgPhone} | Email: ${orgEmail}</div>
     </div>
     <div class="rx-logo">
       <div class="rx-big">R<span style="font-size:18pt">x</span></div>
@@ -94,7 +104,7 @@ body{font-family:Arial,Helvetica,sans-serif;font-size:10pt;color:#000;background
     </div>
     <div class="opd-no">
       <div class="opd-label">OPD NO.</div>
-      <div class="opd-val">${patient.mrn}</div>
+      <div class="opd-val">${mrn}</div>
     </div>
   </div>
 
@@ -104,8 +114,8 @@ body{font-family:Arial,Helvetica,sans-serif;font-size:10pt;color:#000;background
     <div class="pt-header">
       <div class="pt-cell"><span class="pt-label">PATIENT NAME</span><span class="pt-val">${name}</span></div>
       <div class="pt-cell"><span class="pt-label">AGE / GENDER</span><span class="pt-val">${age} / ${gender}</span></div>
-      <div class="pt-cell"><span class="pt-label">PHONE</span><span class="pt-val">${patient.phonePrimary || '—'}</span></div>
-      <div class="pt-cell"><span class="pt-label">BLOOD GROUP</span><span class="pt-val" style="color:#c00">${patient.bloodGroup || '—'}</span></div>
+      <div class="pt-cell"><span class="pt-label">PHONE</span><span class="pt-val">${phone}</span></div>
+      <div class="pt-cell"><span class="pt-label">BLOOD GROUP</span><span class="pt-val" style="color:#c00">${bloodGroup}</span></div>
     </div>
     <div class="vitals-row">
       <div class="vt-cell"><div class="vt-lbl">BP (MMHG)</div><div class="vt-val"></div></div>
@@ -157,8 +167,8 @@ body{font-family:Arial,Helvetica,sans-serif;font-size:10pt;color:#000;background
   </div>
 
   <div class="page-footer">
-    <span>Patient: <strong>${name}</strong> | UHID: <strong style="color:#1e3a8a">${patient.mrn}</strong> | ${age} / ${gender}</span>
-    <span>Printed: ${printedAt} &nbsp;|&nbsp; ${orgInfo.name || '123 Hospital'} — OPD Prescription</span>
+    <span>Patient: <strong>${name}</strong> | UHID: <strong style="color:#1e3a8a">${mrn}</strong> | ${age} / ${gender}</span>
+    <span>Printed: ${printedAt} &nbsp;|&nbsp; ${orgName} — OPD Prescription</span>
   </div>
   <div style="text-align:center;font-size:7pt;color:#aaa;margin-top:8px">This prescription is valid for 30 days from the date of issue. Keep this slip for reference.</div>
 
