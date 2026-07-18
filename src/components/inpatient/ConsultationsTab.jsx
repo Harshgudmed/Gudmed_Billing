@@ -316,7 +316,7 @@ export default function ConsultationsTab({ admission, doctors = [], departments 
                           <div className="h-5 w-5 rounded-full bg-blue-100 flex items-center justify-center text-[10px] font-bold text-blue-700 shrink-0">
                             {d.fullName?.[0] || 'D'}
                           </div>
-                          {d.fullName}
+                          {drName(d.fullName)}
                         </div>
                       </SelectItem>
                     ))}

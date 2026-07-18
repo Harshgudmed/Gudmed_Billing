@@ -211,7 +211,11 @@ export default function QueueModule() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {loading ? (
+                  {/* Only blank the table for the FIRST load (no data yet). On a
+                      refetch after a priority/status change the rows already
+                      exist, so keep showing them instead of wiping the whole list
+                      to a spinner — the change re-ranks one row, not the page. */}
+                  {loading && queue.length === 0 ? (
                     <TableRow>
                       <TableCell colSpan={7} className="text-center py-10 text-gray-400">
                         <RefreshCw className="h-5 w-5 animate-spin inline mr-2" />Loading queue...
