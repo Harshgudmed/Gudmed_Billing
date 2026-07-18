@@ -129,7 +129,10 @@ export async function getRoomQueue(req, res, next) {
         // came to see, and so who they must be listed under.
         assignedTo: { select: DOCTOR_SELECT },
       },
-      orderBy: [{ priorityRank: 'desc' }, { joinedQueueAt: 'asc' }],
+      // createdAt as the final tiebreak so tied (priorityRank, joinedQueueAt)
+      // rows keep a stable order — the public board must not reshuffle the same
+      // patients between 3-second polls. Matches queueController's ORDER BY.
+      orderBy: [{ priorityRank: 'desc' }, { joinedQueueAt: 'asc' }, { createdAt: 'asc' }],
     })
 
     const inProgressEntry = entries.find((e) => e.status === 'in_progress') || null

@@ -82,7 +82,13 @@ export async function getQueue(req, res, next) {
       ? { ...baseWhere, status }
       : baseWhere
 
-    const orderBy = [{ priorityRank: 'desc' }, { joinedQueueAt: 'asc' }]
+    // priorityRank first (urgent group on top), then joinedQueueAt — which is
+    // stamped to "now" on a priority change, so a newly-urgent patient lands at
+    // the BOTTOM of the urgent group (the client's rule). createdAt is the final
+    // tiebreak so two rows with an identical joinedQueueAt (bulk check-in, or the
+    // same instant) always sort the same way — without it Postgres returned tied
+    // rows in an unstable physical order and the board reshuffled on every poll.
+    const orderBy = [{ priorityRank: 'desc' }, { joinedQueueAt: 'asc' }, { createdAt: 'asc' }]
 
     // Counts span the whole filtered set, not just this page — otherwise the
     // header tiles would only ever count the rows currently on screen.
