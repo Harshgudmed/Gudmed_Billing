@@ -25,20 +25,71 @@ const POLL_MS = 3000
 // reset a genuinely abandoned board.
 const IDLE_RETURN_MS = 120000
 
-// Distinct, readable bg/text pairs so a floor's departments are visually
-// tellable apart at a glance instead of all rendering as the same gray chip.
-// Hashed by department id so a given department always gets the same color
-// (stable across polls/re-renders), not just the first N in whatever order
-// they arrive in.
+// ── Why this screen looks different from the rest of the app ────────────────
+//
+// Every other screen is an ADMIN screen: dense, read at arm's length, by
+// someone who chose to look at it. This one is a TV on a wall, read from
+// across a waiting room by a patient who is anxious and not necessarily
+// looking. It was built with admin-screen values — 14px rows, a table, and a
+// layout that left ~70% of a 1080p panel empty — and so was unreadable at the
+// only distance that matters.
+//
+// The guidance for this kind of display is well established (see the sources
+// noted with this change):
+//   · roughly 1 inch of cap height per 10 feet of viewing distance
+//   · the single thing the reader came for — who is being seen now — should be
+//     the largest object on the screen, not one cell in a grid
+//   · high contrast throughout; nothing structural in caption-sized type
+//
+// Light ground, by the hospital's choice. That puts the weight on TYPE and
+// SPACE rather than on a dark canvas: near-black text on white for anything
+// that must carry across a room, one saturated accent reserved for the hero,
+// and generous padding so the eye can find a row without scanning.
+const SURFACE = 'bg-slate-50'
+const CARD = 'bg-white border border-slate-200 shadow-sm'
+const TEXT_MUTED = 'text-slate-500'
+const BRAND = '#2E4168'
+
+// Public-display privacy, OFF by the hospital's decision.
+//
+// This board has no separate token system: the patient's name and UHID ARE how
+// they are called and how they recognise their turn, so both are shown in full.
+//
+// Flipping this to true partially masks them ("Harsh K. V." / "••••7884"),
+// which is what public queue-board guidance recommends — a waiting room is a
+// public space, and a full name beside a full hospital ID links an identity to
+// a medical visit for every stranger present or anyone photographing the
+// screen. Left here, and applied at every render site, so that decision is one
+// line away rather than a rewrite.
+const MASK_PATIENT_IDENTITY = false
+
+export function maskPatientName(name) {
+  const parts = String(name || '').trim().split(/\s+/).filter(Boolean)
+  if (!MASK_PATIENT_IDENTITY || parts.length <= 1) return name || '—'
+  const [given, ...rest] = parts
+  return `${given} ${rest.map((p) => p[0].toUpperCase() + '.').join(' ')}`
+}
+
+export function maskUhid(uhid) {
+  const s = String(uhid || '')
+  if (!MASK_PATIENT_IDENTITY || s.length <= 4) return s || '—'
+  return `••••${s.slice(-4)}`
+}
+
+// Distinct, readable pairs so a floor's departments are tellable apart at a
+// glance instead of all rendering as the same chip. Hashed by department id so
+// a given department always gets the same colour (stable across polls), not
+// just the first N in whatever order they arrive in. Tuned for the dark ground:
+// a light-mode `bg-blue-50` chip on near-black is an unreadable glare patch.
 const DEPARTMENT_COLORS = [
-  'bg-blue-50 text-blue-700 hover:bg-blue-100',
-  'bg-purple-50 text-purple-700 hover:bg-purple-100',
-  'bg-green-50 text-green-700 hover:bg-green-100',
-  'bg-amber-50 text-amber-700 hover:bg-amber-100',
-  'bg-pink-50 text-pink-700 hover:bg-pink-100',
-  'bg-teal-50 text-teal-700 hover:bg-teal-100',
-  'bg-indigo-50 text-indigo-700 hover:bg-indigo-100',
-  'bg-orange-50 text-orange-700 hover:bg-orange-100',
+  'bg-sky-50 text-sky-700 ring-sky-200',
+  'bg-violet-50 text-violet-700 ring-violet-200',
+  'bg-emerald-50 text-emerald-700 ring-emerald-200',
+  'bg-amber-50 text-amber-700 ring-amber-200',
+  'bg-pink-50 text-pink-700 ring-pink-200',
+  'bg-teal-50 text-teal-700 ring-teal-200',
+  'bg-indigo-50 text-indigo-700 ring-indigo-200',
+  'bg-orange-50 text-orange-700 ring-orange-200',
 ]
 function departmentColorClass(departmentId) {
   let hash = 0
@@ -80,18 +131,48 @@ function Header() {
   const now = useLiveClock()
   const { orgInfo } = useOrgSettings()
   return (
-    <div className="bg-[#2E4168] text-white px-8 py-4 flex items-center justify-between shadow-md">
-      <div className="flex items-center gap-3.5">
-        <Logo size={40} />
+    // Brand bar kept as it was — it anchors the panel and reads as the
+    // hospital's own screen. Everything BELOW it is what changed.
+    <header className="flex items-center justify-between bg-[#2E4168] px-10 py-5 text-white shadow-sm">
+      <div className="flex items-center gap-4">
+        <Logo size={44} />
         <div>
-          <div className="text-lg font-bold leading-tight">{orgInfo?.name || 'Hospital'}</div>
-          <div className="text-[11px] text-white/60 uppercase tracking-[0.15em] font-semibold">Live Queue Display</div>
+          <div className="text-2xl font-bold leading-tight">{orgInfo?.name || 'Hospital'}</div>
+          <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.2em] text-white/60">
+            {/* A wall panel shows the same frame whether it is live or frozen on
+                a stale render. This pulse is the one cue that the data behind it
+                is still moving. */}
+            <span className="relative flex h-2 w-2">
+              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
+              <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-400" />
+            </span>
+            Live Queue Display
+          </div>
         </div>
       </div>
       <div className="text-right">
-        <div className="text-2xl font-semibold tabular-nums leading-tight">{now.toLocaleTimeString('en-IN', { hour12: true })}</div>
-        <div className="text-xs text-white/60 font-semibold">{now.toLocaleDateString('en-IN', { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric' })}</div>
+        <div className="text-4xl font-bold leading-none tracking-tight tabular-nums">
+          {now.toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit', hour12: true })}
+        </div>
+        <div className="mt-1.5 text-sm font-medium text-white/60">
+          {now.toLocaleDateString('en-IN', { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric' })}
+        </div>
       </div>
+    </header>
+  )
+}
+
+// One shell for every screen, so moving between them never changes the frame —
+// on a wall panel any flash between routes is the most visible thing in the room.
+function Board({ children }) {
+  return (
+    // A column that owns the full viewport height, so a screen can hand its
+    // content `flex-1` and actually FILL a 1080p panel. Without this the board
+    // sized itself to its content and left the bottom half of the wall blank —
+    // the same list would have been twice as legible using the space it had.
+    <div className={`flex h-screen flex-col overflow-hidden ${SURFACE} text-slate-900`}>
+      <Header />
+      {children}
     </div>
   )
 }
@@ -103,16 +184,24 @@ function Header() {
 function Breadcrumb({ crumbs }) {
   if (!crumbs?.length) return null
   return (
-    <nav aria-label="Breadcrumb" className="flex items-center gap-1.5 text-sm mb-5">
+    <nav aria-label="Breadcrumb" className="mb-6 flex items-center gap-2 text-base">
       {crumbs.map((c, i) => (
-        <span key={i} className="flex items-center gap-1.5">
-          {i > 0 && <ChevronRight className="h-4 w-4 text-gray-300" />}
+        <span key={i} className="flex items-center gap-2">
+          {i > 0 && <ChevronRight className="h-4 w-4 text-slate-400" />}
           {c.onClick
-            ? <button onClick={c.onClick} className="text-gray-500 hover:text-[#2E4168] font-medium transition-colors">{c.label}</button>
-            : <span className="font-semibold text-gray-800">{c.label}</span>}
+            ? <button onClick={c.onClick} className="font-medium text-slate-500 transition-colors hover:text-slate-900">{c.label}</button>
+            : <span className="font-semibold text-slate-900">{c.label}</span>}
         </span>
       ))}
     </nav>
+  )
+}
+
+// One consistent way to title a block, so the eye learns the rhythm of the
+// screen once instead of re-parsing each section.
+function SectionLabel({ children }) {
+  return (
+    <h2 className={`mb-4 text-sm font-bold uppercase tracking-[0.25em] ${TEXT_MUTED}`}>{children}</h2>
   )
 }
 
@@ -167,24 +256,37 @@ function OverviewScreen() {
   }, [load])
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      <Header />
-      <div className="p-8 pt-10">
-        <h1 className="text-2xl font-bold text-gray-900 mb-1">Select a Floor</h1>
-        <p className="text-gray-500 mb-6">Tap a floor to see its departments and rooms.</p>
+    <Board>
+      <div className="px-10 pb-10 pt-8">
+        <h1 className="text-5xl font-bold tracking-tight">Select a Floor</h1>
+        <p className={`mt-2 mb-8 text-xl ${TEXT_MUTED}`}>Tap a floor to see its departments and rooms.</p>
         {floors.length === 0 ? (
-          <p className="text-gray-400">No floors configured yet — add one in Settings → Rooms.</p>
+          <p className={`text-xl ${TEXT_MUTED}`}>No floors configured yet — add one in Settings → Rooms.</p>
         ) : (
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
             {floors.map((f) => (
               <button
                 key={f.id}
                 onClick={() => navigate(`/display/floor/${f.id}`)}
-                className="text-left bg-white border border-gray-200 border-l-4 border-l-[#2E4168] rounded-lg p-5 hover:shadow-md hover:border-l-[#253453] transition-all"
+                className={`group rounded-2xl ${CARD} p-7 text-left transition-all hover:-translate-y-0.5 hover:shadow-md hover:border-slate-300`}
               >
-                <div className="text-lg font-bold text-gray-900">{f.name}</div>
-                <div className="text-sm text-[#2E4168] font-semibold mt-1">{f.waitingCount} waiting · {f.inProgressCount} in progress</div>
-                <div className="mt-3 flex flex-wrap gap-1.5">
+                <div className="flex items-start justify-between gap-4">
+                  <div className="text-3xl font-bold">{f.name}</div>
+                  <ChevronRight className="mt-1 h-7 w-7 shrink-0 text-slate-300 transition-transform group-hover:translate-x-1 group-hover:text-slate-500" />
+                </div>
+                {/* Counts are the reason to pick one floor over another, so they
+                    carry real weight rather than sitting in caption type. */}
+                <div className="mt-5 flex items-baseline gap-6">
+                  <span>
+                    <span className="text-4xl font-bold tabular-nums text-[#2E4168]">{f.waitingCount}</span>
+                    <span className={`ml-2 text-sm font-bold uppercase tracking-wider ${TEXT_MUTED}`}>Waiting</span>
+                  </span>
+                  <span>
+                    <span className="text-4xl font-bold tabular-nums text-emerald-600">{f.inProgressCount}</span>
+                    <span className={`ml-2 text-sm font-bold uppercase tracking-wider ${TEXT_MUTED}`}>In progress</span>
+                  </span>
+                </div>
+                <div className="mt-5 flex flex-wrap gap-2">
                   {f.departments.map((d) => (
                     <span
                       key={d.id}
@@ -192,7 +294,7 @@ function OverviewScreen() {
                       tabIndex={0}
                       onClick={(e) => { e.stopPropagation(); navigate(`/display/floor/${f.id}?dept=${d.id}`) }}
                       onKeyDown={(e) => { if (e.key === 'Enter') { e.stopPropagation(); navigate(`/display/floor/${f.id}?dept=${d.id}`) } }}
-                      className={`text-xs rounded-full px-2.5 py-1 font-medium cursor-pointer transition-colors ${departmentColorClass(d.id)}`}
+                      className={`cursor-pointer rounded-full px-3.5 py-1.5 text-sm font-semibold ring-1 transition-colors ${departmentColorClass(d.id)}`}
                     >
                       {d.name}
                     </span>
@@ -203,7 +305,7 @@ function OverviewScreen() {
           </div>
         )}
       </div>
-    </div>
+    </Board>
   )
 }
 
@@ -245,25 +347,28 @@ function FloorScreen() {
   const floor = floors.find((f) => f.id === floorId)
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      <Header />
-      <div className="p-8">
+    <Board>
+      <div className="px-10 pb-10 pt-6">
         <Breadcrumb crumbs={[{ label: 'All Floors', onClick: () => navigate('/display') }, { label: floor?.name || '…' }]} />
-        <div className="flex gap-1 border-b mb-6 overflow-x-auto">
+        <div className="mb-8 flex gap-2 overflow-x-auto border-b border-slate-200">
           {floor?.departments.map((d) => (
             <button
               key={d.id}
               onClick={() => setDeptId(d.id)}
-              className={`px-4 py-2.5 text-sm font-semibold whitespace-nowrap border-b-2 ${deptId === d.id ? 'border-[#2E4168] text-[#2E4168]' : 'border-transparent text-gray-500 hover:text-gray-800'}`}
+              className={`whitespace-nowrap border-b-[3px] px-5 py-3 text-xl font-semibold transition-colors ${
+                deptId === d.id
+                  ? 'border-[#2E4168] text-[#2E4168]'
+                  : 'border-transparent text-slate-500 hover:text-slate-900'
+              }`}
             >
               {d.name}
             </button>
           ))}
         </div>
         {rooms.length === 0 ? (
-          <p className="text-gray-400">No rooms in this department yet.</p>
+          <p className={`text-xl ${TEXT_MUTED}`}>No rooms in this department yet.</p>
         ) : (
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
             {rooms.map((r) => {
               const a = r.activeDoctor
               // Count the doctors actually linked — never the `sittingType`
@@ -283,22 +388,30 @@ function FloorScreen() {
                 <button
                   key={r.id}
                   onClick={() => navigate(`/display/room/${r.id}`)}
-                  className="text-left bg-white border border-gray-200 rounded-lg p-4 hover:shadow-md hover:border-blue-300 transition-all"
+                  className={`rounded-2xl ${CARD} p-6 text-left transition-all hover:-translate-y-0.5 hover:border-slate-300 hover:shadow-md`}
                 >
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs font-mono text-gray-500">ROOM {r.roomNumber}</span>
-                    <span className={`text-[10px] font-bold uppercase tracking-wide rounded-full px-2 py-0.5 ${isShared ? 'bg-blue-50 text-blue-700' : 'bg-gray-100 text-gray-600'}`}>
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="rounded-md bg-slate-100 px-3 py-1 text-sm font-bold uppercase tracking-[0.15em] text-[#2E4168] ring-1 ring-slate-200">
+                      Room {r.roomNumber}
+                    </span>
+                    <span className={`rounded-full px-3 py-1 text-xs font-bold uppercase tracking-wider ring-1 ${
+                      isShared ? 'bg-sky-50 text-sky-700 ring-sky-200' : 'bg-slate-50 text-slate-600 ring-slate-200'
+                    }`}>
                       {isShared ? `Shared · ${doctorCount}` : 'Single'}
                     </span>
                   </div>
-                  <div className="mt-2 font-bold text-gray-900">
-                    {a.unassigned ? <span className="text-gray-400 italic font-normal">No doctor assigned</span>
-                      : a.onBreak ? <span className="text-gray-500 font-medium">{emptyRoomLabel(r.nextSession)}</span>
+                  {/* The doctor's name is what a patient scans a wall of room
+                      cards for — so it leads, at a size that survives distance. */}
+                  <div className="mt-4 text-2xl font-bold leading-snug">
+                    {a.unassigned ? <span className="font-medium text-slate-400">No doctor assigned</span>
+                      : a.onBreak ? <span className="text-lg font-medium text-slate-500">{emptyRoomLabel(r.nextSession)}</span>
                       : drName(a.doctorName)}
-                    {!a.unassigned && a.manual && <span className="ml-1.5 text-[9px] font-bold uppercase text-amber-700 bg-amber-50 rounded-full px-1.5 py-0.5 align-middle">Cover</span>}
+                    {!a.unassigned && a.manual && (
+                      <span className="ml-2 align-middle rounded-full bg-amber-50 px-2.5 py-1 text-xs font-bold uppercase tracking-wider text-amber-700 ring-1 ring-amber-200">Cover</span>
+                    )}
                   </div>
                   {otherDoctors.length > 0 && (
-                    <div className="mt-1 text-[11px] text-gray-400 truncate">
+                    <div className={`mt-2 truncate text-base ${TEXT_MUTED}`}>
                       + {otherDoctors.map((d) => drName(d.doctorName)).join(', ')}
                     </div>
                   )}
@@ -308,7 +421,7 @@ function FloorScreen() {
           </div>
         )}
       </div>
-    </div>
+    </Board>
   )
 }
 
@@ -330,99 +443,146 @@ function RoomScreen() {
     return () => clearInterval(id)
   }, [load])
 
-  if (!data) return <div className="min-h-screen bg-gray-50"><Header /></div>
+  if (!data) return <Board><div className="p-10 text-slate-500">Loading…</div></Board>
 
   const { room, activeDoctor: a, inProgress, waitingGroups } = data
+  const totalWaiting = waitingGroups.reduce((n, g) => n + g.patients.length, 0)
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      <Header />
-      <div className="p-8">
+    <Board>
+      <div className="flex min-h-0 flex-1 flex-col px-10 pb-8 pt-6">
         <Breadcrumb crumbs={[
           { label: 'All Floors', onClick: () => navigate('/display') },
           { label: room.floor?.name, onClick: () => navigate(`/display/floor/${room.floor?.id}`) },
           { label: `Room ${room.roomNumber}` },
         ]} />
-        <div className="mb-6">
-          <div className="text-sm font-mono text-[#2E4168] font-semibold tracking-wide">ROOM {room.roomNumber} · {room.department?.name}</div>
-          <h1 className="text-3xl font-bold text-gray-900 mt-1">
-            {a.unassigned ? <span className="text-gray-400 italic">No doctor assigned to this room</span>
-              : a.onBreak ? <span className="text-gray-500">{emptyRoomLabel(data.nextSession)}</span>
-              : <>{drName(a.doctorName)}{a.manual && <span className="ml-2 text-xs font-bold uppercase text-amber-700 bg-amber-50 rounded-full px-2 py-1 align-middle">Covering</span>}</>}
-          </h1>
+
+        <div className="mb-8 flex flex-wrap items-end justify-between gap-6">
+          <div>
+            <div className="flex items-center gap-3 text-sm font-bold uppercase tracking-[0.2em] text-[#2E4168]">
+              <span className="rounded-md bg-slate-100 px-3 py-1 ring-1 ring-slate-200">Room {room.roomNumber}</span>
+              <span className={TEXT_MUTED}>{room.department?.name}</span>
+            </div>
+            {/* The doctor's name is what a patient scans the wall for, so it is
+                the second-largest thing here — behind only who is being seen. */}
+            <h1 className="mt-3 text-6xl font-bold leading-none tracking-tight">
+              {a.unassigned ? <span className="text-slate-400">No doctor assigned</span>
+                : a.onBreak ? <span className="text-slate-500">{emptyRoomLabel(data.nextSession)}</span>
+                : <>
+                    {drName(a.doctorName)}
+                    {a.manual && <span className="ml-4 align-middle rounded-full bg-amber-50 px-4 py-1.5 text-base font-bold uppercase tracking-wider text-amber-700 ring-1 ring-amber-200">Covering</span>}
+                  </>}
+            </h1>
+          </div>
+          <div className="text-right">
+            <div className="text-7xl font-bold leading-none tabular-nums">{totalWaiting}</div>
+            <div className={`mt-1 text-sm font-bold uppercase tracking-[0.2em] ${TEXT_MUTED}`}>Waiting</div>
+          </div>
         </div>
 
-        <div className="grid gap-6 lg:grid-cols-[1fr,1.4fr]">
-          <div>
-            <div className="text-xs font-bold uppercase tracking-wide text-gray-500 mb-2">In Progress</div>
+        {/* min-h-0 so the two columns may shrink inside the flex parent and let
+            their own overflow scroll, instead of pushing the page taller. */}
+        <div className="grid min-h-0 flex-1 gap-8 lg:grid-cols-[minmax(0,5fr),minmax(0,7fr)]">
+          {/* ── NOW SERVING: the one thing the reader came for ──────────── */}
+          <section className="flex min-h-0 flex-col">
+            <SectionLabel>Now Serving</SectionLabel>
             {inProgress ? (
-              <div className="bg-gradient-to-br from-[#2E4168] to-[#253453] text-white rounded-lg p-6">
-                <div className="text-xs uppercase tracking-wide text-white/70 font-bold mb-2">Now Serving</div>
-                <div className="text-2xl font-bold">{inProgress.name}</div>
-                <div className="text-white/70 mt-1">{inProgress.uhid}</div>
-                <div className="text-sm mt-3 font-semibold">{inProgress.visitType === 'follow_up' ? 'Follow-up patient' : 'New patient'}</div>
+              <div className="relative flex flex-1 flex-col justify-center overflow-hidden rounded-2xl bg-gradient-to-br from-[#2E4168] to-[#1B2A45] p-10 text-white shadow-lg">
+                <div className="text-sm font-bold uppercase tracking-[0.2em] text-white/70">In Progress</div>
+                <div className="mt-4 text-6xl font-bold leading-tight tracking-tight break-words">
+                  {maskPatientName(inProgress.name)}
+                </div>
+                <div className="mt-3 font-mono text-2xl text-white/75">{maskUhid(inProgress.uhid)}</div>
+                <div className="mt-6 inline-flex rounded-full bg-white/15 px-5 py-2 text-base font-bold uppercase tracking-wider ring-1 ring-white/25">
+                  {inProgress.visitType === 'follow_up' ? 'Follow-up' : 'New patient'}
+                </div>
               </div>
             ) : (
-              <div className="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center text-gray-400 italic">Room free — no patient in progress</div>
-            )}
-          </div>
-
-          <div className="space-y-5">
-            {waitingGroups.length === 0 && (
-              <p className="text-sm text-gray-400 italic">No one waiting</p>
-            )}
-            {waitingGroups.map((g) => (
-              <div key={g.doctorId || 'unassigned'}>
-                {/* Whose queue is this? Driven by the REAL data (is there more
-                    than one doctor's queue here?) — never by the cosmetic
-                    `sittingType` label. Room 200 is labelled "single" while
-                    three doctors actually share it, and gating on that label
-                    hid every heading, leaving three anonymous tables that no
-                    patient could match themselves to. */}
-                {waitingGroups.length > 1 && (
-                  <div className="flex items-baseline gap-2 mb-2 pb-1.5 border-b border-gray-200">
-                    <span className="font-bold text-base text-[#2E4168]">{g.doctorName === 'Unassigned' ? 'Unassigned' : drName(g.doctorName)}</span>
-                    {g.scheduleNote && <span className="text-xs text-gray-500 font-medium">· {g.scheduleNote}</span>}
-                    <span className="ml-auto text-xs font-semibold text-gray-500">
-                      {g.patients.length} waiting
-                    </span>
-                  </div>
-                )}
-                {g.patients.length === 0 ? (
-                  <p className="text-sm text-gray-400 italic">No one waiting</p>
-                ) : (
-                  <div className="border rounded-lg overflow-hidden">
-                    <div className="grid grid-cols-[40px,1fr,90px,140px] bg-gray-50 text-[11px] font-bold uppercase tracking-wide text-gray-500 px-4 py-2">
-                      <span>#</span><span>Patient</span><span>Visit</span><span>UHID</span>
-                    </div>
-                    {g.patients.map((p, i) => {
-                      const isNext = i === 0 && g.active && inProgress?.prescriptionUploaded
-                      return (
-                        <div key={p.queueEntryId}>
-                          <div className={`grid grid-cols-[40px,1fr,90px,140px] items-center px-4 py-2.5 border-t text-sm ${isNext ? 'bg-red-50' : i % 2 ? 'bg-gray-50/60' : ''}`}>
-                            <span className={`font-mono font-semibold ${isNext ? 'text-red-600' : 'text-gray-400'}`}>{i + 1}</span>
-                            <span className="font-medium">{p.name}</span>
-                            <span className={`text-[10px] font-bold uppercase rounded-full px-2 py-0.5 w-fit ${p.visitType === 'follow_up' ? 'bg-green-50 text-green-700' : 'bg-blue-50 text-blue-700'}`}>
-                              {p.visitType === 'follow_up' ? 'Follow-up' : 'New'}
-                            </span>
-                            <span className="font-mono text-xs text-gray-500">{p.uhid}</span>
-                          </div>
-                          {isNext && (
-                            <div className="bg-red-50 px-4 py-2 border-t border-red-100 flex items-center gap-2 text-red-600 font-bold text-sm animate-pulse">
-                              <span className="h-2.5 w-2.5 rounded-full bg-red-500" />You are next. Be ready.
-                            </div>
-                          )}
-                        </div>
-                      )
-                    })}
-                  </div>
-                )}
+              <div className={`flex flex-1 flex-col items-center justify-center rounded-2xl border-2 border-dashed border-slate-300 bg-white p-12 text-center ${TEXT_MUTED}`}>
+                <DoorOpen className="mx-auto mb-4 h-12 w-12 text-slate-300" />
+                <div className="text-2xl font-semibold">Room free</div>
+                <div className="mt-1 text-base">No patient in progress</div>
               </div>
-            ))}
-          </div>
+            )}
+          </section>
+
+          {/* ── UP NEXT ─────────────────────────────────────────────────── */}
+          <section className="flex min-h-0 flex-col">
+            <SectionLabel>Up Next</SectionLabel>
+            {totalWaiting === 0 ? (
+              <div className={`flex flex-1 items-center justify-center rounded-2xl ${CARD} p-12 text-center text-2xl ${TEXT_MUTED}`}>No one waiting</div>
+            ) : (
+              <div className="min-h-0 flex-1 space-y-7 overflow-y-auto pr-1">
+                {waitingGroups.map((g) => (
+                  <div key={g.doctorId || 'unassigned'}>
+                    {/* Whose queue is this? Driven by the REAL data (is there more
+                        than one doctor's queue here?) — never by the cosmetic
+                        `sittingType` label. Room 200 is labelled "single" while
+                        three doctors actually share it, and gating on that label
+                        hid every heading, leaving three anonymous tables that no
+                        patient could match themselves to. */}
+                    {waitingGroups.length > 1 && (
+                      <div className="mb-3 flex items-baseline gap-3 border-b border-slate-200 pb-2">
+                        <span className="text-2xl font-bold text-[#2E4168]">
+                          {g.doctorName === 'Unassigned' ? 'Unassigned' : drName(g.doctorName)}
+                        </span>
+                        {/* Composed here, not on the server: the sentence and
+                            the 12-hour conversion both belong at the point of
+                            display. */}
+                        {g.active
+                          ? <span className={`text-base ${TEXT_MUTED}`}>· active now</span>
+                          : g.shiftStart && <span className={`text-base ${TEXT_MUTED}`}>· today from {formatTime12h(g.shiftStart)}</span>}
+                        <span className={`ml-auto text-base font-semibold ${TEXT_MUTED}`}>{g.patients.length} waiting</span>
+                      </div>
+                    )}
+                    {g.patients.length === 0 ? (
+                      <p className={`text-lg ${TEXT_MUTED}`}>No one waiting</p>
+                    ) : (
+                      <ul className="space-y-2.5">
+                        {g.patients.map((p, i) => {
+                          const isNext = i === 0 && g.active && inProgress?.prescriptionUploaded
+                          return (
+                            <li
+                              key={p.queueEntryId}
+                              className={`flex items-center gap-5 rounded-xl px-5 py-4 transition-colors ${
+                                isNext
+                                  ? 'bg-amber-50 ring-2 ring-amber-300'
+                                  : CARD
+                              }`}
+                            >
+                              <span className={`w-12 shrink-0 text-4xl font-bold tabular-nums ${isNext ? 'text-amber-600' : 'text-slate-400'}`}>
+                                {i + 1}
+                              </span>
+                              <span className="min-w-0 flex-1">
+                                <span className="block truncate text-3xl font-semibold">{maskPatientName(p.name)}</span>
+                                {isNext && (
+                                  <span className="mt-1 flex items-center gap-2 text-base font-bold uppercase tracking-wider text-amber-700">
+                                    <span className="h-2.5 w-2.5 animate-pulse rounded-full bg-amber-500" />
+                                    You are next — please be ready
+                                  </span>
+                                )}
+                              </span>
+                              <span className={`shrink-0 rounded-full px-4 py-1.5 text-sm font-bold uppercase tracking-wider ring-1 ${
+                                p.visitType === 'follow_up'
+                                  ? 'bg-emerald-50 text-emerald-700 ring-emerald-200'
+                                  : 'bg-sky-50 text-sky-700 ring-sky-200'
+                              }`}>
+                                {p.visitType === 'follow_up' ? 'Follow-up' : 'New'}
+                              </span>
+                              <span className={`hidden shrink-0 font-mono text-lg xl:block ${TEXT_MUTED}`}>{maskUhid(p.uhid)}</span>
+                            </li>
+                          )
+                        })}
+                      </ul>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </section>
         </div>
       </div>
-    </div>
+    </Board>
   )
 }
 

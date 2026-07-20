@@ -174,8 +174,16 @@ export async function getRoomQueue(req, res, next) {
         doctorId,
         doctorName: link?.doctorName || patients[0]?.followUpDoctorName || patients[0]?.assignedToName || 'Unassigned',
         active: doctorId === activeId,
-        // Only ever a TODAY note — never another weekday.
-        scheduleNote: doctorId === activeId ? 'active now' : (todayShift ? `today from ${todayShift.start}` : null),
+        // The raw "HH:mm" shift start, NOT a finished sentence. This used to be
+        // pre-formatted here as `today from ${start}`, which shipped a 24-hour
+        // time ("today from 14:00") straight onto a board where every other
+        // time reads as 12-hour — the server has no 12-hour formatter and
+        // adding one would be a second copy of the frontend's.
+        //
+        // Times cross the wire in the stored 24h form and are converted once,
+        // at the point of display (lib/format.js#formatTime12h). Only ever
+        // TODAY's shift — never another weekday.
+        shiftStart: doctorId === activeId ? null : (todayShift?.start ?? null),
         patients,
       }
     }).sort((a, b) => (a.active === b.active ? 0 : a.active ? -1 : 1))
