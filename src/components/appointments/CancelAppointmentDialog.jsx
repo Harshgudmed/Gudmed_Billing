@@ -12,6 +12,7 @@ import {
 import { format } from "date-fns";
 import { Loader2 } from "lucide-react";
 import { parseDate, getPatientFullName } from "./appointmentHelpers";
+import { formatTime12h } from "@/lib/format";
 
 export default function CancelAppointmentDialog({
   open,
@@ -41,7 +42,7 @@ export default function CancelAppointmentDialog({
               </div>
               <div className="text-sm text-gray-500">
                 {format(parseDate(appointment.appointmentDate), "PPP")} at{" "}
-                {appointment.appointmentTime}
+                {formatTime12h(appointment.appointmentTime)}
               </div>
             </div>
           )}

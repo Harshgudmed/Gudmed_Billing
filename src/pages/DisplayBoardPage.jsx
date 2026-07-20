@@ -5,6 +5,7 @@ import client from '@/api/client'
 import Logo from '@/components/Logo'
 import { useOrgSettings } from '@/lib/useOrgSettings'
 import { drName } from '@/lib/utils'
+import { formatTime12h } from '@/lib/format'
 
 // Real hospital queue displays poll rather than push — a lobby TV has one
 // reader per screen and tolerates a few seconds of staleness invisibly, so a
@@ -49,17 +50,8 @@ function departmentColorClass(departmentId) {
  */
 function emptyRoomLabel(nextSession) {
   if (!nextSession) return 'Consultations closed'
-  if (nextSession.today) return `Next session ${to12h(nextSession.start)}`
-  return `Closed today · Next ${nextSession.dayName.slice(0, 3)} ${to12h(nextSession.start)}`
-}
-
-/** "14:00" -> "2:00 PM". A waiting room reads clock time, not 24h. */
-function to12h(hhmm) {
-  const [h, m] = String(hhmm || '').split(':').map(Number)
-  if (!Number.isFinite(h) || !Number.isFinite(m)) return hhmm || ''
-  const suffix = h < 12 ? 'AM' : 'PM'
-  const hour = h % 12 === 0 ? 12 : h % 12
-  return `${hour}:${String(m).padStart(2, '0')} ${suffix}`
+  if (nextSession.today) return `Next session ${formatTime12h(nextSession.start)}`
+  return `Closed today · Next ${nextSession.dayName.slice(0, 3)} ${formatTime12h(nextSession.start)}`
 }
 
 function useLiveClock() {

@@ -21,6 +21,7 @@ import {
   APPOINTMENTS_LIST_PER_PAGE,
 } from "./appointmentConstants";
 import { StatusBadge, TypeBadge } from "./AppointmentBadges";
+import { formatTime12h } from "@/lib/format";
 
 const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const STATUS_DOT_CLASS = {
@@ -203,7 +204,7 @@ export default function MonthlyView({
                         <div className="flex items-start justify-between">
                           <div className="flex items-center gap-2">
                             <span className="font-mono text-sm font-medium">
-                              {appointment.appointmentTime}
+                              {formatTime12h(appointment.appointmentTime)}
                             </span>
                           </div>
                           <StatusBadge status={appointment.status} />

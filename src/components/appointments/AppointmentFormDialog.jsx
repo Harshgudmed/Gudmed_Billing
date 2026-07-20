@@ -12,6 +12,7 @@ import { SearchableSelect } from "@/components/ui/searchable-select";
 import { STATUS_CONFIG } from "./appointmentConstants";
 import { getPatientFullName } from "./appointmentHelpers";
 import { useDoctorTimetable } from "@/components/common/hooks/useDoctorTimetable";
+import { formatTime12h } from "@/lib/format";
 
 export default function AppointmentFormDialog({
   open,
@@ -237,7 +238,7 @@ export default function AppointmentFormDialog({
                         </SelectTrigger>
                       </FormControl>
                       <SelectContent>
-                        {timeOptions.map(t => <SelectItem key={t} value={t}>{t}</SelectItem>)}
+                        {timeOptions.map(t => <SelectItem key={t} value={t}>{formatTime12h(t)}</SelectItem>)}
                       </SelectContent>
                     </Select>
                     <FormMessage />

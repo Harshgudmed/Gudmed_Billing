@@ -27,6 +27,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { formatTime12h } from "@/lib/format";
 import {
   CalendarDays,
   Plus,
@@ -244,7 +245,7 @@ export default function AppointmentsListView({
                         </TableCell>
                         <TableCell>
                           <div className="font-mono font-medium">
-                            {appointment.appointmentTime}
+                            {formatTime12h(appointment.appointmentTime)}
                           </div>
                         </TableCell>
                         <TableCell>
