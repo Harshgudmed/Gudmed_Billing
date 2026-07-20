@@ -15,7 +15,8 @@
     "size-check": "node backend/scripts/storage-report.mjs",
     "e2e:shot": "node e2e/shot.js",
     "e2e:smoke": "node e2e/smoke.js",
-    "qa:drname": "node e2e/lint-drname.mjs"
+    "qa:drname": "node e2e/lint-drname.mjs",
+    "qa:patientname": "node e2e/lint-patientname.mjs"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.10.0",
