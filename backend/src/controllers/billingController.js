@@ -209,11 +209,7 @@ export async function getAll(req, res) {
           include: {
             patient: {
               select: {
-                id: true,
-                mrn: true,
-                firstName: true,
-                middleName: true,
-                lastName: true,
+                ...PATIENT_NAME_SELECT,
                 phonePrimary: true,
                 hasInsurance: true,
                 insuranceProvider: true,
@@ -423,11 +419,7 @@ export async function create(req, res) {
           include: {
             patient: {
               select: {
-                id: true,
-                mrn: true,
-                firstName: true,
-                middleName: true,
-                lastName: true,
+                ...PATIENT_NAME_SELECT,
                 phonePrimary: true,
                 hasInsurance: true,
                 insuranceProvider: true,
