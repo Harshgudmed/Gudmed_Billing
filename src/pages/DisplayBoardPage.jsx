@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { Routes, Route, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { Clock, ChevronRight, Users, DoorOpen } from 'lucide-react'
+import { toast } from 'sonner'
 import client from '@/api/client'
 import Logo from '@/components/Logo'
 import { useOrgSettings } from '@/lib/useOrgSettings'
@@ -490,13 +491,53 @@ function FloorScreen() {
 function RoomScreen() {
   const { roomId } = useParams()
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
   const [data, setData] = useState(null)
-  useIdleReturn(true)
+  const [busy, setBusy] = useState(false)
+
+  // Doctor console mode, opt-in via ?doctor=1.
+  //
+  // The doctor sits in the room with this exact screen in front of them, so
+  // this is where the controls belong — walking them over to the reception
+  // queue screen mid-clinic is not a workflow anyone will follow.
+  //
+  // But the SAME route is what hangs on the waiting-room wall, and the last
+  // thing that board should carry is a button a patient can press. So the
+  // controls are off unless the URL asks for them: the wall runs
+  // /display/room/:id, the doctor bookmarks /display/room/:id?doctor=1.
+  const doctorMode = searchParams.get('doctor') === '1'
+  // A console is being watched by the person using it; it must not wander back
+  // to the floor list under them.
+  useIdleReturn(!doctorMode)
 
   const load = useCallback(async () => {
     const res = await client.get('/display/queue', { params: { roomId } })
     setData(res.data)
   }, [roomId])
+
+  // Act, then refresh immediately rather than waiting out the poll — the
+  // person who pressed the button is looking straight at the result.
+  const act = useCallback(async (fn, failure) => {
+    setBusy(true)
+    try {
+      const res = await fn()
+      if (res?.success) { toast.success(res.message || 'Done'); await load() }
+      else toast.error(res?.error || failure)
+    } catch (err) {
+      toast.error(err.message || failure)
+    } finally {
+      setBusy(false)
+    }
+  }, [load])
+
+  const alertNext = (entryId) => act(
+    () => client.patch(`/queue/${entryId}`, { status: 'called' }),
+    'Could not alert that patient',
+  )
+  const callInNext = () => act(
+    () => client.post('/queue/call-next', { roomId }),
+    'Could not call the next patient',
+  )
 
   useEffect(() => {
     load()
@@ -508,6 +549,11 @@ function RoomScreen() {
 
   const { room, activeDoctor: a, inProgress, waitingGroups } = data
   const totalWaiting = waitingGroups.reduce((n, g) => n + g.patients.length, 0)
+  // Whoever "call next" would actually bring in: first in line for the doctor
+  // who is sitting, falling back to the head of the room's queue. Kept in step
+  // with the server's own ordering so the console names the same person it
+  // will call.
+  const firstWaiting = (waitingGroups.find((g) => g.active) || waitingGroups[0])?.patients?.[0] || null
 
   return (
     <Board>
@@ -579,6 +625,35 @@ function RoomScreen() {
                 <DoorOpen className="mx-auto mb-4 h-12 w-12 text-slate-300" />
                 <div className="text-2xl font-semibold">Room free</div>
                 <div className="mt-1 text-base">No patient in progress</div>
+              </div>
+            )}
+
+            {/* The doctor's controls, under the patient they refer to. Only in
+                ?doctor=1 mode — never on the wall board. */}
+            {doctorMode && (
+              <div className={`mt-5 rounded-2xl ${CARD} p-5`}>
+                <div className={`mb-3 text-xs font-bold uppercase tracking-[0.2em] ${TEXT_MUTED}`}>Doctor controls</div>
+                <div className="flex flex-wrap gap-3">
+                  <button
+                    onClick={callInNext}
+                    disabled={busy || totalWaiting === 0}
+                    className="flex-1 rounded-xl bg-[#2E4168] px-6 py-4 text-lg font-bold text-white transition-colors hover:bg-[#253453] disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    {inProgress ? 'Finish & call next patient' : 'Call next patient in'}
+                  </button>
+                  <button
+                    onClick={() => alertNext(firstWaiting.queueEntryId)}
+                    disabled={busy || !firstWaiting || firstWaiting.alerted}
+                    className="flex-1 rounded-xl border-2 border-amber-300 bg-amber-50 px-6 py-4 text-lg font-bold text-amber-700 transition-colors hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    {firstWaiting?.alerted ? 'Next patient alerted' : 'Alert next patient'}
+                  </button>
+                </div>
+                <p className={`mt-3 text-sm ${TEXT_MUTED}`}>
+                  {firstWaiting
+                    ? <>Next up: <b className="text-slate-700">{firstWaiting.name}</b>. “Alert” shows them “you are next” on the board; “Call next” brings them in and finishes the current patient.</>
+                    : 'Nobody is waiting for this room.'}
+                </p>
               </div>
             )}
           </section>
