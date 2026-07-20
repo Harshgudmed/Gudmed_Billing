@@ -23,6 +23,7 @@ import { printAppointmentCard } from "./appointmentPrint";
 import { APPOINTMENTS_LIST_PER_PAGE, APPOINTMENT_STATUSES, WEEKLY_DAY_PAGE_SIZE } from "./appointmentConstants";
 import { useAppointments } from "./useAppointments";
 import { parseDate, getPatientFullName, byTime } from "./appointmentHelpers";
+import { getFullName } from "@/lib/patient";
 import CancelAppointmentDialog from "./CancelAppointmentDialog";
 import RescheduleAppointmentDialog from "./RescheduleAppointmentDialog";
 import AppointmentFormDialog from "./AppointmentFormDialog";
@@ -32,6 +33,7 @@ import MonthlyView from "./MonthlyView";
 import TodayView from "./TodayView";
 import AppointmentsListView from "./AppointmentsListView";
 import StatisticsCards from "./StatisticsCards";
+import { formatTime12h } from "@/lib/format";
 
 export default function AppointmentsModule() {
   const [activeTab, setActiveTab] = useState("calendar");
@@ -730,14 +732,14 @@ export default function AppointmentsModule() {
       const patient = appointment.patient || getPatient(appointment.patientId);
       const phone = patient?.phonePrimary?.replace(/[^0-9]/g, "") || "";
       const patientName = patient
-        ? `${patient.firstName} ${patient.lastName}`.trim()
+        ? getFullName(patient)
         : "Patient";
       const aptDate = appointment.appointmentDate
         ? format(new Date(appointment.appointmentDate), "dd MMM yyyy")
         : "";
       const doctorName =
         appointment.doctor?.fullName || getDoctor(appointment.doctorId)?.fullName || "Doctor";
-      const message = `Dear ${patientName}, your appointment with ${drName(doctorName)} is confirmed on ${aptDate} at ${appointment.appointmentTime}. Please arrive 10 minutes early. ${orgInfo.name}.`;
+      const message = `Dear ${patientName}, your appointment with ${drName(doctorName)} is confirmed on ${aptDate} at ${formatTime12h(appointment.appointmentTime)}. Please arrive 10 minutes early. ${orgInfo.name}.`;
       if (phone)
         window.open(
           `https://wa.me/91${phone}?text=${encodeURIComponent(message)}`,

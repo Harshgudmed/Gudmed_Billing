@@ -9,6 +9,7 @@ import { scopedDoctorId } from '../utils/scope.js'
 import { computeConsultationFee } from '../services/appointmentFees.js'
 import { nextQueueNumber } from '../utils/queueNumber.js'
 import { deriveRoomAndVisitType } from '../lib/queueDerivation.js'
+import { PATIENT_NAME_SELECT } from '../lib/patientName.js'
 
 export async function getAll(req, res, next) {
   try {
@@ -59,7 +60,7 @@ export async function getAll(req, res, next) {
         orderBy: [{ appointmentDate: 'asc' }, { appointmentTime: 'asc' }],
         include: {
           patient: {
-            select: { id: true, mrn: true, firstName: true, lastName: true, phonePrimary: true, gender: true, dateOfBirth: true },
+            select: { ...PATIENT_NAME_SELECT, phonePrimary: true, gender: true, dateOfBirth: true },
           },
           doctor: {
             select: { id: true, fullName: true, specialization: true },
@@ -310,7 +311,7 @@ export async function create(req, res, next) {
           reminderSent: false,
         },
         include: {
-          patient: { select: { id: true, mrn: true, firstName: true, lastName: true, phonePrimary: true } },
+          patient: { select: { ...PATIENT_NAME_SELECT, phonePrimary: true } },
           doctor: { select: { id: true, fullName: true } },
         },
       })
@@ -501,7 +502,7 @@ export async function update(req, res, next) {
         data: updates,
         include: {
           patient: {
-            select: { id: true, mrn: true, firstName: true, lastName: true, phonePrimary: true, gender: true, dateOfBirth: true },
+            select: { ...PATIENT_NAME_SELECT, phonePrimary: true, gender: true, dateOfBirth: true },
           },
           doctor: {
             select: { id: true, fullName: true, specialization: true },
@@ -636,7 +637,7 @@ export async function reschedule(req, res, next) {
           rescheduledFromId: original.id,
         },
         include: {
-          patient: { select: { id: true, mrn: true, firstName: true, lastName: true, phonePrimary: true } },
+          patient: { select: { ...PATIENT_NAME_SELECT, phonePrimary: true } },
           doctor: { select: { id: true, fullName: true } },
         },
       })

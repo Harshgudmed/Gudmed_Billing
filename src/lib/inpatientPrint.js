@@ -5,6 +5,7 @@
 import { format, differenceInDays } from 'date-fns'
 import { drName } from '@/lib/utils'
 import { toast } from 'sonner'
+import { getFullName } from '@/lib/patient';
 
 // Print small documents via a hidden iframe (avoids popup blockers).
 function printViaIframe(html) {
@@ -30,7 +31,7 @@ export function printAdmissionSlip(adm, { orgInfo, wardName, admissionNo }) {
 <h2>Admission Slip</h2>
 <div class="sub">${orgInfo.name} &nbsp;·&nbsp; Generated ${format(new Date(),'dd MMM yyyy, hh:mm a')}</div>
 <table>
-<tr><td>Patient Name</td><td>${adm.patient?.firstName||''} ${adm.patient?.lastName||''}</td></tr>
+<tr><td>Patient Name</td><td>${getFullName(adm.patient)}</td></tr>
 <tr><td>UHID</td><td>${adm.patient?.mrn||'—'}</td></tr>
 <tr><td>Admission #</td><td>${admissionNo}</td></tr>
 <tr><td>Admission Date</td><td>${admDate}</td></tr>
@@ -61,7 +62,7 @@ export function printDischargeSummary(adm, { orgInfo, wardName, admissionNo }) {
   if (!win) { toast.error('Please allow pop-ups to print'); return }
 
   win.document.write(`<!DOCTYPE html><html>
-<head><title>Discharge Summary — ${adm.patient?.firstName} ${adm.patient?.lastName}</title>
+<head><title>Discharge Summary — ${getFullName(adm.patient)}</title>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:Arial,Helvetica,sans-serif;font-size:12px;color:#222;background:#f0f0f0;padding:20px}
@@ -106,7 +107,7 @@ body{font-family:Arial,Helvetica,sans-serif;font-size:12px;color:#222;background
 
   <div class="section-title">Patient Information</div>
   <div class="grid2">
-    <div class="field"><div class="field-label">Patient Name</div><div class="field-value">${adm.patient?.firstName || ''} ${adm.patient?.lastName || ''}</div></div>
+    <div class="field"><div class="field-label">Patient Name</div><div class="field-value">${getFullName(adm.patient)}</div></div>
     <div class="field"><div class="field-label">UHID</div><div class="field-value">${adm.patient?.mrn || '—'}</div></div>
     <div class="field"><div class="field-label">Age / Gender</div><div class="field-value">${patAge} / ${adm.patient?.gender || '—'}</div></div>
     <div class="field"><div class="field-label">Phone</div><div class="field-value">${adm.patient?.phonePrimary || '—'}</div></div>

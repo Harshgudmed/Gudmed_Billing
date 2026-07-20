@@ -11,6 +11,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import client from '@/api/client'
 import { useAuth } from '@/lib/auth'
+import { getFullName } from "@/lib/patient";
 
 const PRIORITIES = ['ROUTINE', 'URGENT', 'STAT']
 const DRUG_FORMS = [
@@ -156,7 +157,7 @@ export default function ClinicalOrdersTab({ admitted = [], admissionId: controll
   }
 
   const sel = admitted.find((a) => a.id === selectedId)
-  const patientLabel = sel ? `${`${sel.patient?.firstName || ''} ${sel.patient?.lastName || ''}`.trim()} · Bed ${sel.bed?.bedNumber || '—'}` : ''
+  const patientLabel = sel ? `${getFullName(sel.patient)} · Bed ${sel.bed?.bedNumber || '—'}` : ''
 
   // Full in-page New Order view (replaces the list while active — not a drawer).
   if (showNew) {
@@ -174,7 +175,7 @@ export default function ClinicalOrdersTab({ admitted = [], admissionId: controll
               <SelectContent>
                 {admitted.map((a) => (
                   <SelectItem key={a.id} value={a.id}>
-                    {(a.patient?.firstName || '') + ' ' + (a.patient?.lastName || '')} · Bed {a.bed?.bedNumber || '—'}
+                    {getFullName(a.patient)} · Bed {a.bed?.bedNumber || '—'}
                   </SelectItem>
                 ))}
               </SelectContent>

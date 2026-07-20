@@ -4,6 +4,7 @@ import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { getWardName, emptyDischarge } from '@/lib/inpatientHelpers'
+import { getFullName } from "@/lib/patient";
 
 // Discharge tab — cards for every currently-admitted patient. The actual discharge /
 // transfer happen in the shared dialogs owned by InpatientModule (opened via setters).
@@ -44,7 +45,7 @@ export default function DischargeTab({
                         <div className="flex items-center gap-3">
                           <div className="h-9 w-9 rounded-full bg-blue-100 flex items-center justify-center text-sm font-bold text-blue-700">{initials}</div>
                           <div>
-                            <div className="font-semibold text-sm">{a.patient?.firstName} {a.patient?.lastName}</div>
+                            <div className="font-semibold text-sm">{getFullName(a.patient)}</div>
                             <div className="text-xs text-gray-500">{a.patient?.mrn}</div>
                           </div>
                           {a.isCritical && <Badge className={`ml-auto text-xs ${a.criticalLevel === 'blue' ? 'bg-blue-100 text-blue-700' : 'bg-yellow-100 text-yellow-800'}`}>Critical ({a.criticalLevel === 'blue' ? 'Blue' : 'Yellow'})</Badge>}

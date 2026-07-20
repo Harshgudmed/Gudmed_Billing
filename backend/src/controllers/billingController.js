@@ -6,6 +6,7 @@ import { recalcInvoice, refundableAmount } from "../lib/invoiceLedger.js";
 import { fulfillInvoiceItems } from "../lib/invoiceFulfillment.js";
 import { round2 } from "../lib/money.js";
 import { z } from 'zod'
+import { PATIENT_NAME_SELECT } from '../lib/patientName.js'
 
 // A line's amount is quantity x unitPrice — the SERVER decides it, never the
 // client. The old code trusted the `total` in the request body, so a caller
@@ -211,6 +212,7 @@ export async function getAll(req, res) {
                 id: true,
                 mrn: true,
                 firstName: true,
+                middleName: true,
                 lastName: true,
                 phonePrimary: true,
                 hasInsurance: true,
@@ -244,7 +246,7 @@ export async function getAll(req, res) {
           skip: offset,
           include: {
             patient: {
-              select: { id: true, mrn: true, firstName: true, lastName: true },
+              select: { ...PATIENT_NAME_SELECT, },
             },
             // Include the parent invoice so receipts can show Total / Paid / Balance
             // (Dr-Lal style) and the payments table can show patient + invoice no.
@@ -255,7 +257,7 @@ export async function getAll(req, res) {
                 amountPaid: true,
                 balanceDue: true,
                 patient: {
-                  select: { id: true, mrn: true, firstName: true, lastName: true },
+                  select: { ...PATIENT_NAME_SELECT, },
                 },
               },
             },
@@ -424,6 +426,7 @@ export async function create(req, res) {
                 id: true,
                 mrn: true,
                 firstName: true,
+                middleName: true,
                 lastName: true,
                 phonePrimary: true,
                 hasInsurance: true,

@@ -3,10 +3,11 @@ import { getOrgId } from "../../lib/reqContext.js";
 import { createPrescriptionSchema, updatePrescriptionSchema } from '../validations/prescription.validation.js'
 import { getPagination, paginationMeta, handleServiceError, makeError } from '../utils.js'
 import { recordStockChange, consumeFromBatches, findShortages, insufficientStockError } from '../stockService.js'
+import { PATIENT_NAME_SELECT } from '../../lib/patientName.js'
 
 const SORTABLE_FIELDS = ['prescriptionDate', 'status', 'createdAt']
 
-const PATIENT_SELECT = { id: true, mrn: true, firstName: true, lastName: true, phonePrimary: true }
+const PATIENT_SELECT = { ...PATIENT_NAME_SELECT, phonePrimary: true }
 const DOCTOR_SELECT  = { id: true, fullName: true }
 
 export async function list(req, res, next) {

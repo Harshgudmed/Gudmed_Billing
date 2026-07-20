@@ -20,10 +20,28 @@ export function calcAge(dob) {
   return age
 }
 
-/** Full name from first/middle/last, skipping blank parts. */
+/**
+ * "Harsh Mohan Bansal" — every part that exists, in order, single-spaced.
+ *
+ * The frontend twin of the backend's lib/patientName.js#patientFullName; the
+ * two must always agree, so change them together. A name is built HERE and
+ * nowhere else: the inline `${p.firstName} ${p.lastName}` pattern this
+ * replaces was written at ~110 call sites and silently dropped every
+ * patient's middle name.
+ *
+ * Note this can only render what the API actually sent. If a name comes out
+ * missing its middle part, the query behind it is missing `middleName` —
+ * spread PATIENT_NAME_SELECT into that select rather than patching it here.
+ *
+ * Blank/whitespace parts are dropped, so a patient with no middle name reads
+ * "Priya Sharma", never "Priya  Sharma".
+ */
 export function getFullName(p) {
   if (!p) return ''
-  return [p.firstName, p.middleName, p.lastName].filter(Boolean).join(' ')
+  return [p.firstName, p.middleName, p.lastName]
+    .map((part) => (part == null ? '' : String(part).trim()))
+    .filter(Boolean)
+    .join(' ')
 }
 
 /**

@@ -2,6 +2,7 @@ import { db } from '../config/db.js'
 import { getOrgId } from "../lib/reqContext.js";
 import { isOwned } from "../lib/tenant.js";
 import { listResponse } from "../lib/pagination.js";
+import { PATIENT_NAME_SELECT } from '../lib/patientName.js'
 
 export async function getAll(req, res, next) {
   try {
@@ -18,7 +19,7 @@ export async function getAll(req, res, next) {
       ]
     }
     const include = {
-      patient: { select: { id: true, firstName: true, middleName: true, lastName: true, mrn: true } },
+      patient: { select: { ...PATIENT_NAME_SELECT, mrn: true } },
       certifiedBy: { select: { id: true, fullName: true } },
     }
     // Stat cards count across the WHOLE filtered set, not just this page.
@@ -98,7 +99,7 @@ export async function create(req, res, next) {
         certificationDate: new Date(),
       },
       include: {
-        patient: { select: { id: true, firstName: true, lastName: true, mrn: true } },
+        patient: { select: { ...PATIENT_NAME_SELECT, mrn: true } },
         certifiedBy: { select: { id: true, fullName: true } },
       },
     })
@@ -133,7 +134,7 @@ export async function update(req, res, next) {
       where: { id },
       data,
       include: {
-        patient: { select: { id: true, firstName: true, lastName: true, mrn: true } },
+        patient: { select: { ...PATIENT_NAME_SELECT, mrn: true } },
         certifiedBy: { select: { id: true, fullName: true } },
       },
     })

@@ -20,6 +20,7 @@ import { DAY_NAMES } from '../lib/doctorTimetable.js'
 import { groupWaitingByDoctor } from '../lib/queueGrouping.js'
 import { syncAppointmentsToQueue } from '../lib/queueSync.js'
 import { ymdInZone } from '../lib/dates.js'
+import { PATIENT_NAME_SELECT, patientFullName } from '../lib/patientName.js'
 
 const WAITING_STATUSES = ['waiting', 'called']
 
@@ -123,7 +124,7 @@ export async function getRoomQueue(req, res, next) {
     const entries = await db.queueManagement.findMany({
       where: { organizationId: ORG_ID, roomId, status: { in: [...WAITING_STATUSES, 'in_progress'] }, joinedQueueAt: todayRange() },
       include: {
-        patient: { select: { firstName: true, lastName: true, mrn: true } },
+        patient: { select: { ...PATIENT_NAME_SELECT, mrn: true } },
         followUpDoctor: { select: DOCTOR_SELECT },
         // The appointment's own doctor — this is who the patient actually
         // came to see, and so who they must be listed under.
@@ -140,7 +141,7 @@ export async function getRoomQueue(req, res, next) {
 
     const toPatientDTO = (e) => ({
       queueEntryId: e.id,
-      name: `${e.patient?.firstName || ''} ${e.patient?.lastName || ''}`.trim() || '—',
+      name: patientFullName(e.patient) || '—',
       uhid: e.patient?.mrn || '—',
       visitType: e.visitType,
       followUpDoctorId: e.followUpDoctorId,

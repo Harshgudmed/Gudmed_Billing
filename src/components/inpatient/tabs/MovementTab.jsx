@@ -4,6 +4,7 @@ import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
+import { getFullName } from "@/lib/patient";
 
 const TRANSFERS_PER_PAGE = 15
 
@@ -108,7 +109,7 @@ export default function MovementTab({ transferEventList, admissions, transferHis
                                     {(ev.patient?.firstName?.[0] || '') + (ev.patient?.lastName?.[0] || '')}
                                   </div>
                                   <div>
-                                    <div className="font-medium text-sm">{ev.patient?.firstName} {ev.patient?.lastName}</div>
+                                    <div className="font-medium text-sm">{getFullName(ev.patient)}</div>
                                     <div className="text-xs text-gray-400">{ev.patient?.mrn}</div>
                                   </div>
                                 </div>

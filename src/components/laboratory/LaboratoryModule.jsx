@@ -41,6 +41,7 @@ import PatientLookup from '@/components/common/PatientLookup'
 import { printLabReceipt } from '@/components/billing/utils/printBilling'
 import PaymentFields from '@/components/billing/PaymentFields'
 import { createInvoiceWithPayment, fetchOrderInvoicePayments } from '@/lib/billing'
+import { getFullName } from "@/lib/patient";
 
 // ============================================
 // API HELPERS
@@ -100,7 +101,7 @@ function transformApiOrder(apiOrder) {
     id: apiOrder.id,
     orderNumber: apiOrder.orderNumber || '',
     patientId: apiOrder.patientId || '',
-    patientName: patient ? `${patient.firstName || ''} ${patient.lastName || ''}`.trim() : 'Unknown',
+    patientName: patient ? getFullName(patient) : 'Unknown',
     patientMrn: patient?.mrn || '',
     patientAge: age,
     patientGender: patient?.gender || 'male',

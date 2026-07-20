@@ -15,6 +15,7 @@ import { CheckCircle, Printer, Loader2 } from "lucide-react";
 import { format } from "date-fns";
 import { statusBadge } from "../pharmacyHelpers";
 import { Pagination } from "@/components/common/Pagination";
+import { getFullName } from "@/lib/patient";
 
 export default function PrescriptionsTab({
   prescriptionFilter,
@@ -86,7 +87,7 @@ export default function PrescriptionsTab({
                     items = [];
                   }
                   const name = rx.patient
-                    ? `${rx.patient.firstName} ${rx.patient.lastName || ""}`.trim()
+                    ? getFullName(rx.patient)
                     : "Unknown";
                   return (
                     <TableRow key={rx.id}>

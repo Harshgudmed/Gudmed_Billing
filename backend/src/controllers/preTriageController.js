@@ -2,6 +2,7 @@ import { db } from '../config/db.js'
 import { dayRange } from '../lib/dates.js'
 import { getOrgId } from "../lib/reqContext.js";
 import { listResponse } from "../lib/pagination.js";
+import { PATIENT_NAME_SELECT } from '../lib/patientName.js'
 
 function generateScreeningNumber() {
   const date = new Date().toISOString().slice(0, 10).replace(/-/g, '')
@@ -37,7 +38,7 @@ export async function getAll(req, res, next) {
 
     const include = {
       screenedBy: { select: { fullName: true } },
-      patient: { select: { id: true, mrn: true, firstName: true, lastName: true } },
+      patient: { select: { ...PATIENT_NAME_SELECT, } },
     }
     // Stat cards count across baseWhere (all statuses) so the tabs stay accurate.
     const body = await listResponse(db.preTriage, {

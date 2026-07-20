@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useOrgSettings } from '@/lib/useOrgSettings'
 import { formatMoney as fmt } from '@/lib/format'
-import { calcAge } from '@/lib/patient'
+import { calcAge, getFullName } from '@/lib/patient'
 import { toast } from 'sonner'
 import { format } from 'date-fns'
 import client from '@/api/client'
@@ -290,7 +290,7 @@ export default function BillingModule({ onBack }) {
         const mapped = res.data.map((inv) => {
           let items = []
           try { items = typeof inv.items === 'string' ? JSON.parse(inv.items) : (inv.items || []) } catch { items = [] }
-          const patName = inv.patient ? `${inv.patient.firstName} ${inv.patient.lastName}` : 'Unknown'
+          const patName = getFullName(inv.patient) || 'Unknown'
           // Normalise DB items to the print shape ({name,qty,amt}). Invoice items
           // are written in two shapes and BOTH must be read here:
           //   {serviceName,quantity,unitPrice}                — billing/lab/radiology
@@ -373,7 +373,7 @@ export default function BillingModule({ onBack }) {
           (c.claims || []).map((cl) => ({
             id: cl.id,
             claimNumber: cl.claimNumber,
-            patient: [c.patient?.firstName, c.patient?.lastName].filter(Boolean).join(' ') || '—',
+            patient: getFullName(c.patient) || '—',
             insurer: c.insurerName,
             policy: c.policyNumber,
             amount: cl.claimAmount,
@@ -476,12 +476,12 @@ export default function BillingModule({ onBack }) {
   function selectPatient(p) {
     const age = calcAge(p.dateOfBirth)
     setForm(f => ({
-      ...f, patientName: `${p.firstName} ${p.lastName}`, patientId: p.id,
+      ...f, patientName: getFullName(p), patientId: p.id,
       phone: p.phonePrimary, age: String(age),
       gender: p.gender === 'male' ? 'M' : p.gender === 'female' ? 'F' : 'O',
       uhid: p.mrn,
     }))
-    setPatientSearch(`${p.firstName} ${p.lastName}`)
+    setPatientSearch(getFullName(p))
     setPatientDropdown(false)
   }
 

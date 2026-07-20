@@ -4,6 +4,7 @@
 // executor dispatch, NO IpdCharge. Each write also appends a ClinicalOrderEvent
 // (the UI timeline). Auto-billing is wired per order type in 3B+.
 import { db } from '../config/db.js'
+import { PATIENT_NAME_SELECT, patientFullName } from '../lib/patientName.js'
 
 const DRUG_FORMS = [
   "Tablet",
@@ -150,13 +151,13 @@ export async function listOrders(organizationId, { admissionId, type, status, wi
     orderBy: [{ priority: 'desc' }, { orderedAt: 'desc' }],
     take: 200,
     ...(withContext
-      ? { include: { admission: { select: { id: true, bedId: true, patient: { select: { firstName: true, lastName: true, mrn: true } }, bed: { select: { bedNumber: true } } } } } }
+      ? { include: { admission: { select: { id: true, bedId: true, patient: { select: { ...PATIENT_NAME_SELECT, mrn: true } }, bed: { select: { bedNumber: true } } } } } }
       : {}),
   })
   if (!withContext) return orders
   return orders.map((o) => ({
     ...o,
-    patientName: o.admission?.patient ? [o.admission.patient.firstName, o.admission.patient.lastName].filter(Boolean).join(' ') : null,
+    patientName: patientFullName(o.admission?.patient) || null,
     mrn: o.admission?.patient?.mrn || null,
     bedNumber: o.admission?.bed?.bedNumber || null,
     admission: undefined,

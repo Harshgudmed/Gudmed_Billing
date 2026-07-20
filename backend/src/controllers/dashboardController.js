@@ -1,6 +1,7 @@
 import { db } from '../config/db.js'
 import { getOrgId } from "../lib/reqContext.js";
 import { scopedDoctorId } from '../utils/scope.js'
+import { PATIENT_NAME_SELECT } from '../lib/patientName.js'
 
 export async function getDashboard(req, res, next) {
   try {
@@ -98,7 +99,7 @@ export async function getDashboard(req, res, next) {
         where: patientWhere,
         take: 5,
         orderBy: { createdAt: 'desc' },
-        select: { id: true, mrn: true, firstName: true, lastName: true, gender: true, dateOfBirth: true, createdAt: true },
+        select: { ...PATIENT_NAME_SELECT, gender: true, dateOfBirth: true, createdAt: true },
       }),
 
       // Moved into Promise.all — was previously a sequential await.
@@ -112,7 +113,7 @@ export async function getDashboard(req, res, next) {
         take: 10,
         orderBy: [{ appointmentDate: 'asc' }, { appointmentTime: 'asc' }],
         include: {
-          patient: { select: { id: true, mrn: true, firstName: true, lastName: true } },
+          patient: { select: { ...PATIENT_NAME_SELECT, } },
         },
       }),
     ])

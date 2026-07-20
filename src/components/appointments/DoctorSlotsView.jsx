@@ -13,6 +13,8 @@ import { format, addDays, addWeeks, subWeeks, isToday, endOfDay } from "date-fns
 import { drName } from "@/lib/utils";
 import { parseDate } from "./appointmentHelpers";
 import { useDoctorTimetable, slotsForDate } from "@/components/common/hooks/useDoctorTimetable";
+import { getFullName } from "@/lib/patient";
+import { formatTime12h } from "@/lib/format";
 
 // Most doctor cards to render in the "this week" summary (there are 1000+ doctors).
 const SUMMARY_CAP = 24;
@@ -179,7 +181,7 @@ export default function DoctorSlotsView({
             {timeRows.map((slot) => (
               <tr key={slot} className="hover:bg-gray-50">
                 <td className="border px-3 py-1.5 font-medium text-gray-500 bg-gray-50 sticky left-0 z-[5]">
-                  {slot}
+                  {formatTime12h(slot)}
                 </td>
                 {days.map((day, i) => {
                   const ymd = format(day, "yyyy-MM-dd");
@@ -214,7 +216,7 @@ export default function DoctorSlotsView({
                             const patient =
                               appointment.patient || getPatient(appointment.patientId);
                             const name = patient
-                              ? `${patient.firstName} ${patient.lastName}`
+                              ? getFullName(patient)
                               : "Booked";
                             return (
                               <div

@@ -13,6 +13,8 @@ import {
 import { drName } from "@/lib/utils";
 import { STATUS_CONFIG } from "./appointmentConstants";
 import { StatusBadge } from "./AppointmentBadges";
+import { getFullName } from "@/lib/patient";
+import { formatTime12h } from "@/lib/format";
 
 // weekData is keyed by day ("yyyy-MM-dd") → { rows, total }. rows is a bounded
 // preview (first N) the server already returns sorted by time; total is the real
@@ -67,7 +69,7 @@ function DayColumn({ day, dayAppointments, total, isCurrentDay, getPatient, onLo
       {dayAppointments.map((appointment) => {
         const patient = appointment.patient || getPatient(appointment.patientId);
         const patientName = patient
-          ? `${patient.firstName} ${patient.lastName}`.trim()
+          ? getFullName(patient)
           : "Unknown";
         const statusConfig = STATUS_CONFIG[appointment.status] || STATUS_CONFIG.scheduled;
         return (
@@ -75,7 +77,7 @@ function DayColumn({ day, dayAppointments, total, isCurrentDay, getPatient, onLo
             key={appointment.id}
             className={`rounded p-1.5 text-xs cursor-pointer hover:opacity-80 ${statusConfig.bgColor}`}
           >
-            <div className="font-semibold truncate">{appointment.appointmentTime}</div>
+            <div className="font-semibold truncate">{formatTime12h(appointment.appointmentTime)}</div>
             <div className="truncate">{patientName}</div>
             {appointment.doctor && (
               <div className="truncate text-gray-500">{drName(appointment.doctor.fullName)}</div>

@@ -15,6 +15,7 @@ import { useAuth } from '@/lib/auth'
 const SERVICE_GROUPS = ['PROCEDURE', 'LAB', 'RADIOLOGY', 'PHARMACY', 'CONSUMABLE', 'DOCTOR_VISIT', 'NURSING', 'OTHER']
 const PAY_METHODS = ['CASH', 'UPI', 'CARD', 'BANK_TRANSFER', 'CHEQUE']
 import { formatMoney as inr } from '@/lib/format'
+import { getFullName } from "@/lib/patient";
 const statusStyle = { DRAFT: 'bg-amber-100 text-amber-800', FINAL: 'bg-green-100 text-green-800', CANCELLED: 'bg-gray-200 text-gray-600' }
 const payStatusStyle = { UNPAID: 'bg-red-100 text-red-800', PARTIAL: 'bg-amber-100 text-amber-800', PAID: 'bg-green-100 text-green-800', REFUNDED: 'bg-purple-100 text-purple-800' }
 const ledgerTypeStyle = { ADVANCE: 'bg-blue-100 text-blue-800', PAYMENT: 'bg-green-100 text-green-800', REFUND: 'bg-purple-100 text-purple-800' }
@@ -120,7 +121,7 @@ export default function BillScreen({ admission, orgInfo = {} }) {
 <style>body{font-family:Arial;font-size:13px;padding:24px;color:#222}h2{text-align:center;margin:0}.sub{text-align:center;color:#666;font-size:11px;margin-bottom:14px}table{width:100%;border-collapse:collapse;margin:8px 0}th,td{border:1px solid #ddd;padding:6px 8px;text-align:left}th{background:#f5f5f5}.tot{font-weight:bold;background:#e8f5e9}.r{text-align:right}</style></head><body>
 <h2>${orgInfo.name || 'Hospital'} — IPD Bill</h2>
 <div class="sub">${b.billNumber} · ${b.status} · ${b.billType} · Finalized ${b.finalizedAt ? format(new Date(b.finalizedAt), 'dd MMM yyyy, hh:mm a') : ''}</div>
-<table><tr><td><b>Patient</b></td><td>${admission?.patient?.firstName || ''} ${admission?.patient?.lastName || ''}</td><td><b>UHID</b></td><td>${admission?.patient?.mrn || '—'}</td></tr></table>
+<table><tr><td><b>Patient</b></td><td>${getFullName(admission?.patient)}</td><td><b>UHID</b></td><td>${admission?.patient?.mrn || '—'}</td></tr></table>
 <table><tr><th>Item</th><th>Group</th><th>Qty</th><th>Rate</th><th>Amount</th></tr>
 ${rows || '<tr><td colspan="5" style="text-align:center;color:#999">No service line items</td></tr>'}
 <tr class="tot"><td colspan="4" class="r">Bed Charges</td><td>${inr(b.bedTotal)}</td></tr>
@@ -176,7 +177,7 @@ ${rows || '<tr><td colspan="5" style="text-align:center;color:#999">No service l
 <table>
 <tr><td>Receipt No</td><td class="r"><b>${p.receiptNumber}</b></td></tr>
 <tr><td>Date</td><td class="r">${p.paidAt ? format(new Date(p.paidAt), 'dd MMM yyyy, hh:mm a') : ''}</td></tr>
-<tr><td>Patient</td><td class="r">${admission?.patient?.firstName || ''} ${admission?.patient?.lastName || ''}</td></tr>
+<tr><td>Patient</td><td class="r">${getFullName(admission?.patient)}</td></tr>
 <tr><td>UHID</td><td class="r">${admission?.patient?.mrn || '—'}</td></tr>
 <tr><td>Bill</td><td class="r">${bill?.billNumber || '—'}</td></tr>
 <tr><td>Type</td><td class="r">${p.type}</td></tr>

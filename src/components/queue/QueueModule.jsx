@@ -15,6 +15,7 @@ import { useServerPagination } from '@/lib/useServerPagination'
 import client from '@/api/client'
 import AppointmentsModule from '@/components/appointments/AppointmentsModule'
 import BillingModule from '@/components/billing/BillingModule'
+import { getFullName } from "@/lib/patient";
 
 const PRIORITY_COLORS = {
   urgent: 'bg-red-500 text-white',
@@ -260,7 +261,7 @@ export default function QueueModule() {
                     </TableRow>
                   ) : queue.map((entry, idx) => {
                     const patientName = entry.patient
-                      ? `${entry.patient.firstName || ''} ${entry.patient.lastName || ''}`.trim() || '—'
+                      ? getFullName(entry.patient) || '—'
                       : '—'
                     const status = entry.status || 'waiting'
                     const priority = entry.priority || 'normal'

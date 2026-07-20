@@ -33,6 +33,7 @@ import {
   WARD_TYPES, BED_TYPES, DISCHARGE_CONDITIONS, NOTE_TYPES,
   emptyWard, emptyAdmission, emptyDischarge, emptyNote, emptyAddBed,
 } from '@/lib/inpatientHelpers'
+import { getFullName } from "@/lib/patient";
 
 function admissionStatusBadge(status) {
   const map = { admitted:'bg-green-100 text-green-800', discharged:'bg-gray-100 text-gray-800', transferred:'bg-blue-100 text-blue-800' }
@@ -525,7 +526,7 @@ export default function InpatientModule() {
       {/* Discharge Dialog */}
       <Dialog open={showDischargeDialog} onOpenChange={setShowDischargeDialog}>
         <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
-          <DialogHeader><DialogTitle>Discharge Patient{selectedAdmission ? ` — ${selectedAdmission.patient?.firstName} ${selectedAdmission.patient?.lastName}` : ''}</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle>Discharge Patient{selectedAdmission ? ` — ${getFullName(selectedAdmission.patient)}` : ''}</DialogTitle></DialogHeader>
           <div className="space-y-4">
             <div><Label>Discharge Diagnosis *</Label><Input value={dischargeForm.dischargeDiagnosis} onChange={e => setDischargeForm(p => ({ ...p, dischargeDiagnosis: e.target.value }))} /></div>
             <div><Label>Discharge Condition *</Label><Select value={dischargeForm.dischargeCondition} onValueChange={v => setDischargeForm(p => ({ ...p, dischargeCondition: v }))}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{DISCHARGE_CONDITIONS.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}</SelectContent></Select></div>
@@ -551,7 +552,7 @@ export default function InpatientModule() {
       {/* Transfer Dialog */}
       <Dialog open={showTransferDialog} onOpenChange={setShowTransferDialog}>
         <DialogContent className="max-w-lg">
-          <DialogHeader><DialogTitle>Transfer Patient{selectedAdmission ? ` — ${selectedAdmission.patient?.firstName} ${selectedAdmission.patient?.lastName}` : ''}</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle>Transfer Patient{selectedAdmission ? ` — ${getFullName(selectedAdmission.patient)}` : ''}</DialogTitle></DialogHeader>
           <div className="space-y-4">
             <div><Label>Target Ward *</Label><Select value={transferForm.toWardId} onValueChange={v => { setTransferForm(p => ({ ...p, toWardId: v, toBedId: '' })); fetchTransferBeds(v) }}><SelectTrigger><SelectValue placeholder="Select ward" /></SelectTrigger><SelectContent>{wards.filter(w => w.id !== selectedAdmission?.wardId).map(w => <SelectItem key={w.id} value={w.id}>{w.name}</SelectItem>)}</SelectContent></Select></div>
             <div><Label>Target Bed *</Label><Select value={transferForm.toBedId} onValueChange={v => setTransferForm(p => ({ ...p, toBedId: v }))} disabled={!transferForm.toWardId}><SelectTrigger><SelectValue placeholder="Select bed" /></SelectTrigger><SelectContent>{transferBeds.map(b => <SelectItem key={b.id} value={b.id}>Bed {b.bedNumber}</SelectItem>)}</SelectContent></Select></div>
@@ -642,7 +643,7 @@ export default function InpatientModule() {
               <div className="grid grid-cols-2 gap-2">
                 <div><span className="text-gray-500">Adm #: </span><span className="font-mono font-medium">{admissionLabel(viewAdmission)}</span></div>
                 <div><span className="text-gray-500">Status: </span>{admissionStatusBadge(viewAdmission.status)}</div>
-                <div><span className="text-gray-500">Patient: </span><span className="font-medium">{viewAdmission.patient?.firstName} {viewAdmission.patient?.lastName}</span></div>
+                <div><span className="text-gray-500">Patient: </span><span className="font-medium">{getFullName(viewAdmission.patient)}</span></div>
                 <div><span className="text-gray-500">UHID: </span><span className="font-mono">{viewAdmission.patient?.mrn}</span></div>
                 <div><span className="text-gray-500">Ward / Bed: </span><span>{getWardName(wards, viewAdmission)} · Bed {viewAdmission.bed?.bedNumber || '—'}</span></div>
                 <div><span className="text-gray-500">Admitted: </span><span>{viewAdmission.admissionDate ? format(new Date(viewAdmission.admissionDate), 'dd MMM yyyy') : '—'}</span></div>
