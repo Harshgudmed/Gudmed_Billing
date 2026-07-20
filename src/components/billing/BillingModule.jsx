@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useOrgSettings } from '@/lib/useOrgSettings'
-import { formatMoney as fmt } from '@/lib/format'
+import { formatMoney as fmt, formatDateTime } from '@/lib/format'
 import { calcAge, getFullName } from '@/lib/patient'
 import { toast } from 'sonner'
 import { format } from 'date-fns'
@@ -1375,7 +1375,11 @@ export default function BillingModule({ onBack }) {
                             <TableBody>
                               {[...showInvoiceModal.payments].sort((a, b) => new Date(b.date || b.paymentDate || new Date()) - new Date(a.date || a.paymentDate || new Date())).map((p, i) => (
                                 <TableRow key={i}>
-                                  <TableCell className="py-2 text-xs text-gray-500">{p.date || p.paymentDate || showInvoiceModal.date}</TableCell>
+                                  {/* Payments arrive as raw ISO from the API and were rendered
+                                      verbatim ("2026-07-20T06:50:01.555Z") — see lib/format.js.
+                                      `showInvoiceModal.date` is already formatted, so it is only
+                                      passed through when there is no payment timestamp at all. */}
+                                  <TableCell className="py-2 text-xs text-gray-500">{formatDateTime(p.date || p.paymentDate) || showInvoiceModal.date}</TableCell>
                                   <TableCell className="py-2 text-xs font-mono">{p.receiptNo || p.receiptNumber || `RCPT-${i+1}`}</TableCell>
                                   <TableCell className="py-2 text-xs">
                                     {p.method || p.paymentMethod || showInvoiceModal.payMode || 'Cash'}
