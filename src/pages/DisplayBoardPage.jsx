@@ -12,7 +12,18 @@ import { formatTime12h } from '@/lib/format'
 // WebSocket/SSE layer buys nothing here. See the project's queue research
 // notes for the reasoning (OpenMRS's own production display board polls too).
 const POLL_MS = 3000
-const IDLE_RETURN_MS = 30000
+
+// An UNATTENDED wall display should drift back to the overview after someone
+// taps into a floor or room and walks away — the next person arriving should
+// find the board on its home screen, not on whatever the last person opened.
+//
+// It must not do that to someone who is still LOOKING at the screen. At 30s,
+// reading a room's patient list was long enough to get thrown out mid-read,
+// because only `click` counted as activity: scrolling the list, moving the
+// mouse, or pressing a key all left the board convinced nobody was there.
+// Two minutes is past what it takes to read a room and still short enough to
+// reset a genuinely abandoned board.
+const IDLE_RETURN_MS = 120000
 
 // Distinct, readable bg/text pairs so a floor's departments are visually
 // tellable apart at a glance instead of all rendering as the same gray chip.
@@ -105,19 +116,37 @@ function Breadcrumb({ crumbs }) {
   )
 }
 
+// Anything that means a human is present. `click` alone was not enough: reading
+// a room's list involves scrolling and mouse movement but often no click at all,
+// so an attentive viewer read as idle and the board navigated away underneath
+// them mid-read.
+const ACTIVITY_EVENTS = ['click', 'mousemove', 'wheel', 'scroll', 'keydown', 'touchstart', 'pointerdown']
+
 function useIdleReturn(active) {
   const navigate = useNavigate()
-  const timer = useRef(null)
-  const reset = useCallback(() => {
-    clearTimeout(timer.current)
-    if (!active) return
-    timer.current = setTimeout(() => navigate('/display'), IDLE_RETURN_MS)
-  }, [active, navigate])
+  const lastActivity = useRef(Date.now())
+
   useEffect(() => {
-    reset()
-    document.addEventListener('click', reset)
-    return () => { clearTimeout(timer.current); document.removeEventListener('click', reset) }
-  }, [reset])
+    if (!active) return
+
+    // A timestamp + one slow interval, rather than clearing and re-arming a
+    // timeout on every event — `mousemove` alone fires hundreds of times a
+    // second, and re-arming a timer that often on a wall panel is pure waste.
+    const mark = () => { lastActivity.current = Date.now() }
+    for (const e of ACTIVITY_EVENTS) {
+      document.addEventListener(e, mark, { passive: true })
+    }
+
+    lastActivity.current = Date.now()
+    const check = setInterval(() => {
+      if (Date.now() - lastActivity.current >= IDLE_RETURN_MS) navigate('/display')
+    }, 1000)
+
+    return () => {
+      clearInterval(check)
+      for (const e of ACTIVITY_EVENTS) document.removeEventListener(e, mark)
+    }
+  }, [active, navigate])
 }
 
 // ── Overview: all floors ─────────────────────────────────────────────────
