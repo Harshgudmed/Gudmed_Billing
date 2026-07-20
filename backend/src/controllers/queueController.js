@@ -4,10 +4,10 @@ import { z } from 'zod'
 import { nextQueueNumber } from '../utils/queueNumber.js'
 import { getPagination, paginationMeta } from '../lib/pagination.js'
 import { priorityRank } from '../lib/queuePriority.js'
-import { dayRange } from '../lib/dates.js'
+import { dayRange, todayRange } from '../lib/dates.js'
 import { syncAppointmentsToQueue } from '../lib/queueSync.js'
 import { isOwned } from '../lib/tenant.js'
-import { PATIENT_NAME_SELECT } from '../lib/patientName.js'
+import { PATIENT_NAME_SELECT, patientFullName } from '../lib/patientName.js'
 
 const queueSchema = z.object({
   patientId: z.string(),
@@ -270,6 +270,101 @@ export async function updateQueue(req, res, next) {
 // and by a manual "Prescription Ready" staff button in the meantime — both
 // call this same function so the display board never has to know which one
 // fired it.
+/**
+ * POST /api/queue/call-next — the doctor's one button.
+ *
+ * A consultation ends and the next one begins as a single event: the doctor
+ * finishes with whoever is in the room and waves the next person in. Doing that
+ * previously meant two separate row actions on the reception screen (mark the
+ * current patient completed, then mark the next one called), which is not
+ * something a doctor can do from their desk mid-clinic — so in practice nobody
+ * did, `in_progress` stayed empty, and the board could never say who was next.
+ *
+ * One transaction, so the room can never briefly show two patients in progress
+ * or none at all:
+ *   1. whoever is in_progress in this room  → completed
+ *   2. the first waiting patient            → in_progress
+ *
+ * The patient after that then reads as "you are next" on the board with no
+ * further action (see displayController) — which is the whole point: the
+ * warning comes from the queue moving, not from someone remembering to send it.
+ */
+export async function callNextPatient(req, res, next) {
+  try {
+    const ORG_ID = getOrgId(req)
+    const { roomId, doctorId, queueEntryId } = req.body || {}
+    if (!roomId && !doctorId && !queueEntryId) {
+      return res.status(400).json({ success: false, error: 'roomId, doctorId or queueEntryId is required' })
+    }
+    if (roomId && !(await isOwned('room', roomId, ORG_ID))) {
+      return res.status(404).json({ success: false, error: 'Room not found' })
+    }
+
+    // Calling a SPECIFIC patient in (reception picking someone out of order —
+    // they stepped out, or an urgent case) still has to close whoever is
+    // currently in the room, so it runs the same transaction with the target
+    // pinned instead of taken from the head of the queue.
+    let pinned = null
+    if (queueEntryId) {
+      pinned = await db.queueManagement.findFirst({
+        where: { id: queueEntryId, organizationId: ORG_ID },
+        select: { id: true, roomId: true, assignedToId: true },
+      })
+      if (!pinned) return res.status(404).json({ success: false, error: 'Queue item not found' })
+    }
+
+    // Scope to the room (a shared room's queue is the room's, not one doctor's)
+    // and to TODAY, so an old unfinished row from a previous day can never be
+    // picked up as "the next patient".
+    const scope = { organizationId: ORG_ID, joinedQueueAt: todayRange() }
+    // A pinned entry defines its own room, so the patient it replaces is the
+    // one in THAT room — not whatever room the caller happened to name.
+    if (pinned?.roomId) scope.roomId = pinned.roomId
+    else if (roomId) scope.roomId = roomId
+    if (!pinned && doctorId) scope.assignedToId = doctorId
+
+    const result = await db.$transaction(async (tx) => {
+      const current = await tx.queueManagement.findFirst({
+        where: { ...scope, status: 'in_progress', id: { not: pinned?.id } },
+        orderBy: { serviceStartedAt: 'asc' },
+        select: { id: true },
+      })
+      if (current) {
+        await tx.queueManagement.update({
+          where: { id: current.id },
+          data: { status: 'completed', serviceCompletedAt: new Date() },
+        })
+      }
+
+      // Same ordering the board and the queue list use, so the person the
+      // screen showed as next is the person who actually gets called.
+      const upNext = pinned ?? await tx.queueManagement.findFirst({
+        where: { ...scope, status: { in: ['waiting', 'called'] } },
+        orderBy: [{ priorityRank: 'desc' }, { joinedQueueAt: 'asc' }],
+        select: { id: true },
+      })
+      if (!upNext) return { completedId: current?.id ?? null, nowServing: null }
+
+      const nowServing = await tx.queueManagement.update({
+        where: { id: upNext.id },
+        data: { status: 'in_progress', serviceStartedAt: new Date(), calledAt: new Date() },
+        include: { patient: { select: PATIENT_NAME_SELECT } },
+      })
+      return { completedId: current?.id ?? null, nowServing }
+    })
+
+    res.json({
+      success: true,
+      data: result,
+      message: result.nowServing
+        ? `Now serving ${patientFullName(result.nowServing.patient)}`
+        : 'Queue is empty — nobody left to call',
+    })
+  } catch (err) {
+    next(err)
+  }
+}
+
 export async function markPrescriptionUploaded(req, res, next) {
   try {
     const ORG_ID = getOrgId(req)
