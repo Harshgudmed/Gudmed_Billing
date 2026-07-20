@@ -321,7 +321,31 @@ export async function callNextPatient(req, res, next) {
     // one in THAT room — not whatever room the caller happened to name.
     if (pinned?.roomId) scope.roomId = pinned.roomId
     else if (roomId) scope.roomId = roomId
-    if (!pinned && doctorId) scope.assignedToId = doctorId
+
+    // Narrow to ONE doctor's queue whenever we know which doctor is asking.
+    //
+    // Two or three doctors really can sit in the same room at once (the
+    // timetable does not forbid overlapping shifts in one room — see
+    // otherConcurrentDoctors, which exists precisely to surface it). Scoping
+    // only by room in that situation is dangerous, not merely untidy: Dr A
+    // pressing "call next" would COMPLETE whichever patient happened to be in
+    // progress in that room — quite possibly Dr B's, mid-consultation — and
+    // then call in whoever was at the head of the shared list, again possibly
+    // Dr B's patient.
+    //
+    // A patient belongs to a doctor by who they are booked with
+    // (`assignedToId`) or, for a follow-up in a shared room, by who they saw
+    // before (`followUpDoctorId`). Walk-ins carry neither and are left
+    // callable by ANY doctor sitting in the room, which matches how the board
+    // groups them: an unassigned patient folds into whoever is active, so
+    // whichever doctor calls first takes them.
+    if (!pinned && doctorId) {
+      scope.OR = [
+        { assignedToId: doctorId },
+        { followUpDoctorId: doctorId },
+        { assignedToId: null },
+      ]
+    }
 
     const result = await db.$transaction(async (tx) => {
       const current = await tx.queueManagement.findFirst({

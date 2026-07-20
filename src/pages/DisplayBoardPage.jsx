@@ -5,6 +5,7 @@ import { toast } from 'sonner'
 import client from '@/api/client'
 import Logo from '@/components/Logo'
 import { useOrgSettings } from '@/lib/useOrgSettings'
+import { useAuth } from '@/lib/auth'
 import { drName } from '@/lib/utils'
 import { formatTime12h } from '@/lib/format'
 
@@ -494,18 +495,29 @@ function RoomScreen() {
   const [searchParams] = useSearchParams()
   const [data, setData] = useState(null)
   const [busy, setBusy] = useState(false)
+  // null = follow the default (see below); set once the user picks a doctor.
+  const [selectedDoctorId, setSelectedDoctorId] = useState(null)
 
-  // Doctor console mode, opt-in via ?doctor=1.
+  // Who gets the controls.
   //
   // The doctor sits in the room with this exact screen in front of them, so
   // this is where the controls belong — walking them over to the reception
   // queue screen mid-clinic is not a workflow anyone will follow.
   //
   // But the SAME route is what hangs on the waiting-room wall, and the last
-  // thing that board should carry is a button a patient can press. So the
-  // controls are off unless the URL asks for them: the wall runs
-  // /display/room/:id, the doctor bookmarks /display/room/:id?doctor=1.
-  const doctorMode = searchParams.get('doctor') === '1'
+  // thing that board should carry is a button a patient can press. The two are
+  // told apart by WHO IS LOGGED IN, which needs nothing typed and cannot be
+  // got wrong: staff see the controls, and a wall panel — signed in as a
+  // display/kiosk account, or as a patient, or not at all — does not.
+  //
+  // ?doctor=0 forces them off for a panel that happens to be signed in as
+  // staff; ?doctor=1 forces them on. The URL only ever overrides.
+  const { user } = useAuth()
+  const STAFF = ['doctor', 'admin', 'receptionist']
+  const override = searchParams.get('doctor')
+  const doctorMode = override === '1' ? true
+    : override === '0' ? false
+    : STAFF.includes(user?.role)
   // A console is being watched by the person using it; it must not wander back
   // to the floor list under them.
   useIdleReturn(!doctorMode)
@@ -534,8 +546,11 @@ function RoomScreen() {
     () => client.patch(`/queue/${entryId}`, { status: 'called' }),
     'Could not alert that patient',
   )
-  const callInNext = () => act(
-    () => client.post('/queue/call-next', { roomId }),
+  // Always names the doctor, never just the room. In a room two doctors share
+  // at the same time, a room-only call would finish whichever patient happened
+  // to be in progress there — possibly the OTHER doctor's, mid-consultation.
+  const callInNext = (doctorId) => act(
+    () => client.post('/queue/call-next', { roomId, doctorId }),
     'Could not call the next patient',
   )
 
@@ -553,7 +568,21 @@ function RoomScreen() {
   // who is sitting, falling back to the head of the room's queue. Kept in step
   // with the server's own ordering so the console names the same person it
   // will call.
-  const firstWaiting = (waitingGroups.find((g) => g.active) || waitingGroups[0])?.patients?.[0] || null
+  // Which doctor is this console acting for?
+  //
+  // A room can genuinely hold two or three doctors at once, and each of them
+  // must only ever finish and call THEIR OWN patients. So the console commits
+  // to one doctor and says whose queue it is working on:
+  //   · a logged-in doctor always acts as themselves
+  //   · anyone else (admin/reception covering the desk) gets the doctor who is
+  //     actually sitting, and can switch if the room has more than one
+  const doctorGroups = waitingGroups.filter((g) => g.doctorId)
+  const myGroup = doctorGroups.find((g) => g.doctorId === user?.id)
+  const defaultDoctorId = (myGroup || doctorGroups.find((g) => g.active) || doctorGroups[0])?.doctorId || null
+  const actingDoctorId = selectedDoctorId ?? defaultDoctorId
+  const actingGroup = doctorGroups.find((g) => g.doctorId === actingDoctorId) || null
+  // The patient THIS doctor would call — not the head of the shared room list.
+  const firstWaiting = actingGroup?.patients?.[0] || null
 
   return (
     <Board>
@@ -632,11 +661,42 @@ function RoomScreen() {
                 ?doctor=1 mode — never on the wall board. */}
             {doctorMode && (
               <div className={`mt-5 rounded-2xl ${CARD} p-5`}>
-                <div className={`mb-3 text-xs font-bold uppercase tracking-[0.2em] ${TEXT_MUTED}`}>Doctor controls</div>
+                <div className={`mb-3 flex items-baseline gap-2 text-xs font-bold uppercase tracking-[0.2em] ${TEXT_MUTED}`}>
+                  Doctor controls
+                  {actingGroup && (
+                    <span className="normal-case tracking-normal text-slate-700">
+                      · acting as <b>{drName(actingGroup.doctorName)}</b>
+                    </span>
+                  )}
+                </div>
+
+                {/* Only when the room really does hold more than one doctor at
+                    once. Each doctor may finish and call only their OWN
+                    patients, so the console has to be explicit about whose
+                    queue these buttons touch. */}
+                {doctorGroups.length > 1 && (
+                  <div className="mb-4 flex flex-wrap gap-2">
+                    {doctorGroups.map((g) => (
+                      <button
+                        key={g.doctorId}
+                        onClick={() => setSelectedDoctorId(g.doctorId)}
+                        className={`rounded-lg px-3.5 py-2 text-sm font-semibold ring-1 transition-colors ${
+                          g.doctorId === actingDoctorId
+                            ? 'bg-[#2E4168] text-white ring-[#2E4168]'
+                            : 'bg-white text-slate-600 ring-slate-200 hover:bg-slate-50'
+                        }`}
+                      >
+                        {drName(g.doctorName)}
+                        <span className="ml-2 opacity-70">{g.patients.length}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+
                 <div className="flex flex-wrap gap-3">
                   <button
-                    onClick={callInNext}
-                    disabled={busy || totalWaiting === 0}
+                    onClick={() => callInNext(actingDoctorId)}
+                    disabled={busy || !firstWaiting}
                     className="flex-1 rounded-xl bg-[#2E4168] px-6 py-4 text-lg font-bold text-white transition-colors hover:bg-[#253453] disabled:cursor-not-allowed disabled:opacity-40"
                   >
                     {inProgress ? 'Finish & call next patient' : 'Call next patient in'}
@@ -652,7 +712,7 @@ function RoomScreen() {
                 <p className={`mt-3 text-sm ${TEXT_MUTED}`}>
                   {firstWaiting
                     ? <>Next up: <b className="text-slate-700">{firstWaiting.name}</b>. “Alert” shows them “you are next” on the board; “Call next” brings them in and finishes the current patient.</>
-                    : 'Nobody is waiting for this room.'}
+                    : 'Nobody is waiting for this doctor.'}
                 </p>
               </div>
             )}
