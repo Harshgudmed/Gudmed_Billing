@@ -9,6 +9,7 @@ import ClinicalOrdersTab from '@/components/inpatient/ClinicalOrdersTab'
 import ConsultationsTab from '@/components/inpatient/ConsultationsTab'
 import ReportsTab from '@/components/inpatient/ReportsTab'
 import client from '@/api/client'
+import { getFullName } from "@/lib/patient";
 
 // Combined doctor workspace using sub-tabs to prevent vertical scroll fatigue
 export default function NotesAndOrders({ admitted = [] }) {
@@ -55,7 +56,7 @@ export default function NotesAndOrders({ admitted = [] }) {
           <SelectContent>
             {admitted.map((a) => (
               <SelectItem key={a.id} value={a.id}>
-                {(a.patient?.firstName || '') + ' ' + (a.patient?.lastName || '')} · Bed {a.bed?.bedNumber || '—'}
+                {getFullName(a.patient)} · Bed {a.bed?.bedNumber || '—'}
               </SelectItem>
             ))}
           </SelectContent>

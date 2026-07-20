@@ -2,8 +2,9 @@ import { db } from '../config/db.js'
 import { dayRange } from '../lib/dates.js'
 import { getOrgId, safeMoney } from "../lib/reqContext.js";
 import { isOwned } from "../lib/tenant.js";
+import { PATIENT_NAME_SELECT } from '../lib/patientName.js'
 
-const patientSelect = { id: true, firstName: true, middleName: true, lastName: true, mrn: true, phonePrimary: true }
+const patientSelect = { ...PATIENT_NAME_SELECT, mrn: true, phonePrimary: true }
 
 // Generate the next per-org trip number (AM0001, AM0002, ...). The
 // @@unique([organizationId, tripNumber]) constraint is the real safety net.

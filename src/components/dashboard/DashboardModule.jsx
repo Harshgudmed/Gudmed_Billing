@@ -17,6 +17,8 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { Dialog, DialogContent } from '@/components/ui/dialog'
 import client from '@/api/client'
 import RegisterPatientForm from '@/components/common/RegisterPatientForm'
+import { formatTime12h } from "@/lib/format";
+import { getFullName } from "@/lib/patient";
 
 const getStatusBadgeClass = (status) => {
   switch (status) {
@@ -232,10 +234,10 @@ export default function DashboardModule() {
                     <div key={apt.id} className="flex items-center gap-3 p-3 rounded-lg bg-gray-50">
                       <div className="flex-1 min-w-0">
                         <p className="font-medium truncate">
-                          {apt.patient?.firstName} {apt.patient?.lastName}
+                          {getFullName(apt.patient)}
                         </p>
                         <p className="text-sm text-gray-500">
-                          {apt.appointmentTime} &bull; {apt.chiefComplaint || 'Consultation'}
+                          {formatTime12h(apt.appointmentTime)} &bull; {apt.chiefComplaint || 'Consultation'}
                         </p>
                       </div>
                       <Badge className={getStatusBadgeClass(apt.status)}>

@@ -14,6 +14,7 @@ import { toast } from 'sonner'
 import client from '@/api/client'
 
 import { formatMoney as inr } from '@/lib/format'
+import { getFullName } from "@/lib/patient";
 const STATUS_STYLES = { Active: 'bg-green-100 text-green-700', Expired: 'bg-red-100 text-red-700', Inactive: 'bg-gray-200 text-gray-600' }
 const CLAIM_STYLES = {
   pending: 'bg-orange-100 text-orange-700', submitted: 'bg-blue-100 text-blue-700',
@@ -164,7 +165,7 @@ export default function InsuranceModule() {
                   <TableRow><TableCell colSpan={8} className="text-center py-10 text-gray-500">No insurance/TPA cases yet.</TableCell></TableRow>
                 ) : cases.map(c => (
                   <TableRow key={c.id}>
-                    <TableCell>{c.patient ? `${c.patient.firstName} ${c.patient.lastName}` : '—'}</TableCell>
+                    <TableCell>{c.patient ? getFullName(c.patient) : '—'}</TableCell>
                     <TableCell>
                       <div>{c.insurerName}</div>
                       <div className="text-xs text-gray-500">{c.payerType === 'TPA' ? (c.tpaName ? `TPA · ${c.tpaName}` : 'TPA') : 'Insurance'}</div>
@@ -243,7 +244,7 @@ export default function InsuranceModule() {
           {claimCase && (
             <>
               <DialogHeader>
-                <DialogTitle>Claims — {claimCase.patient ? `${claimCase.patient.firstName} ${claimCase.patient.lastName}` : ''}</DialogTitle>
+                <DialogTitle>Claims — {claimCase.patient ? getFullName(claimCase.patient) : ''}</DialogTitle>
               </DialogHeader>
               <div className="text-sm text-gray-600 -mt-2">
                 {claimCase.insurerName} · Limit {inr(claimCase.coverageLimit)} · Used {inr(claimCase.amountUsed)} · Balance <span className="font-medium text-green-600">{inr(claimCase.balance)}</span>

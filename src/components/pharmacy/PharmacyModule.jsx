@@ -84,6 +84,7 @@ import PrescriptionsTab from "./tabs/PrescriptionsTab";
 import BatchesTab from "./tabs/BatchesTab";
 import PurchaseOrdersTab from "./tabs/PurchaseOrdersTab";
 import SalesReportsTab from "./tabs/SalesReportsTab";
+import { getFullName } from "@/lib/patient";
 
 export default function PharmacyModule() {
   const [activeTab, setActiveTab] = useState("dashboard");
@@ -355,7 +356,7 @@ export default function PharmacyModule() {
   const handlePrintLabel = (rx) => {
     let items = [];
     try { items = typeof rx.items === "string" ? JSON.parse(rx.items) : rx.items || []; } catch { items = []; }
-    const name = rx.patient ? `${rx.patient.firstName} ${rx.patient.lastName || ""}`.trim() : "Unknown";
+    const name = rx.patient ? getFullName(rx.patient) : "Unknown";
     const totalCost = items.reduce((s, i) => s + (i.unitPrice || 0) * i.quantity, 0);
     const rxDate = rx.prescriptionDate ? format(new Date(rx.prescriptionDate), "dd MMM yyyy") : "—";
 

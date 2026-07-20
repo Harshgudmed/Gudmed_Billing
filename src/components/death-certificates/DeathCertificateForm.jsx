@@ -15,6 +15,7 @@ import { Search, User, Calendar, MapPin, Activity, ClipboardList, Shield, Loader
 import { format } from 'date-fns'
 import client from '@/api/client'
 import PatientLookup from '@/components/common/PatientLookup'
+import { getFullName } from "@/lib/patient";
 
 const deathCertificateSchema = z.object({
   patientId: z.string().min(1, 'Patient is required'),
@@ -155,7 +156,7 @@ export default function DeathCertificateForm({ initialData, onSuccess }) {
               <div>
                 <CardTitle className="text-green-800 flex items-center gap-2">
                   <User className="h-5 w-5" />
-                  {selectedPatient ? `${selectedPatient.firstName} ${selectedPatient.lastName}` : 'Patient Selected'}
+                  {selectedPatient ? getFullName(selectedPatient) : 'Patient Selected'}
                 </CardTitle>
                 <CardDescription>
                   {selectedPatient ? `UHID: ${selectedPatient.mrn}` : 'Edit mode'}

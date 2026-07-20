@@ -4,15 +4,16 @@
 // the patient block (name, MRN/UHID, phone, age, gender, address) is IDENTICAL
 // everywhere and there is a single source of truth. Nobody re-types patient info.
 
+import { PATIENT_NAME_SELECT, patientFullName } from '../lib/patientName.js'
+
 // Prisma `select` fragment — spread this into any `patient: { select: {...} }`
 // include so every query pulls exactly the fields the snapshot formatter needs.
+// The name columns come from PATIENT_NAME_SELECT rather than being re-listed,
+// so a receipt can never disagree with the rest of the app about what a
+// patient is called.
 export const PATIENT_SNAPSHOT_SELECT = {
-  id: true,
-  mrn: true,
+  ...PATIENT_NAME_SELECT,
   externalId: true,
-  firstName: true,
-  middleName: true,
-  lastName: true,
   dateOfBirth: true,
   gender: true,
   phonePrimary: true,
@@ -66,8 +67,7 @@ export function formatPatientSnapshot(p) {
       age: null, gender: null, dateOfBirth: null, address: '',
     }
   }
-  const fullName = [p.firstName, p.middleName, p.lastName]
-    .map((x) => (x || '').trim()).filter(Boolean).join(' ')
+  const fullName = patientFullName(p)
   return {
     patientId: p.id || null,
     patientName: fullName,

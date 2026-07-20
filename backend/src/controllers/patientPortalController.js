@@ -1,4 +1,5 @@
 import { db } from '../config/db.js'
+import { patientFullName } from '../lib/patientName.js'
 
 // All endpoints here serve the logged-in patient ONLY, using the patientId baked
 // into their JWT. A patient can never see another patient's data.
@@ -81,7 +82,7 @@ export async function getMyDashboard(req, res, next) {
         profile: {
           id: patient.id,
           mrn: patient.mrn,
-          fullName: [patient.firstName, patient.middleName, patient.lastName].filter(Boolean).join(' '),
+          fullName: patientFullName(patient),
           gender: patient.gender,
           dateOfBirth: patient.dateOfBirth,
           bloodGroup: patient.bloodGroup,

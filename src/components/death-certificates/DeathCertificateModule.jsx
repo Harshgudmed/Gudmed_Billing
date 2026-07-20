@@ -13,6 +13,7 @@ import client from '@/api/client'
 import { useServerPagination } from '@/lib/useServerPagination'
 import { PaginatedTable } from '@/components/common/PaginatedTable'
 import DeathCertificateForm from './DeathCertificateForm'
+import { getFullName } from "@/lib/patient";
 
 const ITEMS_PER_PAGE = 10
 
@@ -209,7 +210,7 @@ export default function DeathCertificateModule() {
             renderRow={(cert) => (
               <TableRow key={cert.id}>
                 <TableCell className="font-mono font-medium">{cert.certificateNumber}</TableCell>
-                <TableCell>{cert.patient ? `${cert.patient.firstName} ${cert.patient.lastName}` : 'N/A'}</TableCell>
+                <TableCell>{cert.patient ? getFullName(cert.patient) : 'N/A'}</TableCell>
                 <TableCell>{cert.patient?.mrn || 'N/A'}</TableCell>
                 <TableCell>{format(new Date(cert.dateOfDeath), 'dd MMM yyyy')}</TableCell>
                 <TableCell><Badge variant="outline" className="capitalize">{cert.mannerOfDeath}</Badge></TableCell>

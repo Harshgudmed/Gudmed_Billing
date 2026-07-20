@@ -24,6 +24,7 @@ import { useServerPagination } from '@/lib/useServerPagination'
 import { Pagination } from '@/components/common/Pagination'
 import PatientLookup, { calculatePatientAge, getPatientFullName } from '@/components/common/PatientLookup'
 import { useDateFilter } from '@/components/common/DateFilter'
+import { getFullName } from "@/lib/patient";
 
 // ── Schema ───────────────────────────────────────────────────────────────────
 const screeningSchema = z.object({
@@ -113,7 +114,7 @@ function printSlip(s, orgInfo = { name: 'Hospital', address: '', phone: '', emai
   <div class="section">
     <div class="sec-title">Patient Information</div>
     <div class="grid">
-      <div class="field"><div class="label">Name</div><div class="value">${s.firstName || ''} ${s.lastName || ''}</div></div>
+      <div class="field"><div class="label">Name</div><div class="value">${getFullName(s)}</div></div>
       <div class="field"><div class="label">Age / Gender</div><div class="value">${s.age ?? '—'}y / ${s.gender || '—'}</div></div>
       <div class="field"><div class="label">Phone</div><div class="value">${s.phone || '—'}</div></div>
       <div class="field"><div class="label">Chief Complaint</div><div class="value">${s.chiefComplaint || '—'}</div></div>
@@ -220,7 +221,7 @@ function ViewDetailsDialog({ screening, onClose, onEdit, orgInfo = {} }) {
             </div>
             <div>
               <span className="text-gray-500">Name: </span>
-              <span className="font-semibold">{s.firstName} {s.lastName}</span>
+              <span className="font-semibold">{getFullName(s)}</span>
             </div>
             <div>
               <span className="text-gray-500">Age / Gender: </span>
@@ -628,7 +629,7 @@ export default function PreTriageModule() {
                   <TableRow key={s.id}>
                     <TableCell className="font-medium">{s.screeningNumber}</TableCell>
                     <TableCell>
-                      <div>{s.firstName} {s.lastName}</div>
+                      <div>{getFullName(s)}</div>
                       {s.patient?.mrn && <div className="text-xs font-mono text-gray-500">UHID: {s.patient.mrn}</div>}
                       {s.phone && <div className="text-xs text-gray-400">{s.phone}</div>}
                     </TableCell>

@@ -3,6 +3,7 @@ import { getOrgId } from "../lib/reqContext.js";
 import whatsapp from '../services/whatsappService.js'
 import * as tpl from '../services/messageTemplates.js'
 import { startPharmacySession } from './whatsappBotController.js'
+import { PATIENT_NAME_SELECT, patientFullName } from '../lib/patientName.js'
 
 async function getOrg(orgId) {
   const ORG_ID = orgId || process.env.ORGANIZATION_ID || 'org-demo'
@@ -27,7 +28,7 @@ export async function sendConsultationNotification(req, res) {
       db.consultation.findUnique({
         where: { id: consultationId },
         include: {
-          patient:       { select: { id: true, mrn: true, firstName: true, lastName: true, phonePrimary: true } },
+          patient:       { select: { ...PATIENT_NAME_SELECT, phonePrimary: true } },
           doctor:        { select: { id: true, fullName: true } },
           prescriptions: { select: { id: true, items: true } },
         },
@@ -59,7 +60,7 @@ export async function sendPrescriptionNotification(req, res) {
       db.prescription.findUnique({
         where: { id: prescriptionId },
         include: {
-          patient: { select: { id: true, mrn: true, firstName: true, lastName: true, phonePrimary: true } },
+          patient: { select: { ...PATIENT_NAME_SELECT, phonePrimary: true } },
         },
       }),
       getOrg(reqOrgId),
@@ -86,13 +87,13 @@ export async function sendPrescriptionNotification(req, res) {
     // If an invoice was provided, send receipt instead
     if (invoiceId) {
       const invoice = await db.invoice.findUnique({ where: { id: invoiceId } })
-      const patName = [prescription.patient?.firstName, prescription.patient?.lastName].filter(Boolean).join(' ')
+      const patName = patientFullName(prescription.patient)
       const message = tpl.paymentReceipt(invoice || {}, patName, org)
       const result  = await whatsapp.sendMessage(prescription.patient?.phonePrimary, message)
       return res.json({ success: true, ...result, message })
     }
 
-    const patName = [prescription.patient?.firstName, prescription.patient?.lastName].filter(Boolean).join(' ')
+    const patName = patientFullName(prescription.patient)
     const message = tpl.prescriptionWithPrices(patName, enriched, consultationFee, org)
     const phone   = prescription.patient?.phonePrimary
     const result  = await whatsapp.sendMessage(phone, message)
@@ -136,7 +137,7 @@ export async function sendLabResultNotification(req, res) {
       db.labOrder.findUnique({
         where: { id: orderId },
         include: {
-          patient: { select: { id: true, mrn: true, firstName: true, lastName: true, phonePrimary: true } },
+          patient: { select: { ...PATIENT_NAME_SELECT, phonePrimary: true } },
           results: { include: { test: { select: { testName: true, unit: true, normalRange: true } } } },
         },
       }),
@@ -165,7 +166,7 @@ export async function sendRadiologyNotification(req, res) {
       db.radiologyOrder.findUnique({
         where: { id: orderId },
         include: {
-          patient: { select: { id: true, mrn: true, firstName: true, lastName: true, phonePrimary: true } },
+          patient: { select: { ...PATIENT_NAME_SELECT, phonePrimary: true } },
           exam:   { select: { examName: true, examCategory: true } },
           report: true,
         },
@@ -198,7 +199,7 @@ export async function notifyPharmacyTeam(req, res) {
       db.prescription.findUnique({
         where: { id: prescriptionId },
         include: {
-          patient: { select: { firstName: true, lastName: true, mrn: true } },
+          patient: { select: { ...PATIENT_NAME_SELECT, mrn: true } },
         },
       }),
       getOrg(req.organizationId),
@@ -206,7 +207,7 @@ export async function notifyPharmacyTeam(req, res) {
 
     if (!prescription) return res.status(404).json({ success: false, error: 'Prescription not found' })
 
-    const patName = [prescription.patient?.firstName, prescription.patient?.lastName].filter(Boolean).join(' ')
+    const patName = patientFullName(prescription.patient)
     const message = tpl.pharmacyTeamNotification(prescription, patName, org)
 
     // If no team phone configured, return the message text so frontend can open wa.me manually

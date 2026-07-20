@@ -4,6 +4,7 @@ import { Card, CardContent } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import BillScreen from '@/components/inpatient/BillScreen'
 import { drName } from '@/lib/utils'
+import { getFullName } from "@/lib/patient";
 
 export default function BillingWorkspace({ admissions, orgInfo }) {
   const [selectedPatient, setSelectedPatient] = useState(null)
@@ -12,7 +13,7 @@ export default function BillingWorkspace({ admissions, orgInfo }) {
   const filteredPatients = useMemo(() => {
     return admissions.filter((a) => {
       const q = searchQuery.toLowerCase()
-      const n = `${a.patient?.firstName || ''} ${a.patient?.lastName || ''}`.toLowerCase()
+      const n = getFullName(a.patient).toLowerCase()
       return n.includes(q) || (a.patient?.mrn || '').toLowerCase().includes(q)
     })
   }, [admissions, searchQuery])
@@ -55,7 +56,7 @@ export default function BillingWorkspace({ admissions, orgInfo }) {
                 }`}
               >
                 <div className="font-semibold text-sm flex justify-between">
-                  <span className="truncate pr-2">{a.patient?.firstName} {a.patient?.lastName}</span>
+                  <span className="truncate pr-2">{getFullName(a.patient)}</span>
                 </div>
                 <div className="text-xs text-gray-500 mt-1 flex justify-between">
                   <span>{a.patient?.mrn}</span>
@@ -74,7 +75,7 @@ export default function BillingWorkspace({ admissions, orgInfo }) {
             <div className="mb-4 bg-white p-4 rounded-xl border border-gray-200 shadow-sm flex items-center justify-between">
               <div>
                 <h3 className="font-bold text-lg text-gray-900">
-                  {selectedPatientRecord.patient?.firstName} {selectedPatientRecord.patient?.lastName}
+                  {getFullName(selectedPatientRecord.patient)}
                 </h3>
                 <p className="text-sm text-gray-500">
                   UHID: {selectedPatientRecord.patient?.mrn} | 

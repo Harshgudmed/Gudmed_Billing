@@ -1,6 +1,8 @@
 import { format } from "date-fns";
 import { toast } from "sonner";
 import { drName } from "@/lib/utils";
+import { getFullName } from "@/lib/patient";
+import { formatTime12h } from "@/lib/format";
 
 // Patient/doctor names, complaints etc. are user-entered text — escape before
 // interpolating into the HTML string below, otherwise a name like
@@ -23,8 +25,11 @@ export function printAppointmentCard(apt, orgInfo) {
     return;
   }
   const patient = apt.patient;
+  // getFullName, not `first + last`: a patient registered as
+  // "Harsh Mohan Bansal" printed as "Harsh Bansal" on their own appointment
+  // card, because the middle name was dropped here.
   const patientName = escapeHtml(
-    patient ? `${patient.firstName} ${patient.lastName}`.trim() : "Unknown Patient"
+    patient ? getFullName(patient) || "Unknown Patient" : "Unknown Patient"
   );
   const aptDate = apt.appointmentDate
     ? format(new Date(apt.appointmentDate), "dd MMM yyyy")
@@ -45,7 +50,7 @@ export function printAppointmentCard(apt, orgInfo) {
 ${apt.consultationFee != null ? `<div><div class="label">Consultation Fee</div><div class="value" style="color:#1e3a5f">₹${Number(apt.consultationFee).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div></div>` : ""}
 </div>
 ${apt.consultationFee != null ? `<div style="display:flex;justify-content:space-between;align-items:center;border:2px solid #15803d;border-radius:8px;padding:10px 16px;margin-bottom:16px;background:#f0fdf4"><span style="font-size:11pt;font-weight:bold;color:#15803d">CONSULTATION FEE</span><span style="font-size:18pt;font-weight:bold;color:#15803d">₹${Number(apt.consultationFee).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></div>` : ""}
-<div class="apt-box"><div class="apt-date">${aptDate}</div><div class="apt-time">${apt.appointmentTime}</div></div>
+<div class="apt-box"><div class="apt-date">${aptDate}</div><div class="apt-time">${escapeHtml(formatTime12h(apt.appointmentTime))}</div></div>
 ${apt.chiefComplaint ? `<div style="padding:10px;background:#fffbeb;border:1px solid #fde68a;border-radius:6px;margin-bottom:12px"><strong>Chief Complaint:</strong> ${escapeHtml(apt.chiefComplaint)}</div>` : ""}
 <div class="note">Please arrive 10 minutes early. Bring this card and any previous medical records.</div>
 <div class="footer">Printed: ${printDate}</div>

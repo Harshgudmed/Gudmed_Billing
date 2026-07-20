@@ -4,6 +4,7 @@ import { getOrgId } from "../lib/reqContext.js";
 import { nextSeriesNumber } from "../lib/counters.js";
 import { listResponse } from "../lib/pagination.js";
 import { scopedDoctorId } from '../utils/scope.js'
+import { PATIENT_NAME_SELECT } from '../lib/patientName.js'
 
 export async function getAll(req, res, next) {
   try {
@@ -38,7 +39,7 @@ export async function getAll(req, res, next) {
 
     const include = {
       patient: {
-        select: { id: true, mrn: true, firstName: true, middleName: true, lastName: true, phonePrimary: true, gender: true, dateOfBirth: true, bloodGroup: true },
+        select: { ...PATIENT_NAME_SELECT, phonePrimary: true, gender: true, dateOfBirth: true, bloodGroup: true },
       },
       doctor: { select: { id: true, fullName: true, specialization: true } },
       prescriptions: true,
@@ -105,7 +106,7 @@ export async function create(req, res, next) {
           notes: consultationData.notes,
         },
         include: {
-          patient: { select: { id: true, mrn: true, firstName: true, middleName: true, lastName: true } },
+          patient: { select: { ...PATIENT_NAME_SELECT, } },
           doctor: { select: { id: true, fullName: true } },
         },
       })
@@ -177,7 +178,7 @@ export async function create(req, res, next) {
       const fullConsultation = await tx.consultation.findFirst({
         where: { id: newConsultation.id, organizationId },
         include: {
-          patient: { select: { id: true, mrn: true, firstName: true, middleName: true, lastName: true } },
+          patient: { select: { ...PATIENT_NAME_SELECT, } },
           doctor: { select: { id: true, fullName: true } },
           prescriptions: true,
           labOrders: {
@@ -337,7 +338,7 @@ export async function update(req, res, next) {
       return await tx.consultation.findFirst({
         where: { id, organizationId },
         include: {
-          patient: { select: { id: true, mrn: true, firstName: true, middleName: true, lastName: true } },
+          patient: { select: { ...PATIENT_NAME_SELECT, } },
           doctor: { select: { id: true, fullName: true } },
           prescriptions: true,
           labOrders: {

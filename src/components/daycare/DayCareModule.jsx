@@ -24,6 +24,7 @@ const STATUS_STYLES = {
 }
 const PAY_STYLES = { pending: 'bg-orange-100 text-orange-700', partial: 'bg-amber-100 text-amber-700', paid: 'bg-green-100 text-green-700' }
 import { formatMoney as inr } from '@/lib/format'
+import { getFullName } from "@/lib/patient";
 const labelize = (s) => (s || '').replace(/_/g, ' ')
 
 const EMPTY = { patientId: '', doctorId: '', procedure: '', fee: '', paymentStatus: 'pending', status: 'admitted', dischargeTime: '', notes: '' }
@@ -157,7 +158,7 @@ export default function DayCareModule() {
                 ) : cases.map(c => (
                   <TableRow key={c.id}>
                     <TableCell className="font-mono font-medium text-blue-700">{c.caseNumber}</TableCell>
-                    <TableCell>{c.patient ? `${c.patient.firstName} ${c.patient.lastName}` : '—'}</TableCell>
+                    <TableCell>{c.patient ? getFullName(c.patient) : '—'}</TableCell>
                     <TableCell>{(c.doctor?.fullName || c.doctorName) ? drName(c.doctor?.fullName || c.doctorName) : '—'}</TableCell>
                     <TableCell>{c.procedure || '—'}</TableCell>
                     <TableCell>{format(new Date(c.admissionDate), 'yyyy-MM-dd')}</TableCell>

@@ -6,6 +6,7 @@ import { Button } from '../ui/button'
 import { Check, X, Clock } from 'lucide-react'
 import client from '@/api/client'
 import { toast } from 'sonner'
+import { getFullName } from '@/lib/patient'
 
 export default function RefundApprovalsTab({ userRole, onProcess }) {
   const [approvals, setApprovals] = useState([])
@@ -87,7 +88,7 @@ export default function RefundApprovalsTab({ userRole, onProcess }) {
                       {a.status === 'REJECTED' && <Badge variant="outline" className="text-red-600 bg-red-50">Rejected</Badge>}
                     </TableCell>
                     <TableCell className="py-3 font-medium text-sm">
-                      {a.patient?.firstName} {a.patient?.lastName}
+                      {getFullName(a.patient)}
                     </TableCell>
                     <TableCell className="py-3 text-sm font-mono text-gray-600">{a.invoice?.invoiceNumber}</TableCell>
                     <TableCell className="py-3 text-right font-bold text-red-600">₹{a.amount.toFixed(2)}</TableCell>

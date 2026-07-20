@@ -12,6 +12,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import client from '@/api/client'
 import { useAuth } from '@/lib/auth'
 import { cToF, fToC } from '@/lib/utils'
+import { getFullName } from "@/lib/patient";
 
 const NOTE_TYPES = ['Nursing admission assessment', 'Shift handover note', 'Other notes']
 const MAR_STATUSES = ['GIVEN', 'MISSED', 'HELD', 'REFUSED']
@@ -250,7 +251,7 @@ export default function NursingStation({ admitted = [] }) {
           <SelectContent>
             {admitted.map((a) => (
               <SelectItem key={a.id} value={a.id}>
-                {a.patient?.firstName} {a.patient?.lastName} · {a.patient?.mrn} · {a.bed?.ward?.name || 'Ward'}/{a.bed?.bedNumber || '—'}
+                {getFullName(a.patient)} · {a.patient?.mrn} · {a.bed?.ward?.name || 'Ward'}/{a.bed?.bedNumber || '—'}
               </SelectItem>
             ))}
           </SelectContent>

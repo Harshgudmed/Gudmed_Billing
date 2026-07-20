@@ -1,5 +1,6 @@
 import { format } from "date-fns";
 import { toast } from "sonner";
+import { getFullName } from "@/lib/patient";
 
 // Shared by every print-window builder below — user-entered text (names,
 // addresses, drug names) must never be interpolated into these HTML strings
@@ -247,13 +248,13 @@ export function printReceipt(p, orgInfo, clinic) {
     return;
   }
 
+  // getFullName keeps the middle name — a receipt is a financial document and
+  // must carry the patient's registered name in full.
   const patientName =
     p.invoice?.patientName ||
-    (p.invoice?.patient
-      ? `${p.invoice.patient.firstName} ${p.invoice.patient.lastName}`
-      : p.patient
-        ? `${p.patient.firstName} ${p.patient.lastName}`
-        : "Patient");
+    getFullName(p.invoice?.patient) ||
+    getFullName(p.patient) ||
+    "Patient";
   const mrn =
     p.invoice?.uhid || p.invoice?.patient?.mrn || p.patient?.mrn || "";
   const rxDate = p.paymentDate
@@ -770,11 +771,7 @@ export function printPharmacyReceipt(
   const val = (k) => clinic[k] || orgInfo[k] || "";
   const patientName =
     titleCase(
-      sale.patientName ||
-        sale.customerName ||
-        (sale.patient
-          ? `${sale.patient.firstName || ""} ${sale.patient.lastName || ""}`.trim()
-          : ""),
+      sale.patientName || sale.customerName || getFullName(sale.patient),
     ) || "Walk-in";
   const saleDate = sale.saleDate || sale.createdAt || new Date();
   const dateStr = format(new Date(saleDate), "dd MMM yyyy");

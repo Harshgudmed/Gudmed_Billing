@@ -7,6 +7,7 @@ import { priorityRank } from '../lib/queuePriority.js'
 import { dayRange } from '../lib/dates.js'
 import { syncAppointmentsToQueue } from '../lib/queueSync.js'
 import { isOwned } from '../lib/tenant.js'
+import { PATIENT_NAME_SELECT } from '../lib/patientName.js'
 
 const queueSchema = z.object({
   patientId: z.string(),
@@ -101,7 +102,7 @@ export async function getQueue(req, res, next) {
         orderBy,
         include: {
           patient: {
-            select: { id: true, mrn: true, firstName: true, lastName: true, phonePrimary: true, gender: true, dateOfBirth: true },
+            select: { ...PATIENT_NAME_SELECT, phonePrimary: true, gender: true, dateOfBirth: true },
           },
         },
       }),
@@ -146,7 +147,7 @@ export async function addToQueue(req, res, next) {
     if (validatedData.roomId && !(await isOwned('room', validatedData.roomId, ORG_ID))) {
       return res.status(400).json({ success: false, error: 'Room not found' })
     }
-    const patientInclude = { patient: { select: { id: true, mrn: true, firstName: true, lastName: true } } }
+    const patientInclude = { patient: { select: { ...PATIENT_NAME_SELECT, } } }
 
     // Derive the numeric sort key from the priority string up front so both the
     // upsert and the plain create store it (the queue is ordered on this).
@@ -227,7 +228,7 @@ export async function updateQueue(req, res, next) {
       where: { id },
       data,
       include: {
-        patient: { select: { id: true, mrn: true, firstName: true, lastName: true } },
+        patient: { select: { ...PATIENT_NAME_SELECT, } },
       },
     })
     res.json({ success: true, data: item })

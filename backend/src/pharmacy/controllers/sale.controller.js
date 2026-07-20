@@ -5,6 +5,7 @@ import { createSaleSchema } from '../validations/sale.validation.js'
 import { getPagination, paginationMeta, handleServiceError, makeError } from '../utils.js'
 import { recordStockChange, consumeFromBatches } from '../stockService.js'
 import { getPatientSnapshot } from '../../utils/patientSnapshot.js'
+import { PATIENT_NAME_SELECT } from '../../lib/patientName.js'
 
 const SORTABLE_FIELDS = ['saleDate', 'totalAmount', 'paymentStatus', 'createdAt']
 
@@ -31,7 +32,7 @@ export async function list(req, res, next) {
       db.pharmacySale.findMany({
         where,
         include: {
-          patient: { select: { id: true, mrn: true, firstName: true, lastName: true } },
+          patient: { select: { ...PATIENT_NAME_SELECT, } },
         },
         orderBy,
         skip,
@@ -60,7 +61,7 @@ export async function getById(req, res, next) {
     const sale = await db.pharmacySale.findFirst({
       where: { id: req.params.id, organizationId: ORGANIZATION_ID },
       include: {
-        patient: { select: { id: true, mrn: true, firstName: true, lastName: true } },
+        patient: { select: { ...PATIENT_NAME_SELECT, } },
       },
     })
     if (!sale) throw makeError('Sale not found', 404, 'SALE_NOT_FOUND')
