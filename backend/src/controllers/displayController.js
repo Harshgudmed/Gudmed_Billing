@@ -149,6 +149,11 @@ export async function getRoomQueue(req, res, next) {
       // Used as the group's display name when the doctor a patient is booked
       // with isn't in this room's doctorLinks index.
       assignedToName: e.assignedTo?.fullName || null,
+      // 'called' means a member of staff has DELIBERATELY alerted this patient.
+      // The board only shows "you are next" for that — never inferred from
+      // position, so the message on the wall is always something a human chose
+      // to put there.
+      alerted: e.status === 'called',
     })
 
     const inProgress = inProgressEntry ? {
