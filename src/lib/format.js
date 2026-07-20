@@ -19,6 +19,32 @@ export function formatNumber(value) {
   return (Number(value) || 0).toLocaleString("en-IN");
 }
 
+// A timestamp -> "20 Jul 2026, 12:20 PM".
+//
+// Payment rows were rendering their raw API value, so a receipt line read
+// "2026-07-20T06:50:01.555Z" — the stored UTC instant, verbatim, next to an
+// invoice header that said "18 Jul 2026". Same screen, two formats, and the
+// raw one was in the wrong timezone for the reader.
+//
+// `withTime` is on by default because the timestamps that reach users here are
+// moments (a payment taken, a receipt issued) where the time of day is part of
+// the record. Pass false for a plain calendar date.
+//
+// An unparseable or missing value returns '' rather than "Invalid Date".
+export function formatDateTime(value, { withTime = true } = {}) {
+  if (value == null || value === "") return "";
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return "";
+  const date = d.toLocaleDateString("en-IN", {
+    day: "2-digit", month: "short", year: "numeric",
+  });
+  if (!withTime) return date;
+  const time = d.toLocaleTimeString("en-IN", {
+    hour: "numeric", minute: "2-digit", hour12: true,
+  });
+  return `${date}, ${time}`;
+}
+
 // A stored "HH:mm" clock time -> how a patient reads it.
 //   formatTime12h("13:45") -> "1:45 PM"
 //   formatTime12h("09:00") -> "9:00 AM"

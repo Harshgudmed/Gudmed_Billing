@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { formatTime12h } from '../format.js'
+import { formatTime12h, formatDateTime } from '../format.js'
 
 test('afternoon times convert to PM', () => {
   assert.equal(formatTime12h('13:45'), '1:45 PM')
@@ -39,4 +39,32 @@ test('double-formatting is a no-op, so an accidental re-format cannot corrupt a 
   // This makes the helper safe to apply twice, but the value is still
   // DISPLAY-only: never store it or sort on it (sorting relies on 24h).
   assert.equal(formatTime12h(formatTime12h('13:45')), '1:45 PM')
+})
+
+// ---------- formatDateTime ----------
+
+test('a raw API timestamp becomes a readable date and time', () => {
+  // The exact value that leaked onto a receipt row.
+  const out = formatDateTime('2026-07-20T06:50:01.555Z')
+  assert.match(out, /20 Jul 2026/)
+  assert.match(out, /\d{1,2}:\d{2}\s?(am|pm|AM|PM)/)
+  assert.ok(!out.includes('T'), 'must not still look like an ISO string')
+  assert.ok(!out.includes('Z'), 'must not still carry the UTC marker')
+})
+
+test('withTime:false gives a plain calendar date', () => {
+  const out = formatDateTime('2026-07-20T06:50:01.555Z', { withTime: false })
+  assert.match(out, /20 Jul 2026/)
+  assert.ok(!/\d{1,2}:\d{2}/.test(out), 'should carry no clock time')
+})
+
+test('missing or unparseable timestamps render blank, never "Invalid Date"', () => {
+  assert.equal(formatDateTime(null), '')
+  assert.equal(formatDateTime(undefined), '')
+  assert.equal(formatDateTime(''), '')
+  assert.equal(formatDateTime('not-a-date'), '')
+})
+
+test('accepts a Date object as well as a string', () => {
+  assert.match(formatDateTime(new Date('2026-07-20T06:50:01.555Z')), /20 Jul 2026/)
 })
