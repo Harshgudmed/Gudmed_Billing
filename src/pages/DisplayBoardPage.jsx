@@ -548,13 +548,29 @@ function RoomScreen() {
           <section className="flex min-h-0 flex-col">
             <SectionLabel>Now Serving</SectionLabel>
             {inProgress ? (
-              <div className="relative flex flex-1 flex-col justify-center overflow-hidden rounded-2xl bg-gradient-to-br from-[#2E4168] to-[#1B2A45] p-10 text-white shadow-lg">
-                <div className="text-sm font-bold uppercase tracking-[0.2em] text-white/70">In Progress</div>
-                <div className="mt-4 text-6xl font-bold leading-tight tracking-tight break-words">
+              // White, like everything else on the board. A solid navy slab
+              // this size fought the rest of the screen for attention and made
+              // the panel look two-toned; on a light ground the way to say
+              // "this is the important one" is SIZE and a single accent edge,
+              // not a block of colour.
+              <div className={`relative flex flex-1 flex-col justify-center overflow-hidden rounded-2xl ${CARD} p-10`}>
+                <span className="absolute inset-y-0 left-0 w-2 bg-emerald-500" />
+                <div className="flex items-center gap-2.5 pl-2 text-sm font-bold uppercase tracking-[0.2em] text-emerald-600">
+                  <span className="relative flex h-2.5 w-2.5">
+                    <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
+                    <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-emerald-500" />
+                  </span>
+                  In Progress
+                </div>
+                <div className="mt-4 break-words pl-2 text-6xl font-bold leading-tight tracking-tight">
                   {maskPatientName(inProgress.name)}
                 </div>
-                <div className="mt-3 font-mono text-2xl text-white/75">{maskUhid(inProgress.uhid)}</div>
-                <div className="mt-6 inline-flex rounded-full bg-white/15 px-5 py-2 text-base font-bold uppercase tracking-wider ring-1 ring-white/25">
+                <div className={`mt-3 pl-2 font-mono text-2xl ${TEXT_MUTED}`}>{maskUhid(inProgress.uhid)}</div>
+                <div className={`ml-2 mt-6 inline-flex w-fit rounded-full px-5 py-2 text-base font-bold uppercase tracking-wider ring-1 ${
+                  inProgress.visitType === 'follow_up'
+                    ? 'bg-emerald-50 text-emerald-700 ring-emerald-200'
+                    : 'bg-sky-50 text-sky-700 ring-sky-200'
+                }`}>
                   {inProgress.visitType === 'follow_up' ? 'Follow-up' : 'New patient'}
                 </div>
               </div>
@@ -601,20 +617,16 @@ function RoomScreen() {
                     ) : (
                       <ul className="space-y-2.5">
                         {g.patients.map((p, i) => {
-                          // "You are next" the moment the doctor takes someone
-                          // in — first in line, for the doctor who is actually
-                          // sitting, while a consultation is running.
-                          //
-                          // This used to require `prescriptionUploaded`, a
-                          // separate manual step someone had to remember. In
-                          // practice nobody did, so the warning almost never
-                          // appeared. The queue moving IS the signal: the doctor
-                          // pressing "Call next patient" puts one person in the
-                          // room and, by the same act, tells the person behind
-                          // them to get ready. A prescription already uploaded
-                          // means the current consultation is wrapping up, so it
-                          // still sharpens the wording below.
-                          const isNext = i === 0 && g.active && !!inProgress
+                          // Only ever shown because a human pressed "Alert
+                          // next" — never inferred from being first in line.
+                          // A message on a public wall telling someone to get
+                          // ready has to be something staff chose to send: if
+                          // the board decided on its own, it would be telling
+                          // patients to stand up while the doctor is still
+                          // fifteen minutes from finishing.
+                          const isNext = p.alerted
+                          // Prescription already uploaded = this consultation is
+                          // wrapping up, so the wording gets more immediate.
                           const imminent = isNext && inProgress?.prescriptionUploaded
                           return (
                             <li

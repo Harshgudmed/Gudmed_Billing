@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { toast } from 'sonner'
-import { RefreshCw, Users, Clock, CheckCircle, Phone, Search, MonitorPlay, DoorOpen } from 'lucide-react'
+import { RefreshCw, Users, Clock, CheckCircle, Search, MonitorPlay, DoorOpen, Bell } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -356,15 +356,31 @@ export default function QueueModule() {
                                 Call in
                               </Button>
                             )}
+                            {/* Puts "YOU ARE NEXT — PLEASE BE READY" against
+                                this patient on the wall board. Nothing appears
+                                there unless this is pressed — the board never
+                                decides on its own that someone should stand up. */}
                             {!isCompleted && status !== 'called' && status !== 'in_progress' && (
                               <Button
                                 size="sm"
                                 variant="outline"
+                                className="border-amber-300 text-amber-700 hover:bg-amber-50"
                                 disabled={updatingId === `${entry.id}_called`}
-                                onClick={() => setStatus(entry, 'called', `Called: ${patientName}`)}
+                                onClick={() => setStatus(entry, 'called', `${patientName} alerted — "You are next" is now on the display board`)}
                               >
-                                <Phone className="h-3.5 w-3.5 mr-1" />
-                                Call
+                                <Bell className="h-3.5 w-3.5 mr-1" />
+                                Alert next
+                              </Button>
+                            )}
+                            {status === 'called' && (
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                className="text-gray-500"
+                                disabled={updatingId === `${entry.id}_waiting`}
+                                onClick={() => setStatus(entry, 'waiting', 'Alert removed from the display board')}
+                              >
+                                Undo alert
                               </Button>
                             )}
                             {!isCompleted && (
