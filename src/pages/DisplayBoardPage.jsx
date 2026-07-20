@@ -601,7 +601,21 @@ function RoomScreen() {
                     ) : (
                       <ul className="space-y-2.5">
                         {g.patients.map((p, i) => {
-                          const isNext = i === 0 && g.active && inProgress?.prescriptionUploaded
+                          // "You are next" the moment the doctor takes someone
+                          // in — first in line, for the doctor who is actually
+                          // sitting, while a consultation is running.
+                          //
+                          // This used to require `prescriptionUploaded`, a
+                          // separate manual step someone had to remember. In
+                          // practice nobody did, so the warning almost never
+                          // appeared. The queue moving IS the signal: the doctor
+                          // pressing "Call next patient" puts one person in the
+                          // room and, by the same act, tells the person behind
+                          // them to get ready. A prescription already uploaded
+                          // means the current consultation is wrapping up, so it
+                          // still sharpens the wording below.
+                          const isNext = i === 0 && g.active && !!inProgress
+                          const imminent = isNext && inProgress?.prescriptionUploaded
                           return (
                             <li
                               key={p.queueEntryId}
@@ -619,7 +633,7 @@ function RoomScreen() {
                                 {isNext && (
                                   <span className="mt-1 flex items-center gap-2 text-base font-bold uppercase tracking-wider text-amber-700">
                                     <span className="h-2.5 w-2.5 animate-pulse rounded-full bg-amber-500" />
-                                    You are next — please be ready
+                                    {imminent ? 'You are next — please come to the door' : 'You are next — please be ready'}
                                   </span>
                                 )}
                               </span>

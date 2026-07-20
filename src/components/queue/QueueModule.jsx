@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { toast } from 'sonner'
-import { RefreshCw, Users, Clock, CheckCircle, Phone, Search, MonitorPlay } from 'lucide-react'
+import { RefreshCw, Users, Clock, CheckCircle, Phone, Search, MonitorPlay, DoorOpen } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -99,6 +99,32 @@ export default function QueueModule() {
       toast.error(err.message || 'Failed to update patient')
     } finally {
       setUpdatingId(null)
+    }
+  }
+
+  // The doctor's one button: finish whoever is in the room and wave the next
+  // person in, as a single server-side transaction (POST /queue/call-next).
+  //
+  // Doing this as two row actions — mark completed, then mark called — is not
+  // something a doctor can do from their desk mid-clinic, so in practice nobody
+  // did: `in_progress` stayed empty and the board could never say who was next.
+  // One press now also produces the "you are next" warning for the person
+  // behind, because that is derived from the queue moving.
+  const [callingNext, setCallingNext] = useState(false)
+  const callNext = async (entry) => {
+    setCallingNext(true)
+    try {
+      const res = await client.post('/queue/call-next', { queueEntryId: entry.id })
+      if (res.success) {
+        toast.success(res.message || 'Next patient called')
+        refresh()
+      } else {
+        toast.error(res.error || 'Could not call the next patient')
+      }
+    } catch (err) {
+      toast.error(err.message || 'Could not call the next patient')
+    } finally {
+      setCallingNext(false)
     }
   }
 
@@ -315,7 +341,22 @@ export default function QueueModule() {
                         </TableCell>
                         <TableCell>
                           <div className="flex gap-1 flex-wrap">
-                            {!isCompleted && status !== 'called' && (
+                            {/* The main action: this patient walks in, the one
+                                before them is finished, and the person behind
+                                them starts reading "You are next" on the wall
+                                board — one press, one server transaction. */}
+                            {!isCompleted && status !== 'in_progress' && (
+                              <Button
+                                size="sm"
+                                className="bg-[#2E4168] text-white hover:bg-[#253453]"
+                                disabled={callingNext}
+                                onClick={() => callNext(entry)}
+                              >
+                                <DoorOpen className="h-3.5 w-3.5 mr-1" />
+                                Call in
+                              </Button>
+                            )}
+                            {!isCompleted && status !== 'called' && status !== 'in_progress' && (
                               <Button
                                 size="sm"
                                 variant="outline"
