@@ -42,6 +42,23 @@ const queueUpdateSchema = z.object({
   displayMessage: z.string().optional(),
 })
 
+// How often the appointment→queue self-heal may actually run, per org+date
+// range. Keyed by range as well as org because "today" and a historical range
+// are different scans, and a user paging through last month must not starve
+// today's heal (or vice versa).
+const SYNC_EVERY_MS = 60_000
+const lastSyncAt = new Map() // `${orgId}|${startDate}|${endDate}` -> epoch ms
+
+async function syncIfDue(organizationId, startDate, endDate) {
+  const key = `${organizationId}|${startDate || ''}|${endDate || ''}`
+  const now = Date.now()
+  if (now - (lastSyncAt.get(key) || 0) < SYNC_EVERY_MS) return
+  // Stamped BEFORE awaiting, so concurrent requests in the same window (several
+  // open queue tabs polling together) do not all start their own sync.
+  lastSyncAt.set(key, now)
+  await syncAppointmentsToQueue(organizationId, startDate, endDate)
+}
+
 // GET /api/triage  (reads queue data)
 export async function getQueue(req, res, next) {
   try {
@@ -49,11 +66,21 @@ export async function getQueue(req, res, next) {
     const { serviceArea, status, search, startDate, endDate, roomId } = req.query
     const { page, limit, skip } = getPagination(req.query)
 
-    // The queue is derived from appointments — a patient with an appointment today
-    // is in the queue, with no check-in step (client's rule). Do this before the
-    // read so the list is never a day behind. Idempotent: a no-op once synced.
+    // The queue is derived from appointments — a patient with an appointment
+    // today is in the queue, with no check-in step (client's rule).
+    //
+    // Booking now writes the queue row in the same transaction as the
+    // appointment, so this sync is no longer what makes a new patient appear;
+    // it is the self-heal for rows that predate that, for imported/seeded
+    // appointments, and for slot or room changes.
+    //
+    // That matters because this screen now POLLS every 5s. The sync is not
+    // cheap — it scans the day's appointments and took ~2.2s against this
+    // dataset — so running it on every poll would put a permanent 2s query on
+    // the pool for each open queue tab. Throttled per org+range, exactly like
+    // the display board's healTodaysQueue().
     if (startDate || endDate) {
-      await syncAppointmentsToQueue(ORG_ID, startDate, endDate)
+      await syncIfDue(ORG_ID, startDate, endDate)
     }
 
     // Everything except the status filter. The per-status tile counts are built

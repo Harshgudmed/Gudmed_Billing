@@ -14,7 +14,8 @@ import client from "@/api/client";
 //     params: { search: debouncedSearch, category },
 //   });
 //   dp.rows  dp.page  dp.setPage  dp.totalPages  dp.loading  dp.refresh()
-export function useServerPagination(endpoint, { perPage = 15, params = {} } = {}) {
+//   pollMs: 5000  — optional live refresh; omit for a normal, static list.
+export function useServerPagination(endpoint, { perPage = 15, params = {}, pollMs = 0 } = {}) {
   const [page, setPage] = useState(1);
   const [rows, setRows] = useState([]);
   const [total, setTotal] = useState(0);
@@ -55,6 +56,46 @@ export function useServerPagination(endpoint, { perPage = 15, params = {} } = {}
   useEffect(() => {
     fetchPage();
   }, [fetchPage]);
+
+  // Opt-in live refresh (`pollMs`). A live screen — the queue, where reception
+  // books a patient and expects to see them appear — must not require anyone to
+  // press Refresh.
+  //
+  // Paused while the tab is hidden: a queue left open on a spare monitor
+  // overnight would otherwise poll thousands of times against a page nobody is
+  // looking at. Refetches once immediately on becoming visible again, so the
+  // first thing the user sees after switching back is current.
+  //
+  // `fetchPage` sets `loading`, which the queue table deliberately does NOT use
+  // to blank itself (see QueueModule) — otherwise every poll would flash the
+  // list empty.
+  const savedFetch = useRef(fetchPage);
+  savedFetch.current = fetchPage;
+  useEffect(() => {
+    if (!pollMs) return;
+    let timer = null;
+    const start = () => {
+      stop();
+      timer = setInterval(() => savedFetch.current(), pollMs);
+    };
+    const stop = () => {
+      if (timer) clearInterval(timer);
+      timer = null;
+    };
+    const onVisibility = () => {
+      if (document.hidden) stop();
+      else {
+        savedFetch.current();
+        start();
+      }
+    };
+    if (!document.hidden) start();
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      stop();
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
+  }, [pollMs]);
 
   // When a filter changes, jump back to page 1 (skip the very first render).
   const firstRender = useRef(true);
