@@ -3,6 +3,7 @@ import { db } from '../config/db.js'
 import { getOrgId, getActor } from '../lib/reqContext.js'
 import { resolveActiveDoctor, otherConcurrentDoctors, nextSessionForRoom } from '../lib/activeDoctor.js'
 import { parseTimetable, shiftsForRoom } from '../lib/doctorTimetable.js'
+import { todayRange } from '../lib/dates.js'
 
 export const DOCTOR_SELECT = { id: true, fullName: true, preferences: true }
 
@@ -122,7 +123,32 @@ export async function getRooms(req, res, next) {
     if (departmentId) where.departmentId = departmentId
 
     const rooms = await db.room.findMany({ where, include: ROOM_INCLUDE, orderBy: { roomNumber: 'asc' } })
-    res.json({ success: true, data: rooms.map(toRoomDTO) })
+
+    // How many people are actually waiting in each room, today.
+    //
+    // The display board's floor screen lists every room on a floor — ~90 of
+    // them — and without this each card could only say who the doctor is. That
+    // makes every card look alike, and leaves the one question a patient walks
+    // up with ("where is the queue moving?") unanswered.
+    //
+    // ONE groupBy for the whole page rather than a count per room: this is
+    // polled every 3s by a wall panel, so 90 queries per poll is not an option.
+    const counts = await db.queueManagement.groupBy({
+      by: ['roomId'],
+      where: {
+        organizationId: ORG_ID,
+        roomId: { in: rooms.map((r) => r.id) },
+        status: { in: ['waiting', 'called', 'in_progress'] },
+        joinedQueueAt: todayRange(),
+      },
+      _count: { _all: true },
+    })
+    const waitingByRoom = new Map(counts.map((c) => [c.roomId, c._count._all]))
+
+    res.json({
+      success: true,
+      data: rooms.map((r) => ({ ...toRoomDTO(r), waitingCount: waitingByRoom.get(r.id) || 0 })),
+    })
   } catch (err) { next(err) }
 }
 
