@@ -4,7 +4,8 @@ import { getOrgId } from "../lib/reqContext.js";
 import { drName } from "../lib/drName.js";
 import { nextSeriesNumber, invoiceProbe } from "../lib/counters.js";
 import { startOfDay, endOfDay, todayIST } from '../utils/dates.js'
-import { normalizeTimeHHMM } from '../lib/dates.js'
+import { normalizeTimeHHMM, zonedDateTimeToUtc, ymdInZone } from '../lib/dates.js'
+import { priorityRank } from '../lib/queuePriority.js'
 import { scopedDoctorId } from '../utils/scope.js'
 import { computeConsultationFee } from '../services/appointmentFees.js'
 import { nextQueueNumber } from '../utils/queueNumber.js'
@@ -313,6 +314,49 @@ export async function create(req, res, next) {
         include: {
           patient: { select: { ...PATIENT_NAME_SELECT, phonePrimary: true } },
           doctor: { select: { id: true, fullName: true } },
+        },
+      })
+
+      // Put the patient in the queue NOW, in the same transaction.
+      //
+      // The queue is derived from appointments, but it was derived LAZILY — by
+      // syncAppointmentsToQueue, which runs when the Queue page is fetched and,
+      // for the display board, at most once a minute. So a patient booked at
+      // 15:50 did not exist in the queue at 15:50: the Queue screen only showed
+      // them on the next refetch, and the wall board up to 60s later. Reception
+      // had to refresh to see someone they had just booked.
+      //
+      // Writing the row here makes the queue correct the instant the
+      // appointment exists, so a poll of either screen sees it immediately and
+      // nothing has to wait for a sync pass.
+      //
+      // The sync is NOT redundant now — it stays as the self-heal for rows
+      // created before this existed, for imported/seeded appointments, and for
+      // slot or room changes. It upserts, so it simply finds this row already
+      // present and leaves it alone.
+      const { roomId, visitType } = await deriveRoomAndVisitType({
+        doctorId: validatedData.doctorId,
+        patientId: validatedData.patientId,
+        appointmentDate: apptDate,
+        appointmentTime: validatedData.appointmentTime,
+      })
+      await tx.queueManagement.create({
+        data: {
+          organizationId,
+          patientId: validatedData.patientId,
+          appointmentId: appointment.id,
+          assignedToId: validatedData.doctorId,
+          roomId,
+          visitType,
+          serviceArea: 'opd',
+          queueNumber: await nextQueueNumber(tx, organizationId, 'opd'),
+          status: 'waiting',
+          priority: validatedData.priority || 'normal',
+          priorityRank: priorityRank(validatedData.priority || 'normal'),
+          // The appointment's own slot, not "now" — this is what orders the
+          // queue by appointment time rather than by booking time (see
+          // lib/queueSync.js).
+          joinedQueueAt: zonedDateTimeToUtc(ymdInZone(apptDate), validatedData.appointmentTime),
         },
       })
 

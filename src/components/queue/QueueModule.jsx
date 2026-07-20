@@ -70,6 +70,12 @@ export default function QueueModule() {
 
   const queuePage = useServerPagination('/queue', {
     perPage: QUEUE_PER_PAGE,
+    // The queue is a live screen: reception books a patient and must see them
+    // appear without pressing Refresh. The appointment now writes its queue row
+    // in the same transaction as the booking, so a poll this soon after already
+    // finds the patient there. 5s matches how often a busy front desk changes
+    // something, while staying far cheaper than the board's 3s wall-display poll.
+    pollMs: 5000,
     params: {
       search: debouncedSearch,
       status: statusFilter,
