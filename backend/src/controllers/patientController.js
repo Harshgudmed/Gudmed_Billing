@@ -1,5 +1,5 @@
 import { db } from '../config/db.js'
-import { patientFullName } from '../lib/patientName.js'
+import { patientFullName, PATIENT_NAME_SELECT } from '../lib/patientName.js'
 import { optionalMobileSchema, normalizeIndianMobile } from '../lib/phone.js'
 import { dayRange } from '../lib/dates.js'
 import { getOrgId } from "../lib/reqContext.js";
@@ -313,7 +313,7 @@ export async function create(req, res, next) {
           phonePrimary: validatedData.phonePrimary,
           dateOfBirth: new Date(validatedData.dateOfBirth),
         },
-        select: { id: true, mrn: true, firstName: true, middleName: true, lastName: true },
+        select: PATIENT_NAME_SELECT,
       })
       if (existing) {
         // 409, not a silent merge: reception must SEE that this person already

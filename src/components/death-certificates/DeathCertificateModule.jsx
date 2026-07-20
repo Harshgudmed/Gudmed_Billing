@@ -42,9 +42,7 @@ export default function DeathCertificateModule() {
     if (!win) return
     const dod = format(new Date(cert.dateOfDeath), 'dd MMMM yyyy')
     const certDate = format(new Date(cert.certificationDate), 'dd MMMM yyyy')
-    const patientName = cert.patient
-      ? `${cert.patient.firstName} ${cert.patient.middleName || ''} ${cert.patient.lastName}`.trim()
-      : 'Unknown'
+    const patientName = getFullName(cert.patient) || 'Unknown'
     const age = [
       cert.ageAtDeathYears && `${cert.ageAtDeathYears} years`,
       cert.ageAtDeathMonths && `${cert.ageAtDeathMonths} months`,

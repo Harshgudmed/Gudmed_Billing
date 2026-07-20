@@ -36,6 +36,7 @@ import {
 import { billAnyOrder, billOrderTask, cancelOrderTaskCharge } from "../inpatient/orderBillingService.js";
 import { billConsultation } from "../inpatient/consultationBillingService.js";
 import { generateTasksForOrder } from "../inpatient/scheduleService.js";
+import { PATIENT_NAME_SELECT } from '../lib/patientName.js'
 
 // ─── Validation Schemas ───────────────────────────────────────────────────────
 
@@ -319,11 +320,7 @@ async function getAdmissions(req, res, context) {
       include: {
         patient: {
           select: {
-            id: true,
-            mrn: true,
-            firstName: true,
-            middleName: true,
-            lastName: true,
+            ...PATIENT_NAME_SELECT,
             gender: true,
             dateOfBirth: true,
             phonePrimary: true,
@@ -1048,11 +1045,7 @@ async function createAdmission(req, res, orgId, body) {
             include: {
               patient: {
                 select: {
-                  id: true,
-                  mrn: true,
-                  firstName: true,
-                  middleName: true,
-                  lastName: true,
+                  ...PATIENT_NAME_SELECT,
                   gender: true,
                   dateOfBirth: true,
                   phonePrimary: true,
@@ -1229,11 +1222,7 @@ async function createTransfer(req, res, orgId, body) {
             include: {
               patient: {
                 select: {
-                  id: true,
-                  mrn: true,
-                  firstName: true,
-                  middleName: true,
-                  lastName: true,
+                  ...PATIENT_NAME_SELECT,
                 },
               },
               bed: { include: { ward: true } },
