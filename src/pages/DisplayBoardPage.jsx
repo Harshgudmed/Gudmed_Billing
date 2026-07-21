@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { Routes, Route, useNavigate, useParams, useSearchParams } from 'react-router-dom'
-import { Clock, ChevronRight, Users, DoorOpen } from 'lucide-react'
+import { ChevronRight, DoorOpen, Bell } from 'lucide-react'
 import { toast } from 'sonner'
 import client from '@/api/client'
 import Logo from '@/components/Logo'
@@ -499,50 +499,55 @@ function DoctorLane({ g, showControls, busy, onCall, onAlert }) {
   const moreWaiting = Math.max(0, (g.waitingCount || 0) - shown.length)
 
   return (
-    <div className={`rounded-2xl ${CARD} p-6`}>
-      {/* Lane header: whose queue, and how many. */}
-      <div className="mb-4 flex flex-wrap items-baseline gap-x-3 gap-y-1 border-b border-slate-200 pb-3">
-        <span className="text-3xl font-bold text-slate-800">
+    <div className={`overflow-hidden rounded-2xl ${CARD} ${g.active ? 'ring-1 ring-emerald-200' : ''}`}>
+      {/* Lane header — a tinted strip so each doctor's block reads as one unit
+          at a glance, and the active one is unmistakable. */}
+      <div className={`flex flex-wrap items-center gap-x-3 gap-y-1 px-6 py-3.5 ${g.active ? 'bg-emerald-50' : 'bg-slate-50'}`}>
+        <span className="text-2xl font-bold text-slate-800">
           {g.doctorName === 'Unassigned' ? 'Unassigned' : drName(g.doctorName)}
         </span>
         {g.active
-          ? <span className="text-base font-semibold text-emerald-600">· active now</span>
-          : g.shiftStart && <span className={`text-base ${TEXT_MUTED}`}>· today from {formatTime12h(g.shiftStart)}</span>}
-        <span className="ml-auto text-right">
+          ? <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-100 px-2.5 py-0.5 text-xs font-bold uppercase tracking-wider text-emerald-700">
+              <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-500" />Active now
+            </span>
+          : g.shiftStart && <span className={`text-sm font-medium ${TEXT_MUTED}`}>from {formatTime12h(g.shiftStart)}</span>}
+        <span className="ml-auto flex items-baseline gap-1.5">
           <span className="text-3xl font-bold tabular-nums text-[#2E4168]">{g.waitingCount || 0}</span>
-          <span className={`ml-2 text-sm font-bold uppercase tracking-wider ${TEXT_MUTED}`}>Waiting</span>
+          <span className={`text-xs font-bold uppercase tracking-wider ${TEXT_MUTED}`}>waiting</span>
         </span>
       </div>
 
-      <div className="grid gap-6 lg:grid-cols-[minmax(0,4fr),minmax(0,6fr)]">
-        {/* NOW SERVING for this doctor */}
-        <div>
-          <div className={`mb-2 text-xs font-bold uppercase tracking-[0.2em] ${TEXT_MUTED}`}>Now serving</div>
+      <div className="grid gap-5 p-5 lg:grid-cols-[minmax(0,4fr),minmax(0,6fr)]">
+        {/* NOW SERVING + controls for this doctor */}
+        <div className="flex flex-col">
+          <div className={`mb-2 text-[11px] font-bold uppercase tracking-[0.2em] ${TEXT_MUTED}`}>Now serving</div>
           {inProg ? (
-            <div className="relative overflow-hidden rounded-xl bg-slate-50 p-5 ring-1 ring-slate-200">
-              <span className="absolute inset-y-0 left-0 w-1.5 bg-emerald-500" />
-              <div className="break-words pl-2 text-3xl font-bold leading-tight">{maskPatientName(inProg.name)}</div>
-              <div className={`mt-1 pl-2 font-mono text-lg ${TEXT_MUTED}`}>{maskUhid(inProg.uhid)}</div>
+            <div className="relative flex-1 overflow-hidden rounded-xl bg-gradient-to-br from-emerald-50 to-white p-4 ring-1 ring-emerald-200">
+              <div className="break-words text-2xl font-bold leading-tight text-slate-800">{maskPatientName(inProg.name)}</div>
+              <div className={`mt-0.5 font-mono text-sm ${TEXT_MUTED}`}>{maskUhid(inProg.uhid)}</div>
             </div>
           ) : (
-            <div className={`rounded-xl border-2 border-dashed border-slate-200 p-5 text-center text-lg ${TEXT_MUTED}`}>Room free</div>
+            <div className={`flex flex-1 items-center justify-center rounded-xl bg-slate-50 p-4 text-center text-base ${TEXT_MUTED}`}>Room free</div>
           )}
 
           {showControls && (
-            <div className="mt-3 flex flex-col gap-2.5">
+            // Both actions on ONE row.
+            <div className="mt-3 grid grid-cols-2 gap-2.5">
               <button
                 onClick={onCall}
                 disabled={busy || !next}
-                className="rounded-xl bg-[#2E4168] px-5 py-3.5 text-base font-bold text-white transition-colors hover:bg-[#253453] disabled:cursor-not-allowed disabled:opacity-40"
+                className="flex items-center justify-center gap-2 rounded-xl bg-[#2E4168] px-4 py-3 text-sm font-bold text-white shadow-sm transition-all hover:bg-[#253453] hover:shadow disabled:cursor-not-allowed disabled:opacity-40"
               >
-                {inProg ? 'Finish & call next' : 'Call next patient in'}
+                <DoorOpen className="h-4 w-4" />
+                {inProg ? 'Finish & next' : 'Call next in'}
               </button>
               <button
                 onClick={onAlert}
                 disabled={busy || !next || next.alerted}
-                className="rounded-xl border-2 border-amber-300 bg-amber-50 px-5 py-3.5 text-base font-bold text-amber-700 transition-colors hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-40"
+                className="flex items-center justify-center gap-2 rounded-xl border-2 border-amber-300 bg-amber-50 px-4 py-3 text-sm font-bold text-amber-700 transition-all hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-40"
               >
-                {next?.alerted ? 'Next patient alerted' : 'Alert next patient'}
+                <Bell className="h-4 w-4" />
+                {next?.alerted ? 'Alerted' : 'Alert next'}
               </button>
             </div>
           )}
@@ -550,9 +555,9 @@ function DoctorLane({ g, showControls, busy, onCall, onAlert }) {
 
         {/* UP NEXT for this doctor */}
         <div>
-          <div className={`mb-2 text-xs font-bold uppercase tracking-[0.2em] ${TEXT_MUTED}`}>Up next</div>
+          <div className={`mb-2 text-[11px] font-bold uppercase tracking-[0.2em] ${TEXT_MUTED}`}>Up next</div>
           {shown.length === 0 ? (
-            <p className={`text-lg ${TEXT_MUTED}`}>No one waiting</p>
+            <div className={`flex h-full min-h-[64px] items-center rounded-xl bg-slate-50 px-4 text-base ${TEXT_MUTED}`}>No one waiting</div>
           ) : (
             <ul className="space-y-2">
               {shown.map((p, i) => {
@@ -563,29 +568,33 @@ function DoctorLane({ g, showControls, busy, onCall, onAlert }) {
                 return (
                   <li
                     key={p.queueEntryId}
-                    className={`flex items-center gap-4 rounded-xl px-4 py-3 ${isNext ? 'bg-amber-50 ring-2 ring-amber-300' : 'ring-1 ring-slate-200'}`}
+                    className={`flex items-center gap-4 rounded-xl px-4 py-3 transition-colors ${
+                      isNext ? 'bg-amber-50 ring-2 ring-amber-300' : 'bg-white ring-1 ring-slate-200'
+                    }`}
                   >
-                    <span className={`w-9 shrink-0 text-2xl font-bold tabular-nums ${isNext ? 'text-amber-600' : 'text-slate-400'}`}>{i + 1}</span>
+                    <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-lg font-bold tabular-nums ${
+                      isNext ? 'bg-amber-100 text-amber-700' : 'bg-slate-100 text-slate-500'
+                    }`}>{i + 1}</span>
                     <span className="min-w-0 flex-1">
-                      <span className="block truncate text-2xl font-semibold">{maskPatientName(p.name)}</span>
+                      <span className="block truncate text-xl font-semibold text-slate-800">{maskPatientName(p.name)}</span>
                       {isNext && (
-                        <span className="mt-0.5 flex items-center gap-2 text-sm font-bold uppercase tracking-wider text-amber-700">
-                          <span className="h-2 w-2 animate-pulse rounded-full bg-amber-500" />
-                          {imminent ? 'You are next — please come to the door' : 'You are next — please be ready'}
+                        <span className="mt-0.5 flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-amber-700">
+                          <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-amber-500" />
+                          {imminent ? 'Next — come to the door' : 'Next — please be ready'}
                         </span>
                       )}
                     </span>
-                    <span className={`shrink-0 rounded-full px-3 py-1 text-xs font-bold uppercase tracking-wider ring-1 ${
-                      p.visitType === 'follow_up' ? 'bg-emerald-50 text-emerald-700 ring-emerald-200' : 'bg-sky-50 text-sky-700 ring-sky-200'
+                    <span className={`shrink-0 rounded-full px-2.5 py-0.5 text-[11px] font-bold uppercase tracking-wider ${
+                      p.visitType === 'follow_up' ? 'bg-emerald-50 text-emerald-700' : 'bg-sky-50 text-sky-700'
                     }`}>
                       {p.visitType === 'follow_up' ? 'Follow-up' : 'New'}
                     </span>
-                    <span className={`hidden shrink-0 font-mono xl:block ${TEXT_MUTED}`}>{maskUhid(p.uhid)}</span>
+                    <span className={`hidden shrink-0 font-mono text-sm xl:block ${TEXT_MUTED}`}>{maskUhid(p.uhid)}</span>
                   </li>
                 )
               })}
               {moreWaiting > 0 && (
-                <li className={`px-4 py-2 text-base font-semibold ${TEXT_MUTED}`}>+ {moreWaiting} more waiting</li>
+                <li className={`rounded-xl bg-slate-50 px-4 py-2 text-sm font-semibold ${TEXT_MUTED}`}>+ {moreWaiting} more waiting</li>
               )}
             </ul>
           )}
