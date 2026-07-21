@@ -488,6 +488,113 @@ function FloorScreen() {
   )
 }
 
+// One doctor's lane on the room screen: their current consultation, their next
+// patients, and — only for staff — their own controls. Self-contained so two or
+// three doctors sharing a room each get an identical, independent block that
+// never touches another doctor's queue.
+function DoctorLane({ g, showControls, busy, onCall, onAlert }) {
+  const inProg = g.inProgress
+  const next = g.patients?.[0] || null
+  const shown = g.patients || []
+  const moreWaiting = Math.max(0, (g.waitingCount || 0) - shown.length)
+
+  return (
+    <div className={`rounded-2xl ${CARD} p-6`}>
+      {/* Lane header: whose queue, and how many. */}
+      <div className="mb-4 flex flex-wrap items-baseline gap-x-3 gap-y-1 border-b border-slate-200 pb-3">
+        <span className="text-3xl font-bold text-slate-800">
+          {g.doctorName === 'Unassigned' ? 'Unassigned' : drName(g.doctorName)}
+        </span>
+        {g.active
+          ? <span className="text-base font-semibold text-emerald-600">· active now</span>
+          : g.shiftStart && <span className={`text-base ${TEXT_MUTED}`}>· today from {formatTime12h(g.shiftStart)}</span>}
+        <span className="ml-auto text-right">
+          <span className="text-3xl font-bold tabular-nums text-[#2E4168]">{g.waitingCount || 0}</span>
+          <span className={`ml-2 text-sm font-bold uppercase tracking-wider ${TEXT_MUTED}`}>Waiting</span>
+        </span>
+      </div>
+
+      <div className="grid gap-6 lg:grid-cols-[minmax(0,4fr),minmax(0,6fr)]">
+        {/* NOW SERVING for this doctor */}
+        <div>
+          <div className={`mb-2 text-xs font-bold uppercase tracking-[0.2em] ${TEXT_MUTED}`}>Now serving</div>
+          {inProg ? (
+            <div className="relative overflow-hidden rounded-xl bg-slate-50 p-5 ring-1 ring-slate-200">
+              <span className="absolute inset-y-0 left-0 w-1.5 bg-emerald-500" />
+              <div className="break-words pl-2 text-3xl font-bold leading-tight">{maskPatientName(inProg.name)}</div>
+              <div className={`mt-1 pl-2 font-mono text-lg ${TEXT_MUTED}`}>{maskUhid(inProg.uhid)}</div>
+            </div>
+          ) : (
+            <div className={`rounded-xl border-2 border-dashed border-slate-200 p-5 text-center text-lg ${TEXT_MUTED}`}>Room free</div>
+          )}
+
+          {showControls && (
+            <div className="mt-3 flex flex-col gap-2.5">
+              <button
+                onClick={onCall}
+                disabled={busy || !next}
+                className="rounded-xl bg-[#2E4168] px-5 py-3.5 text-base font-bold text-white transition-colors hover:bg-[#253453] disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                {inProg ? 'Finish & call next' : 'Call next patient in'}
+              </button>
+              <button
+                onClick={onAlert}
+                disabled={busy || !next || next.alerted}
+                className="rounded-xl border-2 border-amber-300 bg-amber-50 px-5 py-3.5 text-base font-bold text-amber-700 transition-colors hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                {next?.alerted ? 'Next patient alerted' : 'Alert next patient'}
+              </button>
+            </div>
+          )}
+        </div>
+
+        {/* UP NEXT for this doctor */}
+        <div>
+          <div className={`mb-2 text-xs font-bold uppercase tracking-[0.2em] ${TEXT_MUTED}`}>Up next</div>
+          {shown.length === 0 ? (
+            <p className={`text-lg ${TEXT_MUTED}`}>No one waiting</p>
+          ) : (
+            <ul className="space-y-2">
+              {shown.map((p, i) => {
+                // Only ever shown because a human pressed "Alert next" — never
+                // inferred from position. See the queue controller.
+                const isNext = p.alerted
+                const imminent = isNext && inProg?.prescriptionUploaded
+                return (
+                  <li
+                    key={p.queueEntryId}
+                    className={`flex items-center gap-4 rounded-xl px-4 py-3 ${isNext ? 'bg-amber-50 ring-2 ring-amber-300' : 'ring-1 ring-slate-200'}`}
+                  >
+                    <span className={`w-9 shrink-0 text-2xl font-bold tabular-nums ${isNext ? 'text-amber-600' : 'text-slate-400'}`}>{i + 1}</span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-2xl font-semibold">{maskPatientName(p.name)}</span>
+                      {isNext && (
+                        <span className="mt-0.5 flex items-center gap-2 text-sm font-bold uppercase tracking-wider text-amber-700">
+                          <span className="h-2 w-2 animate-pulse rounded-full bg-amber-500" />
+                          {imminent ? 'You are next — please come to the door' : 'You are next — please be ready'}
+                        </span>
+                      )}
+                    </span>
+                    <span className={`shrink-0 rounded-full px-3 py-1 text-xs font-bold uppercase tracking-wider ring-1 ${
+                      p.visitType === 'follow_up' ? 'bg-emerald-50 text-emerald-700 ring-emerald-200' : 'bg-sky-50 text-sky-700 ring-sky-200'
+                    }`}>
+                      {p.visitType === 'follow_up' ? 'Follow-up' : 'New'}
+                    </span>
+                    <span className={`hidden shrink-0 font-mono xl:block ${TEXT_MUTED}`}>{maskUhid(p.uhid)}</span>
+                  </li>
+                )
+              })}
+              {moreWaiting > 0 && (
+                <li className={`px-4 py-2 text-base font-semibold ${TEXT_MUTED}`}>+ {moreWaiting} more waiting</li>
+              )}
+            </ul>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ── Room detail: In Progress + Waiting (grouped by doctor for shared rooms) ─
 function RoomScreen() {
   const { roomId } = useParams()
@@ -495,8 +602,6 @@ function RoomScreen() {
   const [searchParams] = useSearchParams()
   const [data, setData] = useState(null)
   const [busy, setBusy] = useState(false)
-  // null = follow the default (see below); set once the user picks a doctor.
-  const [selectedDoctorId, setSelectedDoctorId] = useState(null)
 
   // Who gets the controls.
   //
@@ -562,27 +667,19 @@ function RoomScreen() {
 
   if (!data) return <Board><div className="p-10 text-slate-500">Loading…</div></Board>
 
-  const { room, activeDoctor: a, inProgress, waitingGroups } = data
-  const totalWaiting = waitingGroups.reduce((n, g) => n + g.patients.length, 0)
-  // Whoever "call next" would actually bring in: first in line for the doctor
-  // who is sitting, falling back to the head of the room's queue. Kept in step
-  // with the server's own ordering so the console names the same person it
-  // will call.
-  // Which doctor is this console acting for?
-  //
-  // A room can genuinely hold two or three doctors at once, and each of them
-  // must only ever finish and call THEIR OWN patients. So the console commits
-  // to one doctor and says whose queue it is working on:
-  //   · a logged-in doctor always acts as themselves
-  //   · anyone else (admin/reception covering the desk) gets the doctor who is
-  //     actually sitting, and can switch if the room has more than one
-  const doctorGroups = waitingGroups.filter((g) => g.doctorId)
-  const myGroup = doctorGroups.find((g) => g.doctorId === user?.id)
-  const defaultDoctorId = (myGroup || doctorGroups.find((g) => g.active) || doctorGroups[0])?.doctorId || null
-  const actingDoctorId = selectedDoctorId ?? defaultDoctorId
-  const actingGroup = doctorGroups.find((g) => g.doctorId === actingDoctorId) || null
-  // The patient THIS doctor would call — not the head of the shared room list.
-  const firstWaiting = actingGroup?.patients?.[0] || null
+  const { room, activeDoctor: a, waitingGroups } = data
+  // True totals from the server (whole queue), not the length of the hydrated
+  // slice — at 500/doctor the slice is capped but this count is exact.
+  const totalWaiting = waitingGroups.reduce((n, g) => n + (g.waitingCount || 0), 0)
+
+  // Each doctor gets their OWN lane and their OWN controls — nothing is shared
+  // or switched between them. A logged-in doctor's own lane leads; otherwise
+  // the active doctor's does.
+  const lanes = [...waitingGroups].sort((x, y) => {
+    if (x.doctorId === user?.id) return -1
+    if (y.doctorId === user?.id) return 1
+    return (y.active === x.active) ? 0 : x.active ? -1 : 1
+  })
 
   return (
     <Board>
@@ -593,21 +690,16 @@ function RoomScreen() {
           { label: `Room ${room.roomNumber}` },
         ]} />
 
-        <div className="mb-8 flex flex-wrap items-end justify-between gap-6">
+        <div className="mb-6 flex flex-wrap items-end justify-between gap-6">
           <div>
             <div className="flex items-center gap-3 text-sm font-bold uppercase tracking-[0.2em] text-[#2E4168]">
               <span className="rounded-md bg-slate-100 px-3 py-1 ring-1 ring-slate-200">Room {room.roomNumber}</span>
               <span className={TEXT_MUTED}>{room.department?.name}</span>
             </div>
-            {/* The doctor's name is what a patient scans the wall for, so it is
-                the second-largest thing here — behind only who is being seen. */}
-            <h1 className="mt-3 text-6xl font-bold leading-none tracking-tight">
+            <h1 className="mt-3 text-4xl font-bold leading-none tracking-tight text-slate-800">
               {a.unassigned ? <span className="text-slate-400">No doctor assigned</span>
                 : a.onBreak ? <span className="text-slate-500">{emptyRoomLabel(data.nextSession)}</span>
-                : <>
-                    {drName(a.doctorName)}
-                    {a.manual && <span className="ml-4 align-middle rounded-full bg-amber-50 px-4 py-1.5 text-base font-bold uppercase tracking-wider text-amber-700 ring-1 ring-amber-200">Covering</span>}
-                  </>}
+                : <span className={TEXT_MUTED}>{lanes.length > 1 ? `${lanes.length} doctors in this room` : drName(a.doctorName)}</span>}
             </h1>
           </div>
           <div className="text-right">
@@ -616,193 +708,28 @@ function RoomScreen() {
           </div>
         </div>
 
-        {/* min-h-0 so the two columns may shrink inside the flex parent and let
-            their own overflow scroll, instead of pushing the page taller. */}
-        <div className="grid min-h-0 flex-1 gap-8 lg:grid-cols-[minmax(0,5fr),minmax(0,7fr)]">
-          {/* ── NOW SERVING: the one thing the reader came for ──────────── */}
-          <section className="flex min-h-0 flex-col">
-            <SectionLabel>Now Serving</SectionLabel>
-            {inProgress ? (
-              // White, like everything else on the board. A solid navy slab
-              // this size fought the rest of the screen for attention and made
-              // the panel look two-toned; on a light ground the way to say
-              // "this is the important one" is SIZE and a single accent edge,
-              // not a block of colour.
-              <div className={`relative flex flex-1 flex-col justify-center overflow-hidden rounded-2xl ${CARD} p-10`}>
-                <span className="absolute inset-y-0 left-0 w-2 bg-emerald-500" />
-                <div className="flex items-center gap-2.5 pl-2 text-sm font-bold uppercase tracking-[0.2em] text-emerald-600">
-                  <span className="relative flex h-2.5 w-2.5">
-                    <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
-                    <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-emerald-500" />
-                  </span>
-                  In Progress
-                </div>
-                <div className="mt-4 break-words pl-2 text-6xl font-bold leading-tight tracking-tight">
-                  {maskPatientName(inProgress.name)}
-                </div>
-                <div className={`mt-3 pl-2 font-mono text-2xl ${TEXT_MUTED}`}>{maskUhid(inProgress.uhid)}</div>
-                <div className={`ml-2 mt-6 inline-flex w-fit rounded-full px-5 py-2 text-base font-bold uppercase tracking-wider ring-1 ${
-                  inProgress.visitType === 'follow_up'
-                    ? 'bg-emerald-50 text-emerald-700 ring-emerald-200'
-                    : 'bg-sky-50 text-sky-700 ring-sky-200'
-                }`}>
-                  {inProgress.visitType === 'follow_up' ? 'Follow-up' : 'New patient'}
-                </div>
-              </div>
-            ) : (
-              <div className={`flex flex-1 flex-col items-center justify-center rounded-2xl border-2 border-dashed border-slate-300 bg-white p-12 text-center ${TEXT_MUTED}`}>
-                <DoorOpen className="mx-auto mb-4 h-12 w-12 text-slate-300" />
-                <div className="text-2xl font-semibold">Room free</div>
-                <div className="mt-1 text-base">No patient in progress</div>
-              </div>
-            )}
-
-            {/* The doctor's controls, under the patient they refer to. Only in
-                ?doctor=1 mode — never on the wall board. */}
-            {doctorMode && (
-              <div className={`mt-5 rounded-2xl ${CARD} p-5`}>
-                <div className={`mb-3 flex items-baseline gap-2 text-xs font-bold uppercase tracking-[0.2em] ${TEXT_MUTED}`}>
-                  Doctor controls
-                  {actingGroup && (
-                    <span className="normal-case tracking-normal text-slate-700">
-                      · acting as <b>{drName(actingGroup.doctorName)}</b>
-                    </span>
-                  )}
-                </div>
-
-                {/* Only when the room really does hold more than one doctor at
-                    once. Each doctor may finish and call only their OWN
-                    patients, so the console has to be explicit about whose
-                    queue these buttons touch. */}
-                {doctorGroups.length > 1 && (
-                  <div className="mb-4 flex flex-wrap gap-2">
-                    {doctorGroups.map((g) => (
-                      <button
-                        key={g.doctorId}
-                        onClick={() => setSelectedDoctorId(g.doctorId)}
-                        className={`rounded-lg px-3.5 py-2 text-sm font-semibold ring-1 transition-colors ${
-                          g.doctorId === actingDoctorId
-                            ? 'bg-[#2E4168] text-white ring-[#2E4168]'
-                            : 'bg-white text-slate-600 ring-slate-200 hover:bg-slate-50'
-                        }`}
-                      >
-                        {drName(g.doctorName)}
-                        <span className="ml-2 opacity-70">{g.patients.length}</span>
-                      </button>
-                    ))}
-                  </div>
-                )}
-
-                <div className="flex flex-wrap gap-3">
-                  <button
-                    onClick={() => callInNext(actingDoctorId)}
-                    disabled={busy || !firstWaiting}
-                    className="flex-1 rounded-xl bg-[#2E4168] px-6 py-4 text-lg font-bold text-white transition-colors hover:bg-[#253453] disabled:cursor-not-allowed disabled:opacity-40"
-                  >
-                    {inProgress ? 'Finish & call next patient' : 'Call next patient in'}
-                  </button>
-                  <button
-                    onClick={() => alertNext(firstWaiting.queueEntryId)}
-                    disabled={busy || !firstWaiting || firstWaiting.alerted}
-                    className="flex-1 rounded-xl border-2 border-amber-300 bg-amber-50 px-6 py-4 text-lg font-bold text-amber-700 transition-colors hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-40"
-                  >
-                    {firstWaiting?.alerted ? 'Next patient alerted' : 'Alert next patient'}
-                  </button>
-                </div>
-                <p className={`mt-3 text-sm ${TEXT_MUTED}`}>
-                  {firstWaiting
-                    ? <>Next up: <b className="text-slate-700">{firstWaiting.name}</b>. “Alert” shows them “you are next” on the board; “Call next” brings them in and finishes the current patient.</>
-                    : 'Nobody is waiting for this doctor.'}
-                </p>
-              </div>
-            )}
-          </section>
-
-          {/* ── UP NEXT ─────────────────────────────────────────────────── */}
-          <section className="flex min-h-0 flex-col">
-            <SectionLabel>Up Next</SectionLabel>
-            {totalWaiting === 0 ? (
-              <div className={`flex flex-1 items-center justify-center rounded-2xl ${CARD} p-12 text-center text-2xl ${TEXT_MUTED}`}>No one waiting</div>
-            ) : (
-              <div className="min-h-0 flex-1 space-y-7 overflow-y-auto pr-1">
-                {waitingGroups.map((g) => (
-                  <div key={g.doctorId || 'unassigned'}>
-                    {/* Whose queue is this? Driven by the REAL data (is there more
-                        than one doctor's queue here?) — never by the cosmetic
-                        `sittingType` label. Room 200 is labelled "single" while
-                        three doctors actually share it, and gating on that label
-                        hid every heading, leaving three anonymous tables that no
-                        patient could match themselves to. */}
-                    {waitingGroups.length > 1 && (
-                      <div className="mb-3 flex items-baseline gap-3 border-b border-slate-200 pb-2">
-                        <span className="text-2xl font-bold text-[#2E4168]">
-                          {g.doctorName === 'Unassigned' ? 'Unassigned' : drName(g.doctorName)}
-                        </span>
-                        {/* Composed here, not on the server: the sentence and
-                            the 12-hour conversion both belong at the point of
-                            display. */}
-                        {g.active
-                          ? <span className={`text-base ${TEXT_MUTED}`}>· active now</span>
-                          : g.shiftStart && <span className={`text-base ${TEXT_MUTED}`}>· today from {formatTime12h(g.shiftStart)}</span>}
-                        <span className={`ml-auto text-base font-semibold ${TEXT_MUTED}`}>{g.patients.length} waiting</span>
-                      </div>
-                    )}
-                    {g.patients.length === 0 ? (
-                      <p className={`text-lg ${TEXT_MUTED}`}>No one waiting</p>
-                    ) : (
-                      <ul className="space-y-2.5">
-                        {g.patients.map((p, i) => {
-                          // Only ever shown because a human pressed "Alert
-                          // next" — never inferred from being first in line.
-                          // A message on a public wall telling someone to get
-                          // ready has to be something staff chose to send: if
-                          // the board decided on its own, it would be telling
-                          // patients to stand up while the doctor is still
-                          // fifteen minutes from finishing.
-                          const isNext = p.alerted
-                          // Prescription already uploaded = this consultation is
-                          // wrapping up, so the wording gets more immediate.
-                          const imminent = isNext && inProgress?.prescriptionUploaded
-                          return (
-                            <li
-                              key={p.queueEntryId}
-                              className={`flex items-center gap-5 rounded-xl px-5 py-4 transition-colors ${
-                                isNext
-                                  ? 'bg-amber-50 ring-2 ring-amber-300'
-                                  : CARD
-                              }`}
-                            >
-                              <span className={`w-12 shrink-0 text-4xl font-bold tabular-nums ${isNext ? 'text-amber-600' : 'text-slate-400'}`}>
-                                {i + 1}
-                              </span>
-                              <span className="min-w-0 flex-1">
-                                <span className="block truncate text-3xl font-semibold">{maskPatientName(p.name)}</span>
-                                {isNext && (
-                                  <span className="mt-1 flex items-center gap-2 text-base font-bold uppercase tracking-wider text-amber-700">
-                                    <span className="h-2.5 w-2.5 animate-pulse rounded-full bg-amber-500" />
-                                    {imminent ? 'You are next — please come to the door' : 'You are next — please be ready'}
-                                  </span>
-                                )}
-                              </span>
-                              <span className={`shrink-0 rounded-full px-4 py-1.5 text-sm font-bold uppercase tracking-wider ring-1 ${
-                                p.visitType === 'follow_up'
-                                  ? 'bg-emerald-50 text-emerald-700 ring-emerald-200'
-                                  : 'bg-sky-50 text-sky-700 ring-sky-200'
-                              }`}>
-                                {p.visitType === 'follow_up' ? 'Follow-up' : 'New'}
-                              </span>
-                              <span className={`hidden shrink-0 font-mono text-lg xl:block ${TEXT_MUTED}`}>{maskUhid(p.uhid)}</span>
-                            </li>
-                          )
-                        })}
-                      </ul>
-                    )}
-                  </div>
-                ))}
-              </div>
-            )}
-          </section>
-        </div>
+        {/* One lane per doctor — never combined. Each carries that doctor's own
+            NOW SERVING, their own UP NEXT, and (in staff mode) their own
+            controls, which only ever touch their own patients. */}
+        {lanes.length === 0 ? (
+          <div className={`flex flex-1 flex-col items-center justify-center rounded-2xl border-2 border-dashed border-slate-300 bg-white p-12 text-center ${TEXT_MUTED}`}>
+            <DoorOpen className="mx-auto mb-4 h-12 w-12 text-slate-300" />
+            <div className="text-2xl font-semibold">{a.onBreak ? emptyRoomLabel(data.nextSession) : 'No one waiting'}</div>
+          </div>
+        ) : (
+          <div className="min-h-0 flex-1 space-y-5 overflow-y-auto pr-1">
+            {lanes.map((g) => (
+              <DoctorLane
+                key={g.doctorId || 'unassigned'}
+                g={g}
+                showControls={doctorMode}
+                busy={busy}
+                onCall={() => callInNext(g.doctorId)}
+                onAlert={() => g.patients[0] && alertNext(g.patients[0].queueEntryId)}
+              />
+            ))}
+          </div>
+        )}
       </div>
     </Board>
   )

@@ -121,22 +121,54 @@ export async function getRoomQueue(req, res, next) {
 
     const roomDTO = toRoomDTO(room)
 
-    const entries = await db.queueManagement.findMany({
-      where: { organizationId: ORG_ID, roomId, status: { in: [...WAITING_STATUSES, 'in_progress'] }, joinedQueueAt: todayRange() },
-      include: {
-        patient: { select: { ...PATIENT_NAME_SELECT, mrn: true } },
-        followUpDoctor: { select: DOCTOR_SELECT },
-        // The appointment's own doctor — this is who the patient actually
-        // came to see, and so who they must be listed under.
-        assignedTo: { select: DOCTOR_SELECT },
-      },
-      // createdAt as the final tiebreak so tied (priorityRank, joinedQueueAt)
-      // rows keep a stable order — the public board must not reshuffle the same
-      // patients between 3-second polls. Matches queueController's ORDER BY.
-      orderBy: [{ priorityRank: 'desc' }, { joinedQueueAt: 'asc' }, { createdAt: 'asc' }],
-    })
+    // A wall board must never fetch the whole queue. A busy clinic runs to
+    // hundreds of patients per doctor a day; fetching them all — with each
+    // one's patient + two doctor relations — measured at 4.3s and a 2.3 MB
+    // payload PER 3-second poll, longer than the poll interval itself. And
+    // nobody in the room reads past the next handful of names anyway.
+    //
+    // So: exact counts come from a cheap grouped count, and only the first
+    // FETCH_LIMIT rows are hydrated for display. FETCH_LIMIT is generous enough
+    // that, across the two or three doctors who might share a room, each one's
+    // next several patients are present (rows interleave by appointment time),
+    // while the per-doctor list the UI renders is capped much lower.
+    const FETCH_LIMIT = 120
+    const baseWhere = { organizationId: ORG_ID, roomId, status: { in: [...WAITING_STATUSES, 'in_progress'] }, joinedQueueAt: todayRange() }
 
-    const inProgressEntry = entries.find((e) => e.status === 'in_progress') || null
+    const [entries, waitingTotal] = await Promise.all([
+      db.queueManagement.findMany({
+        where: baseWhere,
+        take: FETCH_LIMIT,
+        include: {
+          patient: { select: { ...PATIENT_NAME_SELECT, mrn: true } },
+          followUpDoctor: { select: DOCTOR_SELECT },
+          // The appointment's own doctor — this is who the patient actually
+          // came to see, and so who they must be listed under.
+          assignedTo: { select: DOCTOR_SELECT },
+        },
+        // createdAt as the final tiebreak so tied (priorityRank, joinedQueueAt)
+        // rows keep a stable order — the public board must not reshuffle the same
+        // patients between 3-second polls. Matches queueController's ORDER BY.
+        orderBy: [{ priorityRank: 'desc' }, { joinedQueueAt: 'asc' }, { createdAt: 'asc' }],
+      }),
+      // Exact "N waiting" per booked doctor, over the WHOLE queue, not just the
+      // hydrated slice. COALESCE(followUp, assigned) mirrors bookedDoctorId; a
+      // true walk-in (both null) counts under the active doctor, added below.
+      db.$queryRaw`
+        SELECT COALESCE("followUpDoctorId", "assignedToId") AS doctor_id, COUNT(*)::int AS n
+        FROM "QueueManagement"
+        WHERE "organizationId" = ${ORG_ID} AND "roomId" = ${roomId}
+          AND status IN ('waiting', 'called')
+          AND "joinedQueueAt" >= ${todayRange().gte} AND "joinedQueueAt" <= ${todayRange().lte}
+        GROUP BY 1`,
+    ])
+    const waitingCountByDoctor = new Map(waitingTotal.map((r) => [r.doctor_id, r.n]))
+
+    // Two or three doctors can consult in one room at once, so "who is being
+    // seen" is a LIST, not a single patient — grouped per doctor below. The
+    // first is still exposed as `inProgress` for the wall board's hero panel.
+    const inProgressEntries = entries.filter((e) => e.status === 'in_progress')
+    const inProgressEntry = inProgressEntries[0] || null
     const waitingEntries = entries.filter((e) => e.status !== 'in_progress')
 
     const toPatientDTO = (e) => ({
@@ -167,18 +199,37 @@ export async function getRoomQueue(req, res, next) {
     const todayShiftFor = (docId) => roomDTO.schedule.find((s) => s.doctorId === docId && s.dayName === todayName)
 
     const activeId = roomDTO.activeDoctor.doctorId
-    const byDoctor = groupWaitingByDoctor(waitingEntries, {
-      activeDoctorId: activeId,
-      hasShiftToday: (docId) => Boolean(todayShiftFor(docId)),
-    })
-    const waitingGroups = Array.from(byDoctor.entries()).map(([doctorId, entries]) => {
+    const hasShiftToday = (docId) => Boolean(todayShiftFor(docId))
+    const byDoctor = groupWaitingByDoctor(waitingEntries, { activeDoctorId: activeId, hasShiftToday })
+
+    // The in-progress patients grouped the SAME way, so each doctor's console
+    // shows the patient THAT doctor is currently seeing — not the room's first.
+    const inProgressByDoctor = new Map()
+    for (const e of inProgressEntries) {
+      const bookedWith = e.followUpDoctorId || e.assignedToId || null
+      const hereToday = bookedWith && (bookedWith === activeId || hasShiftToday(bookedWith))
+      const key = hereToday ? bookedWith : (activeId || 'unassigned')
+      inProgressByDoctor.set(key, e) // one consult per doctor at a time
+    }
+
+    // A doctor may have someone in progress but nobody waiting, so the groups
+    // are keyed by the union of both maps — otherwise their console vanishes
+    // the moment their queue empties, mid-consultation.
+    const groupIds = new Set([...byDoctor.keys(), ...inProgressByDoctor.keys()])
+    const waitingGroups = Array.from(groupIds).map((doctorId) => {
+      const entries = byDoctor.get(doctorId) || []
       const patients = entries.map(toPatientDTO)
       const link = roomDTO.doctorLinks.find((l) => l.doctorId === doctorId)
+      const inProgEntry = inProgressByDoctor.get(doctorId) || null
       const todayShift = todayShiftFor(doctorId)
       return {
         doctorId,
-        doctorName: link?.doctorName || patients[0]?.followUpDoctorName || patients[0]?.assignedToName || 'Unassigned',
+        doctorName: link?.doctorName || patients[0]?.followUpDoctorName || patients[0]?.assignedToName
+          || (inProgEntry ? (inProgEntry.followUpDoctor?.fullName || inProgEntry.assignedTo?.fullName) : null) || 'Unassigned',
         active: doctorId === activeId,
+        // This doctor's current consultation (or null) — powers their console's
+        // "finish & call next" and the per-doctor NOW SERVING card.
+        inProgress: inProgEntry ? { ...toPatientDTO(inProgEntry), prescriptionUploaded: !!inProgEntry.prescriptionUploadedAt } : null,
         // The raw "HH:mm" shift start, NOT a finished sentence. This used to be
         // pre-formatted here as `today from ${start}`, which shipped a 24-hour
         // time ("today from 14:00") straight onto a board where every other
@@ -189,7 +240,14 @@ export async function getRoomQueue(req, res, next) {
         // at the point of display (lib/format.js#formatTime12h). Only ever
         // TODAY's shift — never another weekday.
         shiftStart: doctorId === activeId ? null : (todayShift?.start ?? null),
-        patients,
+        // The TRUE number waiting for this doctor (whole queue), not the length
+        // of the hydrated slice. Walk-ins (COALESCE key null) fold into the
+        // active doctor, matching how they're grouped for display.
+        waitingCount: (waitingCountByDoctor.get(doctorId) || 0)
+          + (doctorId === activeId ? (waitingCountByDoctor.get(null) || 0) : 0),
+        // Only the first several are shipped — the wall shows the next few, not
+        // patient #347. The count above is the real total.
+        patients: patients.slice(0, 12),
       }
     }).sort((a, b) => (a.active === b.active ? 0 : a.active ? -1 : 1))
 
@@ -201,6 +259,9 @@ export async function getRoomQueue(req, res, next) {
         // Lets the room screen say WHEN, instead of the old catch-all "On break".
         nextSession: roomDTO.nextSession,
         inProgress,
+        // Every current consultation in the room (one per doctor). The wall
+        // board shows all of them; a single-doctor room just has one.
+        inProgressList: inProgressEntries.map((e) => ({ ...toPatientDTO(e), prescriptionUploaded: !!e.prescriptionUploadedAt })),
         waitingGroups,
       },
     })
