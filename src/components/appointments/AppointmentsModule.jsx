@@ -20,9 +20,10 @@ import client from "@/api/client";
 import { drName } from "@/lib/utils";
 import { appointmentSchema, editAppointmentSchema } from "./appointmentSchema";
 import { printAppointmentCard } from "./appointmentPrint";
-import { APPOINTMENTS_LIST_PER_PAGE, APPOINTMENT_STATUSES } from "./appointmentConstants";
+import { APPOINTMENTS_LIST_PER_PAGE, APPOINTMENT_STATUSES, WEEKLY_DAY_PAGE_SIZE } from "./appointmentConstants";
 import { useAppointments } from "./useAppointments";
 import { parseDate, getPatientFullName, byTime } from "./appointmentHelpers";
+import { getFullName } from "@/lib/patient";
 import CancelAppointmentDialog from "./CancelAppointmentDialog";
 import RescheduleAppointmentDialog from "./RescheduleAppointmentDialog";
 import AppointmentFormDialog from "./AppointmentFormDialog";
@@ -32,6 +33,7 @@ import MonthlyView from "./MonthlyView";
 import TodayView from "./TodayView";
 import AppointmentsListView from "./AppointmentsListView";
 import StatisticsCards from "./StatisticsCards";
+import { formatTime12h } from "@/lib/format";
 
 export default function AppointmentsModule() {
   const [activeTab, setActiveTab] = useState("calendar");
@@ -380,7 +382,7 @@ export default function AppointmentsModule() {
           days.map((date) =>
             fetchAppointmentsPage({
               page: 1,
-              pageSize: APPOINTMENTS_LIST_PER_PAGE,
+              pageSize: WEEKLY_DAY_PAGE_SIZE,
               date,
             }),
           ),
@@ -402,6 +404,37 @@ export default function AppointmentsModule() {
       cancelled = true;
     };
   }, [activeTab, dates.currentWeek, fetchAppointmentsPage, mutationCount, refreshCount]);
+
+  // "+N more" in the Weekly view fetches the NEXT chunk for that one day and
+  // appends it — a real server round-trip (limit/offset), not a client-side
+  // reveal. loadedCount is always a multiple of WEEKLY_DAY_PAGE_SIZE (every
+  // chunk, initial or appended, uses the same size), so it maps to the next
+  // page number exactly.
+  const [loadingMoreDay, setLoadingMoreDay] = useState(null);
+  const loadMoreWeekDay = useCallback(
+    async (date) => {
+      setLoadingMoreDay(date);
+      try {
+        const loadedCount = weekData[date]?.rows.length ?? 0;
+        const nextPage = Math.floor(loadedCount / WEEKLY_DAY_PAGE_SIZE) + 1;
+        const { rows, total } = await fetchAppointmentsPage({
+          page: nextPage,
+          pageSize: WEEKLY_DAY_PAGE_SIZE,
+          date,
+        });
+        setWeekData((prev) => ({
+          ...prev,
+          [date]: { rows: [...(prev[date]?.rows ?? []), ...rows], total },
+        }));
+      } catch (err) {
+        console.error("Failed to load more appointments for", date, err);
+        toast.error("Failed to load more appointments");
+      } finally {
+        setLoadingMoreDay(null);
+      }
+    },
+    [weekData, fetchAppointmentsPage],
+  );
 
   // Today's appointments split by lifecycle stage and sorted by time. Computed
   // once here so the "Today" tab's empty-check and its list render share one
@@ -699,14 +732,14 @@ export default function AppointmentsModule() {
       const patient = appointment.patient || getPatient(appointment.patientId);
       const phone = patient?.phonePrimary?.replace(/[^0-9]/g, "") || "";
       const patientName = patient
-        ? `${patient.firstName} ${patient.lastName}`.trim()
+        ? getFullName(patient)
         : "Patient";
       const aptDate = appointment.appointmentDate
         ? format(new Date(appointment.appointmentDate), "dd MMM yyyy")
         : "";
       const doctorName =
         appointment.doctor?.fullName || getDoctor(appointment.doctorId)?.fullName || "Doctor";
-      const message = `Dear ${patientName}, your appointment with ${drName(doctorName)} is confirmed on ${aptDate} at ${appointment.appointmentTime}. Please arrive 10 minutes early. ${orgInfo.name}.`;
+      const message = `Dear ${patientName}, your appointment with ${drName(doctorName)} is confirmed on ${aptDate} at ${formatTime12h(appointment.appointmentTime)}. Please arrive 10 minutes early. ${orgInfo.name}.`;
       if (phone)
         window.open(
           `https://wa.me/91${phone}?text=${encodeURIComponent(message)}`,
@@ -764,7 +797,7 @@ export default function AppointmentsModule() {
     return (
       <div className="flex items-center justify-center min-h-[400px]">
         <div className="text-center">
-          <Loader2 className="h-12 w-12 animate-spin text-blue-600 mx-auto mb-4" />
+          <Loader2 className="h-12 w-12 animate-spin text-[#2E4168] mx-auto mb-4" />
           <p className="text-gray-500">Loading appointments...</p>
         </div>
       </div>
@@ -865,6 +898,8 @@ export default function AppointmentsModule() {
             currentWeek={dates.currentWeek}
             setCurrentWeek={(week) => setDatesField("currentWeek", week)}
             weekData={weekData}
+            onLoadMoreDay={loadMoreWeekDay}
+            loadingMoreDay={loadingMoreDay}
             getPatient={getPatient}
           />
         </TabsContent>

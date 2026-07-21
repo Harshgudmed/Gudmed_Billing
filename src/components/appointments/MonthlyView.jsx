@@ -5,8 +5,8 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { drName } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   CalendarDays,
   Plus,
@@ -21,6 +21,7 @@ import {
   APPOINTMENTS_LIST_PER_PAGE,
 } from "./appointmentConstants";
 import { StatusBadge, TypeBadge } from "./AppointmentBadges";
+import { formatTime12h } from "@/lib/format";
 
 const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const STATUS_DOT_CLASS = {
@@ -52,9 +53,20 @@ export default function MonthlyView({
   const totalPages = Math.ceil(selectedDayTotal / APPOINTMENTS_LIST_PER_PAGE);
 
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-      <Card className="lg:col-span-2">
-        <CardHeader>
+    // Both cards share ONE bounded height so they align top-to-bottom, and that
+    // height is capped to what's actually left below the fixed header/stats/tabs
+    // — otherwise the taller "Today" panel pushed total page height past the
+    // viewport, adding a whole-PAGE scrollbar that fought with the panel's own
+    // Previous/Next pagination for "how do I see more" (two answers, one screen).
+    // `lg:grid-rows-[minmax(0,1fr)]` matters as much as the height: a plain grid
+    // row defaults to 'auto' sizing, which grows to fit content and IGNORES the
+    // container's explicit height — so the fixed height above alone still let
+    // the calendar's content push both boxes past it. minmax(0, 1fr) lets the
+    // row actually shrink to the assigned height, so overflow inside each Card
+    // scrolls (invisibly) instead of the whole page growing taller.
+    <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 lg:h-[calc(100vh-266px)] lg:grid-rows-[minmax(0,1fr)]">
+      <Card className="lg:col-span-2 flex flex-col min-h-0">
+        <CardHeader className="py-4">
           <div className="flex items-center justify-between">
             <CardTitle>{format(currentMonth, "MMMM yyyy")}</CardTitle>
             <div className="flex gap-2">
@@ -78,12 +90,12 @@ export default function MonthlyView({
             </div>
           </div>
         </CardHeader>
-        <CardContent>
+        <CardContent className="flex-1 min-h-0 overflow-y-auto no-scrollbar">
           <div className="grid grid-cols-7 gap-1 mb-2">
             {WEEKDAYS.map((day) => (
               <div
                 key={day}
-                className="text-center text-sm font-medium text-gray-500 py-2"
+                className="text-center text-sm font-medium text-gray-500 py-1"
               >
                 {day}
               </div>
@@ -143,8 +155,10 @@ export default function MonthlyView({
         </CardContent>
       </Card>
 
-      {/* Selected day details */}
-      <Card className="flex flex-col">
+      {/* Same shared grid height as the calendar (set on the parent grid) — this
+          card no longer sets its own max-height, so the two columns' bottoms
+          line up instead of the panel running on past the calendar. */}
+      <Card className="flex flex-col min-h-0">
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <CalendarDays className="h-5 w-5" />
@@ -155,7 +169,12 @@ export default function MonthlyView({
           </CardDescription>
         </CardHeader>
         <CardContent className="flex-1 flex flex-col min-h-0">
-          <ScrollArea className="flex-1 min-h-[400px] pr-4">
+          {/* Plain scrollable div, not the Radix ScrollArea used elsewhere — hidden
+              scrollbar (no-scrollbar): Previous/Next below is the one visible way
+              to see more, so a visible scroll affordance here would be a second,
+              confusing answer to "how do I see the rest". Content still scrolls
+              via wheel/touch if a page's 15 cards don't quite fit the box. */}
+          <div className="flex-1 min-h-0 overflow-y-auto no-scrollbar pr-4">
             {selectedDayLoading ? (
               <div className="flex min-h-[240px] items-center justify-center text-gray-500">
                 <Loader2 className="mr-2 h-5 w-5 animate-spin" />
@@ -185,7 +204,7 @@ export default function MonthlyView({
                         <div className="flex items-start justify-between">
                           <div className="flex items-center gap-2">
                             <span className="font-mono text-sm font-medium">
-                              {appointment.appointmentTime}
+                              {formatTime12h(appointment.appointmentTime)}
                             </span>
                           </div>
                           <StatusBadge status={appointment.status} />
@@ -194,7 +213,7 @@ export default function MonthlyView({
                           {getPatientFullName(patient || null)}
                         </div>
                         <div className="text-xs text-gray-500">
-                          {patient?.mrn} • {doctor?.fullName}
+                          {patient?.mrn} • {doctor?.fullName ? drName(doctor.fullName) : "—"}
                         </div>
                         <div className="mt-2 text-sm text-gray-600">
                           {appointment.chiefComplaint}
@@ -205,7 +224,7 @@ export default function MonthlyView({
                   })}
               </div>
             )}
-          </ScrollArea>
+          </div>
           {totalPages > 1 && (
             <div className="mt-4 flex items-center justify-end gap-2 border-t pt-3">
               <Button

@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { getWardName, emptyWard } from '@/lib/inpatientHelpers'
+import { getFullName } from "@/lib/patient";
 
 // Dashboard tab — stat cards, ward overview, current inpatients table.
 // "Add Ward" opens the shared ward dialog owned by InpatientModule.
@@ -72,7 +73,7 @@ export default function DashboardTab({
                   <p className="text-sm font-medium text-gray-600 mb-2">Today's Admissions</p>
                   <p className="text-3xl font-bold text-orange-500">{currentAdmitted.length}</p>
                   {currentAdmitted.slice(0, 2).map(a => (
-                    <p key={a.id} className="text-xs text-orange-600 mt-1">{a.patient?.firstName} {a.patient?.lastName} · {a.bed?.ward?.name || '—'}{a.attendingDoctorName ? ` · ${drName(a.attendingDoctorName)}` : ''}</p>
+                    <p key={a.id} className="text-xs text-orange-600 mt-1">{getFullName(a.patient)} · {a.bed?.ward?.name || '—'}{a.attendingDoctorName ? ` · ${drName(a.attendingDoctorName)}` : ''}</p>
                   ))}
                 </CardContent>
               </Card>
@@ -81,7 +82,7 @@ export default function DashboardTab({
                   <p className="text-sm font-medium text-gray-600 mb-2">Pending Discharges</p>
                   <p className="text-3xl font-bold text-blue-500">{currentAdmitted.length}</p>
                   {currentAdmitted.slice(0, 1).map(a => (
-                    <p key={a.id} className="text-xs text-blue-600 mt-1">{a.patient?.firstName} {a.patient?.lastName} · TBD</p>
+                    <p key={a.id} className="text-xs text-blue-600 mt-1">{getFullName(a.patient)} · TBD</p>
                   ))}
                 </CardContent>
               </Card>
@@ -160,7 +161,7 @@ export default function DashboardTab({
                                 {(a.patient?.firstName?.[0] || '') + (a.patient?.lastName?.[0] || '')}
                               </div>
                               <div>
-                                <div className="font-medium text-sm">{a.patient?.firstName} {a.patient?.lastName}</div>
+                                <div className="font-medium text-sm">{getFullName(a.patient)}</div>
                                 <div className="text-xs text-gray-500">{a.patient?.mrn}</div>
                               </div>
                             </div>

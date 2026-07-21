@@ -14,6 +14,10 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
  *  - value: currently selected value
  *  - onChange: (value) => void
  *  - placeholder, searchPlaceholder, emptyText, className, disabled
+ *  - contentClassName: extra classes for the dropdown panel. By default the
+ *    dropdown matches the trigger width; pass e.g. `w-[380px]` here when the
+ *    trigger is compact but the options are long (room pickers, etc.) so the
+ *    labels aren't truncated to "Room ..." / "1st Floo...".
  */
 export function SearchableSelect({
   options = [],
@@ -23,6 +27,7 @@ export function SearchableSelect({
   searchPlaceholder = 'Type to search...',
   emptyText = 'No results found',
   className,
+  contentClassName,
   disabled,
 }) {
   const [open, setOpen] = useState(false)
@@ -55,7 +60,7 @@ export function SearchableSelect({
           <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
         </Button>
       </PopoverTrigger>
-      <PopoverContent className="w-[--radix-popover-trigger-width] p-0" align="start">
+      <PopoverContent className={cn('w-[--radix-popover-trigger-width] max-w-[92vw] p-0', contentClassName)} align="start">
         <div className="flex items-center border-b px-3">
           <Search className="h-4 w-4 shrink-0 text-gray-400" />
           <Input

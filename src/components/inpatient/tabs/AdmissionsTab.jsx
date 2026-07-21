@@ -8,6 +8,7 @@ import { Badge } from '@/components/ui/badge'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { admissionLabel, getWardName, emptyDischarge } from '@/lib/inpatientHelpers'
+import { getFullName } from "@/lib/patient";
 
 // Admissions tab — searchable/filterable table of admissions (paginated server-side).
 // Discharge action opens the shared dialog owned by InpatientModule.
@@ -60,7 +61,7 @@ export default function AdmissionsTab({
                   </TableHeader>
                   <TableBody>
                     {loading ? (
-                      <TableRow><TableCell colSpan={10} className="text-center py-10"><Loader2 className="h-6 w-6 animate-spin text-gray-400 mx-auto" /></TableCell></TableRow>
+                      <TableRow><TableCell colSpan={10} className="text-center py-10"><Loader2 className="h-6 w-6 animate-spin text-[#2E4168] mx-auto" /></TableCell></TableRow>
                     ) : admissions.length === 0 ? (
                       <TableRow><TableCell colSpan={10} className="text-center py-8 text-gray-400">No admissions found</TableCell></TableRow>
                     ) : admissions.map(a => {
@@ -76,7 +77,7 @@ export default function AdmissionsTab({
                                 {(a.patient?.firstName?.[0] || '') + (a.patient?.lastName?.[0] || '')}
                               </div>
                               <div>
-                                <div className="font-medium text-sm">{a.patient?.firstName} {a.patient?.lastName}</div>
+                                <div className="font-medium text-sm">{getFullName(a.patient)}</div>
                                 <div className="text-xs text-gray-500">{a.patient?.mrn} · {a.patient?.dateOfBirth ? differenceInDays(new Date(), new Date(a.patient.dateOfBirth)) > 365 ? Math.floor(differenceInDays(new Date(), new Date(a.patient.dateOfBirth)) / 365) + 'y' : '' : ''} {a.patient?.gender}</div>
                               </div>
                             </div>

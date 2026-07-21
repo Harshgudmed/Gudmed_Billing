@@ -6,10 +6,13 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { format } from "date-fns";
 import { Plus, Loader2 } from "lucide-react";
+import { drName } from "@/lib/utils";
 import PatientLookup from "@/components/common/PatientLookup";
 import { SearchableSelect } from "@/components/ui/searchable-select";
-import { TIME_SLOTS, STATUS_CONFIG } from "./appointmentConstants";
+import { STATUS_CONFIG } from "./appointmentConstants";
 import { getPatientFullName } from "./appointmentHelpers";
+import { useDoctorTimetable } from "@/components/common/hooks/useDoctorTimetable";
+import { formatTime12h } from "@/lib/format";
 
 export default function AppointmentFormDialog({
   open,
@@ -26,10 +29,26 @@ export default function AppointmentFormDialog({
   doctors,                     
   feeCalculation,              
   feeCalculationLoading,       
-  isSubmitting,                
-  onCancel,                    
-  getPatient,                  
+  isSubmitting,
+  onCancel,
+  getPatient,
 }) {
+  // Bookable times come from the DOCTOR'S timetable (Doctor Accountability), not a
+  // fixed list — the same source RegisterPatientForm books against. The old static
+  // TIME_SLOTS both offered hours a doctor may not sit, and omitted ones they do
+  // (it skipped 12:00-13:45 and 17:00, so those existing appointments opened with
+  // an empty Time field).
+  const doctorId = form.watch("doctorId");
+  const appointmentDate = form.watch("appointmentDate");
+  const currentTime = form.watch("appointmentTime");
+  const { availableTimeSlots, timetableLoading } = useDoctorTimetable(doctorId, appointmentDate);
+
+  // Keep the appointment's own time selectable even when it falls outside the
+  // doctor's current timetable, so editing an old appointment never blanks the field.
+  const timeOptions = currentTime && !availableTimeSlots.includes(currentTime)
+    ? [currentTime, ...availableTimeSlots]
+    : availableTimeSlots;
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       {!isEdit && (
@@ -114,8 +133,8 @@ export default function AppointmentFormDialog({
                     <SearchableSelect
                       className="w-full"
                       options={isEdit 
-                        ? (doctors || []).map(d => ({ value: d.id, label: `${d.fullName} - ${d.specialization}` }))
-                        : (availableDoctors || []).map(d => ({ value: d.id, label: `${d.fullName}${d.consultationFee != null ? ` (₹${d.consultationFee})` : ""}`, sublabel: d.specialization }))
+                        ? (doctors || []).map(d => ({ value: d.id, label: `${drName(d.fullName)} - ${d.specialization}` }))
+                        : (availableDoctors || []).map(d => ({ value: d.id, label: `${drName(d.fullName)}${d.consultationFee != null ? ` (₹${d.consultationFee})` : ""}`, sublabel: d.specialization }))
                       }
                       value={field.value}
                       onChange={(val) => {
@@ -202,10 +221,24 @@ export default function AppointmentFormDialog({
                 render={({ field }) => (
                   <FormItem>
                     <FormLabel>Time *</FormLabel>
-                    <Select onValueChange={field.onChange} value={field.value}>
-                      <FormControl><SelectTrigger><SelectValue placeholder="Select time" /></SelectTrigger></FormControl>
+                    <Select
+                      onValueChange={field.onChange}
+                      value={field.value}
+                      disabled={!doctorId || !appointmentDate || timetableLoading}
+                    >
+                      <FormControl>
+                        <SelectTrigger>
+                          <SelectValue placeholder={
+                            !doctorId ? "Select a doctor first"
+                              : !appointmentDate ? "Select a date first"
+                              : timetableLoading ? "Loading slots…"
+                              : timeOptions.length === 0 ? "Doctor not available this day"
+                              : "Select time"
+                          } />
+                        </SelectTrigger>
+                      </FormControl>
                       <SelectContent>
-                        {TIME_SLOTS.map(t => <SelectItem key={t} value={t}>{t}</SelectItem>)}
+                        {timeOptions.map(t => <SelectItem key={t} value={t}>{formatTime12h(t)}</SelectItem>)}
                       </SelectContent>
                     </Select>
                     <FormMessage />

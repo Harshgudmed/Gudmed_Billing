@@ -27,7 +27,7 @@ export default function PatientKycPage() {
   }, [fetchData])
 
   if (loading) {
-    return <div className="min-h-screen flex items-center justify-center bg-gray-50"><Loader2 className="h-6 w-6 animate-spin text-gray-400" /></div>
+    return <div className="min-h-screen flex items-center justify-center bg-gray-50"><Loader2 className="h-6 w-6 animate-spin text-[#2E4168]" /></div>
   }
 
   const primary = data?.branding?.primaryColor || '#2563eb'

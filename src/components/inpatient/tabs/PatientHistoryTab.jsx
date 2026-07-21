@@ -4,6 +4,7 @@ import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { admissionLabel, getWardName } from '@/lib/inpatientHelpers'
+import { getFullName } from "@/lib/patient";
 
 // Patient Discharge History tab — paginated cards of past (discharged) admissions.
 export default function PatientHistoryTab({
@@ -39,7 +40,7 @@ export default function PatientHistoryTab({
                               <div className="flex items-center gap-3">
                                 <div className="h-9 w-9 rounded-full bg-gray-200 flex items-center justify-center text-sm font-bold text-gray-700">{initials}</div>
                                 <div>
-                                  <div className="font-semibold text-sm">{a.patient?.firstName} {a.patient?.lastName}</div>
+                                  <div className="font-semibold text-sm">{getFullName(a.patient)}</div>
                                   <div className="text-xs text-gray-500">{a.patient?.mrn} · {a.patient?.dateOfBirth ? Math.floor(differenceInDays(new Date(), new Date(a.patient.dateOfBirth)) / 365) + 'y' : ''}, {a.patient?.gender}</div>
                                 </div>
                               </div>

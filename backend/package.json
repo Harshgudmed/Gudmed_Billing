@@ -5,20 +5,23 @@
   "main": "server.js",
   "type": "module",
   "scripts": {
-    "start": "node server.js",
+    "start": "prisma migrate deploy && node server.js",
     "dev": "nodemon server.js",
-    "postinstall": "prisma generate",
+    "postinstall": "prisma generate && node scripts/heal-migrations.mjs",
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",
     "db:push": "prisma db push",
     "db:studio": "prisma studio",
     "db:erd": "node prisma/generate-erd.mjs",
     "test:integration": "node --test --test-force-exit src/integration/__tests__/hl7Parser.test.js src/integration/__tests__/listener.test.js",
+    "test:unit": "node --test --test-force-exit src/lib/__tests__/*.test.js",
     "hl7:simulate": "node scripts/hl7-simulator.js",
-    "hl7:inject": "node scripts/hl7-inject.js"
+    "hl7:inject": "node scripts/hl7-inject.js",
+    "check:drift": "node scripts/check-drift.mjs"
   },
   "dependencies": {
     "@prisma/client": "^6.11.1",
+    "prisma": "^6.11.1",
     "axios": "^1.16.1",
     "bcryptjs": "^2.4.3",
     "cookie-parser": "^1.4.7",
@@ -36,7 +39,6 @@
   },
   "devDependencies": {
     "nodemon": "^3.1.9",
-    "prisma": "^6.11.1",
     "prisma-erd-generator": "^2.4.3"
   },
   "prisma": {

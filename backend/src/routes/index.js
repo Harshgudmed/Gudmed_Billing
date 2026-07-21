@@ -19,7 +19,9 @@ import paymentRoutes from './paymentRoutes.js'
 import { handleWebhook } from '../controllers/paymentController.js'
 import importRoutes from './importRoutes.js'
 import preTriageRoutes from './preTriageRoutes.js'
-import triageRoutes from './triageRoutes.js'
+import queueRoutes from './queueRoutes.js'
+import roomRoutes from './roomRoutes.js'
+import displayRoutes from './displayRoutes.js'
 import dayCareRoutes from './dayCareRoutes.js'
 import ambulanceRoutes from './ambulanceRoutes.js'
 import insuranceRoutes from './insuranceRoutes.js'
@@ -70,7 +72,9 @@ router.use('/fee-slabs',             authorize(), feeSlabRoutes)
 router.use('/notifications',         authorize(), notificationRoutes)
 router.use('/payments',              authorize(), paymentRoutes)
 router.use('/pre-triage',            authorize(), preTriageRoutes)
-router.use('/triage',                authorize(), triageRoutes)
+router.use('/queue',                 authorize(), queueRoutes)
+router.use('/rooms',                 authorize(), roomRoutes)
+router.use('/display',               authorize(), displayRoutes)
 router.use('/day-care',              authorize(), dayCareRoutes)
 router.use('/ambulance',             authorize(), ambulanceRoutes)
 router.use('/insurance',             authorize(), insuranceRoutes)

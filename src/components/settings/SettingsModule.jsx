@@ -1,83 +1,35 @@
-import { useState, useEffect } from "react";
-import { clearOrgCache } from "@/lib/orgSettings";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { PasswordInput } from "@/components/ui/password-input";
+import { useState, useEffect } from 'react'
+import { clearOrgCache } from '@/lib/orgSettings'
+import { drName } from '@/lib/utils'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { PasswordInput } from '@/components/ui/password-input'
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { Badge } from '@/components/ui/badge'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import {
-  Settings,
-  Building2,
-  Users,
-  Package,
-  Link2,
-  Database,
-  Save,
-  Plus,
-  Edit,
-  Eye,
-  CheckCircle,
-  XCircle,
-  AlertCircle,
-  RefreshCw,
-  Loader2,
-  Clock,
-  Palette,
-  MessageCircle,
-  Bell,
-} from "lucide-react";
-import { Label } from "@/components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import { Textarea } from "@/components/ui/textarea";
-import { Separator } from "@/components/ui/separator";
-import { Switch } from "@/components/ui/switch";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-  DialogFooter,
-} from "@/components/ui/dialog";
-import { toast } from "sonner";
-import { z } from "zod";
-import { useForm } from "react-hook-form";
-import { zodResolver } from "@hookform/resolvers/zod";
-import {
-  Form,
-  FormControl,
-  FormField,
-  FormItem,
-  FormLabel,
-  FormMessage,
-} from "@/components/ui/form";
-import client from "@/api/client";
-import { useServerPagination } from "@/lib/useServerPagination";
-import { Pagination } from "@/components/common/Pagination";
-import IntegrationsHub from "./IntegrationsHub";
+  Settings, Building2, Users, Package, Link2, Database,
+  Save, Plus, Edit, Eye, CheckCircle, XCircle, AlertCircle, RefreshCw, Loader2, Clock, Palette,
+  MessageCircle, Bell, DoorOpen,
+} from 'lucide-react'
+import { Label } from '@/components/ui/label'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Textarea } from '@/components/ui/textarea'
+import { Separator } from '@/components/ui/separator'
+import { Switch } from '@/components/ui/switch'
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
+import { Avatar, AvatarFallback } from '@/components/ui/avatar'
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from '@/components/ui/dialog'
+import { toast } from 'sonner'
+import { z } from 'zod'
+import { useForm } from 'react-hook-form'
+import { zodResolver } from '@hookform/resolvers/zod'
+import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form'
+import client from '@/api/client'
+import { useServerPagination } from '@/lib/useServerPagination'
+import { Pagination } from '@/components/common/Pagination'
+import IntegrationsHub from './IntegrationsHub'
+import RoomsManager from './RoomsManager'
 
 const ORG_ID = "org-demo";
 const ITEMS_PER_PAGE = 10;
@@ -512,7 +464,7 @@ export default function SettingsModule() {
     return (
       <div className="flex items-center justify-center min-h-[400px]">
         <div className="text-center">
-          <Loader2 className="h-8 w-8 animate-spin mx-auto mb-4 text-gray-400" />
+          <Loader2 className="h-8 w-8 animate-spin mx-auto mb-4 text-[#2E4168]" />
           <p className="text-gray-500">Loading settings...</p>
         </div>
       </div>
@@ -554,24 +506,13 @@ export default function SettingsModule() {
       </div>
 
       <Tabs value={activeTab} onValueChange={setActiveTab}>
-        <TabsList className="grid w-full grid-cols-5">
-          <TabsTrigger value="organization">
-            <Building2 className="h-4 w-4 mr-2" />
-            Organization
-          </TabsTrigger>
-          <TabsTrigger value="users">
-            <Users className="h-4 w-4 mr-2" />
-            Users
-          </TabsTrigger>
-          <TabsTrigger value="modules">
-            <Package className="h-4 w-4 mr-2" />
-            Modules
-          </TabsTrigger>
-          <TabsTrigger value="integrations">
-            <Link2 className="h-4 w-4 mr-2" />
-            Integrations
-          </TabsTrigger>
-          {/* Notifications tab hidden — to show again: uncomment this trigger AND its <TabsContent>, then set grid-cols to 6 */}
+        <TabsList className="grid w-full grid-cols-6">
+          <TabsTrigger value="organization"><Building2 className="h-4 w-4 mr-2" />Organization</TabsTrigger>
+          <TabsTrigger value="users"><Users className="h-4 w-4 mr-2" />Users</TabsTrigger>
+          <TabsTrigger value="rooms"><DoorOpen className="h-4 w-4 mr-2" />Rooms</TabsTrigger>
+          <TabsTrigger value="modules"><Package className="h-4 w-4 mr-2" />Modules</TabsTrigger>
+          <TabsTrigger value="integrations"><Link2 className="h-4 w-4 mr-2" />Integrations</TabsTrigger>
+          {/* Notifications tab hidden — to show again: uncomment this trigger AND its <TabsContent>, then bump grid-cols by one */}
           {/* <TabsTrigger value="notifications"><MessageCircle className="h-4 w-4 mr-2" />Notifications</TabsTrigger> */}
           <TabsTrigger value="backup">
             <Database className="h-4 w-4 mr-2" />
@@ -1251,67 +1192,42 @@ export default function SettingsModule() {
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {usersPagination.rows.map((user) => (
-                        <TableRow key={user.id}>
-                          <TableCell>
-                            <div className="flex items-center gap-2">
-                              <Avatar className="h-8 w-8">
-                                <AvatarFallback>
-                                  {user.fullName
-                                    .split(" ")
-                                    .map((n) => n[0])
-                                    .join("")
-                                    .slice(0, 2)}
-                                </AvatarFallback>
-                              </Avatar>
-                              <div>
-                                <p className="font-medium">{user.fullName}</p>
-                                <p className="text-xs text-gray-500">
-                                  {user.email}
-                                </p>
+                      {usersPagination.rows.map(user => (
+                          <TableRow key={user.id}>
+                            <TableCell>
+                              <div className="flex items-center gap-2">
+                                <Avatar className="h-8 w-8">
+                                  <AvatarFallback>{user.fullName.split(' ').map(n => n[0]).join('').slice(0, 2)}</AvatarFallback>
+                                </Avatar>
+                                <div>
+                                  {/* Only doctors carry the title — a coordinator or
+                                      admin must not become "Dr.". drName() is
+                                      idempotent, so a name already stored as
+                                      "Dr. Aanya" doesn't become "Dr. Dr. Aanya". */}
+                                  <p className="font-medium">{user.role === 'doctor' ? drName(user.fullName) : user.fullName}</p>
+                                  <p className="text-xs text-gray-500">{user.email}</p>
+                                </div>
                               </div>
-                            </div>
-                          </TableCell>
-                          <TableCell>
-                            <Badge variant="outline">
-                              {ROLE_LABELS[user.role] || user.role}
-                            </Badge>
-                          </TableCell>
-                          <TableCell>{user.department?.name || "-"}</TableCell>
-                          <TableCell>
-                            <Badge
-                              variant={user.isActive ? "default" : "secondary"}
-                            >
-                              {user.isActive ? "active" : "inactive"}
-                            </Badge>
-                          </TableCell>
-                          <TableCell>
-                            <div className="flex gap-1">
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={() => {
-                                  setEditingUser(user);
-                                  setShowUserDialog(true);
-                                }}
-                              >
-                                <Edit className="h-4 w-4" />
-                              </Button>
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={() => handleToggleUserStatus(user)}
-                              >
-                                {user.isActive ? (
-                                  <XCircle className="h-4 w-4 text-red-500" />
-                                ) : (
-                                  <CheckCircle className="h-4 w-4 text-green-500" />
-                                )}
-                              </Button>
-                            </div>
-                          </TableCell>
-                        </TableRow>
-                      ))}
+                            </TableCell>
+                            <TableCell><Badge variant="outline">{ROLE_LABELS[user.role] || user.role}</Badge></TableCell>
+                            <TableCell>{user.department?.name || '-'}</TableCell>
+                            <TableCell>
+                              <Badge variant={user.isActive ? 'default' : 'secondary'}>
+                                {user.isActive ? 'active' : 'inactive'}
+                              </Badge>
+                            </TableCell>
+                            <TableCell>
+                              <div className="flex gap-1">
+                                <Button variant="ghost" size="sm" onClick={() => { setEditingUser(user); setShowUserDialog(true) }}>
+                                  <Edit className="h-4 w-4" />
+                                </Button>
+                                <Button variant="ghost" size="sm" onClick={() => handleToggleUserStatus(user)}>
+                                  {user.isActive ? <XCircle className="h-4 w-4 text-red-500" /> : <CheckCircle className="h-4 w-4 text-green-500" />}
+                                </Button>
+                              </div>
+                            </TableCell>
+                          </TableRow>
+                        ))}
                     </TableBody>
                   </Table>
                   <Pagination
@@ -1364,6 +1280,11 @@ export default function SettingsModule() {
               </div>
             </CardContent>
           </Card>
+        </TabsContent>
+
+        {/* Rooms Tab — Floors/Rooms, doctor linking, Doctor Sitting Type, schedules, overrides */}
+        <TabsContent value="rooms" className="space-y-4">
+          <RoomsManager />
         </TabsContent>
 
         {/* Integrations Tab — 4-card launcher; click a card to open its screen */}

@@ -1,67 +1,23 @@
-import { useState, useEffect, useCallback, useRef } from "react";
-import { useOrgSettings } from "@/lib/useOrgSettings";
-import { formatMoney as fmt } from "@/lib/format";
-import { calcAge } from "@/lib/patient";
-import { toast } from "sonner";
-import { format } from "date-fns";
-import client from "@/api/client";
-import PatientLookup from "@/components/common/PatientLookup";
-import RefundApprovalsTab from "./RefundApprovalsTab";
-import {
-  Receipt,
-  RefreshCw,
-  Plus,
-  Search,
-  Trash2,
-  Shield,
-  Eye,
-  Printer,
-  Download,
-  TrendingUp,
-  Clock,
-  AlertCircle,
-} from "lucide-react";
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-  CardDescription,
-} from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Badge } from "@/components/ui/badge";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogFooter,
-} from "@/components/ui/dialog";
-import { Label } from "@/components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import {
-  printInvoice,
-  printReceipt,
-  printLabReceipt,
-  printRadiologyReceipt,
-  printPharmacyReceipt,
-} from "./utils/printBilling";
+import { useState, useEffect, useCallback, useRef } from 'react'
+import { useOrgSettings } from '@/lib/useOrgSettings'
+import { formatMoney as fmt, formatDateTime } from '@/lib/format'
+import { calcAge, getFullName } from '@/lib/patient'
+import { toast } from 'sonner'
+import { format } from 'date-fns'
+import client from '@/api/client'
+import PatientLookup from '@/components/common/PatientLookup'
+import RefundApprovalsTab from './RefundApprovalsTab'
+import { Receipt, RefreshCw, Plus, Search, Trash2, Shield, Eye, Printer, Download, TrendingUp, Clock, AlertCircle } from 'lucide-react'
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Badge } from '@/components/ui/badge'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
+import { Label } from '@/components/ui/label'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { printInvoice, printReceipt, printLabReceipt, printRadiologyReceipt, printPharmacyReceipt } from './utils/printBilling'
 
 // ── Catalogue ─────────────────────────────────────────────────────────────────
 const CATALOGUE = {
@@ -379,23 +335,19 @@ export default function BillingModule({ onBack }) {
       if (res.success) {
         setTotalBills(res.meta?.total || 0);
         const mapped = res.data.map((inv) => {
-          let items = [];
-          try {
-            items =
-              typeof inv.items === "string"
-                ? JSON.parse(inv.items)
-                : inv.items || [];
-          } catch {
-            items = [];
-          }
-          const patName = inv.patient
-            ? `${inv.patient.firstName} ${inv.patient.lastName}`
-            : "Unknown";
-          // Normalise DB items ({serviceName,quantity,unitPrice}) to the print shape ({name,qty,amt}).
+          let items = []
+          try { items = typeof inv.items === 'string' ? JSON.parse(inv.items) : (inv.items || []) } catch { items = [] }
+          const patName = getFullName(inv.patient) || 'Unknown'
+          // Normalise DB items to the print shape ({name,qty,amt}). Invoice items
+          // are written in two shapes and BOTH must be read here:
+          //   {serviceName,quantity,unitPrice}                — billing/lab/radiology
+          //   {type,description,quantity,unitPrice,total,...} — appointment booking
+          // Missing `description` is why every appointment invoice printed its
+          // line as the literal fallback "Item".
           // gstRate/batchNumber/expiryDate ride along when present (Pharmacy
           // items only) so printPharmacyReceipt can show the real GST breakdown.
-          const normItems = (items || []).map((it) => ({
-            name: it.name || it.serviceName || "Item",
+          const normItems = (items || []).map(it => ({
+            name: it.name || it.serviceName || it.description || 'Item',
             qty: it.qty || it.quantity || 1,
             amt: it.amt ?? it.unitPrice ?? 0,
             sub: it.sub || "",
@@ -494,10 +446,7 @@ export default function BillingModule({ onBack }) {
           (c.claims || []).map((cl) => ({
             id: cl.id,
             claimNumber: cl.claimNumber,
-            patient:
-              [c.patient?.firstName, c.patient?.lastName]
-                .filter(Boolean)
-                .join(" ") || "—",
+            patient: getFullName(c.patient) || '—',
             insurer: c.insurerName,
             policy: c.policyNumber,
             amount: cl.claimAmount,
@@ -640,18 +589,15 @@ export default function BillingModule({ onBack }) {
   ]);
 
   function selectPatient(p) {
-    const age = calcAge(p.dateOfBirth);
-    setForm((f) => ({
-      ...f,
-      patientName: `${p.firstName} ${p.lastName}`,
-      patientId: p.id,
-      phone: p.phonePrimary,
-      age: String(age),
-      gender: p.gender === "male" ? "M" : p.gender === "female" ? "F" : "O",
+    const age = calcAge(p.dateOfBirth)
+    setForm(f => ({
+      ...f, patientName: getFullName(p), patientId: p.id,
+      phone: p.phonePrimary, age: String(age),
+      gender: p.gender === 'male' ? 'M' : p.gender === 'female' ? 'F' : 'O',
       uhid: p.mrn,
-    }));
-    setPatientSearch(`${p.firstName} ${p.lastName}`);
-    setPatientDropdown(false);
+    }))
+    setPatientSearch(getFullName(p))
+    setPatientDropdown(false)
   }
 
   // ── Cart helpers ───────────────────────────────────────────────────────────
@@ -2193,117 +2139,45 @@ export default function BillingModule({ onBack }) {
                               </TableRow>
                             </TableHeader>
                             <TableBody>
-                              {[...showInvoiceModal.payments]
-                                .sort(
-                                  (a, b) =>
-                                    new Date(
-                                      b.date || b.paymentDate || new Date(),
-                                    ) -
-                                    new Date(
-                                      a.date || a.paymentDate || new Date(),
-                                    ),
-                                )
-                                .map((p, i) => (
-                                  <TableRow key={i}>
-                                    <TableCell className="py-2 text-xs text-gray-500">
-                                      {p.date ||
-                                        p.paymentDate ||
-                                        showInvoiceModal.date}
-                                    </TableCell>
-                                    <TableCell className="py-2 text-xs font-mono">
-                                      {p.receiptNo ||
-                                        p.receiptNumber ||
-                                        `RCPT-${i + 1}`}
-                                    </TableCell>
-                                    <TableCell className="py-2 text-xs">
-                                      {p.method ||
-                                        p.paymentMethod ||
-                                        showInvoiceModal.payMode ||
-                                        "Cash"}
-                                      {p.isRefund && (
-                                        <Badge
-                                          variant="outline"
-                                          className="ml-2 text-[10px] text-red-600 bg-red-50 border-red-200"
-                                        >
-                                          Refund
-                                          {p.status && p.status !== "APPROVED"
-                                            ? ` (${p.status === "PENDING_APPROVAL" ? "Pending" : "Rejected"})`
-                                            : ""}
-                                        </Badge>
-                                      )}
-                                    </TableCell>
-                                    <TableCell className="py-2 text-xs text-right font-medium">
-                                      {fmt(p.amount)}
-                                    </TableCell>
-                                    <TableCell className="py-2 text-xs text-right">
-                                      <div className="flex gap-1 justify-end">
-                                        <Button
-                                          size="sm"
-                                          variant="outline"
-                                          className="h-6 px-2 text-[10px]"
-                                          onClick={() =>
-                                            printReceipt(
-                                              {
-                                                ...p,
-                                                invoice: showInvoiceModal,
-                                              },
-                                              orgInfo,
-                                              clinic,
-                                            )
-                                          }
-                                        >
-                                          <Printer className="h-3 w-3 mr-1" />
-                                          Print
-                                        </Button>
-                                        {(() => {
-                                          if (p.isRefund) return null;
-                                          const relatedRefunds = (
-                                            showInvoiceModal?.payments || []
-                                          ).filter(
-                                            (pay) =>
-                                              pay.isRefund &&
-                                              pay.originalPaymentId === p.id &&
-                                              pay.status !== "REJECTED",
-                                          );
-                                          const refundedSoFar =
-                                            relatedRefunds.reduce(
-                                              (sum, r) => sum + r.amount,
-                                              0,
-                                            );
-                                          if (refundedSoFar >= p.amount) {
-                                            return (
-                                              <Badge
-                                                variant="outline"
-                                                className="h-6 px-2 text-[10px] text-gray-500 bg-gray-100 border-gray-200"
-                                              >
-                                                Fully Refunded
-                                              </Badge>
-                                            );
-                                          }
-                                          return (
-                                            <Button
-                                              size="sm"
-                                              variant="outline"
-                                              className="h-6 px-2 text-[10px] text-red-600 border-red-200 hover:bg-red-50"
-                                              onClick={() =>
-                                                handleRefund({
-                                                  ...p,
-                                                  invoiceId:
-                                                    showInvoiceModal.dbId,
-                                                })
-                                              }
-                                            >
-                                              Refund{" "}
-                                              {refundedSoFar > 0
-                                                ? `(Bal ₹${p.amount - refundedSoFar})`
-                                                : ""}
-                                            </Button>
-                                          );
-                                        })()}
-                                      </div>
-                                    </TableCell>
-                                  </TableRow>
-                                ))}
+                              {[...showInvoiceModal.payments].sort((a, b) => new Date(b.date || b.paymentDate || new Date()) - new Date(a.date || a.paymentDate || new Date())).map((p, i) => (
+                                <TableRow key={i}>
+                                  {/* Payments arrive as raw ISO from the API and were rendered
+                                      verbatim ("2026-07-20T06:50:01.555Z") — see lib/format.js.
+                                      `showInvoiceModal.date` is already formatted, so it is only
+                                      passed through when there is no payment timestamp at all. */}
+                                  <TableCell className="py-2 text-xs text-gray-500">{formatDateTime(p.date || p.paymentDate) || showInvoiceModal.date}</TableCell>
+                                  <TableCell className="py-2 text-xs font-mono">{p.receiptNo || p.receiptNumber || `RCPT-${i+1}`}</TableCell>
+                                  <TableCell className="py-2 text-xs">
+                                    {p.method || p.paymentMethod || showInvoiceModal.payMode || 'Cash'}
+                                    {p.isRefund && (
+                                      <Badge variant="outline" className="ml-2 text-[10px] text-red-600 bg-red-50 border-red-200">
+                                        Refund{p.status && p.status !== 'APPROVED' ? ` (${p.status === 'PENDING_APPROVAL' ? 'Pending' : 'Rejected'})` : ''}
+                                      </Badge>
+                                    )}
+                                  </TableCell>
+                                  <TableCell className="py-2 text-xs text-right font-medium">{fmt(p.amount)}</TableCell>
+                                  <TableCell className="py-2 text-xs text-right">
+                                    <div className="flex gap-1 justify-end">
+                                      <Button size="sm" variant="outline" className="h-6 px-2 text-[10px]" onClick={() => printReceipt({ ...p, invoice: showInvoiceModal }, orgInfo, clinic)}>
+                                        <Printer className="h-3 w-3 mr-1" />Print
+                                      </Button>
+                                      {(() => {
+                                        if (p.isRefund) return null;
+                                        const relatedRefunds = (showInvoiceModal?.payments || []).filter(pay => pay.isRefund && pay.originalPaymentId === p.id && pay.status !== 'REJECTED');
+                                        const refundedSoFar = relatedRefunds.reduce((sum, r) => sum + r.amount, 0);
+                                        if (refundedSoFar >= p.amount) {
+                                          return <Badge variant="outline" className="h-6 px-2 text-[10px] text-gray-500 bg-gray-100 border-gray-200">Fully Refunded</Badge>;
+                                        }
+                                        return (
+                                          <Button size="sm" variant="outline" className="h-6 px-2 text-[10px] text-red-600 border-red-200 hover:bg-red-50" onClick={() => handleRefund({ ...p, invoiceId: showInvoiceModal.dbId })}>
+                                            Refund {refundedSoFar > 0 ? `(Bal ₹${p.amount - refundedSoFar})` : ''}
+                                          </Button>
+                                        );
+                                      })()}
+                                    </div>
+                                  </TableCell>
+                                </TableRow>
+                              ))}
                             </TableBody>
                           </Table>
                         </div>

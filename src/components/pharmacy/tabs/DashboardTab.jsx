@@ -13,6 +13,7 @@ import { format } from "date-fns";
 import { stockBadge } from "../pharmacyHelpers";
 import { formatMoney } from "@/lib/format";
 import { Pagination } from "@/components/common/Pagination";
+import { getFullName } from "@/lib/patient";
 
 // The list props default to [] on purpose. `stats` arrives one render AFTER the
 // first paint, and every KPI below reads `stats?.x ?? someList.length` — so an
@@ -139,7 +140,7 @@ export default function DashboardTab({
                 {pendingRx.slice(0, 5).map(rx => {
                   let items = [];
                   try { items = typeof rx.items === "string" ? JSON.parse(rx.items) : (rx.items || []) } catch { items = [] }
-                  const name = rx.patient ? `${rx.patient.firstName} ${rx.patient.lastName || ""}`.trim() : "Unknown";
+                  const name = rx.patient ? getFullName(rx.patient) : "Unknown";
                   const initials = name.split(" ").map(n => n[0]).join("").slice(0, 2).toUpperCase();
                   const time = rx.prescriptionDate ? format(new Date(rx.prescriptionDate), "HH:mm") : "—";
                   return (

@@ -29,7 +29,10 @@ export async function computeConsultationFee({ organizationId, doctorId, patient
   })
   if (!doctor) return { doctorMissing: true }
 
-  const baseFee = doctor.consultationFee || DEFAULT_CONSULTATION_FEE
+  // `??` not `||`: a doctor whose fee is deliberately set to 0 (a free clinic /
+  // charity / govt-scheme doctor) must bill 0, not silently fall back to 500.
+  // Only a null/unset fee falls back to the default.
+  const baseFee = doctor.consultationFee ?? DEFAULT_CONSULTATION_FEE
 
   const lastNewVisit = await db.appointment.findFirst({
     where: {
@@ -69,7 +72,9 @@ export async function computeConsultationFee({ organizationId, doctorId, patient
     },
   })
   if (slab) {
-    return { fee: slab.feeAmount, daysSinceLastVisit, isNewPatient: false, slab, reason: 'slab' }
+    // Clamp at 0 in case a bad slab predates the createSlab guard — a negative
+    // fee must never become a negative invoice/commission.
+    return { fee: Math.max(0, slab.feeAmount), daysSinceLastVisit, isNewPatient: false, slab, reason: 'slab' }
   }
 
   return { fee: baseFee, daysSinceLastVisit, isNewPatient: false, slab: null, reason: 'default' }

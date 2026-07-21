@@ -7,6 +7,7 @@
  */
 
 import { formatRupee as rupee } from '../lib/money.js'
+import { patientFullName } from '../lib/patientName.js'
 
 function fmtDate(d) {
   if (!d) return '—'
@@ -29,7 +30,7 @@ function divider() { return '─'.repeat(28) }
 
 export function consultationSummary(c, org = {}) {
   const orgName = org.name || 'Hospital'
-  const patName = [c.patient?.firstName, c.patient?.lastName].filter(Boolean).join(' ') || 'Patient'
+  const patName = patientFullName(c.patient) || 'Patient'
   const rawName = c.doctor?.fullName || ''
   const doctor  = rawName ? (rawName.toLowerCase().startsWith('dr') ? rawName : `Dr. ${rawName}`) : 'Your Doctor'
   const date    = fmtDate(c.visitDate || c.createdAt)
@@ -139,7 +140,7 @@ export function paymentReceipt(invoice, patientName, org = {}) {
 export function labResultReady(order, results = [], org = {}) {
   const orgName  = org.name || 'Hospital'
   const patName  = order.patient
-    ? [order.patient.firstName, order.patient.lastName].filter(Boolean).join(' ')
+    ? patientFullName(order.patient)
     : 'Patient'
   const hasCritical = results.some(r => r.isCritical)
 
@@ -176,7 +177,7 @@ export function labResultReady(order, results = [], org = {}) {
 export function radiologyReportReady(order, report, org = {}) {
   const orgName = org.name || 'Hospital'
   const patName = order.patient
-    ? [order.patient.firstName, order.patient.lastName].filter(Boolean).join(' ')
+    ? patientFullName(order.patient)
     : 'Patient'
 
   const lines = [
@@ -215,7 +216,7 @@ export function radiologyReportReady(order, report, org = {}) {
 export function appointmentReminder(apt, org = {}) {
   const orgName  = org.name || 'Hospital'
   const patName  = apt.patient
-    ? [apt.patient.firstName, apt.patient.lastName].filter(Boolean).join(' ')
+    ? patientFullName(apt.patient)
     : 'Patient'
   const drName   = apt.doctor?.fullName || ''
   const doctor   = drName ? (drName.toLowerCase().startsWith('dr') ? drName : `Dr. ${drName}`) : 'your doctor'

@@ -3,6 +3,7 @@ import bcrypt from 'bcryptjs'
 import { db } from '../config/db.js'
 import { TOKEN_COOKIE, authCookieOptions, clearCookieOptions } from '../config/cookie.js'
 import { JWT_SECRET } from '../config/security.js'
+import { patientFullName } from '../lib/patientName.js'
 
 /**
  * POST /api/auth/login
@@ -121,7 +122,7 @@ export async function patientLogin(req, res, next) {
       return res.status(403).json({ success: false, error: 'This account is inactive. Please contact the hospital.' })
     }
 
-    const fullName = [patient.firstName, patient.lastName].filter(Boolean).join(' ')
+    const fullName = patientFullName(patient)
     const token = jwt.sign(
       { patientId: patient.id, organizationId: patient.organizationId, role: 'patient', name: fullName },
       JWT_SECRET,
@@ -162,7 +163,7 @@ export async function me(req, res) {
       user: {
         id: patient.id,
         role: 'patient',
-        fullName: [patient.firstName, patient.lastName].filter(Boolean).join(' '),
+        fullName: patientFullName(patient),
         mrn: patient.mrn,
         organizationId: req.user.organizationId,
       },

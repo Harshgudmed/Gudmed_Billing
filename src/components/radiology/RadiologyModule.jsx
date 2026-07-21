@@ -24,6 +24,7 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import PatientLookup from '@/components/common/PatientLookup'
 import BulkImportDialog from '@/components/common/BulkImportDialog'
 import client from '@/api/client'
+import { getFullName } from "@/lib/patient";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -434,7 +435,7 @@ export default function RadiologyModule() {
     printRadiologyReceipt({
       invoiceNo: order.orderNumber,
       labId: order.orderNumber,
-      patientName: order.patient ? `${order.patient.firstName} ${order.patient.lastName}` : '—',
+      patientName: order.patient ? getFullName(order.patient) : '—',
       uhid: order.patient?.mrn,
       age: order.patient?.dateOfBirth ? `${differenceInYears(now, new Date(order.patient.dateOfBirth))} year(s)` : '',
       sex: order.patient?.gender ? order.patient.gender.charAt(0).toUpperCase() + order.patient.gender.slice(1) : '',
@@ -449,7 +450,7 @@ export default function RadiologyModule() {
 
   const handlePrintFullReport = (report, order) => {
     if (!report || !order) return
-    const patientName = order.patient ? `${order.patient.firstName} ${order.patient.lastName}` : '—'
+    const patientName = order.patient ? getFullName(order.patient) : '—'
     const printDate = format(new Date(), 'dd MMM yyyy HH:mm')
     const reportedDate = report.reportedAt ? format(new Date(report.reportedAt), 'dd MMM yyyy HH:mm') : '—'
     const verifiedDate = report.verifiedAt ? format(new Date(report.verifiedAt), 'dd MMM yyyy HH:mm') : null
@@ -537,7 +538,7 @@ ${report.recommendations ? `<div style="border-left:4px solid #1e3a5f;padding:8p
   const handlePrintReportSheet = () => {
     if (!reportNotesOrder) return
     const order = reportNotesOrder
-    const patientName = order.patient ? `${order.patient.firstName} ${order.patient.lastName}` : '—'
+    const patientName = order.patient ? getFullName(order.patient) : '—'
     const printDate = format(new Date(), 'dd MMM yyyy HH:mm')
     const orderDate = order.orderDate ? format(new Date(order.orderDate), 'dd MMM yyyy HH:mm') : '—'
     const html = `<!DOCTYPE html><html><head><title>Radiology Report — ${order.orderNumber}</title><style>
@@ -602,7 +603,7 @@ ${order.clinicalIndication ? `<div class="section"><div class="section-header">C
 
   const filteredOrders = orders.filter(o => {
     const q = searchQuery.toLowerCase()
-    const patName = `${o.patient?.firstName || ''} ${o.patient?.lastName || ''}`.toLowerCase()
+    const patName = getFullName(o.patient).toLowerCase()
     const matchSearch = !q || patName.includes(q) || (o.patient?.mrn || '').toLowerCase().includes(q) || (o.orderNumber || '').toLowerCase().includes(q)
     const matchStatus = statusFilter === 'all' || o.status === statusFilter
     const matchModality = modalityFilter === 'all' || o.exam?.examCategory === modalityFilter
@@ -740,7 +741,7 @@ ${order.clinicalIndication ? `<div class="section"><div class="section-header">C
                   <TableRow key={o.id}>
                     <TableCell className="font-mono text-sm">{o.orderNumber}</TableCell>
                     <TableCell>
-                      <div className="font-medium">{o.patient?.firstName} {o.patient?.lastName}</div>
+                      <div className="font-medium">{getFullName(o.patient)}</div>
                       <div className="text-xs text-gray-500">{o.patient?.mrn}</div>
                     </TableCell>
                     <TableCell>
@@ -911,7 +912,7 @@ ${order.clinicalIndication ? `<div class="section"><div class="section-header">C
                   return (
                     <TableRow key={r.id}>
                       <TableCell className="font-mono text-sm">{ord?.orderNumber || '—'}</TableCell>
-                      <TableCell>{ord?.patient ? `${ord.patient.firstName} ${ord.patient.lastName}` : '—'}</TableCell>
+                      <TableCell>{ord?.patient ? getFullName(ord.patient) : '—'}</TableCell>
                       <TableCell>{ord?.exam?.examName || '—'}</TableCell>
                       <TableCell className="text-sm">{r.reportedAt ? format(new Date(r.reportedAt), 'dd MMM yyyy HH:mm') : '—'}</TableCell>
                       <TableCell>{statusBadge(r.status)}</TableCell>
@@ -982,7 +983,7 @@ ${order.clinicalIndication ? `<div class="section"><div class="section-header">C
                 <TableRow key={o.id}>
                   <TableCell className="font-mono text-xs">{o.orderNumber}</TableCell>
                   <TableCell>
-                    <div className="font-medium text-sm">{o.patient?.firstName} {o.patient?.lastName}</div>
+                    <div className="font-medium text-sm">{getFullName(o.patient)}</div>
                     <div className="text-xs text-gray-500">{o.patient?.mrn}</div>
                   </TableCell>
                   <TableCell>
@@ -1107,7 +1108,7 @@ ${order.clinicalIndication ? `<div class="section"><div class="section-header">C
                   const order = orders.find(o => o.id === r.orderId)
                   return (
                     <TableRow key={r.id}>
-                      <TableCell className="text-sm">{order?.patient?.firstName} {order?.patient?.lastName}</TableCell>
+                      <TableCell className="text-sm">{getFullName(order?.patient)}</TableCell>
                       <TableCell className="text-sm">{order?.exam?.examName || '—'}</TableCell>
                       <TableCell className="text-sm">{r.reportedAt ? format(new Date(r.reportedAt), 'dd MMM yyyy') : '—'}</TableCell>
                       <TableCell>{statusBadge(r.status)}</TableCell>
@@ -1350,7 +1351,7 @@ ${order.clinicalIndication ? `<div class="section"><div class="section-header">C
               <div className="grid grid-cols-2 gap-2">
                 <div><span className="text-gray-500">Order #: </span><span className="font-mono font-medium">{viewOrder.orderNumber}</span></div>
                 <div><span className="text-gray-500">Date: </span><span>{viewOrder.orderDate ? format(new Date(viewOrder.orderDate), 'dd MMM yyyy') : '—'}</span></div>
-                <div><span className="text-gray-500">Patient: </span><span className="font-medium">{viewOrder.patient?.firstName} {viewOrder.patient?.lastName}</span></div>
+                <div><span className="text-gray-500">Patient: </span><span className="font-medium">{getFullName(viewOrder.patient)}</span></div>
                 <div><span className="text-gray-500">UHID: </span><span className="font-mono">{viewOrder.patient?.mrn}</span></div>
                 <div><span className="text-gray-500">Exam: </span><span>{viewOrder.exam?.examName || '—'}</span></div>
                 <div><span className="text-gray-500">Category: </span>{categoryBadge(viewOrder.exam?.examCategory)}</div>

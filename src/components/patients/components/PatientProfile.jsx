@@ -1,5 +1,7 @@
 import { format } from 'date-fns';
+import { drName } from '@/lib/utils';
 import { formatMoney as fmtMoney } from '@/lib/format';
+import { escapeHtml } from '@/lib/printTemplate';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -29,33 +31,42 @@ export default function PatientProfile({
     if (!p) return;
     const win = window.open('', '_blank', 'width=900,height=780');
     if (!win) { toast.error('Please allow pop-ups to open the report'); return; }
-    const name = getFullName(p);
-    const age = p.dateOfBirth ? `${calculateAge(p.dateOfBirth)} yrs` : '—';
-    const gender = p.gender ? p.gender.charAt(0).toUpperCase() + p.gender.slice(1) : '—';
+    // Everything interpolated into this document.write is HTML-escaped: patient,
+    // order and result fields are user-controlled and would otherwise allow
+    // stored XSS to fire on print.
+    const name = escapeHtml(getFullName(p));
+    const mrn = escapeHtml(p.mrn);
+    const age = escapeHtml(p.dateOfBirth ? `${calculateAge(p.dateOfBirth)} yrs` : '—');
+    const gender = escapeHtml(p.gender ? p.gender.charAt(0).toUpperCase() + p.gender.slice(1) : '—');
+    const orgName = escapeHtml(orgInfo.name || 'Hospital');
+    const orderNumber = escapeHtml(order.orderNumber);
+    const accessionNumber = order.accessionNumber ? escapeHtml(order.accessionNumber) : '';
+    const clinicalIndication = order.clinicalIndication ? escapeHtml(order.clinicalIndication) : '';
+    const notes = order.notes ? escapeHtml(order.notes) : '';
     const printDate = format(new Date(), 'dd MMM yyyy HH:mm');
     const orderDate = order.orderDate ? format(new Date(order.orderDate), 'dd MMM yyyy HH:mm') : format(new Date(order.createdAt), 'dd MMM yyyy HH:mm');
     const results = order.results || [];
     const hasResults = results.length > 0;
     const hasAbnormal = results.some(r => r.isAbnormal || r.isCritical);
-    const orgAddr = [orgInfo.address, orgInfo.city].filter(Boolean).join(', ');
+    const orgAddr = escapeHtml([orgInfo.address, orgInfo.city].filter(Boolean).join(', '));
 
     const rows = hasResults
       ? results.map(r => {
-          const refRange = r.referenceRangeText || (r.referenceRangeMin != null && r.referenceRangeMax != null ? `${r.referenceRangeMin} – ${r.referenceRangeMax}` : '—');
+          const refRange = escapeHtml(r.referenceRangeText || (r.referenceRangeMin != null && r.referenceRangeMax != null ? `${r.referenceRangeMin} – ${r.referenceRangeMax}` : '—'));
           const rowClass = r.isCritical ? 'result-critical' : r.isAbnormal ? 'result-abnormal' : '';
           const valStyle = r.isAbnormal || r.isCritical ? `font-weight:bold;color:${r.isCritical ? '#dc2626' : '#b45309'}` : 'font-weight:bold';
-          const flag = r.isCritical ? '⚠ CRITICAL' : (r.flag || 'N');
+          const flag = escapeHtml(r.isCritical ? '⚠ CRITICAL' : (r.flag || 'N'));
           return `<tr class="${rowClass}">
-            <td>${r.test?.testName || '—'}</td>
-            <td style="${valStyle}">${r.resultValue ?? '—'}</td>
-            <td>${r.resultUnit || r.test?.unit || '—'}</td>
+            <td>${escapeHtml(r.test?.testName || '—')}</td>
+            <td style="${valStyle}">${escapeHtml(r.resultValue ?? '—')}</td>
+            <td>${escapeHtml(r.resultUnit || r.test?.unit || '—')}</td>
             <td>${refRange}</td>
             <td>${flag}</td>
           </tr>`;
         }).join('')
       : `<tr><td colspan="5" style="color:#888;font-style:italic;text-align:center;padding:14px">Results pending</td></tr>`;
 
-    win.document.write(`<!DOCTYPE html><html><head><title>Laboratory Report — ${order.orderNumber}</title>
+    win.document.write(`<!DOCTYPE html><html><head><title>Laboratory Report — ${orderNumber}</title>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:Arial,Helvetica,sans-serif;font-size:10pt;color:#000;background:#fff}
@@ -87,13 +98,13 @@ tr:nth-child(even) td{background:#f9f9f9}
 <div class="page">
   <div class="hosp-header">
     <div>
-      <div class="hosp-name">${orgInfo.name || 'Hospital'}</div>
+      <div class="hosp-name">${orgName}</div>
       <div class="hosp-sub">Laboratory &amp; Pathology Department</div>
       <div class="hosp-sub">${orgAddr}</div>
     </div>
     <div class="hosp-contact">
-      Order #: <strong>${order.orderNumber}</strong><br/>
-      ${order.accessionNumber ? `Accession #: <strong>${order.accessionNumber}</strong><br/>` : ''}
+      Order #: <strong>${orderNumber}</strong><br/>
+      ${accessionNumber ? `Accession #: <strong>${accessionNumber}</strong><br/>` : ''}
       Printed: ${printDate}
     </div>
   </div>
@@ -102,19 +113,19 @@ tr:nth-child(even) td{background:#f9f9f9}
     <div class="info-box-hdr">Patient Information</div>
     <div class="info-grid">
       <div class="info-cell"><div class="info-label">Patient Name</div><div class="info-value"><strong>${name}</strong></div></div>
-      <div class="info-cell"><div class="info-label">UHID</div><div class="info-value">${p.mrn}</div></div>
+      <div class="info-cell"><div class="info-label">UHID</div><div class="info-value">${mrn}</div></div>
       <div class="info-cell"><div class="info-label">Age / Sex</div><div class="info-value">${age} / ${gender}</div></div>
       <div class="info-cell"><div class="info-label">Order Date</div><div class="info-value">${orderDate}</div></div>
     </div>
   </div>
-  ${order.clinicalIndication ? `<div class="clinical-bar"><strong>Clinical Indication:</strong> ${order.clinicalIndication}</div>` : ''}
+  ${clinicalIndication ? `<div class="clinical-bar"><strong>Clinical Indication:</strong> ${clinicalIndication}</div>` : ''}
   ${hasAbnormal ? `<div class="critical-note">⚠ This report contains abnormal/critical values. Please review highlighted results.</div>` : ''}
   <table>
     <thead><tr><th style="width:32%">TEST NAME</th><th style="width:16%">RESULT</th><th style="width:14%">UNIT</th><th style="width:24%">REFERENCE RANGE</th><th style="width:14%">FLAG</th></tr></thead>
     <tbody>${rows}</tbody>
   </table>
-  ${order.notes ? `<div class="clinical-bar"><strong>Notes:</strong> ${order.notes}</div>` : ''}
-  <div class="footer">${orgInfo.name || 'Hospital'} — Laboratory &amp; Pathology Department &nbsp;|&nbsp; Confidential &nbsp;|&nbsp; Printed: ${printDate}</div>
+  ${notes ? `<div class="clinical-bar"><strong>Notes:</strong> ${notes}</div>` : ''}
+  <div class="footer">${orgName} — Laboratory &amp; Pathology Department &nbsp;|&nbsp; Confidential &nbsp;|&nbsp; Printed: ${printDate}</div>
   <button class="print-btn" onclick="window.print()">Print / Save as PDF</button>
 </div>
 </body></html>`);
@@ -126,15 +137,29 @@ tr:nth-child(even) td{background:#f9f9f9}
     if (!p) return;
     const win = window.open('', '_blank', 'width=900,height=780');
     if (!win) { toast.error('Please allow pop-ups to open the report'); return; }
-    const name = getFullName(p);
-    const age = p.dateOfBirth ? `${calculateAge(p.dateOfBirth)} yrs` : '—';
-    const gender = p.gender ? p.gender.charAt(0).toUpperCase() + p.gender.slice(1) : '—';
+    // All interpolated values are HTML-escaped — patient, exam and report fields
+    // are user-controlled and would otherwise allow stored XSS to fire on print.
+    const name = escapeHtml(getFullName(p));
+    const mrn = escapeHtml(p.mrn);
+    const age = escapeHtml(p.dateOfBirth ? `${calculateAge(p.dateOfBirth)} yrs` : '—');
+    const gender = escapeHtml(p.gender ? p.gender.charAt(0).toUpperCase() + p.gender.slice(1) : '—');
+    const orgName = escapeHtml(orgInfo.name || 'Hospital');
+    const examName = escapeHtml(order.exam?.examName || '—');
+    const modality = escapeHtml(order.exam?.modality || '—');
+    const bodyPart = escapeHtml(order.exam?.bodyPart || '—');
+    const statusText = escapeHtml((order.status || '').replace(/_/g, ' '));
+    const clinicalIndication = order.clinicalIndication ? escapeHtml(order.clinicalIndication) : '';
     const printDate = format(new Date(), 'dd MMM yyyy HH:mm');
     const orderDate = format(new Date(order.createdAt), 'dd MMM yyyy HH:mm');
     const rep = order.report;
-    const orgAddr = [orgInfo.address, orgInfo.city].filter(Boolean).join(', ');
+    const repCritical = rep?.criticalFindings ? escapeHtml(rep.criticalFindings) : '';
+    const repTechnique = rep?.technique ? escapeHtml(rep.technique) : '';
+    const repFindings = escapeHtml(rep?.findings || 'Report pending.');
+    const repImpression = rep?.impression ? escapeHtml(rep.impression) : '';
+    const repRecommendations = rep?.recommendations ? escapeHtml(rep.recommendations) : '';
+    const orgAddr = escapeHtml([orgInfo.address, orgInfo.city].filter(Boolean).join(', '));
 
-    win.document.write(`<!DOCTYPE html><html><head><title>Radiology Report — ${order.exam?.examName || ''}</title>
+    win.document.write(`<!DOCTYPE html><html><head><title>Radiology Report — ${examName}</title>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:Arial,Helvetica,sans-serif;font-size:10.5pt;color:#000;background:#fff}
@@ -161,7 +186,7 @@ body{font-family:Arial,Helvetica,sans-serif;font-size:10.5pt;color:#000;backgrou
 <div class="page">
   <div class="hosp-header">
     <div>
-      <div class="hosp-name">${orgInfo.name || 'Hospital'}</div>
+      <div class="hosp-name">${orgName}</div>
       <div class="hosp-sub">Department of Radiology &amp; Imaging</div>
       <div class="hosp-sub">${orgAddr}</div>
     </div>
@@ -172,22 +197,22 @@ body{font-family:Arial,Helvetica,sans-serif;font-size:10.5pt;color:#000;backgrou
     <div class="info-box-hdr">Patient &amp; Exam Information</div>
     <div class="info-grid">
       <div class="info-cell"><div class="info-label">Patient Name</div><div class="info-value"><strong>${name}</strong></div></div>
-      <div class="info-cell"><div class="info-label">UHID</div><div class="info-value">${p.mrn}</div></div>
+      <div class="info-cell"><div class="info-label">UHID</div><div class="info-value">${mrn}</div></div>
       <div class="info-cell"><div class="info-label">Age / Sex</div><div class="info-value">${age} / ${gender}</div></div>
       <div class="info-cell"><div class="info-label">Exam Date</div><div class="info-value">${orderDate}</div></div>
-      <div class="info-cell"><div class="info-label">Examination</div><div class="info-value"><strong>${order.exam?.examName || '—'}</strong></div></div>
-      <div class="info-cell"><div class="info-label">Modality</div><div class="info-value">${order.exam?.modality || '—'}</div></div>
-      <div class="info-cell"><div class="info-label">Body Part</div><div class="info-value">${order.exam?.bodyPart || '—'}</div></div>
-      <div class="info-cell"><div class="info-label">Status</div><div class="info-value" style="text-transform:capitalize">${(order.status || '').replace(/_/g, ' ')}</div></div>
+      <div class="info-cell"><div class="info-label">Examination</div><div class="info-value"><strong>${examName}</strong></div></div>
+      <div class="info-cell"><div class="info-label">Modality</div><div class="info-value">${modality}</div></div>
+      <div class="info-cell"><div class="info-label">Body Part</div><div class="info-value">${bodyPart}</div></div>
+      <div class="info-cell"><div class="info-label">Status</div><div class="info-value" style="text-transform:capitalize">${statusText}</div></div>
     </div>
   </div>
-  ${order.clinicalIndication ? `<div class="section-title">Clinical Indication</div><div class="section-body">${order.clinicalIndication}</div>` : ''}
-  ${rep?.hasCriticalFindings ? `<div class="critical-note">⚠ CRITICAL FINDINGS: ${rep.criticalFindings || 'Requires immediate attention'}</div>` : ''}
-  ${rep?.technique ? `<div class="section-title">Technique</div><div class="section-body">${rep.technique}</div>` : ''}
-  <div class="section-title">Findings</div><div class="section-body">${rep?.findings || 'Report pending.'}</div>
-  ${rep?.impression ? `<div class="section-title">Impression</div><div class="section-body"><strong>${rep.impression}</strong></div>` : ''}
-  ${rep?.recommendations ? `<div class="section-title">Recommendations</div><div class="section-body">${rep.recommendations}</div>` : ''}
-  <div class="footer">${orgInfo.name || 'Hospital'} — Department of Radiology &nbsp;|&nbsp; Confidential &nbsp;|&nbsp; Printed: ${printDate}</div>
+  ${clinicalIndication ? `<div class="section-title">Clinical Indication</div><div class="section-body">${clinicalIndication}</div>` : ''}
+  ${rep?.hasCriticalFindings ? `<div class="critical-note">⚠ CRITICAL FINDINGS: ${repCritical || 'Requires immediate attention'}</div>` : ''}
+  ${rep?.technique ? `<div class="section-title">Technique</div><div class="section-body">${repTechnique}</div>` : ''}
+  <div class="section-title">Findings</div><div class="section-body">${repFindings}</div>
+  ${rep?.impression ? `<div class="section-title">Impression</div><div class="section-body"><strong>${repImpression}</strong></div>` : ''}
+  ${rep?.recommendations ? `<div class="section-title">Recommendations</div><div class="section-body">${repRecommendations}</div>` : ''}
+  <div class="footer">${orgName} — Department of Radiology &nbsp;|&nbsp; Confidential &nbsp;|&nbsp; Printed: ${printDate}</div>
   <button class="print-btn" onclick="window.print()">Print / Save as PDF</button>
 </div>
 </body></html>`);
@@ -216,7 +241,7 @@ body{font-family:Arial,Helvetica,sans-serif;font-size:10.5pt;color:#000;backgrou
           <Badge className="bg-gray-100 text-gray-600 border-0 capitalize">{a.appointmentType?.replace(/_/g, ' ')}</Badge>
         </div>
         <p className="text-xs text-gray-500 mt-1">
-          {a.doctor?.fullName || 'Doctor —'}{a.department?.name ? ` · ${a.department.name}` : ''}
+          {a.doctor?.fullName ? drName(a.doctor.fullName) : 'Doctor —'}{a.department?.name ? ` · ${a.department.name}` : ''}
           {a.consultationFee != null ? ` · Fee ${fmtMoney(a.consultationFee)}` : ''}
         </p>
       </div>
@@ -303,7 +328,14 @@ body{font-family:Arial,Helvetica,sans-serif;font-size:10.5pt;color:#000;backgrou
                     { label: 'Blood Group', val: selectedPatient.bloodGroup || '—' },
                     { label: 'Phone', val: selectedPatient.phonePrimary || '—' },
                     { label: 'Email', val: selectedPatient.email || '—' },
-                    { label: 'Region', val: selectedPatient.region || '—' },
+                    // One readable line, the way an address is actually read out:
+                    // "A-1204, Block G, Andheri West, Mumbai, Mumbai Suburban, Maharashtra - 400053"
+                    { label: 'Address', val: [
+                        selectedPatient.houseNumber, selectedPatient.street, selectedPatient.locality,
+                        selectedPatient.city, selectedPatient.district, selectedPatient.state,
+                      ].filter(Boolean).join(', ')
+                        + (selectedPatient.pincode ? ` - ${selectedPatient.pincode}` : '')
+                      || selectedPatient.addressDescription || '—' },
                     { label: 'Insurance', val: selectedPatient.hasInsurance ? (selectedPatient.insuranceProvider || 'Yes') : 'No' },
                     { label: 'Emergency Contact', val: selectedPatient.emergencyContactName || '—' },
                     { label: 'Contact Phone', val: selectedPatient.emergencyContactPhone || '—' },
@@ -319,7 +351,7 @@ body{font-family:Arial,Helvetica,sans-serif;font-size:10.5pt;color:#000;backgrou
               {/* Appointments & Billing */}
               <TabsContent value="appointments" className="mt-4">
                 {recordsLoading ? (
-                  <div className="flex justify-center py-12"><Loader2 className="h-6 w-6 animate-spin text-blue-500" /></div>
+                  <div className="flex justify-center py-12"><Loader2 className="h-6 w-6 animate-spin text-[#2E4168]" /></div>
                 ) : (
                   <div className="space-y-4">
                     {/* Billing summary */}
@@ -373,7 +405,7 @@ body{font-family:Arial,Helvetica,sans-serif;font-size:10.5pt;color:#000;backgrou
               <TabsContent value="lab" className="mt-4">
                 <ScrollArea className="h-[360px] pr-3">
                   {recordsLoading ? (
-                    <div className="flex justify-center py-12"><Loader2 className="h-6 w-6 animate-spin text-blue-500" /></div>
+                    <div className="flex justify-center py-12"><Loader2 className="h-6 w-6 animate-spin text-[#2E4168]" /></div>
                   ) : records.labOrders.length === 0 ? (
                     <div className="text-center py-12 text-gray-500">
                       <FlaskConical className="h-10 w-10 mx-auto mb-2 opacity-40" />
@@ -447,7 +479,7 @@ body{font-family:Arial,Helvetica,sans-serif;font-size:10.5pt;color:#000;backgrou
               <TabsContent value="radiology" className="mt-4">
                 <ScrollArea className="h-[360px] pr-3">
                   {recordsLoading ? (
-                    <div className="flex justify-center py-12"><Loader2 className="h-6 w-6 animate-spin text-blue-500" /></div>
+                    <div className="flex justify-center py-12"><Loader2 className="h-6 w-6 animate-spin text-[#2E4168]" /></div>
                   ) : records.radiologyOrders.length === 0 ? (
                     <div className="text-center py-12 text-gray-500">
                       <Scan className="h-10 w-10 mx-auto mb-2 opacity-40" />
@@ -506,7 +538,7 @@ body{font-family:Arial,Helvetica,sans-serif;font-size:10.5pt;color:#000;backgrou
               <TabsContent value="ipd" className="mt-4">
                 <ScrollArea className="h-[360px] pr-3">
                   {recordsLoading ? (
-                    <div className="flex justify-center py-12"><Loader2 className="h-6 w-6 animate-spin text-blue-500" /></div>
+                    <div className="flex justify-center py-12"><Loader2 className="h-6 w-6 animate-spin text-[#2E4168]" /></div>
                   ) : records.admissions.length === 0 ? (
                     <div className="text-center py-12 text-gray-500">
                       <BedDouble className="h-10 w-10 mx-auto mb-2 opacity-40" />
@@ -549,7 +581,7 @@ body{font-family:Arial,Helvetica,sans-serif;font-size:10.5pt;color:#000;backgrou
               <TabsContent value="documents" className="mt-4">
                 <ScrollArea className="h-[360px] pr-3">
                   {recordsLoading ? (
-                    <div className="flex justify-center py-12"><Loader2 className="h-6 w-6 animate-spin text-blue-500" /></div>
+                    <div className="flex justify-center py-12"><Loader2 className="h-6 w-6 animate-spin text-[#2E4168]" /></div>
                   ) : !records.patientDocuments || records.patientDocuments.length === 0 ? (
                     <div className="text-center py-12 text-gray-500">
                       <FileText className="h-10 w-10 mx-auto mb-2 opacity-40" />

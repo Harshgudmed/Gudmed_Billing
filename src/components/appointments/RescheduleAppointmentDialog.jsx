@@ -19,7 +19,8 @@ import {
 import { format } from "date-fns";
 import { Loader2 } from "lucide-react";
 import { parseDate, getPatientFullName } from "./appointmentHelpers";
-import { TIME_SLOTS } from "./appointmentConstants";
+import { useDoctorTimetable } from "@/components/common/hooks/useDoctorTimetable";
+import { formatTime12h } from "@/lib/format";
 
 export default function RescheduleAppointmentDialog({
   open,
@@ -34,6 +35,14 @@ export default function RescheduleAppointmentDialog({
   onConfirm,
   isSubmitting,
 }) {
+  // Offer the times this doctor actually sits (Doctor Accountability timetable),
+  // not a fixed list — rescheduling must respect the same availability that
+  // booking does.
+  const { availableTimeSlots, timetableLoading } = useDoctorTimetable(
+    appointment?.doctorId,
+    date ? format(date, "yyyy-MM-dd") : "",
+  );
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
@@ -51,7 +60,7 @@ export default function RescheduleAppointmentDialog({
               </div>
               <div className="text-sm text-gray-500">
                 Current: {format(parseDate(appointment.appointmentDate), "PPP")} at{" "}
-                {appointment.appointmentTime}
+                {formatTime12h(appointment.appointmentTime)}
               </div>
             </div>
           )}
@@ -68,12 +77,21 @@ export default function RescheduleAppointmentDialog({
             </div>
             <div>
               <Label>New Time</Label>
-              <Select value={time} onValueChange={onTimeChange}>
+              <Select
+                value={time}
+                onValueChange={onTimeChange}
+                disabled={!date || timetableLoading}
+              >
                 <SelectTrigger>
-                  <SelectValue placeholder="Select time" />
+                  <SelectValue placeholder={
+                    !date ? "Pick a date first"
+                      : timetableLoading ? "Loading slots…"
+                      : availableTimeSlots.length === 0 ? "Doctor not available this day"
+                      : "Select time"
+                  } />
                 </SelectTrigger>
                 <SelectContent>
-                  {TIME_SLOTS.map((slot) => (
+                  {availableTimeSlots.map((slot) => (
                     <SelectItem key={slot} value={slot}>
                       {slot}
                     </SelectItem>

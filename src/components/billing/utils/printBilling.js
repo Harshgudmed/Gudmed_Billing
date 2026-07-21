@@ -1,5 +1,6 @@
 import { format } from "date-fns";
 import { toast } from "sonner";
+import { getFullName } from "@/lib/patient";
 
 // Shared by every print-window builder below — user-entered text (names,
 // addresses, drug names) must never be interpolated into these HTML strings
@@ -105,7 +106,7 @@ export function printInvoice(bill, orgInfo, clinic, options = {}) {
   }
 
   const displayItems = (bill.items || []).filter(
-    (it) => !/home collection/i.test(it.name || it.serviceName || ""),
+    (it) => !/home collection/i.test(it.name || it.serviceName || it.description || ""),
   );
 
   const itemRows = displayItems
@@ -113,8 +114,8 @@ export function printInvoice(bill, orgInfo, clinic, options = {}) {
       (it, i) => `
     <tr>
       <td style="padding:6px 8px;border-bottom:1px solid #eee;font-size:8.5pt">${i + 1}</td>
-      <td style="padding:6px 8px;border-bottom:1px solid #eee;font-family:monospace;color:#0b5cab;font-weight:bold">${esc(it.code || (it.name || it.serviceName || "").substring(0, 4).toUpperCase())}</td>
-      <td style="padding:6px 8px;border-bottom:1px solid #eee;font-size:8.5pt"><strong>${esc(it.name || it.serviceName)}</strong>${it.sub ? `<br/><span style="font-size:8pt;color:#888">${esc(it.sub)}</span>` : ""}</td>
+      <td style="padding:6px 8px;border-bottom:1px solid #eee;font-family:monospace;color:#0b5cab;font-weight:bold">${esc(it.code || (it.name || it.serviceName || it.description || "").substring(0, 4).toUpperCase())}</td>
+      <td style="padding:6px 8px;border-bottom:1px solid #eee;font-size:8.5pt"><strong>${esc(it.name || it.serviceName || it.description || "—")}</strong>${it.sub ? `<br/><span style="font-size:8pt;color:#888">${esc(it.sub)}</span>` : ""}</td>
       <td style="padding:6px 8px;border-bottom:1px solid #eee;text-align:center;font-size:8.5pt">${it.qty || it.quantity || 1}</td>
       <td style="padding:6px 8px;border-bottom:1px solid #eee;text-align:right;font-size:8.5pt">${inr(it.amt || it.unitPrice || 0)}</td>
       <td style="padding:6px 8px;border-bottom:1px solid #eee;text-align:right;font-size:8.5pt;font-weight:bold">${inr(it.total || (it.qty || it.quantity || 1) * (it.amt || it.unitPrice || 0))}</td>
@@ -247,13 +248,13 @@ export function printReceipt(p, orgInfo, clinic) {
     return;
   }
 
+  // getFullName keeps the middle name — a receipt is a financial document and
+  // must carry the patient's registered name in full.
   const patientName =
     p.invoice?.patientName ||
-    (p.invoice?.patient
-      ? `${p.invoice.patient.firstName} ${p.invoice.patient.lastName}`
-      : p.patient
-        ? `${p.patient.firstName} ${p.patient.lastName}`
-        : "Patient");
+    getFullName(p.invoice?.patient) ||
+    getFullName(p.patient) ||
+    "Patient";
   const mrn =
     p.invoice?.uhid || p.invoice?.patient?.mrn || p.patient?.mrn || "";
   const rxDate = p.paymentDate
@@ -770,11 +771,7 @@ export function printPharmacyReceipt(
   const val = (k) => clinic[k] || orgInfo[k] || "";
   const patientName =
     titleCase(
-      sale.patientName ||
-        sale.customerName ||
-        (sale.patient
-          ? `${sale.patient.firstName || ""} ${sale.patient.lastName || ""}`.trim()
-          : ""),
+      sale.patientName || sale.customerName || getFullName(sale.patient),
     ) || "Walk-in";
   const saleDate = sale.saleDate || sale.createdAt || new Date();
   const dateStr = format(new Date(saleDate), "dd MMM yyyy");

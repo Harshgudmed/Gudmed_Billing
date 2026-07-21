@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo } from 'react'
+import { drName } from '@/lib/utils'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -23,6 +24,7 @@ const STATUS_STYLES = {
 }
 const PAY_STYLES = { pending: 'bg-orange-100 text-orange-700', partial: 'bg-amber-100 text-amber-700', paid: 'bg-green-100 text-green-700' }
 import { formatMoney as inr } from '@/lib/format'
+import { getFullName } from "@/lib/patient";
 const labelize = (s) => (s || '').replace(/_/g, ' ')
 
 const EMPTY = { patientId: '', doctorId: '', procedure: '', fee: '', paymentStatus: 'pending', status: 'admitted', dischargeTime: '', notes: '' }
@@ -138,7 +140,7 @@ export default function DayCareModule() {
         </CardHeader>
         <CardContent>
           {loading && cases.length === 0 ? (
-            <div className="flex justify-center p-10"><Loader2 className="h-7 w-7 animate-spin text-blue-600" /></div>
+            <div className="flex justify-center p-10"><Loader2 className="h-7 w-7 animate-spin text-[#2E4168]" /></div>
           ) : error ? (
             <div className="flex flex-col items-center p-8 text-center text-red-600"><AlertCircle className="h-8 w-8 mb-2" />{error}<Button variant="outline" className="mt-3" onClick={fetchCases}>Retry</Button></div>
           ) : (
@@ -156,8 +158,8 @@ export default function DayCareModule() {
                 ) : cases.map(c => (
                   <TableRow key={c.id}>
                     <TableCell className="font-mono font-medium text-blue-700">{c.caseNumber}</TableCell>
-                    <TableCell>{c.patient ? `${c.patient.firstName} ${c.patient.lastName}` : '—'}</TableCell>
-                    <TableCell>{c.doctor?.fullName || c.doctorName || '—'}</TableCell>
+                    <TableCell>{c.patient ? getFullName(c.patient) : '—'}</TableCell>
+                    <TableCell>{(c.doctor?.fullName || c.doctorName) ? drName(c.doctor?.fullName || c.doctorName) : '—'}</TableCell>
                     <TableCell>{c.procedure || '—'}</TableCell>
                     <TableCell>{format(new Date(c.admissionDate), 'yyyy-MM-dd')}</TableCell>
                     <TableCell className="font-medium">{inr(c.fee)}</TableCell>
@@ -211,7 +213,7 @@ export default function DayCareModule() {
               <Label>Doctor</Label>
               <Select value={form.doctorId} onValueChange={v => set('doctorId', v)}>
                 <SelectTrigger className="mt-1"><SelectValue placeholder="Select doctor..." /></SelectTrigger>
-                <SelectContent>{doctors.map(d => <SelectItem key={d.id} value={d.id}>{d.fullName}</SelectItem>)}</SelectContent>
+                <SelectContent>{doctors.map(d => <SelectItem key={d.id} value={d.id}>{drName(d.fullName)}</SelectItem>)}</SelectContent>
               </Select>
             </div>
             <div><Label>Procedure</Label><Input className="mt-1" placeholder="e.g. Cataract Surgery, Dialysis" value={form.procedure} onChange={e => set('procedure', e.target.value)} /></div>

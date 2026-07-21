@@ -14,106 +14,32 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
-  FlaskConical,
-  Plus,
-  Eye,
-  Edit,
-  Trash2,
-  Calendar,
-  Clock,
-  User,
-  FileText,
-  AlertTriangle,
-  CheckCircle,
-  XCircle,
-  Filter,
-  Search,
-  Printer,
-  Send,
-  ChevronDown,
-  ChevronUp,
-  ChevronLeft,
-  ChevronRight,
-  Save,
-  AlertCircle,
-  Activity,
-  TestTube,
-  X,
-  RefreshCw,
-  Microscope,
-  Beaker,
-  Droplet,
-  ClipboardList,
-  FileBarChart,
-  ArrowUpDown,
-  ArrowUp,
-  ArrowDown,
-  Ban,
-  Play,
-  Pause,
-  CheckSquare,
-  Loader2,
-  Receipt,
-  Upload,
-} from "lucide-react";
-import { format, formatDistanceToNow } from "date-fns";
-import { toast } from "sonner";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-  DialogFooter,
-} from "@/components/ui/dialog";
-import { Label } from "@/components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import { Textarea } from "@/components/ui/textarea";
-import { ScrollArea } from "@/components/ui/scroll-area";
-import { Separator } from "@/components/ui/separator";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
-import { Checkbox } from "@/components/ui/checkbox";
-import { z } from "zod";
-import { useForm } from "react-hook-form";
-import { zodResolver } from "@hookform/resolvers/zod";
-import {
-  Form,
-  FormControl,
-  FormDescription,
-  FormField,
-  FormItem,
-  FormLabel,
-  FormMessage,
-} from "@/components/ui/form";
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import BulkImportDialog from "@/components/common/BulkImportDialog";
-import { Progress } from "@/components/ui/progress";
-import client from "@/api/client";
-import { useServerPagination } from "@/lib/useServerPagination";
-import { PaginatedTable } from "@/components/common/PaginatedTable";
-import { drName } from "@/lib/utils";
-import PatientLookup from "@/components/common/PatientLookup";
-import { printLabReceipt } from "@/components/billing/utils/printBilling";
-import PaymentFields from "@/components/billing/PaymentFields";
-import {
-  createInvoiceWithPayment,
-  fetchOrderInvoicePayments,
-} from "@/lib/billing";
+  Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger, DialogFooter
+} from '@/components/ui/dialog'
+import { Label } from '@/components/ui/label'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Textarea } from '@/components/ui/textarea'
+import { ScrollArea } from '@/components/ui/scroll-area'
+import { Separator } from '@/components/ui/separator'
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
+import { Checkbox } from '@/components/ui/checkbox'
+import { z } from 'zod'
+import { useForm } from 'react-hook-form'
+import { zodResolver } from '@hookform/resolvers/zod'
+import { Form, FormControl, FormDescription, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form'
+import { Avatar, AvatarFallback } from '@/components/ui/avatar'
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
+import BulkImportDialog from '@/components/common/BulkImportDialog'
+import { Progress } from '@/components/ui/progress'
+import client from '@/api/client'
+import { useServerPagination } from '@/lib/useServerPagination'
+import { PaginatedTable } from '@/components/common/PaginatedTable'
+import { drName } from '@/lib/utils'
+import PatientLookup from '@/components/common/PatientLookup'
+import { printLabReceipt } from '@/components/billing/utils/printBilling'
+import PaymentFields from '@/components/billing/PaymentFields'
+import { createInvoiceWithPayment, fetchOrderInvoicePayments } from '@/lib/billing'
+import { getFullName } from "@/lib/patient";
 
 // ============================================
 // API HELPERS
@@ -174,12 +100,10 @@ function transformApiOrder(apiOrder) {
 
   return {
     id: apiOrder.id,
-    orderNumber: apiOrder.orderNumber || "",
-    patientId: apiOrder.patientId || "",
-    patientName: patient
-      ? `${patient.firstName || ""} ${patient.lastName || ""}`.trim()
-      : "Unknown",
-    patientMrn: patient?.mrn || "",
+    orderNumber: apiOrder.orderNumber || '',
+    patientId: apiOrder.patientId || '',
+    patientName: patient ? getFullName(patient) : 'Unknown',
+    patientMrn: patient?.mrn || '',
     patientAge: age,
     patientGender: patient?.gender || "male",
     patientPhone: patient?.phonePrimary || "",
@@ -1247,7 +1171,7 @@ tr:nth-child(even) td{background:#f9f9f9}
           {/* Stats Cards */}
           {statsLoading ? (
             <div className="flex items-center justify-center py-12">
-              <Loader2 className="h-8 w-8 animate-spin text-blue-600" />
+              <Loader2 className="h-8 w-8 animate-spin text-[#2E4168]" />
             </div>
           ) : (
             <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
@@ -1393,7 +1317,7 @@ tr:nth-child(even) td{background:#f9f9f9}
                 <ScrollArea className="h-[200px]">
                   {ordersLoading ? (
                     <div className="flex items-center justify-center py-8">
-                      <Loader2 className="h-6 w-6 animate-spin text-gray-400" />
+                      <Loader2 className="h-6 w-6 animate-spin text-[#2E4168]" />
                     </div>
                   ) : recentOrdersAttention.length === 0 ? (
                     <p className="text-center text-gray-500 py-8">
@@ -1515,13 +1439,8 @@ tr:nth-child(even) td{background:#f9f9f9}
                   </div>
                   <ScrollArea className="h-[260px]">
                     {ordersLoading ? (
-                      <div className="flex items-center justify-center py-8">
-                        <Loader2 className="h-5 w-5 animate-spin text-gray-400" />
-                      </div>
-                    ) : orders.filter(
-                        (o) =>
-                          o.status !== "completed" && o.status !== "cancelled",
-                      ).length === 0 ? (
+                      <div className="flex items-center justify-center py-8"><Loader2 className="h-5 w-5 animate-spin text-[#2E4168]" /></div>
+                    ) : orders.filter(o => o.status !== 'completed' && o.status !== 'cancelled').length === 0 ? (
                       <div className="text-center py-8 text-gray-400">
                         <CheckCircle className="h-10 w-10 mx-auto mb-2 text-green-400" />
                         <p className="text-sm">All orders completed!</p>
@@ -1597,11 +1516,8 @@ tr:nth-child(even) td{background:#f9f9f9}
                   </div>
                   <ScrollArea className="h-[260px]">
                     {ordersLoading ? (
-                      <div className="flex items-center justify-center py-8">
-                        <Loader2 className="h-5 w-5 animate-spin text-gray-400" />
-                      </div>
-                    ) : orders.filter((o) => o.status === "completed")
-                        .length === 0 ? (
+                      <div className="flex items-center justify-center py-8"><Loader2 className="h-5 w-5 animate-spin text-[#2E4168]" /></div>
+                    ) : orders.filter(o => o.status === 'completed').length === 0 ? (
                       <div className="text-center py-8 text-gray-400">
                         <FlaskConical className="h-10 w-10 mx-auto mb-2 opacity-40" />
                         <p className="text-sm">No completed orders yet</p>
@@ -2075,7 +1991,7 @@ tr:nth-child(even) td{background:#f9f9f9}
                 <ScrollArea className="h-[400px]">
                   {ordersLoading ? (
                     <div className="flex items-center justify-center py-8">
-                      <Loader2 className="h-6 w-6 animate-spin text-gray-400" />
+                      <Loader2 className="h-6 w-6 animate-spin text-[#2E4168]" />
                     </div>
                   ) : orders.filter(
                       (o) =>
@@ -2448,7 +2364,7 @@ tr:nth-child(even) td{background:#f9f9f9}
                 <ScrollArea className="h-[400px]">
                   {ordersLoading ? (
                     <div className="flex items-center justify-center py-12">
-                      <Loader2 className="h-8 w-8 animate-spin text-gray-400" />
+                      <Loader2 className="h-8 w-8 animate-spin text-[#2E4168]" />
                     </div>
                   ) : orders.filter((o) => o.status === "completed").length ===
                     0 ? (
@@ -2959,7 +2875,7 @@ tr:nth-child(even) td{background:#f9f9f9}
                     <div className="border rounded-lg p-4 max-h-60 overflow-y-auto">
                       {testsLoading ? (
                         <div className="flex items-center justify-center py-4">
-                          <Loader2 className="h-6 w-6 animate-spin text-gray-400" />
+                          <Loader2 className="h-6 w-6 animate-spin text-[#2E4168]" />
                         </div>
                       ) : tests.filter((t) => t.isActive).length === 0 ? (
                         <p className="text-center text-gray-500 py-4">

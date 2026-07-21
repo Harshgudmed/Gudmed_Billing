@@ -5,6 +5,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { drName } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
@@ -12,6 +13,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Clock, CheckCircle, Bell, BellOff } from "lucide-react";
 import { getPatientFullName } from "./appointmentHelpers";
 import { StatusBadge, TypeBadge } from "./AppointmentBadges";
+import { formatTime12h } from "@/lib/format";
 
 export default function TodayView({
   upcomingAppointments,
@@ -56,7 +58,7 @@ export default function TodayView({
                       <div className="flex items-center gap-3">
                         <div className="text-center">
                           <div className="font-mono text-lg font-bold">
-                            {appointment.appointmentTime}
+                            {formatTime12h(appointment.appointmentTime)}
                           </div>
                         </div>
                         <Avatar className="h-10 w-10">
@@ -72,7 +74,7 @@ export default function TodayView({
                             {getPatientFullName(patient || null)}
                           </div>
                           <div className="text-sm text-gray-500">
-                            {doctor?.fullName} • {patient?.mrn}
+                            {doctor?.fullName ? drName(doctor.fullName) : "—"} • {patient?.mrn}
                           </div>
                           <div className="text-sm mt-1">
                             {appointment.chiefComplaint}
@@ -178,7 +180,7 @@ export default function TodayView({
                       <div className="flex items-center gap-3">
                         <div className="text-center">
                           <div className="font-mono text-lg font-bold text-gray-400">
-                            {appointment.appointmentTime}
+                            {formatTime12h(appointment.appointmentTime)}
                           </div>
                           <div className="text-xs text-gray-400">
                             {appointment.durationMinutes} min
@@ -195,7 +197,7 @@ export default function TodayView({
                             {getPatientFullName(patient || null)}
                           </div>
                           <div className="text-sm text-gray-400">
-                            {doctor?.fullName} • {patient?.mrn}
+                            {doctor?.fullName ? drName(doctor.fullName) : "—"} • {patient?.mrn}
                           </div>
                           <div className="text-sm mt-1 text-gray-500">
                             {appointment.chiefComplaint}

@@ -117,48 +117,16 @@ function format12Hour(timeStr) {
 }
 
 const emptyPatientForm = {
-  firstName: "",
-  middleName: "",
-  lastName: "",
-  dateOfBirth: "",
-  gender: "",
-  maritalStatus: "",
-  referredBy: "",
-  mlcNumber: "",
-
-  phonePrimary: "",
-  phoneSecondary: "",
-  email: "",
-
-  // Location Fields
-  state: "",
-  district: "",
-  city: "",
-  locality: "",
-  houseNumber: "",
-  postalCode: "",
-
-  emergencyContactName: "",
-  emergencyContactPhone: "",
-  emergencyContactRelationship: "",
-
-  bloodGroup: "",
-
-  hasInsurance: false,
-  insuranceProvider: "",
-  insuranceId: "",
-
-  department: "",
-  doctor: "",
-  consultationFee: "",
-
-  appointmentType: "",
-  priority: "",
-  appointmentDate: "",
-  appointmentTime: "",
-
-  notes: "",
-};
+  firstName: '', middleName: '', lastName: '', dateOfBirth: '', gender: 'male',
+  maritalStatus: '', referredBy: '', mlcNumber: '',
+  phonePrimary: '', phoneSecondary: '', email: '',
+  houseNumber: '', street: '', locality: '', city: '', district: '', state: '', pincode: '',
+  emergencyContactName: '', emergencyContactPhone: '', emergencyContactRelationship: '',
+  bloodGroup: '', hasInsurance: false, insuranceProvider: '', insuranceId: '',
+  // Appointment — booked together with registration
+  department: '', doctor: '', consultationFee: '', appointmentType: 'OPD', priority: 'Routine',
+  appointmentDate: '', appointmentTime: '', notes: '',
+}
 
 /**
  * Shared "Register New Patient" form (registers the patient AND books the first
@@ -509,47 +477,31 @@ export default function RegisterPatientForm({ onSuccess, onCancel }) {
             </div>
 
             <div>
+              <Label className="text-xs text-gray-600">Street / Block</Label>
+              <Input className="mt-1" value={patientForm.street} onChange={e => setField('street', e.target.value)} placeholder="e.g. Block G, MG Road" />
+            </div>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
               <Label className="text-xs text-gray-600">Locality / Area</Label>
-              <Input
-                className="mt-1"
-                value={patientForm.locality}
-                onChange={(e) => setField("locality", e.target.value)}
-                placeholder="e.g. Rohini, Andheri"
-              />
+              <Input className="mt-1" value={patientForm.locality} onChange={e => setField('locality', e.target.value)} placeholder="e.g. Andheri West" />
+            </div>
+            <div>
+              <Label className="text-xs text-gray-600">Village / Town / City</Label>
+              <Input className="mt-1" value={patientForm.city} onChange={e => setField('city', e.target.value)} placeholder="e.g. Mumbai" />
             </div>
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <div>
-              <Label className="text-xs text-gray-600">City</Label>
-              <Input
-                className="mt-1"
-                value={patientForm.city}
-                onChange={(e) => setField("city", e.target.value)}
-                placeholder="City name"
-              />
-            </div>
-
-            <div>
               <Label className="text-xs text-gray-600">District</Label>
-              <Input
-                className="mt-1"
-                value={patientForm.district}
-                onChange={(e) => setField("district", e.target.value)}
-                placeholder="District name"
-              />
+              <Input className="mt-1" value={patientForm.district} onChange={e => setField('district', e.target.value)} placeholder="e.g. Mumbai Suburban" />
             </div>
 
             <div>
               <Label className="text-xs text-gray-600">State</Label>
-              <Select
-                value={patientForm.state}
-                onValueChange={(v) => setField("state", v)}
-              >
-                <SelectTrigger className="mt-1">
-                  <SelectValue placeholder="Select state" />
-                </SelectTrigger>
-
+              <Select value={patientForm.state} onValueChange={v => setField('state', v)}>
+                <SelectTrigger className="mt-1"><SelectValue placeholder="Select state" /></SelectTrigger>
                 <SelectContent>
                   {INDIAN_STATES.map((s) => (
                     <SelectItem key={s} value={s}>
@@ -559,18 +511,10 @@ export default function RegisterPatientForm({ onSuccess, onCancel }) {
                 </SelectContent>
               </Select>
             </div>
-          </div>
-
-          <div>
-            <Label className="text-xs text-gray-600">PIN Code</Label>
-            <Input
-              className="mt-1"
-              value={patientForm.postalCode}
-              onChange={(e) => setField("postalCode", e.target.value)}
-              placeholder="6-digit PIN"
-              inputMode="numeric"
-              maxLength={6}
-            />
+            <div>
+              <Label className="text-xs text-gray-600">PIN Code</Label>
+              <Input className="mt-1" value={patientForm.pincode} onChange={e => setField('pincode', e.target.value.replace(/\D/g, ''))} placeholder="6-digit PIN" inputMode="numeric" maxLength={6} />
+            </div>
           </div>
         </section>
 

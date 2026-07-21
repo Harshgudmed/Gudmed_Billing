@@ -10,6 +10,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import client from '@/api/client'
 import { useAuth } from '@/lib/auth'
+import { getFullName } from "@/lib/patient";
 
 // Doctor Progress Notes — reuses the existing note-v2 / clinical-notes-v2 endpoints
 // (no backend change). Notes are append-only: an "edit" is an addendum (parentId),
@@ -67,7 +68,7 @@ export default function ProgressNotesPanel({ admitted = [], admissionId: control
             <SelectTrigger className="w-72"><SelectValue placeholder="Select admitted patient" /></SelectTrigger>
             <SelectContent>
               {admitted.map((a) => (
-                <SelectItem key={a.id} value={a.id}>{(a.patient?.firstName || '') + ' ' + (a.patient?.lastName || '')} · Bed {a.bed?.bedNumber || '—'}</SelectItem>
+                <SelectItem key={a.id} value={a.id}>{getFullName(a.patient)} · Bed {a.bed?.bedNumber || '—'}</SelectItem>
               ))}
             </SelectContent>
           </Select>

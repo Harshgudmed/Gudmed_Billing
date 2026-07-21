@@ -83,12 +83,12 @@ const INSURANCE_PROVIDERS = [
   "Tata AIG",
 ];
 
-export function getPatientFullName(patient) {
-  if (!patient) return "";
-  return `${patient.firstName || ""} ${patient.middleName || ""} ${patient.lastName || ""}`
-    .replace(/\s+/g, " ")
-    .trim();
-}
+// Imported (not re-exported straight through) so this module can use the name
+// itself as well as expose it — `export ... from` creates no local binding.
+// The implementation lives in lib/patient.js; this file used to carry its own
+// copy, which is how the same patient could read differently on two screens.
+import { getFullName as getPatientFullName } from '@/lib/patient'
+export { getPatientFullName }
 
 export function calculatePatientAge(dateOfBirth) {
   if (!dateOfBirth) return null;

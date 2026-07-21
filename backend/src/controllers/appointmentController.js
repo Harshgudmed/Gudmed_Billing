@@ -1,11 +1,16 @@
 import { db } from '../config/db.js'
 import { Prisma } from '@prisma/client'
 import { getOrgId } from "../lib/reqContext.js";
+import { drName } from "../lib/drName.js";
 import { nextSeriesNumber, invoiceProbe } from "../lib/counters.js";
 import { startOfDay, endOfDay, todayIST } from '../utils/dates.js'
+import { normalizeTimeHHMM, zonedDateTimeToUtc, ymdInZone } from '../lib/dates.js'
+import { priorityRank } from '../lib/queuePriority.js'
 import { scopedDoctorId } from '../utils/scope.js'
 import { computeConsultationFee } from '../services/appointmentFees.js'
-import { generateQueueNumber } from '../utils/queueNumber.js'
+import { nextQueueNumber } from '../utils/queueNumber.js'
+import { deriveRoomAndVisitType } from '../lib/queueDerivation.js'
+import { PATIENT_NAME_SELECT } from '../lib/patientName.js'
 
 export async function getAll(req, res, next) {
   try {
@@ -56,7 +61,7 @@ export async function getAll(req, res, next) {
         orderBy: [{ appointmentDate: 'asc' }, { appointmentTime: 'asc' }],
         include: {
           patient: {
-            select: { id: true, mrn: true, firstName: true, lastName: true, phonePrimary: true, gender: true, dateOfBirth: true },
+            select: { ...PATIENT_NAME_SELECT, phonePrimary: true, gender: true, dateOfBirth: true },
           },
           doctor: {
             select: { id: true, fullName: true, specialization: true },
@@ -187,8 +192,20 @@ export async function create(req, res, next) {
   try {
     const organizationId = getOrgId(req)
     const validatedData = req.validatedBody
+    // Pad once, here: the slot-clash lookup below and the row we store must agree,
+    // and the stored value is string-sorted (see normalizeTimeHHMM).
+    validatedData.appointmentTime = normalizeTimeHHMM(validatedData.appointmentTime)
 
-    const apptDate = new Date(validatedData.appointmentDate)
+    // Pin to midnight of the hospital's day. `appointmentDate` is the DAY; the
+    // time of day lives in `appointmentTime`. The browser sends a full instant
+    // (the form defaults to `new Date()` and posts .toISOString()), so storing
+    // it raw put the booking's own creation moment in the date — 2026-07-17
+    // T11:40:15.915Z rather than midnight. That silently disabled the
+    // double-booking guard: the unique index is on (organizationId, doctorId,
+    // appointmentDate, appointmentTime), so a date unique to the millisecond
+    // can never collide, and one doctor ended up with 13 bookings in the same
+    // 10:00 slot. Normalising here is what gives that index something to catch.
+    const apptDate = startOfDay(validatedData.appointmentDate)
     let consultationFee = null
     let appliedSlabInfo = null
 
@@ -217,13 +234,20 @@ export async function create(req, res, next) {
 
     // Prevent double-booking: no two live appointments for the SAME doctor at the
     // same date + time slot. Cancelled appointments free the slot again.
+    //
+    // Matched across the whole calendar DAY rather than on `apptDate` exactly:
+    // every appointment written before the normalisation above carries a
+    // creation-instant date, so an equality test would miss all of them and
+    // happily double-book on top of existing rows. `rescheduled` is excluded to
+    // match the partial index's own WHERE clause — a superseded row must not
+    // keep holding the slot it was moved out of.
     const slotClash = await db.appointment.findFirst({
       where: {
         organizationId,
         doctorId: validatedData.doctorId,
-        appointmentDate: apptDate,
+        appointmentDate: { gte: startOfDay(apptDate), lte: endOfDay(apptDate) },
         appointmentTime: validatedData.appointmentTime,
-        status: { notIn: ['cancelled', 'no_show'] },
+        status: { notIn: ['cancelled', 'no_show', 'rescheduled'] },
       },
       select: { id: true },
     })
@@ -235,8 +259,43 @@ export async function create(req, res, next) {
       })
     }
 
-    // Create appointment, invoice, AND commission in transaction
-    const { appointment, draftInvoiceNumber, commission } = await db.$transaction(async (tx) => {
+    // Prevent the SAME patient being booked with two different doctors at the
+    // same date + time — a person cannot be in two rooms at once. The DB only
+    // has a doctor-side partial unique index, so nothing stops this at the
+    // database level yet. Mirror the doctor-side check across the whole calendar
+    // day, excluding voided/superseded rows, matching ANY doctor.
+    // FOLLOW-UP: add a partial unique index on
+    // (organizationId, patientId, appointmentDate, appointmentTime) — schema.prisma
+    // is owned by another engineer this round, so this app-level guard stands in.
+    const patientClash = await db.appointment.findFirst({
+      where: {
+        organizationId,
+        patientId: validatedData.patientId,
+        appointmentDate: { gte: startOfDay(apptDate), lte: endOfDay(apptDate) },
+        appointmentTime: validatedData.appointmentTime,
+        status: { notIn: ['cancelled', 'no_show', 'rescheduled'] },
+      },
+      select: { id: true },
+    })
+    if (patientClash) {
+      return res.status(409).json({
+        success: false,
+        code: 'PATIENT_DOUBLE_BOOKED',
+        error: `This patient already has an appointment at ${validatedData.appointmentTime} on this date. A patient cannot be booked with two doctors at the same time.`,
+      })
+    }
+
+    // Create appointment, invoice, AND commission in transaction. The
+    // findFirst check above is only a fast, friendly pre-check — it runs
+    // outside any transaction/lock, so two requests within the same ~100ms
+    // window can both pass it and both reach this create. The real guard is
+    // the partial unique index on (organizationId, doctorId, appointmentDate,
+    // appointmentTime) (migration 20260716100500_appointment_slot_unique) —
+    // the loser's create throws P2002, caught below and translated to the
+    // same SLOT_TAKEN response the pre-check gives the common case.
+    let appointment, draftInvoiceNumber, commission
+    try {
+      ({ appointment, draftInvoiceNumber, commission } = await db.$transaction(async (tx) => {
       const appointment = await tx.appointment.create({
         data: {
           organizationId,
@@ -253,8 +312,51 @@ export async function create(req, res, next) {
           reminderSent: false,
         },
         include: {
-          patient: { select: { id: true, mrn: true, firstName: true, lastName: true, phonePrimary: true } },
+          patient: { select: { ...PATIENT_NAME_SELECT, phonePrimary: true } },
           doctor: { select: { id: true, fullName: true } },
+        },
+      })
+
+      // Put the patient in the queue NOW, in the same transaction.
+      //
+      // The queue is derived from appointments, but it was derived LAZILY — by
+      // syncAppointmentsToQueue, which runs when the Queue page is fetched and,
+      // for the display board, at most once a minute. So a patient booked at
+      // 15:50 did not exist in the queue at 15:50: the Queue screen only showed
+      // them on the next refetch, and the wall board up to 60s later. Reception
+      // had to refresh to see someone they had just booked.
+      //
+      // Writing the row here makes the queue correct the instant the
+      // appointment exists, so a poll of either screen sees it immediately and
+      // nothing has to wait for a sync pass.
+      //
+      // The sync is NOT redundant now — it stays as the self-heal for rows
+      // created before this existed, for imported/seeded appointments, and for
+      // slot or room changes. It upserts, so it simply finds this row already
+      // present and leaves it alone.
+      const { roomId, visitType } = await deriveRoomAndVisitType({
+        doctorId: validatedData.doctorId,
+        patientId: validatedData.patientId,
+        appointmentDate: apptDate,
+        appointmentTime: validatedData.appointmentTime,
+      })
+      await tx.queueManagement.create({
+        data: {
+          organizationId,
+          patientId: validatedData.patientId,
+          appointmentId: appointment.id,
+          assignedToId: validatedData.doctorId,
+          roomId,
+          visitType,
+          serviceArea: 'opd',
+          queueNumber: await nextQueueNumber(tx, organizationId, 'opd'),
+          status: 'waiting',
+          priority: validatedData.priority || 'normal',
+          priorityRank: priorityRank(validatedData.priority || 'normal'),
+          // The appointment's own slot, not "now" — this is what orders the
+          // queue by appointment time rather than by booking time (see
+          // lib/queueSync.js).
+          joinedQueueAt: zonedDateTimeToUtc(ymdInZone(apptDate), validatedData.appointmentTime),
         },
       })
 
@@ -265,7 +367,19 @@ export async function create(req, res, next) {
         orderBy: { createdAt: 'asc' },
       })
       const unitPrice = consultationFee ?? opdService?.unitPrice ?? 500
-      const description = opdService?.serviceName ?? `${aptType} Consultation`
+      // The line must say WHAT was billed, so reception/patient/audit can tell an
+      // OPD visit from a follow-up on the receipt itself. Naming the service
+      // alone ("OPD Consultation") made every appointment type — including
+      // follow-ups and emergencies — print the same line.
+      const VISIT_LABEL = {
+        follow_up: 'Follow-up Consultation',
+        new_patient: 'OPD Consultation (New Patient)',
+        emergency: 'Emergency Consultation',
+      }
+      const visitLabel = VISIT_LABEL[aptType] || opdService?.serviceName || `${aptType} Consultation`
+      const description = appointment.doctor?.fullName
+        ? `${visitLabel} — ${drName(appointment.doctor.fullName)}`
+        : visitLabel
       // Same atomic per-org/FY series the billing counter draws from, so an
       // appointment invoice and a counter invoice share one numbering scheme and
       // cannot collide on the @unique column when created in the same millisecond.
@@ -305,11 +419,19 @@ export async function create(req, res, next) {
           where: { doctorId: validatedData.doctorId },
         })
 
-        if (commissionConfig && commissionConfig.isActive && unitPrice > 0) {
+        if (commissionConfig && commissionConfig.isActive) {
+          // A percentage doctor earns a share of what was actually charged, so a
+          // free follow-up (unitPrice 0) correctly earns nothing. A fixed
+          // per-consultation doctor is paid for SEEING the patient, so they earn
+          // their flat amount even on a free follow-up. Guarding on the computed
+          // amount (not on unitPrice) gives both: fixed pays out at ₹0 fee,
+          // percentage stays zero. The old `unitPrice > 0` guard silently
+          // withheld the fixed doctor's fee on every free follow-up.
           const commissionAmount = commissionConfig.commissionType === 'percentage'
             ? (unitPrice * commissionConfig.commissionRate) / 100
             : commissionConfig.commissionRate
 
+          if (commissionAmount > 0) {
           commission = await tx.doctorCommission.create({
             data: {
               organizationId,
@@ -322,11 +444,32 @@ export async function create(req, res, next) {
               status: 'pending',
             },
           })
+          }
         }
       }
 
       return { appointment, draftInvoiceNumber: invoice.invoiceNumber, commission }
-    })
+      }))
+    } catch (err) {
+      // P2002's `target` is the constraint NAME on some Prisma versions and the
+      // list of FIELD names on others — this Postgres client reports the fields
+      // ("organizationId,doctorId,appointmentDate,appointmentTime"), so matching
+      // only the index name never hit, and a taken slot would surface as a 500
+      // instead of SLOT_TAKEN. It went unnoticed because the index itself could
+      // never fire until appointmentDate stopped carrying a time-of-day (see
+      // create()'s startOfDay call). `appointmentTime` is unique to this index —
+      // it is the only unique constraint on Appointment that mentions it.
+      const target = String(err.meta?.target || '')
+      if (err.code === 'P2002'
+        && (target.includes('Appointment_doctor_active_slot_key') || target.includes('appointmentTime'))) {
+        return res.status(409).json({
+          success: false,
+          code: 'SLOT_TAKEN',
+          error: `That doctor already has an appointment at ${validatedData.appointmentTime} on this date. Pick another slot.`,
+        })
+      }
+      throw err
+    }
 
     const messageLines = [
       `Appointment scheduled`,
@@ -364,14 +507,20 @@ export async function update(req, res, next) {
     // Whitelist: only these fields can be changed — sensitive fields like
     // organizationId, patientId, invoiceId are never touched.
     const updates = {}
-    if (body.appointmentDate    !== undefined) updates.appointmentDate    = body.appointmentDate
-    if (body.appointmentTime    !== undefined) updates.appointmentTime    = body.appointmentTime
+    // Same day-pinning as create() — an edit must not reintroduce a
+    // time-of-day into the date and slip back past the slot unique index.
+    if (body.appointmentDate    !== undefined) updates.appointmentDate    = startOfDay(body.appointmentDate)
+    if (body.appointmentTime    !== undefined) updates.appointmentTime    = normalizeTimeHHMM(body.appointmentTime)
     if (body.appointmentType    !== undefined) updates.appointmentType    = body.appointmentType
     if (body.doctorId           !== undefined) updates.doctorId           = body.doctorId
     if (body.chiefComplaint     !== undefined) updates.chiefComplaint     = body.chiefComplaint
     if (body.notes              !== undefined) updates.notes              = body.notes
     if (body.cancellationReason !== undefined) updates.cancellationReason = body.cancellationReason
-    if (body.consultationFee    !== undefined) updates.consultationFee    = body.consultationFee
+    // consultationFee is deliberately NOT settable via PATCH: it is derived from
+    // the doctor's slabs at create() and is what the linked Invoice + Doctor
+    // Commission were built from. Changing it here alone put the appointment,
+    // its invoice and its commission in a three-way disagreement. (The field is
+    // also stripped from updateAppointmentSchema, so it never reaches here.)
     if (body.reminderSent       !== undefined) updates.reminderSent       = body.reminderSent
 
     // Status change → auto-set the matching timestamp
@@ -397,7 +546,7 @@ export async function update(req, res, next) {
         data: updates,
         include: {
           patient: {
-            select: { id: true, mrn: true, firstName: true, lastName: true, phonePrimary: true, gender: true, dateOfBirth: true },
+            select: { ...PATIENT_NAME_SELECT, phonePrimary: true, gender: true, dateOfBirth: true },
           },
           doctor: {
             select: { id: true, fullName: true, specialization: true },
@@ -406,6 +555,24 @@ export async function update(req, res, next) {
       })
 
       if (body.status === 'checked_in') {
+        // Room + new-vs-follow-up are derived from the doctor/patient, not
+        // asked at check-in — see lib/queueDerivation.js.
+        const { roomId, visitType } = await deriveRoomAndVisitType({
+          doctorId: updated.doctorId,
+          patientId: updated.patientId,
+          // The room comes from the shift covering THIS appointment's slot, so
+          // the slot has to come along — see lib/queueDerivation.js.
+          appointmentDate: updated.appointmentDate,
+          appointmentTime: updated.appointmentTime,
+        })
+        // No room means the queue row would carry roomId=null and appear on NO
+        // board — the patient would wait forever, unseen. Refuse the check-in so
+        // staff assign a room first, rather than silently creating an invisible
+        // queue row. Thrown here (inside the tx) so the status change rolls back
+        // too; translated to a clean 400 in the catch below.
+        if (!roomId) {
+          throw Object.assign(new Error('This doctor has no room assigned — assign a room before checking in'), { code: 'NO_ROOM' })
+        }
         await tx.queueManagement.upsert({
           where: { appointmentId: id },
           create: {
@@ -414,10 +581,25 @@ export async function update(req, res, next) {
             appointmentId: id,
             serviceArea: 'opd',
             assignedToId: updated.doctorId,
+            roomId,
+            visitType,
             status: 'waiting',
-            queueNumber: generateQueueNumber('opd'),
+            queueNumber: await nextQueueNumber(tx, organizationId, 'opd'),
           },
           update: {}, // already queued (e.g. re-check-in after an edit) — leave as-is
+        })
+      }
+
+      // Cancelling or no-showing an appointment must also drop the patient OUT of
+      // the queue. Check-in creates a 'waiting' QueueManagement row; without this
+      // the row stayed 'waiting' after a cancel, so the patient the receptionist
+      // just cancelled was still called by staff and still shown on the public
+      // display board. updateMany (not update) so it is a harmless no-op when the
+      // appointment was never checked in and has no queue row.
+      if (body.status === 'cancelled' || body.status === 'no_show') {
+        await tx.queueManagement.updateMany({
+          where: { appointmentId: id, status: { notIn: ['completed', 'cancelled', 'no_show'] } },
+          data: { status: body.status },
         })
       }
 
@@ -426,6 +608,11 @@ export async function update(req, res, next) {
 
     res.json({ success: true, data: appointment })
   } catch (err) {
+    // Check-in was refused because the doctor has no room to seat the patient in
+    // (see the NO_ROOM guard above). Surface it as a clean, actionable 400.
+    if (err.code === 'NO_ROOM') {
+      return res.status(400).json({ success: false, code: 'NO_ROOM', error: err.message })
+    }
     next(err)
   }
 }
@@ -437,10 +624,20 @@ export async function reschedule(req, res, next) {
   try {
     const organizationId = getOrgId(req)
     const { id } = req.params
-    const { appointmentDate, appointmentTime } = req.body
+    const { appointmentDate } = req.body
+    // This route has no `validate()` middleware, so validate req.body here — it
+    // is how unpadded times like "9:00" and impossible ones like "25:00" got in,
+    // which then sort wrong on the board.
+    const appointmentTime = normalizeTimeHHMM(req.body.appointmentTime)
 
     if (!appointmentDate || !appointmentTime) {
       return res.status(400).json({ success: false, error: 'appointmentDate and appointmentTime are required' })
+    }
+    if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(appointmentTime)) {
+      return res.status(400).json({ success: false, error: 'Time must be HH:mm between 00:00 and 23:59' })
+    }
+    if (Number.isNaN(new Date(appointmentDate).getTime())) {
+      return res.status(400).json({ success: false, error: 'Invalid appointmentDate' })
     }
 
     const scopeWhere = { id, organizationId }
@@ -451,13 +648,28 @@ export async function reschedule(req, res, next) {
       return res.status(404).json({ success: false, error: 'Appointment not found' })
     }
 
-    const created = await db.$transaction(async (tx) => {
+    // R5 — a finished or voided visit is not a thing you move. Only a live
+    // upcoming appointment can be rescheduled; a cancelled/no-show/completed/
+    // already-rescheduled one must not spawn a fresh live appointment.
+    if (['cancelled', 'no_show', 'completed', 'rescheduled'].includes(original.status)) {
+      return res.status(400).json({ success: false, error: `A ${original.status} appointment cannot be rescheduled` })
+    }
+
+    // R6 — you cannot reschedule into the past. Compare on the hospital DAY so a
+    // same-day reschedule is still allowed.
+    if (startOfDay(appointmentDate) < startOfDay(new Date())) {
+      return res.status(400).json({ success: false, error: 'Cannot reschedule to a date in the past' })
+    }
+
+    let created
+    try {
+      created = await db.$transaction(async (tx) => {
       const newAppointment = await tx.appointment.create({
         data: {
           organizationId,
           patientId: original.patientId,
           doctorId: original.doctorId,
-          appointmentDate: new Date(appointmentDate),
+          appointmentDate: startOfDay(appointmentDate), // day only — see create()
           appointmentTime,
           appointmentType: original.appointmentType || 'new_patient',
           departmentId: original.departmentId,
@@ -469,7 +681,7 @@ export async function reschedule(req, res, next) {
           rescheduledFromId: original.id,
         },
         include: {
-          patient: { select: { id: true, mrn: true, firstName: true, lastName: true, phonePrimary: true } },
+          patient: { select: { ...PATIENT_NAME_SELECT, phonePrimary: true } },
           doctor: { select: { id: true, fullName: true } },
         },
       })
@@ -477,8 +689,45 @@ export async function reschedule(req, res, next) {
         where: { id: original.id },
         data: { status: 'rescheduled', rescheduledToId: newAppointment.id },
       })
+
+      // R1 — the old appointment is now 'rescheduled', so it must not keep the
+      // patient in the queue. If they were checked in, close that queue row;
+      // otherwise the patient stayed 'waiting' on the OLD slot's board and, on
+      // checking into the new slot, showed up twice. updateMany = no-op when
+      // there's no queue row.
+      await tx.queueManagement.updateMany({
+        where: { appointmentId: original.id, status: { notIn: ['completed', 'cancelled', 'no_show'] } },
+        data: { status: 'rescheduled' },
+      })
+
+      // R2 — carry the draft invoice to the NEW appointment so the visit the
+      // patient actually attends is the one that's billed. create() attaches a
+      // draft invoice to every appointment; without this the invoice stayed on
+      // the superseded 'rescheduled' row and the real visit looked unbilled.
+      // Only an untouched draft is moved — a real invoice someone has since
+      // acted on is left exactly where it is.
+      await tx.invoice.updateMany({
+        where: { appointmentId: original.id, status: 'draft', paymentStatus: 'unpaid' },
+        data: { appointmentId: newAppointment.id },
+      })
+
       return newAppointment
     })
+    } catch (err) {
+      // R4 — a reschedule onto a slot the doctor already has hits the partial
+      // unique index and throws P2002. Translate it to the same clean SLOT_TAKEN
+      // the create() path returns, instead of leaking a raw Prisma error.
+      const target = String(err.meta?.target || '')
+      if (err.code === 'P2002'
+        && (target.includes('Appointment_doctor_active_slot_key') || target.includes('appointmentTime'))) {
+        return res.status(409).json({
+          success: false,
+          code: 'SLOT_TAKEN',
+          error: `That doctor already has an appointment at ${appointmentTime} on this date. Pick another slot.`,
+        })
+      }
+      throw err
+    }
 
     res.status(201).json({ success: true, data: created, message: 'Appointment rescheduled' })
   } catch (err) {

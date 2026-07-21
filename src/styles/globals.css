@@ -2,6 +2,40 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Thin, light scrollbar for internal scroll areas (slot cells, doctor summary).
+   The browser default bar is thick and dark, which looked heavy inside the small
+   grid cells. */
+@layer utilities {
+  .thin-scroll {
+    scrollbar-width: thin;                       /* Firefox */
+    scrollbar-color: rgb(203 213 225) transparent; /* slate-300 thumb */
+  }
+  .thin-scroll::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  .thin-scroll::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  .thin-scroll::-webkit-scrollbar-thumb {
+    background-color: rgb(203 213 225);          /* slate-300 */
+    border-radius: 9999px;
+  }
+  .thin-scroll:hover::-webkit-scrollbar-thumb {
+    background-color: rgb(148 163 184);          /* slate-400 on hover */
+  }
+
+  /* Fully hidden scrollbar — the area still scrolls (mouse wheel, touch, drag),
+     just with no visible track/thumb. Use where a bar reads as visual clutter. */
+  .no-scrollbar {
+    scrollbar-width: none;      /* Firefox */
+    -ms-overflow-style: none;   /* old Edge */
+  }
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+}
+
 @layer base {
   :root {
     --background: 0 0% 100%;
@@ -32,6 +66,6 @@
     @apply border-border;
   }
   body {
-    @apply bg-background text-foreground antialiased;
+    @apply bg-background text-foreground antialiased cursor-default;
   }
 }

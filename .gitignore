@@ -40,3 +40,6 @@ backend/prisma/*.db
 # One-off migration scripts that contain a DB connection string — keep out of git
 backend/full-migrate.js
 backend/restore-from-render.js
+
+# e2e screenshots (local artefacts)
+e2e/shots/

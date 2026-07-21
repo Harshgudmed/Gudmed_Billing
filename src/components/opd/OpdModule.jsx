@@ -866,21 +866,14 @@ export default function OpdModule() {
           </Card>
         ) : (
           <div className="space-y-3">
-            {paginated.map((c) => {
-              const pat = c.patient;
-              const patName = pat ? getFullName(pat) : "Unknown Patient";
-              const patMrn = pat?.mrn || "—";
-              const patAge = pat?.dateOfBirth ? getAge(pat.dateOfBirth) : 0;
-              const patGender = pat?.gender || "";
-              const docName = c.doctor?.fullName || "—";
-              const icd = (() => {
-                try {
-                  const a = JSON.parse(c.icd10Codes || "[]");
-                  return Array.isArray(a) ? a[0] : "";
-                } catch {
-                  return "";
-                }
-              })();
+            {paginated.map(c => {
+              const pat = c.patient
+              const patName = pat ? getFullName(pat) : 'Unknown Patient'
+              const patMrn = pat?.mrn || '—'
+              const patAge = pat?.dateOfBirth ? getAge(pat.dateOfBirth) : 0
+              const patGender = pat?.gender || ''
+              const docName = c.doctor?.fullName ? drName(c.doctor.fullName) : '—'
+              const icd = (() => { try { const a = JSON.parse(c.icd10Codes || '[]'); return Array.isArray(a) ? a[0] : '' } catch { return '' } })()
               return (
                 <Card
                   key={c.id}
@@ -1199,43 +1192,9 @@ export default function OpdModule() {
                 );
               })()}
             <DialogFooter>
-              <Button variant="outline" onClick={() => setViewing(null)}>
-                Close
-              </Button>
-              {viewing && (
-                <Button
-                  variant="outline"
-                  onClick={() => {
-                    openEdit(viewing);
-                    setViewing(null);
-                  }}
-                >
-                  <Edit className="h-4 w-4 mr-1" />
-                  Edit
-                </Button>
-              )}
-              {viewing && (
-                <Button
-                  className="bg-[#2E4168] hover:bg-[#24344f]"
-                  onClick={() => {
-                    const c = viewing;
-                    printPrescription(
-                      c,
-                      c.patient ? getFullName(c.patient) : "Unknown",
-                      c.patient?.mrn || "—",
-                      c.patient?.dateOfBirth
-                        ? getAge(c.patient.dateOfBirth)
-                        : 0,
-                      c.patient?.gender || "",
-                      c.doctor?.fullName || "—",
-                      orgInfo,
-                    );
-                  }}
-                >
-                  <Printer className="h-4 w-4 mr-1" />
-                  Print
-                </Button>
-              )}
+              <Button variant="outline" onClick={() => setViewing(null)}>Close</Button>
+              {viewing && <Button variant="outline" onClick={() => { openEdit(viewing); setViewing(null) }}><Edit className="h-4 w-4 mr-1" />Edit</Button>}
+              {viewing && <Button className="bg-[#2E4168] hover:bg-[#24344f]" onClick={() => { const c = viewing; printPrescription(c, c.patient ? getFullName(c.patient) : 'Unknown', c.patient?.mrn || '—', c.patient?.dateOfBirth ? getAge(c.patient.dateOfBirth) : 0, c.patient?.gender || '', c.doctor?.fullName ? drName(c.doctor.fullName) : '—', orgInfo) }}><Printer className="h-4 w-4 mr-1" />Print</Button>}
             </DialogFooter>
           </DialogContent>
         </Dialog>

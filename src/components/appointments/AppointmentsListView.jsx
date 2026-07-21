@@ -1,4 +1,5 @@
 import { Card, CardContent } from "@/components/ui/card";
+import { drName } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
@@ -26,6 +27,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { formatTime12h } from "@/lib/format";
 import {
   CalendarDays,
   Plus,
@@ -146,7 +148,7 @@ export default function AppointmentsListView({
                 <SelectItem value="all">All Doctors</SelectItem>
                 {filterDoctors.map((doctor) => (
                   <SelectItem key={doctor.id} value={doctor.id}>
-                    {doctor.fullName}
+                    {drName(doctor.fullName)}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -243,7 +245,7 @@ export default function AppointmentsListView({
                         </TableCell>
                         <TableCell>
                           <div className="font-mono font-medium">
-                            {appointment.appointmentTime}
+                            {formatTime12h(appointment.appointmentTime)}
                           </div>
                         </TableCell>
                         <TableCell>
@@ -266,7 +268,7 @@ export default function AppointmentsListView({
                         </TableCell>
                         <TableCell>
                           <div className="font-medium">
-                            {doctor?.fullName || "Unassigned"}
+                            {doctor?.fullName ? drName(doctor.fullName) : "Unassigned"}
                           </div>
                           <div className="text-xs text-gray-500">
                             {doctor?.specialization}

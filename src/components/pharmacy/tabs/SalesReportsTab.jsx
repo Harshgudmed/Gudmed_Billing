@@ -16,6 +16,7 @@ import { statusBadge } from "../pharmacyHelpers";
 import { Pagination } from "@/components/common/Pagination";
 import { formatMoney } from "@/lib/format";
 import { printPharmacyReceipt } from "@/components/billing/utils/printBilling";
+import { getFullName } from "@/lib/patient";
 
 function printSale(sale, orgInfo) {
   let clinic = {};
@@ -89,7 +90,7 @@ export default function SalesReportsTab({
               {loading ? (
                 <TableRow>
                   <TableCell colSpan={8} className="text-center py-10">
-                    <Loader2 className="h-6 w-6 animate-spin text-gray-400 mx-auto" />
+                    <Loader2 className="h-6 w-6 animate-spin text-[#2E4168] mx-auto" />
                   </TableCell>
                 </TableRow>
               ) : sales.length === 0 ? (
@@ -104,7 +105,7 @@ export default function SalesReportsTab({
               ) : (
                 sales.map((s) => {
                   const name = s.patient
-                    ? `${s.patient.firstName} ${s.patient.lastName || ""}`.trim()
+                    ? getFullName(s.patient)
                     : "Walk-in";
                   return (
                     <TableRow key={s.id}>

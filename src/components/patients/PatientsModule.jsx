@@ -91,7 +91,7 @@ export default function PatientsModule() {
     defaultValues: {
       firstName: '', middleName: '', lastName: '', dateOfBirth: '',
       gender: 'male', phonePrimary: '', phoneSecondary: '', email: '',
-      region: '', zone: '', woreda: '', kebele: '',
+      houseNumber: '', street: '', locality: '', city: '', district: '', state: '', pincode: '',
       emergencyContactName: '', emergencyContactPhone: '', emergencyContactRelationship: '',
       bloodGroup: '', hasInsurance: false, insuranceProvider: '', insuranceId: '',
     },
@@ -110,8 +110,9 @@ export default function PatientsModule() {
       firstName: patient.firstName || '', middleName: patient.middleName || '', lastName: patient.lastName || '',
       dateOfBirth: patient.dateOfBirth ? format(new Date(patient.dateOfBirth), 'yyyy-MM-dd') : '',
       gender: patient.gender || 'male', phonePrimary: patient.phonePrimary || '', phoneSecondary: patient.phoneSecondary || '',
-      email: patient.email || '', region: patient.region || '', zone: patient.zone || '',
-      woreda: patient.woreda || '', kebele: patient.kebele || '',
+      email: patient.email || '',
+      houseNumber: patient.houseNumber || '', street: patient.street || '', locality: patient.locality || '',
+      city: patient.city || '', district: patient.district || '', state: patient.state || '', pincode: patient.pincode || '',
       emergencyContactName: patient.emergencyContactName || '', emergencyContactPhone: patient.emergencyContactPhone || '',
       emergencyContactRelationship: patient.emergencyContactRelationship || '', bloodGroup: patient.bloodGroup || '',
       hasInsurance: patient.hasInsurance || false, insuranceProvider: patient.insuranceProvider || '', insuranceId: patient.insuranceId || '',
@@ -236,7 +237,7 @@ export default function PatientsModule() {
         <CardContent className="p-0">
           {loading ? (
             <div className="flex items-center justify-center py-16">
-              <Loader2 className="h-8 w-8 animate-spin text-blue-500" />
+              <Loader2 className="h-8 w-8 animate-spin text-[#2E4168]" />
             </div>
           ) : error ? (
             <div className="text-center py-16">

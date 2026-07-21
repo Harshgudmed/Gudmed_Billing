@@ -1,35 +1,19 @@
-import { useState, useEffect } from "react";
-import { getOrgSettings } from "@/lib/orgSettings";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Badge } from "@/components/ui/badge";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import { TableCell, TableRow } from "@/components/ui/table";
-import {
-  FileText,
-  Plus,
-  Search,
-  Printer,
-  Edit,
-  Trash2,
-  FileCheck,
-  Loader2,
-  Filter,
-  X,
-} from "lucide-react";
-import { format } from "date-fns";
-import { toast } from "sonner";
-import client from "@/api/client";
-import { useServerPagination } from "@/lib/useServerPagination";
-import { PaginatedTable } from "@/components/common/PaginatedTable";
-import DeathCertificateForm from "./DeathCertificateForm";
+import { useState, useEffect } from 'react'
+import { getOrgSettings } from '@/lib/orgSettings'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Badge } from '@/components/ui/badge'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { TableCell, TableRow } from '@/components/ui/table'
+import { FileText, Plus, Search, Printer, Edit, Trash2, FileCheck, Loader2, Filter, X } from 'lucide-react'
+import { format } from 'date-fns'
+import { toast } from 'sonner'
+import client from '@/api/client'
+import { useServerPagination } from '@/lib/useServerPagination'
+import { PaginatedTable } from '@/components/common/PaginatedTable'
+import DeathCertificateForm from './DeathCertificateForm'
+import { getFullName } from "@/lib/patient";
 
 const ITEMS_PER_PAGE = 10;
 
@@ -65,23 +49,18 @@ export default function DeathCertificateModule() {
   }, []);
 
   function handlePrint(id) {
-    const cert = certificates.find((c) => c.id === id);
-    if (!cert) return;
-    const win = window.open("", "_blank", "width=900,height=750");
-    if (!win) return;
-    const dod = format(new Date(cert.dateOfDeath), "dd MMMM yyyy");
-    const certDate = format(new Date(cert.certificationDate), "dd MMMM yyyy");
-    const patientName = cert.patient
-      ? `${cert.patient.firstName} ${cert.patient.middleName || ""} ${cert.patient.lastName}`.trim()
-      : "Unknown";
-    const age =
-      [
-        cert.ageAtDeathYears && `${cert.ageAtDeathYears} years`,
-        cert.ageAtDeathMonths && `${cert.ageAtDeathMonths} months`,
-        cert.ageAtDeathDays && `${cert.ageAtDeathDays} days`,
-      ]
-        .filter(Boolean)
-        .join(", ") || "—";
+    const cert = certificates.find(c => c.id === id)
+    if (!cert) return
+    const win = window.open('', '_blank', 'width=900,height=750')
+    if (!win) return
+    const dod = format(new Date(cert.dateOfDeath), 'dd MMMM yyyy')
+    const certDate = format(new Date(cert.certificationDate), 'dd MMMM yyyy')
+    const patientName = getFullName(cert.patient) || 'Unknown'
+    const age = [
+      cert.ageAtDeathYears && `${cert.ageAtDeathYears} years`,
+      cert.ageAtDeathMonths && `${cert.ageAtDeathMonths} months`,
+      cert.ageAtDeathDays && `${cert.ageAtDeathDays} days`,
+    ].filter(Boolean).join(', ') || '—'
     const html = `<!DOCTYPE html><html><head><title>Death Certificate ${cert.certificateNumber}</title>
       <style>body{font-family:'Times New Roman',serif;margin:30px;color:#000;}
       .border-box{border:3px double #000;padding:20px;}.header{text-align:center;margin-bottom:20px;}
@@ -157,11 +136,7 @@ export default function DeathCertificateModule() {
   }
 
   if (certificatesPagination.loading && certificates.length === 0) {
-    return (
-      <div className="flex items-center justify-center p-12">
-        <Loader2 className="h-8 w-8 animate-spin text-blue-600" />
-      </div>
-    );
+    return <div className="flex items-center justify-center p-12"><Loader2 className="h-8 w-8 animate-spin text-[#2E4168]" /></div>
   }
 
   if (view === "create") {
@@ -307,23 +282,11 @@ export default function DeathCertificateModule() {
             ]}
             renderRow={(cert) => (
               <TableRow key={cert.id}>
-                <TableCell className="font-mono font-medium">
-                  {cert.certificateNumber}
-                </TableCell>
-                <TableCell>
-                  {cert.patient
-                    ? `${cert.patient.firstName} ${cert.patient.lastName}`
-                    : "N/A"}
-                </TableCell>
-                <TableCell>{cert.patient?.mrn || "N/A"}</TableCell>
-                <TableCell>
-                  {format(new Date(cert.dateOfDeath), "dd MMM yyyy")}
-                </TableCell>
-                <TableCell>
-                  <Badge variant="outline" className="capitalize">
-                    {cert.mannerOfDeath}
-                  </Badge>
-                </TableCell>
+                <TableCell className="font-mono font-medium">{cert.certificateNumber}</TableCell>
+                <TableCell>{cert.patient ? getFullName(cert.patient) : 'N/A'}</TableCell>
+                <TableCell>{cert.patient?.mrn || 'N/A'}</TableCell>
+                <TableCell>{format(new Date(cert.dateOfDeath), 'dd MMM yyyy')}</TableCell>
+                <TableCell><Badge variant="outline" className="capitalize">{cert.mannerOfDeath}</Badge></TableCell>
                 <TableCell>
                   {cert.issuedAt ? (
                     <Badge className="bg-green-100 text-green-700 hover:bg-green-100 flex items-center gap-1 w-fit">

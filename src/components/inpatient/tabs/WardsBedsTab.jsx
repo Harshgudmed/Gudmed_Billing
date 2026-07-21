@@ -6,6 +6,7 @@ import { Badge } from '@/components/ui/badge'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { emptyWard, emptyAddBed, emptyAdmission } from '@/lib/inpatientHelpers'
+import { getFullName } from "@/lib/patient";
 
 // Wards & Beds tab — ward list table + visual bed map (building → floor → ward → beds).
 // Clicking an available bed jumps to the New Admission tab with that bed pre-selected.
@@ -137,7 +138,7 @@ export default function WardsBedsTab({
                         <div className="flex flex-wrap gap-3">
                           {beds.map(bed => {
                             const admission = admissions.find(a => a.bedId === bed.id && a.status === 'admitted')
-                            const patientName = admission ? `${admission.patient?.firstName || ''} ${admission.patient?.lastName || ''}`.trim() : ''
+                            const patientName = admission ? getFullName(admission.patient) : ''
                             const styles = {
                               occupied:    { bed: 'border-red-400 bg-red-50',    sheet: 'bg-red-500',    text: 'text-red-700' },
                               maintenance: { bed: 'border-yellow-400 bg-yellow-50', sheet: 'bg-yellow-500', text: 'text-yellow-700' },

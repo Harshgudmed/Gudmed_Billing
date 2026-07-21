@@ -1,8 +1,10 @@
+import { dayRange, dayRangeOf, startOfToday as hospitalStartOfToday } from '../lib/dates.js'
 import { db } from '../config/db.js'
 import { getOrgId } from "../lib/reqContext.js";
 import { nextSeriesNumber } from "../lib/counters.js";
 import { listResponse } from "../lib/pagination.js";
 import { scopedDoctorId } from '../utils/scope.js'
+import { PATIENT_NAME_SELECT } from '../lib/patientName.js'
 
 export async function getAll(req, res, next) {
   try {
@@ -28,18 +30,16 @@ export async function getAll(req, res, next) {
 
     const where = { ...baseWhere }
     // A single `date` (legacy) OR a startDate/endDate range filters the list.
+    // Day boundaries come from the hospital's timezone, not the server's.
     if (date) {
-      const t = new Date(date)
-      where.visitDate = { gte: new Date(new Date(t).setHours(0, 0, 0, 0)), lte: new Date(new Date(t).setHours(23, 59, 59, 999)) }
+      where.visitDate = dayRangeOf(date)
     } else if (startDate || endDate) {
-      where.visitDate = {}
-      if (startDate) where.visitDate.gte = new Date(new Date(startDate).setHours(0, 0, 0, 0))
-      if (endDate) where.visitDate.lte = new Date(new Date(endDate).setHours(23, 59, 59, 999))
+      where.visitDate = dayRange(startDate, endDate)
     }
 
     const include = {
       patient: {
-        select: { id: true, mrn: true, firstName: true, middleName: true, lastName: true, phonePrimary: true, gender: true, dateOfBirth: true, bloodGroup: true },
+        select: { ...PATIENT_NAME_SELECT, phonePrimary: true, gender: true, dateOfBirth: true, bloodGroup: true },
       },
       doctor: { select: { id: true, fullName: true, specialization: true } },
       prescriptions: true,
@@ -52,7 +52,8 @@ export async function getAll(req, res, next) {
     const body = await listResponse(db.consultation, {
       where, include, orderBy: { visitDate: 'desc' }, req, fullListTake: 50,
       summary: async () => {
-        const startOfToday = new Date(new Date().setHours(0, 0, 0, 0))
+        // "Today" is the hospital's today, not the server's.
+        const startOfToday = hospitalStartOfToday()
         const weekAgo = new Date(Date.now() - 7 * 86400000)
         const [total, today, thisWeek, withRx] = await Promise.all([
           db.consultation.count({ where: baseWhere }),
@@ -105,7 +106,7 @@ export async function create(req, res, next) {
           notes: consultationData.notes,
         },
         include: {
-          patient: { select: { id: true, mrn: true, firstName: true, middleName: true, lastName: true } },
+          patient: { select: { ...PATIENT_NAME_SELECT, } },
           doctor: { select: { id: true, fullName: true } },
         },
       })
@@ -177,7 +178,7 @@ export async function create(req, res, next) {
       const fullConsultation = await tx.consultation.findFirst({
         where: { id: newConsultation.id, organizationId },
         include: {
-          patient: { select: { id: true, mrn: true, firstName: true, middleName: true, lastName: true } },
+          patient: { select: { ...PATIENT_NAME_SELECT, } },
           doctor: { select: { id: true, fullName: true } },
           prescriptions: true,
           labOrders: {
@@ -337,7 +338,7 @@ export async function update(req, res, next) {
       return await tx.consultation.findFirst({
         where: { id, organizationId },
         include: {
-          patient: { select: { id: true, mrn: true, firstName: true, middleName: true, lastName: true } },
+          patient: { select: { ...PATIENT_NAME_SELECT, } },
           doctor: { select: { id: true, fullName: true } },
           prescriptions: true,
           labOrders: {

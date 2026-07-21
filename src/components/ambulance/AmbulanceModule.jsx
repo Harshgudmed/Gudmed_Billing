@@ -30,6 +30,7 @@ const STATUS_STYLES = {
 }
 
 import { formatMoney as inr } from '@/lib/format'
+import { getFullName } from "@/lib/patient";
 
 const EMPTY = {
   patientId: '', ambulanceType: 'ALS', fromLocation: '', toLocation: 'Hospital',
@@ -124,7 +125,7 @@ export default function AmbulanceModule() {
           </CardHeader>
           <CardContent>
             {loading && trips.length === 0 ? (
-              <div className="flex justify-center p-10"><Loader2 className="h-7 w-7 animate-spin text-blue-600" /></div>
+              <div className="flex justify-center p-10"><Loader2 className="h-7 w-7 animate-spin text-[#2E4168]" /></div>
             ) : error ? (
               <div className="flex flex-col items-center p-8 text-center text-red-600">
                 <AlertCircle className="h-8 w-8 mb-2" />{error}
@@ -152,7 +153,7 @@ export default function AmbulanceModule() {
                   ) : trips.map(t => (
                     <TableRow key={t.id}>
                       <TableCell className="font-mono font-medium text-blue-700">{t.tripNumber}</TableCell>
-                      <TableCell>{t.patient ? `${t.patient.firstName} ${t.patient.lastName}` : '—'}</TableCell>
+                      <TableCell>{t.patient ? getFullName(t.patient) : '—'}</TableCell>
                       <TableCell><Badge variant="outline">{t.ambulanceType}</Badge></TableCell>
                       <TableCell>{t.fromLocation || '—'}</TableCell>
                       <TableCell>{t.toLocation || '—'}</TableCell>

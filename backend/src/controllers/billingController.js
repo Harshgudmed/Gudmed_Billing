@@ -1,9 +1,23 @@
 import { db } from '../config/db.js'
 import { getOrgId, getActor } from "../lib/reqContext.js";
+import { todayRange } from '../lib/dates.js'
 import { nextSeriesNumber, invoiceProbe } from "../lib/counters.js";
 import { recalcInvoice, refundableAmount } from "../lib/invoiceLedger.js";
 import { fulfillInvoiceItems } from "../lib/invoiceFulfillment.js";
+import { round2 } from "../lib/money.js";
 import { z } from 'zod'
+import { PATIENT_NAME_SELECT } from '../lib/patientName.js'
+
+// A line's amount is quantity x unitPrice — the SERVER decides it, never the
+// client. The old code trusted the `total` in the request body, so a caller
+// could bill 10 x Rs.5000 as Rs.1 (the amount left the till, the stock still
+// left the shelf). Recompute every line here and drop the client's `total` on
+// the floor. Kept as one helper so the create path and the add-item path can't
+// drift apart. tax rides along untouched; only the money math is reclaimed.
+function priceLine(item) {
+  const total = round2((Number(item.quantity) || 0) * (Number(item.unitPrice) || 0))
+  return { ...item, total }
+}
 
 // Validation schemas
 const serviceSchema = z.object({
@@ -195,10 +209,7 @@ export async function getAll(req, res) {
           include: {
             patient: {
               select: {
-                id: true,
-                mrn: true,
-                firstName: true,
-                lastName: true,
+                ...PATIENT_NAME_SELECT,
                 phonePrimary: true,
                 hasInsurance: true,
                 insuranceProvider: true,
@@ -231,7 +242,7 @@ export async function getAll(req, res) {
           skip: offset,
           include: {
             patient: {
-              select: { id: true, mrn: true, firstName: true, lastName: true },
+              select: { ...PATIENT_NAME_SELECT, },
             },
             // Include the parent invoice so receipts can show Total / Paid / Balance
             // (Dr-Lal style) and the payments table can show patient + invoice no.
@@ -242,7 +253,7 @@ export async function getAll(req, res) {
                 amountPaid: true,
                 balanceDue: true,
                 patient: {
-                  select: { id: true, mrn: true, firstName: true, lastName: true },
+                  select: { ...PATIENT_NAME_SELECT, },
                 },
               },
             },
@@ -260,10 +271,8 @@ export async function getAll(req, res) {
     }
 
     if (resource === 'stats') {
-      const todayStart = new Date()
-      todayStart.setHours(0, 0, 0, 0)
-      const todayEnd = new Date()
-      todayEnd.setHours(23, 59, 59, 999)
+      // "Today" = the hospital's day, not the server's (see lib/dates.js).
+      const { gte: todayStart, lte: todayEnd } = todayRange()
 
       const [
         todayRevenueResult,
@@ -353,11 +362,13 @@ export async function create(req, res) {
         return res.status(400).json({ success: false, error: parsed.error.flatten() })
       }
 
-      const { patientId, consultationId, items, discountAmount, discountPercentage, taxPercentage, notes } =
+      const { patientId, consultationId, discountAmount, discountPercentage, taxPercentage, notes } =
         parsed.data
 
-      const subtotal = items.reduce((sum, item) => sum + item.total, 0)
-      const taxAmount = items.reduce((sum, item) => sum + (item.tax || 0), 0)
+      // Reprice every line from quantity x unitPrice before it is trusted or stored.
+      const items = parsed.data.items.map(priceLine)
+      const subtotal = round2(items.reduce((sum, item) => sum + item.total, 0))
+      const taxAmount = round2(items.reduce((sum, item) => sum + (item.tax || 0), 0))
       
       if (discountAmount > subtotal + taxAmount) {
         return res.status(400).json({ success: false, error: 'Discount cannot exceed the total value of the items' })
@@ -408,10 +419,7 @@ export async function create(req, res) {
           include: {
             patient: {
               select: {
-                id: true,
-                mrn: true,
-                firstName: true,
-                lastName: true,
+                ...PATIENT_NAME_SELECT,
                 phonePrimary: true,
                 hasInsurance: true,
                 insuranceProvider: true,
@@ -708,32 +716,38 @@ export async function create(req, res) {
         const oldInvoice = payment.invoice
         const refundedAmount = payment.amount
 
-        // An invoice can only be revised ONCE. Without this, two refunds left
-        // pending on the same invoice could both be approved, and each would
-        // derive its revised invoice from the SAME (already superseded) totals —
-        // refunding the money twice. The second request must be re-raised against
-        // the revised invoice instead.
-        if (oldInvoice.isArchived) {
+        // An invoice can only be revised ONCE. CLAIM IT ATOMICALLY: the conditional
+        // update matches only while the invoice is still un-archived, so of two
+        // refunds approved concurrently on the same invoice exactly one wins the
+        // compare-and-swap and the loser sees count===0 and gets a clean 409.
+        //
+        // The previous guard read `oldInvoice.isArchived` from a snapshot taken
+        // BEFORE this line (payment.invoice, loaded at the top of the tx), then set
+        // isArchived in a separate unconditional update below — a check-then-act
+        // race. Under concurrency both approvals read isArchived:false, both passed
+        // the guard, and each derived a revised invoice from the SAME superseded
+        // totals, refunding the money twice with no book entry for the second.
+        // Folding the check and the set into one conditional write closes the race.
+        // Mirrors the bed-claiming compare-and-swap in inpatientController.js (~1013).
+        const claimed = await tx.invoice.updateMany({
+          where: { id: oldInvoice.id, organizationId: ORGANIZATION_ID, isArchived: false },
+          data: {
+            paymentStatus: 'refunded',
+            isArchived: true, // lock it: immutable, kept as-is for the audit trail
+          },
+        })
+        if (claimed.count !== 1) {
           const err = new Error('This invoice has already been revised by an approved refund. Re-raise this request against the revised invoice.')
           err.status = 409; throw err
         }
 
-        // 1. Update Payment
+        // 1. Update Payment (only the CAS winner reaches here)
         const approvedPayment = await tx.payment.update({
           where: { id: paymentId },
           data: {
             status: 'APPROVED',
             approvedByUserId: actor.id,
             approvalDate: new Date()
-          }
-        })
-
-        // 2. Lock Old Invoice (immutable — kept exactly as-is for the audit trail)
-        await tx.invoice.update({
-          where: { id: oldInvoice.id },
-          data: {
-            paymentStatus: 'refunded',
-            isArchived: true,
           }
         })
 
@@ -828,11 +842,13 @@ export async function create(req, res) {
 
         let items = []
         try { items = JSON.parse(invoice.items || '[]') } catch { items = [] }
-        items.push({ ...item, status: 'ordered' })
+        // Same rule on the add-item path: the server prices the new line, not
+        // the client. Existing lines are left as stored (already priced when added).
+        items.push({ ...priceLine(item), status: 'ordered' })
 
-        const subtotal = items.reduce((s, i) => s + (i.total || 0), 0)
-        const taxAmount = items.reduce((s, i) => s + (i.tax || 0), 0)
-        const totalAmount = subtotal - (invoice.discountAmount || 0) + taxAmount
+        const subtotal = round2(items.reduce((s, i) => s + (i.total || 0), 0))
+        const taxAmount = round2(items.reduce((s, i) => s + (i.tax || 0), 0))
+        const totalAmount = round2(subtotal - (invoice.discountAmount || 0) + taxAmount)
 
         await tx.invoice.update({
           where: { id: invoiceId },
