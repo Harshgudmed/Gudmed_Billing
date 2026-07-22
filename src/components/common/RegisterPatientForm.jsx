@@ -12,9 +12,10 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { SearchableSelect } from '@/components/ui/searchable-select'
 import { DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog'
 import client from '@/api/client'
-import { drName } from '@/lib/utils'
+import { cn, drName } from '@/lib/utils'
 import { useDoctorTimetable } from './hooks/useDoctorTimetable'
 import { useCreatePatient } from '@/lib/useCreatePatient'
+import { patientFormSchema, issuesToFieldErrors } from '@/lib/schemas/patientFormSchema'
 
 const INDIAN_STATES = [
   'Andhra Pradesh', 'Arunachal Pradesh', 'Assam', 'Bihar', 'Chhattisgarh',
@@ -36,6 +37,14 @@ const APPOINTMENT_TYPES = ['OPD', 'Emergency', 'Follow-up', 'Specialist', 'Telec
 const PRIORITY_LEVELS = ['Routine', 'Urgent', 'Emergency', 'Critical']
 
 const MARITAL_STATUSES = ['Single', 'Married', 'Divorced', 'Widowed', 'Other']
+
+// Renders next to a field, right under its Input/Select, for both a Zod
+// validation error caught before submit and a validation error the backend
+// sends back after it (see handleRegisterPatient) — one place, either source.
+function FieldError({ message }) {
+  if (!message) return null
+  return <p className="mt-1 text-xs text-red-600">{message}</p>
+}
 
 function format12Hour(timeStr) {
   if (!timeStr) return ''
@@ -72,6 +81,9 @@ const emptyPatientForm = {
  */
 export default function RegisterPatientForm({ onSuccess, onCancel }) {
   const [patientForm, setPatientForm] = useState(emptyPatientForm)
+  // Keyed by field name — { firstName: "message", ... } — populated by either
+  // the pre-submit Zod check or a validation error the backend returns.
+  const [fieldErrors, setFieldErrors] = useState({})
   const [bookingAppointment, setBookingAppointment] = useState(false)
   const { createPatient, creating: creatingPatient } = useCreatePatient()
   // savingPatient covers the whole flow (patient create + appointment book),
@@ -107,7 +119,12 @@ export default function RegisterPatientForm({ onSuccess, onCancel }) {
     loadSettings()
   }, [])
 
-  const setField = (field, value) => setPatientForm(prev => ({ ...prev, [field]: value }))
+  const setField = (field, value) => {
+    setPatientForm(prev => ({ ...prev, [field]: value }))
+    // Clear a field's error the moment the user edits it, rather than leaving
+    // a stale message on screen after they've already fixed the value.
+    setFieldErrors(prev => (prev[field] ? { ...prev, [field]: undefined } : prev))
+  }
 
   // Departments for booking = real consultation departments only.
   // Exclude operational / service departments (you don't book a consult with them).
@@ -128,11 +145,18 @@ export default function RegisterPatientForm({ onSuccess, onCancel }) {
 
   const handleRegisterPatient = async (e) => {
     e.preventDefault()
-    // Registration also books an appointment, so a doctor + date are required.
-    if (!patientForm.doctor || !patientForm.appointmentDate) {
-      toast.error('Please select a doctor and an appointment date')
+    setFieldErrors({})
+
+    // Catch obviously-bad input before it makes a round trip. The backend
+    // (patientController.js `patientSchema`) still re-validates and remains
+    // the source of truth — this is only a faster first pass.
+    const parsed = patientFormSchema.safeParse(patientForm)
+    if (!parsed.success) {
+      setFieldErrors(issuesToFieldErrors(parsed.error.issues))
+      toast.error('Please fix the highlighted fields')
       return
     }
+
     try {
       const patient = await createPatient({
         ...patientForm,
@@ -161,6 +185,7 @@ export default function RegisterPatientForm({ onSuccess, onCancel }) {
 
         toast.success(`Patient ${patient.mrn} registered & appointment booked`)
         setPatientForm(emptyPatientForm)
+        setFieldErrors({})
         onSuccess?.(patient)
       } catch (err) {
         // Roll back the orphan patient so nothing is left half-created.
@@ -170,6 +195,12 @@ export default function RegisterPatientForm({ onSuccess, onCancel }) {
         setBookingAppointment(false)
       }
     } catch (err) {
+      // Backend validation error (see errorHandler.js: ZodError -> 400 with
+      // `details`). The backend is the source of truth, so any rule the
+      // pre-submit check missed still surfaces here, next to the field.
+      if ((err.status === 400 || err.status === 422) && Array.isArray(err.details)) {
+        setFieldErrors(issuesToFieldErrors(err.details))
+      }
       toast.error(err.message || 'Failed to register patient')
     }
   }
@@ -195,7 +226,8 @@ export default function RegisterPatientForm({ onSuccess, onCancel }) {
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <div>
               <Label className="text-xs text-gray-600">First Name <span className="text-red-500">*</span></Label>
-              <Input className="mt-1" value={patientForm.firstName} onChange={e => setField('firstName', e.target.value)} required placeholder="First name" />
+              <Input className={cn('mt-1', fieldErrors.firstName && 'border-red-500')} value={patientForm.firstName} onChange={e => setField('firstName', e.target.value)} required placeholder="First name" />
+              <FieldError message={fieldErrors.firstName} />
             </div>
             <div>
               <Label className="text-xs text-gray-600">Middle Name</Label>
@@ -203,13 +235,15 @@ export default function RegisterPatientForm({ onSuccess, onCancel }) {
             </div>
             <div>
               <Label className="text-xs text-gray-600">Last Name <span className="text-red-500">*</span></Label>
-              <Input className="mt-1" value={patientForm.lastName} onChange={e => setField('lastName', e.target.value)} required placeholder="Last name" />
+              <Input className={cn('mt-1', fieldErrors.lastName && 'border-red-500')} value={patientForm.lastName} onChange={e => setField('lastName', e.target.value)} required placeholder="Last name" />
+              <FieldError message={fieldErrors.lastName} />
             </div>
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <div>
               <Label className="text-xs text-gray-600">Date of Birth <span className="text-red-500">*</span></Label>
-              <Input className="mt-1" type="date" value={patientForm.dateOfBirth} onChange={e => setField('dateOfBirth', e.target.value)} required />
+              <Input className={cn('mt-1', fieldErrors.dateOfBirth && 'border-red-500')} type="date" value={patientForm.dateOfBirth} onChange={e => setField('dateOfBirth', e.target.value)} required />
+              <FieldError message={fieldErrors.dateOfBirth} />
             </div>
             <div>
               <Label className="text-xs text-gray-600">Gender <span className="text-red-500">*</span></Label>
@@ -263,11 +297,13 @@ export default function RegisterPatientForm({ onSuccess, onCancel }) {
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <Label className="text-xs text-gray-600">Primary Phone <span className="text-red-500">*</span></Label>
-              <Input className="mt-1" value={patientForm.phonePrimary} onChange={e => setField('phonePrimary', e.target.value)} placeholder="+91 XXXXX XXXXX" required />
+              <Input className={cn('mt-1', fieldErrors.phonePrimary && 'border-red-500')} value={patientForm.phonePrimary} onChange={e => setField('phonePrimary', e.target.value)} placeholder="+91 XXXXX XXXXX" required />
+              <FieldError message={fieldErrors.phonePrimary} />
             </div>
             <div>
               <Label className="text-xs text-gray-600">Email</Label>
-              <Input className="mt-1" type="email" value={patientForm.email} onChange={e => setField('email', e.target.value)} placeholder="patient@email.com" />
+              <Input className={cn('mt-1', fieldErrors.email && 'border-red-500')} type="email" value={patientForm.email} onChange={e => setField('email', e.target.value)} placeholder="patient@email.com" />
+              <FieldError message={fieldErrors.email} />
             </div>
           </div>
         </section>
@@ -313,7 +349,8 @@ export default function RegisterPatientForm({ onSuccess, onCancel }) {
             </div>
             <div>
               <Label className="text-xs text-gray-600">PIN Code</Label>
-              <Input className="mt-1" value={patientForm.pincode} onChange={e => setField('pincode', e.target.value.replace(/\D/g, ''))} placeholder="6-digit PIN" inputMode="numeric" maxLength={6} />
+              <Input className={cn('mt-1', fieldErrors.pincode && 'border-red-500')} value={patientForm.pincode} onChange={e => setField('pincode', e.target.value.replace(/\D/g, ''))} placeholder="6-digit PIN" inputMode="numeric" maxLength={6} />
+              <FieldError message={fieldErrors.pincode} />
             </div>
           </div>
         </section>
@@ -330,7 +367,8 @@ export default function RegisterPatientForm({ onSuccess, onCancel }) {
             </div>
             <div>
               <Label className="text-xs text-gray-600">Contact Phone</Label>
-              <Input className="mt-1" value={patientForm.emergencyContactPhone} onChange={e => setField('emergencyContactPhone', e.target.value)} placeholder="+91 XXXXX XXXXX" />
+              <Input className={cn('mt-1', fieldErrors.emergencyContactPhone && 'border-red-500')} value={patientForm.emergencyContactPhone} onChange={e => setField('emergencyContactPhone', e.target.value)} placeholder="+91 XXXXX XXXXX" />
+              <FieldError message={fieldErrors.emergencyContactPhone} />
             </div>
             <div>
               <Label className="text-xs text-gray-600">Relationship</Label>
@@ -410,12 +448,14 @@ export default function RegisterPatientForm({ onSuccess, onCancel }) {
                     appointmentDate: '',
                     appointmentTime: ''
                   }))
+                  setFieldErrors(prev => (prev.doctor ? { ...prev, doctor: undefined } : prev))
                 }}
                 placeholder={availableDoctors.length ? 'Select doctor' : (patientForm.department ? 'No doctors in department' : 'Select doctor')}
                 searchPlaceholder="Search doctors..."
                 emptyText="No doctors found"
                 disabled={availableDoctors.length === 0}
               />
+              <FieldError message={fieldErrors.doctor} />
             </div>
           </div>
 
@@ -445,12 +485,13 @@ export default function RegisterPatientForm({ onSuccess, onCancel }) {
               <Label className="text-xs text-gray-600 flex items-center gap-1"><Calendar className="h-3.5 w-3.5" />Date <span className="text-red-500">*</span></Label>
               {/* <Input className="mt-1" type="date" value={patientForm.appointmentDate} onChange={e => setField('appointmentDate', e.target.value)} /> */}
               <Input
-                className="mt-1"
+                className={cn('mt-1', fieldErrors.appointmentDate && 'border-red-500')}
                 type="date"
                 value={patientForm.appointmentDate}
                 onChange={e => setField('appointmentDate', e.target.value)}
                 disabled={!patientForm.doctor || timetableLoading}
               />
+              <FieldError message={fieldErrors.appointmentDate} />
             </div>
             <div>
               <Label className="text-xs text-gray-600 flex items-center gap-1"><Clock className="h-3.5 w-3.5" />Time</Label>
