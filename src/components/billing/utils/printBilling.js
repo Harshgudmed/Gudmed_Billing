@@ -523,10 +523,11 @@ function printDiagnosticReceipt(
           orgInfo.homeCollectionCharge || clinic.homeCollectionCharge || 0,
         );
   const disc = Number(r.discount || 0);
+  const gstAmt = Number(r.gstAmt || 0);
   const net =
     r.netPayable !== undefined
       ? Number(r.netPayable)
-      : orderValue + home - disc;
+      : orderValue + home - disc + gstAmt;
   const paid = Number(r.paid || 0),
     bal = r.balance !== undefined ? Number(r.balance) : net - paid;
 
@@ -694,9 +695,10 @@ ${PAYMENT_TABLE_CSS}
   }
   <div class="totals">
     <div class="trow"><span>Order Value</span><span>${inr(orderValue)}</span></div>
-    ${home ? `<div class="trow"><span>Home Collection Charges</span><span>${inr(home)}</span></div>` : ""}
+    ${home ? `<div class="trow"><span>Home Collection Charges</span><span>+${inr(home)}</span></div>` : ""}
     ${disc ? `<div class="trow"><span>Discount</span><span>-${inr(disc)}</span></div>` : ""}
-    <div class="trow sub"><span>Total Order Value</span><span>${inr(orderValue + home)}</span></div>
+    ${gstAmt ? `<div class="trow"><span>GST</span><span>+${inr(gstAmt)}</span></div>` : ""}
+    <div class="trow sub"><span>Total Order Value</span><span>${inr(orderValue + home + gstAmt)}</span></div>
     <div class="trow net"><span>Net Payable Amount</span><span>${inr(net)}</span></div>
     <div class="trow"><span>Paid Amount</span><span>${inr(paid)}</span></div>
     ${formatOpt === "detailed" ? `<div class="trow" style="color:${bal > 0 ? "#b91c1c" : "#065f46"}"><span>Balance Amount</span><span>${inr(bal)}</span></div>` : ""}

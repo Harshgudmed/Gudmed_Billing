@@ -588,7 +588,7 @@ export default function BillingModule({ onBack }) {
         ].filter(Boolean).join('\n')
         const cc = (clinic.countryCode || '91').replace(/\D/g, '')
         const phone = form.phone.replace(/\D/g, '').slice(-10)
-        window.open(`https://wa.me/${cc}${phone}?text=${encodeURIComponent(msgText)}`, '_blank')
+        // window.open(`https://wa.me/${cc}${phone}?text=${encodeURIComponent(msgText)}`, '_blank')
       }
       setShowInvoiceModal(bill)
       setForm(newForm())
@@ -1352,8 +1352,9 @@ export default function BillingModule({ onBack }) {
                     <div className="flex flex-col items-end gap-4">
                       <div className="w-64 space-y-1 border rounded-lg p-3">
                         <div className="flex justify-between text-gray-600"><span>Subtotal</span><span>{fmt(displaySubtotal)}</span></div>
-                        {hcc > 0 && <div className="flex justify-between text-gray-600"><span>Home Collection</span><span>{fmt(hcc)}</span></div>}
-                        {(showInvoiceModal.discountAmt || 0) > 0 && <div className="flex justify-between text-green-600"><span>Discount</span><span>−{fmt(showInvoiceModal.discountAmt)}</span></div>}
+                        {hcc > 0 && <div className="flex justify-between text-green-600"><span>Home Collection</span><span>+{fmt(hcc)}</span></div>}
+                        {(showInvoiceModal.discountAmt || 0) > 0 && <div className="flex justify-between text-red-600"><span>Discount</span><span>−{fmt(showInvoiceModal.discountAmt)}</span></div>}
+                        {(showInvoiceModal.gstAmt || 0) > 0 && <div className="flex justify-between text-green-600"><span>GST</span><span>+{fmt(showInvoiceModal.gstAmt)}</span></div>}
                         <div className="flex justify-between font-bold text-base border-t pt-1 mt-1"><span>Total</span><span>{fmt(showInvoiceModal.total)}</span></div>
                         <div className="flex justify-between text-green-700 text-sm"><span>Amount Paid</span><span>{fmt(showInvoiceModal.amountPaid || 0)}</span></div>
                         <div className="flex justify-between font-semibold text-red-600 text-sm"><span>Balance Due</span><span>{fmt(showInvoiceModal.balanceDue ?? (showInvoiceModal.total - (showInvoiceModal.amountPaid || 0)))}</span></div>
@@ -1446,7 +1447,7 @@ export default function BillingModule({ onBack }) {
                     age: b.age ? `${b.age} year(s)` : '', sex: b.gender, contact: b.phone,
                     dateTime: b.date, refDoctor: b.refDoctor || 'self', mode: b.payMode,
                     items: testItems.map(it => ({ code: (it.name || 'TEST').substring(0, 6).toUpperCase(), name: it.name, price: (it.amt || 0) * (it.qty || 1), eta: '' })),
-                    orderValue: testTotal, homeCollection: hcc, discount: b.discountAmt || 0,
+                    orderValue: testTotal, homeCollection: hcc, discount: b.discountAmt || 0, gstAmt: b.gstAmt || 0,
                     netPayable: b.total, paid: b.amountPaid || 0, balance: b.balanceDue ?? (b.total - (b.amountPaid || 0)),
                     payments: b.payments
                   }, orgInfo, clinic, options)
@@ -1458,7 +1459,7 @@ export default function BillingModule({ onBack }) {
                     age: b.age ? `${b.age} year(s)` : '', sex: b.gender, contact: b.phone,
                     dateTime: b.date, refDoctor: b.refDoctor || 'self', mode: b.payMode,
                     items: examItems.map(it => ({ code: (it.name || 'EXAM').substring(0, 6).toUpperCase(), name: it.name, price: (it.amt || 0) * (it.qty || 1), eta: '' })),
-                    orderValue: examTotal, homeCollection: 0, discount: b.discountAmt || 0,
+                    orderValue: examTotal, homeCollection: 0, discount: b.discountAmt || 0, gstAmt: b.gstAmt || 0,
                     netPayable: b.total, paid: b.amountPaid || 0, balance: b.balanceDue ?? (b.total - (b.amountPaid || 0)),
                     payments: b.payments
                   }, orgInfo, clinic, options)
