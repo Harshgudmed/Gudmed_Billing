@@ -779,10 +779,10 @@ export default function BillingModule({ onBack }) {
           .join("\n");
         const cc = (clinic.countryCode || "91").replace(/\D/g, "");
         const phone = form.phone.replace(/\D/g, "").slice(-10);
-        window.open(
-          `https://wa.me/${cc}${phone}?text=${encodeURIComponent(msgText)}`,
-          "_blank",
-        );
+        // window.open(
+        //   `https://wa.me/${cc}${phone}?text=${encodeURIComponent(msgText)}`,
+        //   "_blank",
+        // );
       }
       setShowInvoiceModal(bill);
       setForm(newForm());
@@ -2082,15 +2082,26 @@ export default function BillingModule({ onBack }) {
                           <span>{fmt(displaySubtotal)}</span>
                         </div>
                         {hcc > 0 && (
-                          <div className="flex justify-between text-gray-600">
+                          <div className="flex justify-between text-green-600">
                             <span>Home Collection</span>
-                            <span>{fmt(hcc)}</span>
+                            <span>+{fmt(hcc)}</span>
                           </div>
                         )}
                         {(showInvoiceModal.discountAmt || 0) > 0 && (
-                          <div className="flex justify-between text-green-600">
+                          <div className="flex justify-between text-red-600">
                             <span>Discount</span>
                             <span>−{fmt(showInvoiceModal.discountAmt)}</span>
+                          </div>
+                        )}
+                        {(showInvoiceModal.gstAmt || 0) > 0 && (
+                          <div className="flex justify-between text-green-600">
+                            <span>
+                              GST
+                              {showInvoiceModal.gstPct
+                                ? ` (${showInvoiceModal.gstPct}%)`
+                                : ""}
+                            </span>
+                            <span>+{fmt(showInvoiceModal.gstAmt)}</span>
                           </div>
                         )}
                         <div className="flex justify-between font-bold text-base border-t pt-1 mt-1">
