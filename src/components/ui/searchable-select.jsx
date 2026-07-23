@@ -71,7 +71,7 @@ export function SearchableSelect({
             className="border-0 focus-visible:ring-0 focus-visible:ring-offset-0 h-10 px-2"
           />
         </div>
-        <div className="max-h-64 overflow-y-auto p-1">
+        <div className="max-h-64 overflow-y-auto p-1" onWheel={(e) => e.stopPropagation()}>
           {filtered.length === 0 ? (
             <div className="py-6 text-center text-sm text-gray-400">{emptyText}</div>
           ) : (
