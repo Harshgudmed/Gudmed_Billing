@@ -35,6 +35,17 @@ import AppointmentsListView from "./AppointmentsListView";
 import StatisticsCards from "./StatisticsCards";
 import { formatTime12h } from "@/lib/format";
 
+// StatisticsCards key → the List View status filter it should drill into.
+const STAT_KEY_TO_STATUS = {
+  total: "all",
+  confirmed: "confirmed",
+  checkedIn: "checked_in",
+  inProgress: "in_progress",
+  completed: "completed",
+  cancelled: "cancelled",
+  noShows: "no_show",
+};
+
 export default function AppointmentsModule() {
   const [activeTab, setActiveTab] = useState("calendar");
   const [orgInfo, setOrgInfo] = useState({
@@ -864,7 +875,14 @@ export default function AppointmentsModule() {
         </div>
       </div>
 
-      <StatisticsCards stats={stats} />
+      <StatisticsCards
+        stats={stats}
+        onCardClick={(key) => {
+          handleSelectedDateChange(new Date());
+          setFiltersField("status", STAT_KEY_TO_STATUS[key]);
+          setActiveTab("list");
+        }}
+      />
 
       <Tabs value={activeTab} onValueChange={setActiveTab}>
         <TabsList className="grid w-full grid-cols-5 max-w-3xl">

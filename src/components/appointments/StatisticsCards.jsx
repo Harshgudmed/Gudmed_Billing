@@ -33,13 +33,18 @@ const STAT_CARDS = [
   { key: "noShows", label: "No Shows", color: "amber", Icon: AlertCircle },
 ];
 
-export default function StatisticsCards({ stats }) {
+export default function StatisticsCards({ stats, onCardClick }) {
   return (
     <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-4">
       {STAT_CARDS.map(({ key, label, color, Icon }) => {
         const style = STAT_CARD_STYLES[color];
+        const clickable = Boolean(onCardClick);
         return (
-          <Card key={key} className={style.card}>
+          <Card
+            key={key}
+            className={`${style.card} ${clickable ? "cursor-pointer transition-shadow hover:shadow-md" : ""}`}
+            onClick={clickable ? () => onCardClick(key) : undefined}
+          >
             <CardContent className="p-4">
               <div className="flex items-center justify-between">
                 <div>
