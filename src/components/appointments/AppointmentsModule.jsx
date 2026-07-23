@@ -33,6 +33,8 @@ import MonthlyView from "./MonthlyView";
 import TodayView from "./TodayView";
 import AppointmentsListView from "./AppointmentsListView";
 import StatisticsCards from "./StatisticsCards";
+import AppointmentPatientDialog from "./AppointmentPatientDialog";
+import { usePatientRecords } from "@/components/patients/hooks/usePatientRecords";
 import { formatTime12h } from "@/lib/format";
 
 // StatisticsCards key → the List View status filter it should drill into.
@@ -133,6 +135,36 @@ export default function AppointmentsModule() {
 
   const [calendarCounts, setCalendarCounts] = useState([]);
   const [refreshCount, setRefreshCount] = useState(0);
+
+  // Monthly view's appointment card → "Patient Details" modal. The card only
+  // carries the limited patient fields embedded on the appointment (name,
+  // mrn, phone, gender, dob), so the full profile is fetched fresh by id.
+  const [patientView, setPatientView] = useState({
+    open: false,
+    patient: null,
+    patientLoading: false,
+    viewTab: "overview",
+  });
+  const {
+    records: patientRecords,
+    recordsLoading: patientRecordsLoading,
+    fetchRecords: fetchPatientRecords,
+    cancelAppointment: cancelPatientAppointment,
+    cancellingId: cancellingPatientApptId,
+  } = usePatientRecords(patientView.patient);
+
+  const openPatientView = async (patientId) => {
+    if (!patientId) return;
+    setPatientView({ open: true, patient: null, patientLoading: true, viewTab: "overview" });
+    try {
+      const res = await client.get(`/patients/${patientId}`);
+      setPatientView((prev) => ({ ...prev, patient: res.data, patientLoading: false }));
+      fetchPatientRecords(patientId);
+    } catch {
+      toast.error("Failed to load patient details");
+      setPatientView((prev) => ({ ...prev, patientLoading: false }));
+    }
+  };
 
   const {
     appointments,
@@ -908,6 +940,7 @@ export default function AppointmentsModule() {
             setSelectedDayPage={(value) => setPaginationField("selectedDay", value)}
             getPatient={getPatient}
             onScheduleNew={() => openDialog("new")}
+            onViewPatient={openPatientView}
           />
         </TabsContent>
 
@@ -1023,6 +1056,19 @@ export default function AppointmentsModule() {
         onCancel={closeDialog}
         onConfirm={handleReschedule}
         isSubmitting={loadingState.submitting}
+      />
+
+      <AppointmentPatientDialog
+        open={patientView.open}
+        onOpenChange={(open) => setPatientView((prev) => ({ ...prev, open }))}
+        patient={patientView.patient}
+        patientLoading={patientView.patientLoading}
+        records={patientRecords}
+        recordsLoading={patientRecordsLoading}
+        viewTab={patientView.viewTab}
+        setViewTab={(viewTab) => setPatientView((prev) => ({ ...prev, viewTab }))}
+        cancelAppointment={cancelPatientAppointment}
+        cancellingId={cancellingPatientApptId}
       />
     </div>
   );
