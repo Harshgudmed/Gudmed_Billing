@@ -49,6 +49,7 @@ export default function MonthlyView({
   setSelectedDayPage,
   getPatient,
   onScheduleNew,
+  onViewPatient,
 }) {
   const totalPages = Math.ceil(selectedDayTotal / APPOINTMENTS_LIST_PER_PAGE);
 
@@ -200,6 +201,7 @@ export default function MonthlyView({
                       <div
                         key={appointment.id}
                         className={`p-3 rounded-lg border cursor-pointer transition-all hover:shadow-md ${statusInfo?.bgColor || "bg-white"}`}
+                        onClick={() => onViewPatient?.(appointment.patientId)}
                       >
                         <div className="flex items-start justify-between">
                           <div className="flex items-center gap-2">
