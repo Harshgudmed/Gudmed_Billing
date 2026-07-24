@@ -727,7 +727,7 @@ ${order.clinicalIndication ? `<div class="section"><div class="section-header">C
                   <TableHead>Patient</TableHead>
                   <TableHead>Exam</TableHead>
                   <TableHead>Urgency</TableHead>
-                  <TableHead>Date</TableHead>
+                  <TableHead>Ordered On</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead>Actions</TableHead>
                 </TableRow>
