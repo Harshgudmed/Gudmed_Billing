@@ -621,6 +621,7 @@ ${order.clinicalIndication ? `<div class="section"><div class="section-header">C
   })
 
   const reportedCount = orders.filter(o => o.status === 'reported').length
+  const criticalFindingsCount = stats.criticalFindings || reports.filter(r => r.hasCriticalFindings).length || orders.filter(o => o.report?.hasCriticalFindings || o.hasCriticalFindings).length
 
   // ── Render ────────────────────────────────────────────────────────────────
 
@@ -654,12 +655,19 @@ ${order.clinicalIndication ? `<div class="section"><div class="section-header">C
       {/* Stats */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-4">
         {[
-          { label: 'Pending', value: stats.pending || orders.filter(o => o.status === 'pending').length, color: 'text-yellow-600', bg: 'bg-yellow-50' },
-          { label: 'In Progress', value: stats.inProgress || orders.filter(o => o.status === 'in_progress').length, color: 'text-orange-600', bg: 'bg-orange-50' },
-          { label: 'Reported', value: reportedCount, color: 'text-teal-600', bg: 'bg-teal-50' },
-          { label: 'Critical Findings', value: stats.criticalFindings || 0, color: 'text-red-600', bg: 'bg-red-50' },
+          { label: 'Pending', value: stats.pending || orders.filter(o => o.status === 'pending').length, color: 'text-yellow-600', bg: 'bg-yellow-50', tab: 'worklist', filter: 'pending' },
+          { label: 'In Progress', value: stats.inProgress || orders.filter(o => o.status === 'in_progress').length, color: 'text-orange-600', bg: 'bg-orange-50', tab: 'worklist', filter: 'in_progress' },
+          { label: 'Reported', value: reportedCount, color: 'text-teal-600', bg: 'bg-teal-50', tab: 'worklist', filter: 'reported' },
+          { label: 'Critical Findings', value: criticalFindingsCount, color: 'text-red-600', bg: 'bg-red-50', tab: 'reports', filter: 'all' },
         ].map(s => (
-          <Card key={s.label} className={s.bg}>
+          <Card
+            key={s.label}
+            className={`${s.bg} cursor-pointer hover:shadow-md transition-shadow`}
+            onClick={() => {
+              setActiveTab(s.tab)
+              setStatusFilter(s.filter)
+            }}
+          >
             <CardContent className="pt-4 pb-3">
               <p className="text-xs text-gray-500 uppercase font-medium tracking-wide">{s.label}</p>
               <p className={`text-2xl font-bold mt-1 ${s.color}`}>{s.value}</p>
