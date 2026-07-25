@@ -85,22 +85,37 @@ export default function QueueModule() {
   })
   const { rows: queue, loading, summary, refresh } = queuePage
 
-  const setStatus = async (entry, status, successMessage) => {
-    setUpdatingId(`${entry.id}_${status}`)
+  // One place for the loading/success/error/refresh cycle every queue action
+  // shares. setStatus, callNext and changePriority used to each copy-paste this
+  // same try/catch/finally shape — three identical copies in one file, the
+  // textbook "Rule of Three" signal to extract it. Mirrors the same-shaped
+  // `act()` helper in DisplayBoardPage.jsx, which solved this exact problem
+  // for the doctor console first.
+  //
+  // `key` scopes the loading flag to ONE row+action (e.g. "id_called"), so
+  // pressing one row's button never disables a different row's — callNext
+  // previously used a single component-wide `callingNext` boolean instead,
+  // which disabled every row's "Call in" button at once while any one call
+  // was in flight.
+  const act = async (key, fn, successMessage, failureMessage) => {
+    setUpdatingId(key)
     try {
-      const res = await client.patch(`/queue/${entry.id}`, { status })
+      const res = await fn()
       if (res.success) {
-        toast.success(successMessage)
-        refresh()
+        toast.success(typeof successMessage === 'function' ? successMessage(res) : successMessage)
+        await refresh()
       } else {
-        toast.error(res.error || 'Failed to update patient')
+        toast.error(res.error || failureMessage)
       }
     } catch (err) {
-      toast.error(err.message || 'Failed to update patient')
+      toast.error(err.message || failureMessage)
     } finally {
       setUpdatingId(null)
     }
   }
+
+  const setStatus = (entry, status, successMessage) =>
+    act(`${entry.id}_${status}`, () => client.patch(`/queue/${entry.id}`, { status }), successMessage, 'Failed to update patient')
 
   // The doctor's one button: finish whoever is in the room and wave the next
   // person in, as a single server-side transaction (POST /queue/call-next).
@@ -110,44 +125,16 @@ export default function QueueModule() {
   // did: `in_progress` stayed empty and the board could never say who was next.
   // One press now also produces the "you are next" warning for the person
   // behind, because that is derived from the queue moving.
-  const [callingNext, setCallingNext] = useState(false)
-  const callNext = async (entry) => {
-    setCallingNext(true)
-    try {
-      const res = await client.post('/queue/call-next', { queueEntryId: entry.id })
-      if (res.success) {
-        toast.success(res.message || 'Next patient called')
-        refresh()
-      } else {
-        toast.error(res.error || 'Could not call the next patient')
-      }
-    } catch (err) {
-      toast.error(err.message || 'Could not call the next patient')
-    } finally {
-      setCallingNext(false)
-    }
-  }
+  const callNext = (entry) =>
+    act(`${entry.id}_call`, () => client.post('/queue/call-next', { queueEntryId: entry.id }), (res) => res.message || 'Next patient called', 'Could not call the next patient')
 
   // Changing priority re-ranks the row on the server (priority -> priorityRank),
   // so the queue must be re-read: the whole point is that the patient MOVES.
   // Mutating `entry.priority` in place did nothing — it is not React state, so
   // React never re-rendered and the row appeared stuck where it was.
-  const changePriority = async (entry, priority) => {
+  const changePriority = (entry, priority) => {
     if (priority === entry.priority) return
-    setUpdatingId(`${entry.id}_priority`)
-    try {
-      const res = await client.patch(`/queue/${entry.id}`, { priority })
-      if (res.success) {
-        toast.success(`Priority set to ${priority}`)
-        await refresh()
-      } else {
-        toast.error(res.error || 'Failed to change priority')
-      }
-    } catch (err) {
-      toast.error(err.message || 'Failed to change priority')
-    } finally {
-      setUpdatingId(null)
-    }
+    return act(`${entry.id}_priority`, () => client.patch(`/queue/${entry.id}`, { priority }), `Priority set to ${priority}`, 'Failed to change priority')
   }
 
   return (
@@ -158,8 +145,8 @@ export default function QueueModule() {
           <h1 className="text-3xl font-bold flex items-center gap-2">
             <Users className="h-7 w-7 text-blue-600" />
            Smart Queue Management
-          </h1>
-          <p className="text-gray-500">{TODAY_LABEL}</p>
+          </h1> 
+         <p className="text-gray-500">{TODAY_LABEL}</p>
         </div>
         <div className="flex items-center gap-2">
           {/* Opens in a new tab/window, not a Tabs entry — /display is a
@@ -349,7 +336,7 @@ export default function QueueModule() {
                               <Button
                                 size="sm"
                                 className="bg-[#2E4168] text-white hover:bg-[#253453]"
-                                disabled={callingNext}
+                                disabled={updatingId === `${entry.id}_call`}
                                 onClick={() => callNext(entry)}
                               >
                                 <DoorOpen className="h-3.5 w-3.5 mr-1" />

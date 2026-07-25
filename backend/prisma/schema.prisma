@@ -51,37 +51,37 @@ model Organization {
   createdById String?
 
   // Relations
-  users               User[]
-  patients            Patient[]
-  appointments        Appointment[]
-  consultations       Consultation[]
-  pharmacyDrugs       PharmacyDrug[]
-  pharmacyBatches     PharmacyBatch[]
-  prescriptions       Prescription[]
-  pharmacySales       PharmacySale[]
-  labTests            LabTest[]
-  labOrders           LabOrder[]
-  labResults          LabResult[]
-  radiologyExams      RadiologyExam[]
-  radiologyOrders     RadiologyOrder[]
-  radiologyReports    RadiologyReport[]
-  billingServices     BillingService[]
-  invoices            Invoice[]
-  payments            Payment[]
-  auditLogs           AuditLog[]
-  notifications       Notification[]
-  userInvitations     UserInvitation[]
-  departments         Department[]
-  wards               Ward[]
-  beds                Bed[]
-  admissions          Admission[]
-  doctorFeeSlabs           DoctorFeeSlab[]
-  doctorCommissionConfigs  DoctorCommissionConfig[]
-  doctorCommissions        DoctorCommission[]
-  pharmacyPurchaseOrders   PharmacyPurchaseOrder[]
-  vendors                  Vendor[]
-  machineIntegrations MachineIntegration[]
-  machineResultsQueue MachineResultsQueue[]
+  users                   User[]
+  patients                Patient[]
+  appointments            Appointment[]
+  consultations           Consultation[]
+  pharmacyDrugs           PharmacyDrug[]
+  pharmacyBatches         PharmacyBatch[]
+  prescriptions           Prescription[]
+  pharmacySales           PharmacySale[]
+  labTests                LabTest[]
+  labOrders               LabOrder[]
+  labResults              LabResult[]
+  radiologyExams          RadiologyExam[]
+  radiologyOrders         RadiologyOrder[]
+  radiologyReports        RadiologyReport[]
+  billingServices         BillingService[]
+  invoices                Invoice[]
+  payments                Payment[]
+  auditLogs               AuditLog[]
+  notifications           Notification[]
+  userInvitations         UserInvitation[]
+  departments             Department[]
+  wards                   Ward[]
+  beds                    Bed[]
+  admissions              Admission[]
+  doctorFeeSlabs          DoctorFeeSlab[]
+  doctorCommissionConfigs DoctorCommissionConfig[]
+  doctorCommissions       DoctorCommission[]
+  pharmacyPurchaseOrders  PharmacyPurchaseOrder[]
+  vendors                 Vendor[]
+  machineIntegrations     MachineIntegration[]
+  machineResultsQueue     MachineResultsQueue[]
 
   // eAPTS Relations
   eaptsConfig             EaptsConfig?
@@ -90,35 +90,36 @@ model Organization {
   patientDocuments        PatientDocument[]
 
   // Enterprise IPD Relations
-  bedCategories  BedCategory[]
-  tariffPlans    TariffPlan[]
-  tariffRules    TariffRule[]
-  chargeMasters  ChargeMaster[]
-  patientTariffs PatientTariff[]
-  bedOccupancies BedOccupancy[]
-  ipdCharges     IpdCharge[]
-  vitalsRecords  VitalsRecord[]
-  clinicalNotesV2 ClinicalNote[]
+  bedCategories             BedCategory[]
+  tariffPlans               TariffPlan[]
+  tariffRules               TariffRule[]
+  chargeMasters             ChargeMaster[]
+  patientTariffs            PatientTariff[]
+  bedOccupancies            BedOccupancy[]
+  ipdCharges                IpdCharge[]
+  vitalsRecords             VitalsRecord[]
+  clinicalNotesV2           ClinicalNote[]
   medicationAdministrations MedicationAdministration[]
-  dischargeClearances DischargeClearance[]
-  housekeepingTasks   HousekeepingTask[]
-  bills               Bill[]
-  billCounters        BillCounter[]
-  billPayments        BillPayment[]
-  clinicalOrders      ClinicalOrder[]
-  orderTasks          OrderTask[]
+  dischargeClearances       DischargeClearance[]
+  housekeepingTasks         HousekeepingTask[]
+  bills                     Bill[]
+  billCounters              BillCounter[]
+  billPayments              BillPayment[]
+  clinicalOrders            ClinicalOrder[]
+  orderTasks                OrderTask[]
 
-  ipdConsultations    IpdConsultation[]
+  ipdConsultations IpdConsultation[]
 
-  preTriages          PreTriage[]
-  queues              QueueManagement[]
-  dayCareCases        DayCareCase[]
-  ambulanceTrips      AmbulanceTrip[]
-  insuranceCases      InsuranceCase[]
-  insuranceClaims     InsuranceClaim[]
-  deathCertificates   DeathCertificate[]
+  preTriages            PreTriage[]
+  queues                QueueManagement[]
+  dayCareCases          DayCareCase[]
+  ambulanceTrips        AmbulanceTrip[]
+  insuranceCases        InsuranceCase[]
+  insuranceClaims       InsuranceClaim[]
+  deathCertificates     DeathCertificate[]
   floors                Floor[]
   rooms                 Room[]
+  displayScreens        DisplayScreen[]
   doctorRoomAssignments DoctorRoomAssignment[]
   consultationSchedules ConsultationSchedule[]
 }
@@ -138,20 +139,20 @@ model User {
   address     String?
 
   // Professional Info
-  employeeId     String?
-  role           String // super_admin, admin, doctor, nurse, receptionist, pharmacist, lab_tech, lab_supervisor, radiologist, radiology_tech, billing_clerk, inventory_manager, finance_controller
-  departmentId   String?
-  specialization String?
-  licenseNumber  String?
-  consultationFee Float?  // default appointment/consultation fee for this doctor (₹)
-  followUpDays    Int?    // free follow-up window: a repeat visit to this doctor within N days is not charged
+  employeeId      String?
+  role            String // super_admin, admin, doctor, nurse, receptionist, pharmacist, lab_tech, lab_supervisor, radiologist, radiology_tech, billing_clerk, inventory_manager, finance_controller
+  departmentId    String?
+  specialization  String?
+  licenseNumber   String?
+  consultationFee Float? // default appointment/consultation fee for this doctor (₹)
+  followUpDays    Int? // free follow-up window: a repeat visit to this doctor within N days is not charged
 
   // System
   isActive        Boolean   @default(true)
   lastLoginAt     DateTime?
   preferences     String? // JSON string for UI preferences
   defaultCalendar String    @default("ethiopian") // 'ethiopian' or 'gregorian'
-  
+
   // Invitation System
   invitationToken     String?   @unique
   invitationExpiresAt DateTime?
@@ -162,38 +163,38 @@ model User {
   createdById String?
 
   // Relations
-  organization               Organization       @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  department                 Department?        @relation(fields: [departmentId], references: [id])
-  appointmentsAsDoctor       Appointment[]      @relation("DoctorAppointments")
-  consultations              Consultation[]     @relation("DoctorConsultations")
-  prescriptions              Prescription[]     @relation("PrescribingDoctor")
-  prescriptionsDispensed     Prescription[]     @relation("DispensingPharmacist")
-  pharmacySales              PharmacySale[]     @relation("PharmacySalesBy")
-  labOrdersRequested         LabOrder[]         @relation("LabOrdersRequested")
-  labOrdersCollected         LabOrder[]         @relation("LabOrdersCollected")
-  labResultsEntered          LabResult[]        @relation("LabResultsEntered")
-  labResultsVerified         LabResult[]        @relation("LabResultsVerified")
-  radiologyOrdersRequested   RadiologyOrder[]   @relation("RadiologyOrdersRequested")
-  radiologyOrdersPerformed   RadiologyOrder[]   @relation("RadiologyOrdersPerformed")
-  radiologyReports           RadiologyReport[]  @relation("RadiologyReports")
-  invoicesCreated            Invoice[]          @relation("InvoicesCreated")
-  invoicesCancelled          Invoice[]          @relation("InvoicesCancelled")
-  paymentsProcessed          Payment[]          @relation("PaymentsProcessed")
-  auditLogs                  AuditLog[]         @relation("AuditLogsByUser")
-  notifications              Notification[]     @relation("UserNotifications")
-  checkedInAppointments      Appointment[]      @relation("CheckedInBy")
+  organization             Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  department               Department?       @relation(fields: [departmentId], references: [id])
+  appointmentsAsDoctor     Appointment[]     @relation("DoctorAppointments")
+  consultations            Consultation[]    @relation("DoctorConsultations")
+  prescriptions            Prescription[]    @relation("PrescribingDoctor")
+  prescriptionsDispensed   Prescription[]    @relation("DispensingPharmacist")
+  pharmacySales            PharmacySale[]    @relation("PharmacySalesBy")
+  labOrdersRequested       LabOrder[]        @relation("LabOrdersRequested")
+  labOrdersCollected       LabOrder[]        @relation("LabOrdersCollected")
+  labResultsEntered        LabResult[]       @relation("LabResultsEntered")
+  labResultsVerified       LabResult[]       @relation("LabResultsVerified")
+  radiologyOrdersRequested RadiologyOrder[]  @relation("RadiologyOrdersRequested")
+  radiologyOrdersPerformed RadiologyOrder[]  @relation("RadiologyOrdersPerformed")
+  radiologyReports         RadiologyReport[] @relation("RadiologyReports")
+  invoicesCreated          Invoice[]         @relation("InvoicesCreated")
+  invoicesCancelled        Invoice[]         @relation("InvoicesCancelled")
+  paymentsProcessed        Payment[]         @relation("PaymentsProcessed")
+  auditLogs                AuditLog[]        @relation("AuditLogsByUser")
+  notifications            Notification[]    @relation("UserNotifications")
+  checkedInAppointments    Appointment[]     @relation("CheckedInBy")
 
   // User Management Relations
-  invitedBy              User?             @relation("UserInvitations", fields: [invitedById], references: [id])
-  invitedUsers           User[]            @relation("UserInvitations")
-  userInvitations        UserInvitation[]  @relation("InvitationsSent")
-  userActivities         UserActivity[]
+  invitedBy       User?            @relation("UserInvitations", fields: [invitedById], references: [id])
+  invitedUsers    User[]           @relation("UserInvitations")
+  userInvitations UserInvitation[] @relation("InvitationsSent")
+  userActivities  UserActivity[]
 
   // Doctor Accountability
-  feeSlabs               DoctorFeeSlab[]         @relation("DoctorFeeSlabs")
-  commissionConfig       DoctorCommissionConfig? @relation("DoctorCommissionConfig")
-  commissions            DoctorCommission[]      @relation("DoctorCommissions")
-  commissionsSettled     DoctorCommission[]      @relation("CommissionsSettled")
+  feeSlabs           DoctorFeeSlab[]         @relation("DoctorFeeSlabs")
+  commissionConfig   DoctorCommissionConfig? @relation("DoctorCommissionConfig")
+  commissions        DoctorCommission[]      @relation("DoctorCommissions")
+  commissionsSettled DoctorCommission[]      @relation("CommissionsSettled")
 
   // IPD Specialist Consultations
   ipdConsultationsAsDoctor  IpdConsultation[] @relation("ConsultingDoctorIPD")
@@ -205,21 +206,21 @@ model User {
   dischargeAdmissions Admission[] @relation("DischargeDoctor")
 
   // Doctor Sitting Type — which room(s) this doctor is linked to, and when
-  roomAssignments        DoctorRoomAssignment[] @relation("DoctorRoomLinks")
-  consultationSchedules  ConsultationSchedule[] @relation("DoctorSchedules")
-  followUpQueueEntries   QueueManagement[]      @relation("QueueFollowUpDoctor")
-  roomOverridesAsDoctor  Room[]                 @relation("RoomOverrideDoctor")
-  roomOverridesSetBy     Room[]                 @relation("RoomOverrideSetBy")
+  roomAssignments       DoctorRoomAssignment[] @relation("DoctorRoomLinks")
+  consultationSchedules ConsultationSchedule[] @relation("DoctorSchedules")
+  followUpQueueEntries  QueueManagement[]      @relation("QueueFollowUpDoctor")
+  roomOverridesAsDoctor Room[]                 @relation("RoomOverrideDoctor")
+  roomOverridesSetBy    Room[]                 @relation("RoomOverrideSetBy")
 
   // Pre-Triage screening
-  preTriagesScreened  PreTriage[] @relation("ScreenedBy")
-  preTriagesRouted    PreTriage[] @relation("RoutedBy")
+  preTriagesScreened PreTriage[] @relation("ScreenedBy")
+  preTriagesRouted   PreTriage[] @relation("RoutedBy")
 
   // Queue management
-  queueAssigned       QueueManagement[] @relation("QueueAssignedTo")
+  queueAssigned QueueManagement[] @relation("QueueAssignedTo")
 
   // Day-care cases (as treating doctor)
-  dayCareCases        DayCareCase[]     @relation("DayCareDoctor")
+  dayCareCases DayCareCase[] @relation("DayCareDoctor")
 
   // Death certificates
   deathCertificatesCertified DeathCertificate[] @relation("CertifiedBy")
@@ -365,15 +366,15 @@ model Patient {
 
 /// Patient Document (KYC & Records)
 model PatientDocument {
-  id             String   @id @default(cuid())
+  id             String @id @default(cuid())
   organizationId String
   patientId      String
 
-  documentType   String   // aadhaar, pan, insurance, referral, lab_report, prescription, history, other
-  title          String?
-  fileUrl        String
-  fileType       String?  // mime type
-  uploadedAt     DateTime @default(now())
+  documentType String // aadhaar, pan, insurance, referral, lab_report, prescription, history, other
+  title        String?
+  fileUrl      String
+  fileType     String? // mime type
+  uploadedAt   DateTime @default(now())
 
   // Relations
   organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
@@ -397,8 +398,8 @@ model Appointment {
   appointmentTime String
   appointmentType String? // new_patient, follow_up, emergency
   departmentId    String?
-  priority        String  @default("normal") // normal, urgent
-  consultationFee Float?  // fee charged for this appointment (₹)
+  priority        String   @default("normal") // normal, urgent
+  consultationFee Float? // fee charged for this appointment (₹)
 
   // Status
   status String @default("scheduled") // scheduled, confirmed, checked_in, in_progress, completed, cancelled, no_show, rescheduled
@@ -432,13 +433,19 @@ model Appointment {
   createdById String?
 
   // Relations
-  organization  Organization        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  patient       Patient             @relation(fields: [patientId], references: [id], onDelete: Cascade)
-  doctor        User?               @relation("DoctorAppointments", fields: [doctorId], references: [id])
-  checkedInBy   User?               @relation("CheckedInBy", fields: [checkedInById], references: [id])
+  organization  Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  patient       Patient          @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  doctor        User?            @relation("DoctorAppointments", fields: [doctorId], references: [id])
+  checkedInBy   User?            @relation("CheckedInBy", fields: [checkedInById], references: [id])
   consultations Consultation[]
   invoices      Invoice[]
   queueEntry    QueueManagement?
+  // NOTE: a partial unique index — (organizationId, doctorId, appointmentDate,
+  // appointmentTime) WHERE doctorId IS NOT NULL AND status NOT IN (cancelled,
+  // no_show, rescheduled) — also exists on this table, preventing the same
+  // doctor from being double-booked into the same slot. Prisma's schema DSL
+  // can't express a WHERE-filtered unique constraint, so it's not declared
+  // here as `@@unique` — see migration 20260716100500_appointment_slot_unique.
 
   @@index([organizationId])
   @@index([patientId])
@@ -448,12 +455,6 @@ model Appointment {
   @@index([organizationId, appointmentDate, status])
   @@index([appointmentDate, appointmentTime])
   @@index([status])
-  // NOTE: a partial unique index — (organizationId, doctorId, appointmentDate,
-  // appointmentTime) WHERE doctorId IS NOT NULL AND status NOT IN (cancelled,
-  // no_show, rescheduled) — also exists on this table, preventing the same
-  // doctor from being double-booked into the same slot. Prisma's schema DSL
-  // can't express a WHERE-filtered unique constraint, so it's not declared
-  // here as `@@unique` — see migration 20260716100500_appointment_slot_unique.
 }
 
 /// Consultation (Visit Record)
@@ -561,11 +562,11 @@ model Bed {
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
 
-  organization Organization       @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  ward         Ward               @relation(fields: [wardId], references: [id], onDelete: Cascade)
-  bedCategory  BedCategory?       @relation(fields: [bedCategoryId], references: [id])
-  admissions   Admission[]
-  occupancies  BedOccupancy[]
+  organization      Organization       @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  ward              Ward               @relation(fields: [wardId], references: [id], onDelete: Cascade)
+  bedCategory       BedCategory?       @relation(fields: [bedCategoryId], references: [id])
+  admissions        Admission[]
+  occupancies       BedOccupancy[]
   housekeepingTasks HousekeepingTask[]
 
   @@index([organizationId])
@@ -589,7 +590,7 @@ model Admission {
   depositAmount        Float?
   admissionNotes       String?
   isCritical           Boolean  @default(false)
-  criticalLevel        String?  // 'blue' or 'yellow'
+  criticalLevel        String? // 'blue' or 'yellow'
   admittingDoctorId    String?
   attendingDoctorId    String?
 
@@ -757,8 +758,8 @@ model PharmacyBatch {
   createdById String?
 
   organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  drug   PharmacyDrug @relation(fields: [drugId], references: [id], onDelete: Cascade)
-  vendor Vendor?      @relation(fields: [vendorId], references: [id])
+  drug         PharmacyDrug @relation(fields: [drugId], references: [id], onDelete: Cascade)
+  vendor       Vendor?      @relation(fields: [vendorId], references: [id])
 
   @@index([drugId])
   @@index([expiryDate])
@@ -826,9 +827,9 @@ model PharmacySale {
   customerName String? // walk-in / OTC buyer name (no patient record)
 
   // Patient Information (snapshot for receipt)
-  phone          String? // Patient contact number for receipt
-  uhid           String? // UHID if available
-  mrn            String? // MRN snapshot
+  phone           String? // Patient contact number for receipt
+  uhid            String? // UHID if available
+  mrn             String? // MRN snapshot
   referenceDoctor String? // Referring doctor name
 
   // Items (JSON array)
@@ -891,8 +892,8 @@ model PharmacyPurchaseOrder {
   notes            String?
   cancellationNote String?
 
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   vendor       Vendor?      @relation(fields: [vendorId], references: [id])
@@ -912,9 +913,9 @@ model StockLedger {
   batchId String?
 
   // purchase | sale | dispense | return | adjustment | recall | import
-  changeType   String
-  quantityDelta Int    // signed: positive = stock in, negative = stock out
-  balanceAfter  Int    // drug.quantityInStock after this movement
+  changeType    String
+  quantityDelta Int // signed: positive = stock in, negative = stock out
+  balanceAfter  Int // drug.quantityInStock after this movement
 
   reference String? // sale/prescription/PO id or invoice no.
   note      String?
@@ -958,7 +959,7 @@ model Vendor {
 model MedicineReference {
   id             String  @id @default(cuid())
   name           String
-  nameLower      String  // lowercased for case-insensitive prefix search
+  nameLower      String // lowercased for case-insensitive prefix search
   price          Float?
   manufacturer   String?
   type           String?
@@ -1024,9 +1025,9 @@ model Invoice {
   organizationId String
 
   // Relations
-  patientId      String
-  consultationId String?
-  appointmentId  String? // set when this invoice is the auto-voucher for an appointment
+  patientId       String
+  consultationId  String?
+  appointmentId   String? // set when this invoice is the auto-voucher for an appointment
   parentInvoiceId String?
   parentInvoice   Invoice?  @relation("RevisedInvoices", fields: [parentInvoiceId], references: [id])
   revisedInvoices Invoice[] @relation("RevisedInvoices")
@@ -1159,24 +1160,24 @@ model Payment {
 
 /// Doctor Fee Slab (day-based follow-up fee structure)
 model DoctorFeeSlab {
-  id             String  @id @default(cuid())
+  id             String @id @default(cuid())
   organizationId String
   doctorId       String
 
   // Slab definition: applies fee when days_since_last_visit is in range [fromDays, toDays)
-  fromDays       Int
-  toDays         Int
-  feeAmount      Float
+  fromDays  Int
+  toDays    Int
+  feeAmount Float
 
   // Status and notes
-  isActive       Boolean @default(true)
-  notes          String?
+  isActive Boolean @default(true)
+  notes    String?
 
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  doctor         User         @relation("DoctorFeeSlabs", fields: [doctorId], references: [id], onDelete: Cascade)
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  doctor       User         @relation("DoctorFeeSlabs", fields: [doctorId], references: [id], onDelete: Cascade)
 
   @@unique([doctorId, fromDays, toDays])
   @@index([doctorId])
@@ -1185,12 +1186,12 @@ model DoctorFeeSlab {
 
 /// Doctor Commission Configuration (rate per doctor)
 model DoctorCommissionConfig {
-  id             String  @id @default(cuid())
+  id             String @id @default(cuid())
   organizationId String
-  doctorId       String  @unique
+  doctorId       String @unique
 
   commissionType String  @default("percentage") // percentage | fixed_per_consultation
-  commissionRate Float   @default(10)           // % or fixed ₹ amount
+  commissionRate Float   @default(10) // % or fixed ₹ amount
   isActive       Boolean @default(true)
   notes          String?
 
@@ -1209,14 +1210,14 @@ model DoctorCommission {
   organizationId String
   doctorId       String
 
-  invoiceId      String?
-  invoiceAmount  Float
-  commissionRate Float
-  commissionType String  @default("percentage")
+  invoiceId        String?
+  invoiceAmount    Float
+  commissionRate   Float
+  commissionType   String  @default("percentage")
   commissionAmount Float
 
-  status         String  @default("pending")  // pending | approved | paid | cancelled
-  period         String? // e.g. "2026-05" for monthly grouping
+  status String  @default("pending") // pending | approved | paid | cancelled
+  period String? // e.g. "2026-05" for monthly grouping
 
   settledAt      DateTime?
   settledById    String?
@@ -1380,27 +1381,27 @@ enum LogType {
 
 /// User Invitation
 model UserInvitation {
-  id             String   @id @default(cuid())
+  id             String @id @default(cuid())
   organizationId String
-  
+
   // Invitation Details
-  email          String
-  role           String
-  departmentIds  String?  // JSON array of department IDs
-  token          String   @unique
-  expiresAt      DateTime
-  
+  email         String
+  role          String
+  departmentIds String? // JSON array of department IDs
+  token         String   @unique
+  expiresAt     DateTime
+
   // Status
-  status         InvitationStatus @default(pending)
-  acceptedAt     DateTime?
-  
+  status     InvitationStatus @default(pending)
+  acceptedAt DateTime?
+
   // Metadata
-  createdAt      DateTime @default(now())
-  sentById       String
-  
-  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  sentBy         User         @relation("InvitationsSent", fields: [sentById], references: [id])
-  
+  createdAt DateTime @default(now())
+  sentById  String
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  sentBy       User         @relation("InvitationsSent", fields: [sentById], references: [id])
+
   @@index([organizationId])
   @@index([email])
   @@index([token])
@@ -1409,60 +1410,60 @@ model UserInvitation {
 
 /// Permission
 model Permission {
-  id          String   @id @default(cuid())
-  
+  id String @id @default(cuid())
+
   // Permission Details
-  code        String   @unique  // e.g., "patients:create"
-  name        String              // e.g., "Create Patient"
+  code        String  @unique // e.g., "patients:create"
+  name        String // e.g., "Create Patient"
   description String?
-  category    String              // e.g., "patients", "lab", "pharmacy"
-  
-  createdAt   DateTime @default(now())
-  
+  category    String // e.g., "patients", "lab", "pharmacy"
+
+  createdAt DateTime @default(now())
+
   rolePermissions RolePermission[]
-  
+
   @@index([category])
   @@index([code])
 }
 
 /// Role Permission Mapping
 model RolePermission {
-  id           String @id @default(cuid())
-  
-  role         String       // matches User.role
+  id String @id @default(cuid())
+
+  role         String // matches User.role
   permissionId String
-  
+
   // Optional: granular control
-  canCreate    Boolean @default(false)
-  canRead      Boolean @default(false)
-  canUpdate    Boolean @default(false)
-  canDelete    Boolean @default(false)
-  
-  permission   Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
-  
+  canCreate Boolean @default(false)
+  canRead   Boolean @default(false)
+  canUpdate Boolean @default(false)
+  canDelete Boolean @default(false)
+
+  permission Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
   @@unique([role, permissionId])
   @@index([role])
 }
 
 /// User Activity Log
 model UserActivity {
-  id             String   @id @default(cuid())
+  id             String  @id @default(cuid())
   organizationId String?
   userId         String
-  
+
   // Activity Details
-  action         String   // login, logout, create_patient, update_prescription, etc.
-  entityType     String?  // patient, prescription, lab_order, etc.
-  entityId       String?
-  details        String?  // JSON: additional context
-  
+  action     String // login, logout, create_patient, update_prescription, etc.
+  entityType String? // patient, prescription, lab_order, etc.
+  entityId   String?
+  details    String? // JSON: additional context
+
   // Metadata
-  ipAddress      String?
-  userAgent      String?
-  timestamp      DateTime @default(now())
-  
-  user           User @relation(fields: [userId], references: [id], onDelete: Cascade)
-  
+  ipAddress String?
+  userAgent String?
+  timestamp DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
   @@index([userId])
   @@index([action])
   @@index([timestamp])
@@ -1719,17 +1720,17 @@ model ChargeMaster {
 
 /// Configurable adjustment — NO hardcoded percentages. Most-specific rule wins.
 model TariffRule {
-  id             String    @id @default(cuid())
-  organizationId String
-  planId         String
-  bedCategoryId  String? // null = any category
-  serviceGroup   String? // null = any group
-  serviceItemId  String? // null = whole group; set = item-specific (wins)
-  adjustmentType String // PERCENT | FIXED_DELTA | ABSOLUTE_OVERRIDE
+  id              String    @id @default(cuid())
+  organizationId  String
+  planId          String
+  bedCategoryId   String? // null = any category
+  serviceGroup    String? // null = any group
+  serviceItemId   String? // null = whole group; set = item-specific (wins)
+  adjustmentType  String // PERCENT | FIXED_DELTA | ABSOLUTE_OVERRIDE
   adjustmentValue Float
-  validFrom      DateTime  @default(now())
-  validTo        DateTime?
-  createdAt      DateTime  @default(now())
+  validFrom       DateTime  @default(now())
+  validTo         DateTime?
+  createdAt       DateTime  @default(now())
 
   organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   plan         TariffPlan   @relation(fields: [planId], references: [id], onDelete: Cascade)
@@ -1791,11 +1792,11 @@ model IpdCharge {
   createdAt      DateTime @default(now())
 
   // ── Phase 1 billing: snapshot integrity (frozen at post time) ──
-  taxPct         Float   @default(0)
-  taxAmount      Float   @default(0)
-  discountPct    Float   @default(0)
-  discountAmount Float   @default(0)
-  lineTotal      Float   @default(0) // frozen: unitPrice*qty - discountAmount + taxAmount
+  taxPct         Float     @default(0)
+  taxAmount      Float     @default(0)
+  discountPct    Float     @default(0)
+  discountAmount Float     @default(0)
+  lineTotal      Float     @default(0) // frozen: unitPrice*qty - discountAmount + taxAmount
   // ── traceability ──
   postedById     String?
   postedByName   String?
@@ -1807,10 +1808,10 @@ model IpdCharge {
   // ── bill linkage ──
   billId         String?
 
-  organization Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  admission    Admission     @relation(fields: [admissionId], references: [id], onDelete: Restrict)
-  chargeItem   ChargeMaster? @relation(fields: [chargeItemId], references: [id])
-  bill         Bill?         @relation(fields: [billId], references: [id], onDelete: SetNull)
+  organization Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  admission    Admission        @relation(fields: [admissionId], references: [id], onDelete: Restrict)
+  chargeItem   ChargeMaster?    @relation(fields: [chargeItemId], references: [id])
+  bill         Bill?            @relation(fields: [billId], references: [id], onDelete: SetNull)
   consultation IpdConsultation?
 
   @@unique([organizationId, sourceModule, sourceRef])
@@ -1821,13 +1822,13 @@ model IpdCharge {
 /// Phase 1 IPD bill (one-to-many per admission: interim / final / supplementary).
 /// Charges are frozen line items (IpdCharge); a FINAL bill is immutable.
 model Bill {
-  id             String    @id @default(cuid())
+  id             String  @id @default(cuid())
   organizationId String
   admissionId    String // NOT unique — many bills per admission
   billNumber     String? // assigned only at finalize
-  status         String    @default("DRAFT") // DRAFT | FINAL | CANCELLED
-  billType       String    @default("FINAL") // INTERIM | FINAL | SUPPLEMENTARY
-  payerType      String    @default("CASH") // CASH | INSURANCE | TPA | CORPORATE | GOVT | EMPLOYEE
+  status         String  @default("DRAFT") // DRAFT | FINAL | CANCELLED
+  billType       String  @default("FINAL") // INTERIM | FINAL | SUPPLEMENTARY
+  payerType      String  @default("CASH") // CASH | INSURANCE | TPA | CORPORATE | GOVT | EMPLOYEE
 
   bedTotal      Float @default(0)
   serviceTotal  Float @default(0)
@@ -2034,12 +2035,12 @@ model ClinicalOrder {
   admissionId    String
   patientId      String
 
-  orderType    String // LAB | RADIOLOGY | PHARMACY | PROCEDURE
-  catalogModel String? // LabTest | RadiologyExam | PharmacyDrug | ChargeMaster
+  orderType     String // LAB | RADIOLOGY | PHARMACY | PROCEDURE
+  catalogModel  String? // LabTest | RadiologyExam | PharmacyDrug | ChargeMaster
   catalogItemId String?
-  itemName     String // snapshot (survives catalog edits)
-  itemCode     String?
-  serviceGroup String // LAB | RADIOLOGY | PHARMACY | PROCEDURE
+  itemName      String // snapshot (survives catalog edits)
+  itemCode      String?
+  serviceGroup  String // LAB | RADIOLOGY | PHARMACY | PROCEDURE
 
   priority           String  @default("ROUTINE") // ROUTINE | URGENT | STAT
   quantity           Float   @default(1)
@@ -2053,22 +2054,22 @@ model ClinicalOrder {
   status       String  @default("ORDERED") // ORDERED|ACKNOWLEDGED|IN_PROGRESS|COMPLETED|CANCELLED
   domainStatus String? // reserved (3B+)
 
-  orderedById      String?
-  orderedByName    String?
-  orderedAt        DateTime  @default(now())
-  acknowledgedById String?
+  orderedById        String?
+  orderedByName      String?
+  orderedAt          DateTime  @default(now())
+  acknowledgedById   String?
   acknowledgedByName String?
-  acknowledgedAt   DateTime?
-  startedById      String?
-  startedByName    String?
-  startedAt        DateTime?
-  completedById    String?
-  completedByName  String?
-  completedAt      DateTime?
-  cancelledById    String?
-  cancelledByName  String?
-  cancelledAt      DateTime?
-  cancelReason     String?
+  acknowledgedAt     DateTime?
+  startedById        String?
+  startedByName      String?
+  startedAt          DateTime?
+  completedById      String?
+  completedByName    String?
+  completedAt        DateTime?
+  cancelledById      String?
+  cancelledByName    String?
+  cancelledAt        DateTime?
+  cancelReason       String?
 
   executorModel String? // reserved (3B+)
   executorId    String? // reserved (3B+)
@@ -2091,7 +2092,7 @@ model ClinicalOrder {
 /// One scheduled occurrence of a repeating order (e.g. ABG TDS x2d → 6 rows).
 /// Generated from ClinicalOrder.frequency + duration; the nurse ticks each one.
 model OrderTask {
-  id             String   @id @default(cuid())
+  id             String @id @default(cuid())
   organizationId String
   admissionId    String
   orderId        String
@@ -2157,7 +2158,7 @@ model ClinicalOrderEvent {
 /// On status → COMPLETED the service auto-posts one IpdCharge (per-visit, room-adjusted)
 /// and one DoctorCommission row using the consulting doctor's DoctorCommissionConfig.
 model IpdConsultation {
-  id             String   @id @default(cuid())
+  id             String @id @default(cuid())
   organizationId String
 
   admissionId        String
@@ -2165,38 +2166,37 @@ model IpdConsultation {
   requestedById      String?
   departmentId       String?
 
-
   // Scheduling
-  requestedAt  DateTime  @default(now())
-  scheduledAt  DateTime?
-  completedAt  DateTime?
+  requestedAt DateTime  @default(now())
+  scheduledAt DateTime?
+  completedAt DateTime?
 
   // Status lifecycle: REQUESTED | IN_PROGRESS | COMPLETED | BILLED | CANCELLED
-  status       String    @default("REQUESTED")
+  status String @default("REQUESTED")
 
   // Clinical output (filled by consulting doctor)
-  referralReason     String?
-  consultationNotes  String?
-  diagnosis          String?
-  recommendedPlan    String?
-  followUpRequired   Boolean  @default(false)
-  followUpNotes      String?
+  referralReason    String?
+  consultationNotes String?
+  diagnosis         String?
+  recommendedPlan   String?
+  followUpRequired  Boolean @default(false)
+  followUpNotes     String?
 
   // Billing linkage — set automatically when status → COMPLETED
-  ipdChargeId      String?  @unique   // one charge per consultation (SetNull on charge cancel)
-  feeApplied       Float?             // snapshot of fee charged
-  commissionAmount Float?             // snapshot of commission earned
+  ipdChargeId      String? @unique // one charge per consultation (SetNull on charge cancel)
+  feeApplied       Float? // snapshot of fee charged
+  commissionAmount Float? // snapshot of commission earned
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   // ── Relations ────────────────────────────────────────────────────────────────
-  organization     Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  admission        Admission     @relation(fields: [admissionId], references: [id], onDelete: Restrict)
-  consultingDoctor User          @relation("ConsultingDoctorIPD", fields: [consultingDoctorId], references: [id])
-  requestedBy      User?         @relation("ConsultationRequestedBy", fields: [requestedById], references: [id])
-  department       Department?   @relation(fields: [departmentId], references: [id])
-  ipdCharge        IpdCharge?    @relation(fields: [ipdChargeId], references: [id], onDelete: SetNull)
+  organization     Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  admission        Admission    @relation(fields: [admissionId], references: [id], onDelete: Restrict)
+  consultingDoctor User         @relation("ConsultingDoctorIPD", fields: [consultingDoctorId], references: [id])
+  requestedBy      User?        @relation("ConsultationRequestedBy", fields: [requestedById], references: [id])
+  department       Department?  @relation(fields: [departmentId], references: [id])
+  ipdCharge        IpdCharge?   @relation(fields: [ipdChargeId], references: [id], onDelete: SetNull)
 
   @@index([organizationId, admissionId])
   @@index([consultingDoctorId])
@@ -2209,7 +2209,7 @@ model IpdConsultation {
 
 /// Lab Test (Test Catalog)
 model LabTest {
-  id                      String @id @default(cuid())
+  id                      String   @id @default(cuid())
   organizationId          String
   testName                String
   testCode                String?
@@ -2240,21 +2240,21 @@ model LabTest {
 
 /// Lab Order
 model LabOrder {
-  id                   String   @id @default(cuid())
+  id                   String    @id @default(cuid())
   organizationId       String
   patientId            String
   consultationId       String?
   requestedById        String
-  orderDate            DateTime @default(now())
-  orderNumber          String   @unique
+  orderDate            DateTime  @default(now())
+  orderNumber          String    @unique
   tests                String
   clinicalIndication   String?
   provisionalDiagnosis String?
-  priority             String   @default("routine")
-  status               String   @default("pending")
+  priority             String    @default("routine")
+  status               String    @default("pending")
   sampleCollectedAt    DateTime?
   sampleCollectedById  String?
-  accessionNumber      String?  @unique
+  accessionNumber      String?   @unique
   resultsEnteredAt     DateTime?
   resultsEnteredById   String?
   resultsVerifiedAt    DateTime?
@@ -2262,8 +2262,8 @@ model LabOrder {
   resultsReportedAt    DateTime?
   notes                String?
   rejectionReason      String?
-  createdAt            DateTime @default(now())
-  updatedAt            DateTime @updatedAt
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
   createdById          String?
 
   organization      Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
@@ -2281,14 +2281,14 @@ model LabOrder {
 
 /// Lab Result
 model LabResult {
-  id                 String   @id @default(cuid())
+  id                 String    @id @default(cuid())
   organizationId     String
   orderId            String
   testId             String
   resultValue        String
   resultUnit         String?
-  isAbnormal         Boolean  @default(false)
-  isCritical         Boolean  @default(false)
+  isAbnormal         Boolean   @default(false)
+  isCritical         Boolean   @default(false)
   flag               String?
   referenceRangeMin  Float?
   referenceRangeMax  Float?
@@ -2307,10 +2307,10 @@ model LabResult {
   updatedAt          DateTime  @updatedAt
 
   organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  order      LabOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  test       LabTest  @relation(fields: [testId], references: [id])
-  enteredBy  User?    @relation("LabResultsEntered", fields: [enteredById], references: [id])
-  verifiedBy User?    @relation("LabResultsVerified", fields: [verifiedById], references: [id])
+  order        LabOrder     @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  test         LabTest      @relation(fields: [testId], references: [id])
+  enteredBy    User?        @relation("LabResultsEntered", fields: [enteredById], references: [id])
+  verifiedBy   User?        @relation("LabResultsVerified", fields: [verifiedById], references: [id])
 
   @@index([isCritical])
   @@index([orderId])
@@ -2326,17 +2326,17 @@ model RadiologyExam {
   id             String @id @default(cuid())
   organizationId String
 
-  examName     String
-  examCode     String?
-  examCategory String?
-  bodyPart     String?
-  modality     String?
-  price        Float?
-  estimatedDuration Int?
+  examName                String
+  examCode                String?
+  examCategory            String?
+  bodyPart                String?
+  modality                String?
+  price                   Float?
+  estimatedDuration       Int?
   preparationInstructions String?
   contrastRequired        Boolean @default(false)
-  description String?
-  isActive    Boolean @default(true)
+  description             String?
+  isActive                Boolean @default(true)
 
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
@@ -2365,17 +2365,17 @@ model RadiologyOrder {
   clinicalIndication   String?
   provisionalDiagnosis String?
   relevantHistory      String?
-  urgency String @default("routine")
-  status String @default("pending")
-  scheduledDate DateTime?
-  examPerformedAt DateTime?
-  performedById   String?
-  reportCreatedAt  DateTime?
-  reportedById     String?
-  reportVerifiedAt DateTime?
-  verifiedById     String?
-  notes              String?
-  cancellationReason String?
+  urgency              String    @default("routine")
+  status               String    @default("pending")
+  scheduledDate        DateTime?
+  examPerformedAt      DateTime?
+  performedById        String?
+  reportCreatedAt      DateTime?
+  reportedById         String?
+  reportVerifiedAt     DateTime?
+  verifiedById         String?
+  notes                String?
+  cancellationReason   String?
 
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
@@ -2396,39 +2396,39 @@ model RadiologyOrder {
 
 /// Radiology Report
 model RadiologyReport {
-  id             String  @id @default(cuid())
+  id             String @id @default(cuid())
   organizationId String
 
   orderId String @unique
 
-  technique       String?
-  findings        String?
-  impression      String?
-  recommendations String?
-  hasCriticalFindings Boolean   @default(false)
-  criticalFindings    String?
-  criticalNotifiedTo  String?
-  criticalNotifiedAt  DateTime?
-  comparedWithPrevious Boolean @default(false)
+  technique            String?
+  findings             String?
+  impression           String?
+  recommendations      String?
+  hasCriticalFindings  Boolean   @default(false)
+  criticalFindings     String?
+  criticalNotifiedTo   String?
+  criticalNotifiedAt   DateTime?
+  comparedWithPrevious Boolean   @default(false)
   comparisonNotes      String?
-  images        String?
-  dicomStudyUid String?
-  templateUsed String?
-  reportedById String?
-  reportedAt   DateTime  @default(now())
-  verifiedById String?
-  verifiedAt   DateTime?
-  status          String    @default("draft")
-  amendmentReason String?
-  amendedAt       DateTime?
-  amendedById     String?
+  images               String?
+  dicomStudyUid        String?
+  templateUsed         String?
+  reportedById         String?
+  reportedAt           DateTime  @default(now())
+  verifiedById         String?
+  verifiedAt           DateTime?
+  status               String    @default("draft")
+  amendmentReason      String?
+  amendedAt            DateTime?
+  amendedById          String?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   organization Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  order      RadiologyOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  reportedBy User?          @relation("RadiologyReports", fields: [reportedById], references: [id])
+  order        RadiologyOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  reportedBy   User?          @relation("RadiologyReports", fields: [reportedById], references: [id])
 
   @@index([hasCriticalFindings])
   @@index([organizationId])
@@ -2458,13 +2458,13 @@ model PreTriage {
   bloodPressureSystolic  Int?
   bloodPressureDiastolic Int?
   pulseRate              Int?
-  respiratoryRate        Int?    // breaths per minute
-  spo2                   Float?  // oxygen saturation %
-  weight                 Float?  // kg
-  height                 Float?  // cm
-  bmi                    Float?  // auto-calculated from weight/height
-  fbs                    Float?  // fasting blood sugar mg/dL
-  ppbs                   Float?  // post-prandial blood sugar mg/dL
+  respiratoryRate        Int? // breaths per minute
+  spo2                   Float? // oxygen saturation %
+  weight                 Float? // kg
+  height                 Float? // cm
+  bmi                    Float? // auto-calculated from weight/height
+  fbs                    Float? // fasting blood sugar mg/dL
+  ppbs                   Float? // post-prandial blood sugar mg/dL
 
   // Triage Routing Decision
   routedTo String? // adult_triage, mch_triage, psychiatric_triage
@@ -2503,18 +2503,18 @@ model QueueManagement {
   serviceType   String? // consultation, procedure, etc.
 
   // Queue Information
-  queueNumber String
-  priority    String @default("normal") // urgent, high, medium, normal, low
+  queueNumber  String
+  priority     String @default("normal") // urgent, high, medium, normal, low
   // Numeric sort key derived from `priority` (see lib/queuePriority.js). The DB
   // orders on this, not on the string — a string sort mis-ranked "high"/"medium".
-  priorityRank Int   @default(40)
+  priorityRank Int    @default(40)
 
   // new: any walk-in/appointment takes whoever the room's schedule says is
   // active right now. follow_up: may carry followUpDoctorId — the doctor
   // this patient actually saw before, who can be someone OTHER than whoever
   // is active in a shared room right now (e.g. booked with the 2pm doctor,
   // arrived during the 9am doctor's slot). See lib/activeDoctor.js.
-  visitType        String    @default("new") // new | follow_up
+  visitType        String  @default("new") // new | follow_up
   followUpDoctorId String?
 
   // Assignment
@@ -2550,13 +2550,19 @@ model QueueManagement {
   updatedAt DateTime @updatedAt
 
   // Relations
-  organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  patient         Patient?     @relation(fields: [patientId], references: [id])
-  assignedTo      User?        @relation("QueueAssignedTo", fields: [assignedToId], references: [id])
-  appointment     Appointment? @relation(fields: [appointmentId], references: [id])
-  followUpDoctor  User?        @relation("QueueFollowUpDoctor", fields: [followUpDoctorId], references: [id])
-  room            Room?        @relation(fields: [roomId], references: [id])
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  patient        Patient?     @relation(fields: [patientId], references: [id])
+  assignedTo     User?        @relation("QueueAssignedTo", fields: [assignedToId], references: [id])
+  appointment    Appointment? @relation(fields: [appointmentId], references: [id])
+  followUpDoctor User?        @relation("QueueFollowUpDoctor", fields: [followUpDoctorId], references: [id])
+  room           Room?        @relation(fields: [roomId], references: [id])
 
+  // Backs lib/utils/queueNumber.js#nextQueueNumber's atomic counter — without
+  // this, two concurrent inserts could silently hand two patients the same
+  // displayed queue token (proven in practice: a full-history resync of this
+  // dataset produced 127,073 colliding rows before this constraint + the
+  // atomic generator existed).
+  @@unique([organizationId, queueNumber])
   @@index([organizationId])
   @@index([serviceArea, status])
   @@index([assignedToId])
@@ -2572,12 +2578,6 @@ model QueueManagement {
   // the table holds a year of history — this index lets the date range do
   // the actual filtering instead of a near-full-table scan.
   @@index([organizationId, status, joinedQueueAt])
-  // Backs lib/utils/queueNumber.js#nextQueueNumber's atomic counter — without
-  // this, two concurrent inserts could silently hand two patients the same
-  // displayed queue token (proven in practice: a full-history resync of this
-  // dataset produced 127,073 colliding rows before this constraint + the
-  // atomic generator existed).
-  @@unique([organizationId, queueNumber])
 }
 
 /// A physical floor of the hospital — the top level of the display board's
@@ -2626,20 +2626,50 @@ model Room {
   overrideSetAt    DateTime?
   overrideSetById  String?
 
-  organization  Organization           @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  floor         Floor                  @relation(fields: [floorId], references: [id], onDelete: Cascade)
-  department    Department?            @relation(fields: [departmentId], references: [id])
-  doctorLinks   DoctorRoomAssignment[]
-  schedules     ConsultationSchedule[]
+  // Which waiting-room TV this room's queue is shown on — set once via the
+  // Display Boards admin panel (drag-and-drop), not by doctor/timetable. A
+  // room can be on at most one screen; null means "not assigned to a TV yet".
+  // See DisplayScreen for why this maps ROOMS to screens rather than doctors.
+  displayScreenId String?
+
+  organization   Organization           @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  floor          Floor                  @relation(fields: [floorId], references: [id], onDelete: Cascade)
+  department     Department?            @relation(fields: [departmentId], references: [id])
+  doctorLinks    DoctorRoomAssignment[]
+  schedules      ConsultationSchedule[]
   queueEntries   QueueManagement[]
-  overrideDoctor User?                 @relation("RoomOverrideDoctor", fields: [overrideDoctorId], references: [id])
-  overrideSetBy  User?                 @relation("RoomOverrideSetBy", fields: [overrideSetById], references: [id])
+  overrideDoctor User?                  @relation("RoomOverrideDoctor", fields: [overrideDoctorId], references: [id])
+  overrideSetBy  User?                  @relation("RoomOverrideSetBy", fields: [overrideSetById], references: [id])
+  displayScreen  DisplayScreen?         @relation(fields: [displayScreenId], references: [id], onDelete: SetNull)
 
   @@unique([organizationId, floorId, roomNumber])
   @@index([organizationId])
   @@index([floorId])
   @@index([departmentId])
   @@index([overrideDoctorId])
+  @@index([displayScreenId])
+}
+
+/// A waiting-room TV. Rooms are mapped to it (not doctors — a room's
+/// physical location is fixed, so whichever doctor is timetabled into that
+/// room today is automatically shown on the right screen; see the Display
+/// Boards admin panel). maxDoctors/sliderSpeedSeconds control the on-screen
+/// grid: more doctor-columns than maxDoctors and the board rotates through
+/// them at sliderSpeedSeconds intervals instead of cramming them in.
+model DisplayScreen {
+  id                 String   @id @default(cuid())
+  organizationId     String
+  name               String
+  maxDoctors         Int      @default(5)
+  sliderSpeedSeconds Int      @default(30)
+  announcementText   String?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  rooms        Room[]
+
+  @@index([organizationId])
 }
 
 /// Which doctors are linked to a room ("wo link karega"). For a 'single'
@@ -2673,9 +2703,9 @@ model ConsultationSchedule {
   organizationId String
   doctorId       String
   roomId         String
-  dayOfWeek      Int      // 0=Sunday .. 6=Saturday, matches JS Date#getDay()
-  startTime      String   // "HH:mm", 24h, room-local
-  endTime        String   // "HH:mm", 24h, room-local
+  dayOfWeek      Int // 0=Sunday .. 6=Saturday, matches JS Date#getDay()
+  startTime      String // "HH:mm", 24h, room-local
+  endTime        String // "HH:mm", 24h, room-local
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
@@ -2726,7 +2756,7 @@ model DayCareCase {
 
 /// Ambulance Trip — patient transport (BLS/ALS/ICU/etc.) with per-trip charge.
 model AmbulanceTrip {
-  id             String @id @default(cuid())
+  id             String  @id @default(cuid())
   organizationId String
   patientId      String?
 
@@ -2737,7 +2767,7 @@ model AmbulanceTrip {
   distanceKm    Float?
   charge        Float   @default(0)
 
-  status  String   @default("completed") // scheduled | enroute | completed | cancelled
+  status   String   @default("completed") // scheduled | enroute | completed | cancelled
   tripDate DateTime @default(now())
 
   driverName    String?
@@ -2797,7 +2827,7 @@ model InsuranceClaim {
   caseId         String
 
   claimNumber    String // per-org sequential, e.g. CLM0001
-  claimAmount    Float   @default(0)
+  claimAmount    Float  @default(0)
   approvedAmount Float?
 
   status    String  @default("pending") // pending | submitted | approved | rejected | settled
