@@ -47,7 +47,10 @@ export const ROLES = {
   doctor: {
     label: 'Doctor',
     home: 'opd',
-    modules: ['dashboard', 'opd', 'patients', 'doctorAccountability'],
+    // 'queue' shows the doctor their OWN patients' queue only — the backend
+    // (queueController.getQueue) scopes it to entries assigned/following-up to
+    // this doctor, so they never see another doctor's patients.
+    modules: ['dashboard', 'opd', 'queue', 'patients', 'doctorAccountability'],
   },
   receptionist: {
     label: 'Receptionist',

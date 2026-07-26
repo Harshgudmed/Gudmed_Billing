@@ -1,5 +1,5 @@
 import { db } from '../config/db.js'
-import { getOrgId } from "../lib/reqContext.js";
+import { getOrgId, getActor } from "../lib/reqContext.js";
 import { z } from 'zod'
 import { nextQueueNumber } from '../utils/queueNumber.js'
 import { getPagination, paginationMeta } from '../lib/pagination.js'
@@ -116,6 +116,20 @@ export async function getQueue(req, res, next) {
     }
     const searchWhere = queueSearchWhere(search)
     if (searchWhere) Object.assign(baseWhere, searchWhere)
+
+    // A DOCTOR sees only THEIR OWN patients' queue — the ones booked with them
+    // (assignedToId) or returning to them (followUpDoctorId) — never the rest of
+    // the hospital's. Admin/reception see everything. Combined via AND so it
+    // still respects any active search/date/status filter above.
+    // (No-op while AUTH_ENFORCED is off in dev, since there is no actor role
+    // then; it takes effect in production where the role comes from the token.)
+    const actor = getActor(req)
+    if (actor.role === 'doctor' && actor.id) {
+      const mine = { OR: [{ assignedToId: actor.id }, { followUpDoctorId: actor.id }] }
+      baseWhere.AND = baseWhere.AND
+        ? [...(Array.isArray(baseWhere.AND) ? baseWhere.AND : [baseWhere.AND]), mine]
+        : [mine]
+    }
 
     // The listed page (and its total) additionally honour the status filter.
     const where = (status && status !== 'all')

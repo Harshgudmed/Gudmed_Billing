@@ -66,7 +66,14 @@ const patientSchema = z.object({
   firstName: z.string().min(2),
   middleName: z.string().optional(),
   lastName: z.string().min(2),
-  dateOfBirth: z.string(),
+  // Must be a real, parseable date that is not in the future. Previously plain
+  // `z.string()`: a future date (age comes out negative) was stored, and an
+  // unparseable value ("not-a-date") passed zod, then `new Date('Invalid Date')`
+  // reached Prisma and threw a 500. Guard it here so both become a clean 400.
+  dateOfBirth: z.string().refine((v) => {
+    const d = new Date(v)
+    return !Number.isNaN(d.getTime()) && d.getTime() <= Date.now()
+  }, { message: 'Date of birth must be a valid date in the past' }),
   gender: z.enum(['male', 'female', 'other']),
   // Normalised + validated on the way in — see lib/phone.js. Previously
   // `z.string()`, which accepted anything and let country codes ("919876543210")
@@ -162,6 +169,8 @@ export async function getAll(req, res, next) {
         take: limit,
         skip: offset,
         orderBy: { createdAt: 'desc' },
+        // Never expose the patient-portal credential hash to staff-facing APIs.
+        omit: { passwordHash: true },
         include: {
           _count: {
             select: {
@@ -197,7 +206,10 @@ export async function getOne(req, res, next) {
   try {
     const organizationId = getOrgId(req)
 
-    const patient = await db.patient.findFirst({ where: { id: req.params.id, organizationId } })
+    const patient = await db.patient.findFirst({
+      where: { id: req.params.id, organizationId },
+      omit: { passwordHash: true }, // never leak the patient-portal credential hash
+    })
     if (!patient) {
       return res.status(404).json({ success: false, error: 'Patient not found' })
     }
@@ -386,6 +398,7 @@ export async function create(req, res, next) {
     const patient = await db.$transaction(async (tx) => {
       return tx.patient.create({
         data: { ...patientData, mrn: await generateUHID(tx, organizationId) },
+        omit: { passwordHash: true }, // never leak the patient-portal credential hash
         include: { appointments: true },
       })
     })
@@ -465,13 +478,26 @@ export async function update(req, res, next) {
       })
     }
 
-    if (updateData.dateOfBirth) updateData.dateOfBirth = new Date(updateData.dateOfBirth)
+    // Same DOB guard as the create schema — this route takes req.body directly
+    // (no zod schema), so without this a future/garbage date rejected at
+    // registration could still be pasted in here.
+    if (updateData.dateOfBirth) {
+      const dob = new Date(updateData.dateOfBirth)
+      if (Number.isNaN(dob.getTime()) || dob.getTime() > Date.now()) {
+        return res.status(400).json({ success: false, error: 'Date of birth must be a valid date in the past' })
+      }
+      updateData.dateOfBirth = dob
+    }
     if (updateData.insuranceExpiryDate) updateData.insuranceExpiryDate = new Date(updateData.insuranceExpiryDate)
     if (Array.isArray(updateData.allergies)) updateData.allergies = JSON.stringify(updateData.allergies)
     if (Array.isArray(updateData.chronicConditions)) updateData.chronicConditions = JSON.stringify(updateData.chronicConditions)
     if (Array.isArray(updateData.currentMedications)) updateData.currentMedications = JSON.stringify(updateData.currentMedications)
 
-    const updatedPatient = await db.patient.update({ where: { id }, data: updateData })
+    const updatedPatient = await db.patient.update({
+      where: { id },
+      data: updateData,
+      omit: { passwordHash: true }, // never leak the patient-portal credential hash
+    })
 
     await db.auditLog.create({
       data: {
