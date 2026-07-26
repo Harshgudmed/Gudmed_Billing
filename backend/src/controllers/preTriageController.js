@@ -62,8 +62,12 @@ export async function getAll(req, res, next) {
 // GET /api/pre-triage/:id
 export async function getOne(req, res, next) {
   try {
-    const screening = await db.preTriage.findUnique({
-      where: { id: req.params.id },
+    // Org-scoped: without organizationId this leaked another hospital's
+    // screening to anyone who knew (or guessed) the id — findUnique-by-id-alone
+    // is a cross-tenant read. findFirst lets us AND the org in.
+    const ORG_ID = getOrgId(req)
+    const screening = await db.preTriage.findFirst({
+      where: { id: req.params.id, organizationId: ORG_ID },
       include: { screenedBy: { select: { fullName: true } } },
     })
     if (!screening) return res.status(404).json({ success: false, error: 'Screening not found' })
@@ -81,7 +85,9 @@ export async function create(req, res, next) {
     let data = { ...validatedData }
 
     if (validatedData.patientId) {
-      const patient = await db.patient.findUnique({ where: { id: validatedData.patientId } })
+      // Org-scoped: a cross-org patientId would otherwise snapshot ANOTHER
+      // hospital's patient PII (name/age/gender/phone) into this screening.
+      const patient = await db.patient.findFirst({ where: { id: validatedData.patientId, organizationId: ORG_ID } })
       if (!patient) {
         return res.status(404).json({ success: false, error: 'Patient not found' })
       }
@@ -118,6 +124,12 @@ const PROTECTED_FIELDS = new Set(['id', 'organizationId', 'screeningNumber', 'sc
 
 export async function update(req, res, next) {
   try {
+    // Org-scoped existence check FIRST: update-by-id-alone let one hospital
+    // edit another's screening. Confirm the row belongs to this org, then update.
+    const ORG_ID = getOrgId(req)
+    const existing = await db.preTriage.findFirst({ where: { id: req.params.id, organizationId: ORG_ID }, select: { id: true } })
+    if (!existing) return res.status(404).json({ success: false, error: 'Screening not found' })
+
     // Strip protected fields and convert empty strings to null (avoids FK violations)
     const data = Object.fromEntries(
       Object.entries(req.body)
@@ -139,7 +151,9 @@ export async function update(req, res, next) {
 export async function convertToPatient(req, res, next) {
   try {
     const ORG_ID = getOrgId(req)
-    const screening = await db.preTriage.findUnique({ where: { id: req.params.id } })
+    // Org-scoped: convert-by-id-alone let one hospital convert another's
+    // screening AND mint a patient from its PII into the attacker's org.
+    const screening = await db.preTriage.findFirst({ where: { id: req.params.id, organizationId: ORG_ID } })
     if (!screening) return res.status(404).json({ success: false, error: 'Screening not found' })
 
     const mrn = `UHID${Date.now().toString().slice(-8)}`

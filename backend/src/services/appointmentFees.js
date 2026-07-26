@@ -1,4 +1,5 @@
 import { db } from '../config/db.js'
+import { startOfDay } from '../utils/dates.js'
 
 // Pricing policy constants (previously hard-coded as magic numbers in two places).
 export const DEFAULT_CONSULTATION_FEE = 500
@@ -33,6 +34,27 @@ export async function computeConsultationFee({ organizationId, doctorId, patient
   // charity / govt-scheme doctor) must bill 0, not silently fall back to 500.
   // Only a null/unset fee falls back to the default.
   const baseFee = doctor.consultationFee ?? DEFAULT_CONSULTATION_FEE
+
+  // SAME-DAY REPEAT with the SAME doctor → no second charge. A patient sent back
+  // to the same doctor later the same day is ONE consultation episode, so the
+  // repeat visit is free. Hospital rule: same day + same doctor = free; a
+  // DIFFERENT doctor the same day IS a separate consultation and is charged
+  // normally (so this checks doctorId, not department). Without this the strict
+  // `lt: targetDate` anchor below treats the afternoon visit as never-before-seen
+  // and bills full again — double-charging one episode.
+  const sameDayVisit = await db.appointment.findFirst({
+    where: {
+      organizationId,
+      patientId,
+      doctorId,
+      status: { notIn: ['cancelled', 'rescheduled', 'no_show'] },
+      appointmentDate: startOfDay(targetDate),
+    },
+    select: { id: true },
+  })
+  if (sameDayVisit) {
+    return { fee: 0, daysSinceLastVisit: 0, isNewPatient: false, slab: null, reason: 'same_day_repeat' }
+  }
 
   const lastNewVisit = await db.appointment.findFirst({
     where: {

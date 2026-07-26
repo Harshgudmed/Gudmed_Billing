@@ -153,7 +153,10 @@ export async function getAll(req, res) {
     const ORGANIZATION_ID = getOrgId(req)
     const { resource, category, status, patientId, invoiceId, search } = req.query
     const limit = Math.min(Math.max(parseInt(req.query.limit) || 10, 1), 1000) // hard cap → no unbounded query DoS
-    const offset = parseInt(req.query.offset || '0')
+    // Guard like `limit`: a bare parseInt let `offset=-5` (or `offset=abc` → NaN)
+    // reach Prisma, which threw a 500. A bad page offset is a client mistake — it
+    // must clamp to a valid skip, never crash and page the on-call.
+    const offset = Math.max(parseInt(req.query.offset) || 0, 0)
 
     if (resource === 'services') {
       const where = {
@@ -468,11 +471,22 @@ export async function create(req, res) {
       // IDEMPOTENCY: if this exact submit was already recorded (same client token),
       // return that payment instead of charging again. Prevents double-charge on a
       // double-click / network retry, even across tabs or lost responses.
+      //
+      // A key BINDS to its payload: the same key with a DIFFERENT amount (or a
+      // different invoice) is not a retry — it is a client bug or a reused token,
+      // and silently returning the old payment would tell the caller "₹750 paid"
+      // while only the original ₹100 was ever recorded. Reject that with a 409
+      // instead of hiding the mismatch.
       if (idempotencyKey) {
         const existing = await db.payment.findFirst({
           where: { organizationId: ORGANIZATION_ID, idempotencyKey },
         })
-        if (existing) return res.status(200).json({ success: true, data: existing, idempotent: true })
+        if (existing) {
+          if (Number(existing.amount) !== Number(amount) || existing.invoiceId !== invoiceId) {
+            return res.status(409).json({ success: false, code: 'IDEMPOTENCY_KEY_REUSED', error: 'This payment reference was already used for a different amount or invoice. Use a fresh reference.' })
+          }
+          return res.status(200).json({ success: true, data: existing, idempotent: true })
+        }
       }
 
       // MONEY = ACID. Everything below runs in ONE transaction:
@@ -481,14 +495,24 @@ export async function create(req, res) {
       //   3. recompute the invoice cache from its Payment rows (recalcInvoice)
       //   4. write the audit row INSIDE the tx — if audit fails, the whole
       //      payment rolls back (a hospital's money trail must be provable)
-      const payment = await db.$transaction(async (tx) => {
+      let payment
+      try {
+        payment = await db.$transaction(async (tx) => {
         const invoice = await tx.invoice.findFirst({
           where: { id: invoiceId, organizationId: ORGANIZATION_ID },
-          select: { id: true, isArchived: true },
+          select: { id: true, isArchived: true, status: true },
         })
         if (!invoice) {
           const err = new Error('Invoice not found')
           err.status = 404
+          throw err
+        }
+        // A cancelled invoice is void — no money may be recorded against it. The
+        // ledger recalc only refused to RE-OPEN a cancelled document's status; it
+        // still let the Payment row (and the cash) land. Block it at the source.
+        if (invoice.status === 'cancelled') {
+          const err = new Error('This invoice is cancelled — no payment can be recorded against it.')
+          err.status = 409
           throw err
         }
         // A superseded invoice is frozen; money must be taken against its revision.
@@ -549,7 +573,19 @@ export async function create(req, res) {
         })
 
         return created
-      })
+        })
+      } catch (e) {
+        // Two callers raced with the SAME idempotency key: the pre-check above
+        // saw no row yet, both entered the tx, and the unique index on
+        // idempotencyKey rejected the loser with P2002. The index did its job —
+        // exactly one payment was created and the money is safe. Return that one
+        // as an idempotent hit instead of leaking a raw Prisma 500 to the caller.
+        if (e?.code === 'P2002' && idempotencyKey) {
+          const winner = await db.payment.findFirst({ where: { organizationId: ORGANIZATION_ID, idempotencyKey } })
+          if (winner) return res.status(200).json({ success: true, data: winner, idempotent: true })
+        }
+        throw e
+      }
 
       return res.status(201).json({ success: true, data: payment })
     }
@@ -838,6 +874,13 @@ export async function create(req, res) {
         }
         if (invoice.status === 'cancelled' || invoice.paymentStatus === 'cancelled') {
           const err = new Error('Cannot add items to a cancelled invoice'); err.status = 400; throw err
+        }
+        // An archived invoice is the frozen audit record of a superseded bill —
+        // payment and refund already refuse it; this path did not, so a line
+        // item could still be pushed onto it and silently move its total. Block
+        // it here too, or the "immutable" audit trail is editable after the fact.
+        if (invoice.isArchived) {
+          const err = new Error('This invoice was revised and archived — add items to its revised invoice instead.'); err.status = 409; throw err
         }
 
         let items = []

@@ -4,6 +4,23 @@ import { scopedDoctorId } from '../utils/scope.js'
 import { assertValidShift, assertNoSelfOverlap } from '../lib/activeDoctor.js'
 import { roomIdsInTimetable } from '../lib/doctorTimetable.js'
 
+// Accepts an ISO calendar date (YYYY-MM-DD) or a full ISO datetime whose date
+// part is a real calendar date, and returns the canonical YYYY-MM-DD string.
+// Returns null for anything else (empty, dd/mm/yyyy, MM/DD/YYYY, overflow like
+// 2026-02-31) so callers can reject it. This is what keeps isOnLeave()'s
+// slice(0,10) match working — only ISO dates are ever stored.
+function normalizeIsoDate(raw) {
+  const s = String(raw ?? '').trim()
+  const m = /^(\d{4})-(\d{2})-(\d{2})(?:[T ].*)?$/.exec(s)
+  if (!m) return null
+  const ymd = `${m[1]}-${m[2]}-${m[3]}`
+  const dt = new Date(`${ymd}T00:00:00Z`)
+  if (Number.isNaN(dt.getTime())) return null
+  // Reject calendar overflow (e.g. 2026-02-31 → 2026-03-03).
+  if (dt.toISOString().slice(0, 10) !== ymd) return null
+  return ymd
+}
+
 export async function handleGet(req, res, next) {
   try {
     const ORG_ID = getOrgId(req)
@@ -19,15 +36,30 @@ export async function handleGet(req, res, next) {
     offset = Math.max(0, offset)
 
     if (resource === 'doctors') {
-      const doctors = await db.user.findMany({
-        where: { organizationId: ORG_ID, role: 'doctor', isActive: true, ...(myDoctorId ? { id: myDoctorId } : {}) },
-        include: {
-          department: { select: { id: true, name: true } },
-          commissionConfig: true,
-        },
-        orderBy: { fullName: 'asc' },
+      const where = { organizationId: ORG_ID, role: 'doctor', isActive: true, ...(myDoctorId ? { id: myDoctorId } : {}) }
+      const [doctors, total] = await Promise.all([
+        db.user.findMany({
+          where,
+          include: {
+            department: { select: { id: true, name: true } },
+            commissionConfig: true,
+          },
+          orderBy: { fullName: 'asc' },
+          take: limit,
+          skip: offset,
+        }),
+        db.user.count({ where }),
+      ])
+
+      const hasMore = (offset + limit) < total
+      const page = Math.floor(offset / limit) + 1
+      const totalPages = Math.ceil(total / limit)
+
+      return res.json({
+        success: true,
+        data: doctors,
+        meta: { total, limit, offset, page, totalPages, hasMore }
       })
-      return res.json({ success: true, data: doctors })
     }
 
     if (resource === 'commissions') {
@@ -154,6 +186,28 @@ export async function handlePost(req, res, next) {
     if (resource === 'config') {
       const { doctorId, commissionType, commissionRate, isActive, notes, consultationFee, followUpDays } = req.body
 
+      // Validate commission settings before storing them. Previously `parseFloat(x) || 0`
+      // silently coerced junk (NaN, negatives, 150%, 1e308, unknown types) into stored
+      // values — a percentage of 150 or -10 makes no sense and Infinity/NaN corrupts every
+      // downstream commission calculation. Reject bad input up front instead.
+      const ALLOWED_COMMISSION_TYPES = ['percentage', 'fixed', 'fixed_per_consultation']
+      if (commissionType !== undefined && !ALLOWED_COMMISSION_TYPES.includes(commissionType)) {
+        return res.status(400).json({ success: false, error: `Invalid commissionType — must be one of: ${ALLOWED_COMMISSION_TYPES.join(', ')}` })
+      }
+      const rate = typeof commissionRate === 'string' ? Number(commissionRate.trim()) : Number(commissionRate)
+      // A percentage is capped at 100; a fixed ₹ amount is not, but must still be a
+      // sane, finite, non-negative number (rejects NaN/Infinity/1e308).
+      const isPercentage = commissionType === undefined || commissionType === 'percentage'
+      const maxRate = isPercentage ? 100 : 1_000_000
+      if (!Number.isFinite(rate) || rate < 0 || rate > maxRate) {
+        return res.status(400).json({
+          success: false,
+          error: isPercentage
+            ? 'commissionRate must be a number between 0 and 100'
+            : `commissionRate must be a number between 0 and ${maxRate}`,
+        })
+      }
+
       // Persist the doctor's appointment fee + free follow-up window on the user record
       const userData = {}
       if (consultationFee !== undefined) {
@@ -172,11 +226,11 @@ export async function handlePost(req, res, next) {
       if (existing) {
         config = await db.doctorCommissionConfig.update({
           where: { doctorId },
-          data: { commissionType, commissionRate: parseFloat(commissionRate) || 0, isActive, notes: notes || null },
+          data: { commissionType, commissionRate: rate, isActive, notes: notes || null },
         })
       } else {
         config = await db.doctorCommissionConfig.create({
-          data: { organizationId: ORG_ID, doctorId, commissionType, commissionRate: parseFloat(commissionRate) || 0, isActive, notes: notes || null },
+          data: { organizationId: ORG_ID, doctorId, commissionType, commissionRate: rate, isActive, notes: notes || null },
         })
       }
       return res.json({ success: true, data: config })
@@ -208,6 +262,17 @@ export async function handlePost(req, res, next) {
       const targetDoctorId = doctorId
       if (!targetDoctorId) {
         return res.status(400).json({ success: false, error: 'Doctor ID is required' })
+      }
+      // The optimistic lock is MANDATORY, not best-effort. Omitting
+      // expectedUpdatedAt used to drop the updatedAt guard entirely, so the
+      // write landed unconditionally and two concurrent editors silently
+      // clobbered each other — the exact lost update the guard below claims to
+      // prevent. The real UI always echoes the row's updatedAt back here (see
+      // DoctorTiming.jsx), so requiring it doesn't break the app. Reject a
+      // missing/empty or unparseable value up front with a clean 400.
+      const expected = new Date(expectedUpdatedAt)
+      if (!expectedUpdatedAt || Number.isNaN(expected.getTime())) {
+        return res.status(400).json({ success: false, error: 'expectedUpdatedAt is required to save the timetable safely' })
       }
       const doctor = await db.user.findUnique({
         where: { id: targetDoctorId, organizationId: ORG_ID }
@@ -245,6 +310,26 @@ export async function handlePost(req, res, next) {
         }
       }
 
+      // Leave/exception dates are matched on read by isOnLeave() via
+      // String(e.date).slice(0,10), which ONLY works for ISO YYYY-MM-DD. A date
+      // stored as dd/mm/yyyy or MM/DD/YYYY would never match and the doctor would
+      // silently NOT be marked on leave. Normalize on write: require every
+      // exception date to be a real ISO calendar date (accepting a full ISO
+      // datetime and keeping its date part); reject anything else with 400 so only
+      // ISO dates are ever stored.
+      if (timetable?.exceptions !== undefined) {
+        if (!Array.isArray(timetable.exceptions)) {
+          return res.status(400).json({ success: false, error: 'timetable.exceptions must be a list' })
+        }
+        for (const ex of timetable.exceptions) {
+          const ymd = normalizeIsoDate(ex?.date)
+          if (!ymd) {
+            return res.status(400).json({ success: false, error: `Invalid exception date "${ex?.date}" — must be ISO format YYYY-MM-DD` })
+          }
+          ex.date = ymd
+        }
+      }
+
       let prefs = {}
       try {
         if (doctor.preferences) prefs = JSON.parse(doctor.preferences)
@@ -267,7 +352,7 @@ export async function handlePost(req, res, next) {
       // zero rows instead of clobbering the other save.
       try {
         const result = await db.$transaction(async (tx) => {
-          const updateWhere = { id: targetDoctorId, ...(expectedUpdatedAt ? { updatedAt: new Date(expectedUpdatedAt) } : {}) }
+          const updateWhere = { id: targetDoctorId, updatedAt: expected }
           const { count } = await tx.user.updateMany({
             where: updateWhere,
             data: { preferences: JSON.stringify(prefs) },
