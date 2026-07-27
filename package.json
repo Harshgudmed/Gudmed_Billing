@@ -5,7 +5,9 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "dev:all": "concurrently -k -n api,web -c blue,green \"npm --prefix backend run dev\" \"vite\"",
+    "predev:all": "node -e \"require('fs').existsSync('display-manager/node_modules/electron')||require('child_process').execSync('npm --prefix display-manager install',{stdio:'inherit'})\"",
+    "dev:all": "concurrently -k -n api,web,screens -c blue,green,magenta \"npm --prefix backend run dev\" \"vite\" \"npm --prefix display-manager start\"",
+    "dev:app": "concurrently -k -n api,web -c blue,green \"npm --prefix backend run dev\" \"vite\"",
     "dev:lan": "vite --mode lan --host",
     "tunnel": "cloudflared tunnel --url http://localhost:5173",
     "dev:tunnel": "concurrently -k -n vite,tunnel -c green,cyan \"vite\" \"cloudflared tunnel --url http://localhost:5173\"",

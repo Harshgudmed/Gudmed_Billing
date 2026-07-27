@@ -49,6 +49,7 @@ const NotFoundPage             = lazy(() => import('./pages/NotFoundPage.jsx'))
 // No Shell (no sidebar/header) — this runs full-screen on a lobby TV/second
 // monitor, so it's mounted outside both the legacy and role-based Shell trees.
 const DisplayBoardPage         = lazy(() => import('./pages/DisplayBoardPage.jsx'))
+const DisplayAutoPage          = lazy(() => import('./pages/DisplayAutoPage.jsx'))
 
 // Module key → page component. Shared by both legacy and role-based routing.
 const PAGE_BY_MODULE = {
@@ -400,6 +401,9 @@ export default function App() {
     <>
       <Suspense fallback={<PageLoader />}>
         <Routes>
+          {/* Self-pairing display — the ONE URL every TV opens; shows a pairing
+              code until an admin links it, then the assigned screen's board. */}
+          <Route path="/display/auto" element={<DisplayAutoPage />} />
           {/* Queue display board — no Shell, full-screen, second-monitor use */}
           <Route path="/display/*" element={<DisplayBoardPage />} />
           <Route path="*" element={AUTH_ENFORCED ? <AuthedApp /> : <LegacyApp />} />

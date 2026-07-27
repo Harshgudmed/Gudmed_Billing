@@ -71,6 +71,40 @@ export async function getUsers(req, res, next) {
   } catch (err) { next(err) }
 }
 
+// Roles a hospital admin may assign through the Settings user screen. Sourced
+// from the app's real role registries — the Settings dropdown (ROLE_LABELS in
+// SettingsModule.jsx), the web role config (src/lib/roleConfig.js ROLES) and the
+// IPD RBAC map (backend/src/inpatient/rbac.js). Every value here appears in
+// operational code, so all legitimate roles keep working.
+//
+// `super_admin` is DELIBERATELY EXCLUDED: it is the highest-privilege role —
+// authorize() (auth.js) and the IPD RBAC always let it pass, and it is a refund
+// approver in billingController. Allowing a normal admin to mint a super_admin
+// through this endpoint would be privilege escalation. `patient` is portal-only
+// (never a staff account), so it is excluded too.
+const ASSIGNABLE_ROLES = new Set([
+  'admin',
+  'doctor',
+  'nurse',
+  'receptionist',
+  'pharmacist',
+  'billing',
+  'billing_clerk',
+  'inventory_manager',
+  'finance_controller',
+  'lab_technician',
+  'radiology_technician',
+])
+
+// Returns an error message when `role` is not an assignable role, else null.
+// (This is what blocks unknown/junk roles and super_admin escalation.)
+function roleError(role) {
+  if (typeof role !== 'string' || !ASSIGNABLE_ROLES.has(role)) {
+    return `Invalid role. Allowed roles: ${[...ASSIGNABLE_ROLES].join(', ')}`
+  }
+  return null
+}
+
 export async function createUser(req, res, next) {
   try {
     const ORG_ID = getOrgId(req)
@@ -78,6 +112,10 @@ export async function createUser(req, res, next) {
     if (!password || password.length < 6) {
       return res.status(400).json({ success: false, error: 'A password of at least 6 characters is required so the user can log in' })
     }
+    // Constrain role to the app's real, non-privileged set (rejects super_admin
+    // escalation and junk roles).
+    const roleErr = roleError(role)
+    if (roleErr) return res.status(400).json({ success: false, error: roleErr })
     const existing = await db.user.findUnique({ where: { email } })
     if (existing) return res.status(400).json({ success: false, error: 'Email already in use' })
     const user = await db.user.create({
@@ -108,6 +146,13 @@ export async function updateUser(req, res, next) {
     const existing = await db.user.findFirst({ where: { id, organizationId: ORG_ID }, select: { id: true } })
     if (!existing) return res.status(404).json({ success: false, error: 'User not found' })
 
+    // Validate role whenever one is supplied (an admin could otherwise escalate a
+    // user to super_admin, or store a junk role, via update).
+    if (role !== undefined) {
+      const roleErr = roleError(role)
+      if (roleErr) return res.status(400).json({ success: false, error: roleErr })
+    }
+
     const data = { fullName, email, role, departmentId: departmentId || null, phone: phone || null, specialization: specialization || null }
     // Optional password reset — only re-hash when a new password is supplied.
     if (password) {
@@ -135,7 +180,9 @@ export async function toggleUserStatus(req, res, next) {
     if (!existing) return res.status(404).json({ success: false, error: 'User not found' })
 
     const user = await db.user.update({ where: { id }, data: { isActive } })
-    res.json({ success: true, data: user })
+    // Never return the hash to the client (mirror the sibling user handlers).
+    const { passwordHash, ...safe } = user
+    res.json({ success: true, data: safe })
   } catch (err) { next(err) }
 }
 

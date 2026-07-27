@@ -1,6 +1,5 @@
 import { db } from '../config/db.js'
 import { getOrgId } from "../lib/reqContext.js";
-import { isOwned } from "../lib/tenant.js";
 import { listResponse } from "../lib/pagination.js";
 import { PATIENT_NAME_SELECT } from '../lib/patientName.js'
 
@@ -52,6 +51,17 @@ export async function create(req, res, next) {
       certifiedById, certifierQualification, licenseNumber,
     } = req.body
 
+    // Cross-tenant guard: the patient must belong to the caller's org. Without
+    // this, a foreign patientId from the body would be linked (or trip an FK
+    // 500). Mirrors the check in preTriage/consultation/billing controllers.
+    if (!patientId) return res.status(400).json({ success: false, error: 'patientId is required' })
+    const patient = await db.patient.findFirst({ where: { id: patientId, organizationId: ORG_ID }, select: { id: true } })
+    if (!patient) return res.status(404).json({ success: false, error: 'Patient not found' })
+
+    // Certificate number is minted PER ORG (count scoped to this org), so every
+    // hospital's series independently starts at DC-00001. The DB constraint is
+    // the composite @@unique([organizationId, certificateNumber]) — see the
+    // 20260727..._death_cert_number_scoped_per_org migration.
     const count = await db.deathCertificate.count({ where: { organizationId: ORG_ID } })
     const certNumber = `DC-${String(count + 1).padStart(5, '0')}`
 
@@ -115,7 +125,11 @@ export async function update(req, res, next) {
     const { id, issuedTo, issuedToRelationship, ...rest } = req.body
     if (!id) return res.status(400).json({ success: false, error: 'id is required' })
     // Tenant guard: only touch a certificate that belongs to this org.
-    if (!(await isOwned('deathCertificate', id, ORG_ID))) return res.status(404).json({ success: false, error: 'Death certificate not found' })
+    const existing = await db.deathCertificate.findFirst({ where: { id, organizationId: ORG_ID }, select: { id: true, issuedAt: true } })
+    if (!existing) return res.status(404).json({ success: false, error: 'Death certificate not found' })
+    // A death certificate is a legal document: once issued (issuedAt set) it is
+    // finalized and must not be edited. Only drafts (issuedAt null) are editable.
+    if (existing.issuedAt) return res.status(409).json({ success: false, error: 'Issued certificate cannot be edited' })
     const data = {}
     if (issuedTo !== undefined) {
       data.issuedTo = issuedTo

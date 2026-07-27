@@ -3,12 +3,14 @@ import { Card, CardHeader, CardTitle, CardContent, CardDescription, CardFooter }
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { MonitorPlay, ExternalLink, Plus, Trash2, Edit, Search, GripVertical, DoorOpen, Megaphone, Building2, Users, RotateCw, CheckCircle2, X } from 'lucide-react'
+import { MonitorPlay, ExternalLink, Plus, Trash2, Edit, Search, GripVertical, DoorOpen, Megaphone, Building2, Users, RotateCw, CheckCircle2, X, Clock, ChevronLeft, Activity } from 'lucide-react'
 import { toast } from 'sonner'
 import client from '@/api/client'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Badge } from '@/components/ui/badge'
+import DoctorTiming from '../doctor-accountability/DoctorTiming'
+import ScreenHealth from './ScreenHealth'
 
 // The hospital's OWN brand colours (Settings → Organization → colour picker),
 // applied app-wide as CSS custom properties by App.jsx#applyBranding — not a
@@ -93,6 +95,9 @@ export default function DisplayBoardsModule() {
   const [rooms, setRooms] = useState([])
   const [floors, setFloors] = useState([])
   const [loading, setLoading] = useState(true)
+  // Sub-view: manage TV screens, or set doctors' room + weekly timetable in the
+  // same place (so the doctor→room and room→screen setup live side by side).
+  const [view, setView] = useState('screens')
 
   const [showDialog, setShowDialog] = useState(false)
   const [editingScreen, setEditingScreen] = useState(null)
@@ -265,16 +270,42 @@ export default function DisplayBoardsModule() {
           </div>
         </div>
         <div className="space-x-3">
-          <Button variant="outline" onClick={() => window.open('/display', '_blank')}>
-            <MonitorPlay className="w-4 h-4 mr-2" />
-            Open Floor Overview
-          </Button>
-          <Button style={{ backgroundColor: PRIMARY }} className="hover:opacity-90" onClick={handleOpenCreate}>
-            <Plus className="w-4 h-4 mr-2" />
-            Add New Screen
-          </Button>
+          {view === 'screens' ? (
+            <>
+              {/* Live health of every physical display — online/offline + pairing. */}
+              <Button variant="outline" onClick={() => setView('health')}>
+                <Activity className="w-4 h-4 mr-2" />
+                Screen Health
+              </Button>
+              {/* Jump to the doctor room + weekly timetable setup, right here. */}
+              <Button variant="outline" onClick={() => setView('timetable')}>
+                <Clock className="w-4 h-4 mr-2" />
+                Doctor's Timetable
+              </Button>
+              <Button variant="outline" onClick={() => window.open('/display', '_blank')}>
+                <MonitorPlay className="w-4 h-4 mr-2" />
+                Open Floor Overview
+              </Button>
+              <Button style={{ backgroundColor: PRIMARY }} className="hover:opacity-90" onClick={handleOpenCreate}>
+                <Plus className="w-4 h-4 mr-2" />
+                Add New Screen
+              </Button>
+            </>
+          ) : (
+            <Button variant="outline" onClick={() => setView('screens')}>
+              <ChevronLeft className="w-4 h-4 mr-2" />
+              Back to TV Screens
+            </Button>
+          )}
         </div>
       </div>
+
+      {view === 'timetable' && <DoctorTiming />}
+
+      {view === 'health' && <ScreenHealth screens={screens} />}
+
+      {view === 'screens' && (<>
+
 
       {unassignedRooms.length > 0 && (
         <div className="flex items-start gap-2.5 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
@@ -572,6 +603,7 @@ export default function DisplayBoardsModule() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      </>)}
     </div>
   )
 }

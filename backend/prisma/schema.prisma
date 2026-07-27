@@ -120,6 +120,7 @@ model Organization {
   floors                Floor[]
   rooms                 Room[]
   displayScreens        DisplayScreen[]
+  displayDevices        DisplayDevice[]
   doctorRoomAssignments DoctorRoomAssignment[]
   consultationSchedules ConsultationSchedule[]
 }
@@ -2672,8 +2673,36 @@ model DisplayScreen {
 
   organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   rooms        Room[]
+  devices      DisplayDevice[]
 
   @@index([organizationId])
+}
+
+// A physical display (the TV/box in a waiting area). It registers itself on
+// first boot, gets a pairing code, and an admin links it to a DisplayScreen.
+// After that it remembers its own identity and shows that screen's board —
+// heartbeat keeps its online/offline health visible in the admin.
+model DisplayDevice {
+  id             String    @id @default(cuid())
+  organizationId String
+  deviceId       String    @unique              // stable identity the device stores locally
+  pairingCode    String?                         // shown on-screen while unpaired
+  screenId       String?                         // linked DisplayScreen (after admin assigns)
+  status         String    @default("unpaired")  // unpaired | paired
+  lastSeenAt     DateTime?                        // last heartbeat — drives online/offline
+  // diagnostics
+  friendlyName   String?                         // admin label, e.g. "Ground Floor Left TV"
+  appVersion     String?                         // Display Manager version reported by the device
+  lastBootAt     DateTime?                        // when the device/app last started
+  lastIpAddress  String?                         // for network troubleshooting
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  organization Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  screen       DisplayScreen? @relation(fields: [screenId], references: [id], onDelete: SetNull)
+
+  @@index([organizationId])
+  @@index([screenId])
 }
 
 /// Which doctors are linked to a room ("wo link karega"). For a 'single'
@@ -2859,7 +2888,7 @@ model DeathCertificate {
   id                String @id @default(cuid())
   organizationId    String
   patientId         String
-  certificateNumber String @unique // DC-YYYY-XXXX
+  certificateNumber String // DC-YYYY-XXXX — unique PER ORG, see @@unique below
 
   // Death Details
   dateOfDeath     DateTime
@@ -2920,6 +2949,7 @@ model DeathCertificate {
   certifiedBy  User?        @relation("CertifiedBy", fields: [certifiedById], references: [id])
   issuedBy     User?        @relation("IssuedBy", fields: [issuedById], references: [id])
 
+  @@unique([organizationId, certificateNumber])
   @@index([organizationId])
   @@index([patientId])
   @@index([certificateNumber])

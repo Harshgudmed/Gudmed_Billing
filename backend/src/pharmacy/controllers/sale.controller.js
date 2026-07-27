@@ -1,5 +1,5 @@
 import { db } from '../../config/db.js'
-import { getOrgId } from "../../lib/reqContext.js";
+import { getOrgId, safeMoney } from "../../lib/reqContext.js";
 import { dayRange } from '../../lib/dates.js'
 import { createSaleSchema } from '../validations/sale.validation.js'
 import { getPagination, paginationMeta, handleServiceError, makeError } from '../utils.js'
@@ -99,6 +99,25 @@ export async function create(req, res, next) {
         drugsById.set(item.drugId, drug)
       }
 
+      // MONEY SAFETY: compute the totals and validate the discount BEFORE any
+      // stock mutation, so a bad discount can never decrement inventory or store
+      // a negative total. Reject a discount that is negative, non-numeric, or
+      // greater than the subtotal (which would drive totalAmount below 0).
+      const subtotal = parsed.items.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0)
+      const discountAmount = safeMoney(parsed.discountAmount)
+      if (discountAmount === null) {
+        throw makeError('Discount amount must be a non-negative number', 400, 'INVALID_DISCOUNT')
+      }
+      if (discountAmount > subtotal) {
+        throw makeError(
+          `Discount (${discountAmount}) cannot exceed subtotal (${subtotal})`,
+          400,
+          'DISCOUNT_EXCEEDS_SUBTOTAL',
+          { subtotal, discountAmount }
+        )
+      }
+      const totalAmount = subtotal - discountAmount
+
       // Decrement stock for each item — batches FIFO + ledger row (single source of
       // truth) — BEFORE building the stored item list, so we can snapshot which
       // batch/expiry each line actually drew from onto the receipt (a GST invoice
@@ -114,10 +133,6 @@ export async function create(req, res, next) {
           expiryDate: consumed[0]?.expiryDate || null,
         })
       }
-
-      const subtotal = parsed.items.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0)
-      const discountAmount = parsed.discountAmount ?? 0
-      const totalAmount = subtotal - discountAmount
 
       // Build the multi-payment ledger. Each split gets its own receipt number +
       // timestamp so the printed Payment table (SN/Receipt/Date/Amount/Paymode)

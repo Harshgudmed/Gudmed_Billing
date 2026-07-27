@@ -921,6 +921,18 @@ function ScreenBoardView() {
     return () => clearInterval(id)
   }, [load])
 
+  // When this board was reached from the self-pairing page (/display/auto), a
+  // deviceId rides along in the URL. Keep sending heartbeats so Screen Health
+  // still shows this TV as online while it displays the board.
+  useEffect(() => {
+    const deviceId = new URLSearchParams(window.location.search).get('deviceId')
+    if (!deviceId) return
+    const beat = () => client.post(`/display/devices/${deviceId}/heartbeat`, { appVersion: '1.0.0' }).catch(() => {})
+    beat()
+    const id = setInterval(beat, 15_000)
+    return () => clearInterval(id)
+  }, [])
+
   return (
     <GridBoard
       resetKey={screenId}

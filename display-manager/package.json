@@ -1,0 +1,31 @@
+{
+  "name": "gudmed-display-manager",
+  "version": "1.0.0",
+  "description": "GudMed Display Manager — auto-opens the queue board fullscreen on every connected monitor, at boot, with no typing.",
+  "main": "main.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "electron .",
+    "build": "electron-builder --win nsis"
+  },
+  "build": {
+    "appId": "in.gudmed.display-manager",
+    "productName": "GudMed Display Manager",
+    "files": [
+      "main.js",
+      "deviceStore.js",
+      "package.json"
+    ],
+    "win": {
+      "target": "nsis"
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false
+    }
+  },
+  "devDependencies": {
+    "electron": "^31.0.0",
+    "electron-builder": "^24.13.3"
+  }
+}
