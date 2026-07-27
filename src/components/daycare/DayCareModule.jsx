@@ -38,6 +38,7 @@ export default function DayCareModule() {
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState('all')
   const [paymentFilter, setPaymentFilter] = useState('all')
+  const [quickFilter, setQuickFilter] = useState('all') // 'all' | 'active' | 'discharged', driven by the stat cards
   const [open, setOpen] = useState(false)
   const [saving, setSaving] = useState(false)
   const [form, setForm] = useState(EMPTY)
@@ -66,6 +67,12 @@ export default function DayCareModule() {
     discharged: cases.filter(c => c.status === 'discharged').length,
     revenue: cases.reduce((s, c) => s + (c.fee || 0), 0),
   }), [cases])
+
+  const displayedCases = useMemo(() => {
+    if (quickFilter === 'active') return cases.filter(c => !['discharged', 'cancelled'].includes(c.status))
+    if (quickFilter === 'discharged') return cases.filter(c => c.status === 'discharged')
+    return cases
+  }, [cases, quickFilter])
 
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }))
 
@@ -111,9 +118,18 @@ export default function DayCareModule() {
       </div>
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <Card><CardHeader className="py-4"><CardTitle className="text-sm font-medium text-gray-500">Total Cases</CardTitle></CardHeader><CardContent><div className="text-2xl font-bold">{stats.total}</div></CardContent></Card>
-        <Card className="border-l-4 border-l-amber-500"><CardHeader className="py-4"><CardTitle className="text-sm font-medium text-gray-500">Active</CardTitle></CardHeader><CardContent><div className="text-2xl font-bold">{stats.active}</div></CardContent></Card>
-        <Card className="border-l-4 border-l-green-500"><CardHeader className="py-4"><CardTitle className="text-sm font-medium text-gray-500">Discharged</CardTitle></CardHeader><CardContent><div className="text-2xl font-bold">{stats.discharged}</div></CardContent></Card>
+        <Card
+          className={`cursor-pointer transition-shadow hover:shadow-md ${quickFilter === 'all' ? 'ring-2 ring-[#2E4168]' : ''}`}
+          onClick={() => setQuickFilter('all')}
+        ><CardHeader className="py-4"><CardTitle className="text-sm font-medium text-gray-500">Total Cases</CardTitle></CardHeader><CardContent><div className="text-2xl font-bold">{stats.total}</div></CardContent></Card>
+        <Card
+          className={`cursor-pointer transition-shadow hover:shadow-md border-l-4 border-l-amber-500 ${quickFilter === 'active' ? 'ring-2 ring-amber-500' : ''}`}
+          onClick={() => setQuickFilter(f => f === 'active' ? 'all' : 'active')}
+        ><CardHeader className="py-4"><CardTitle className="text-sm font-medium text-gray-500">Active</CardTitle></CardHeader><CardContent><div className="text-2xl font-bold">{stats.active}</div></CardContent></Card>
+        <Card
+          className={`cursor-pointer transition-shadow hover:shadow-md border-l-4 border-l-green-500 ${quickFilter === 'discharged' ? 'ring-2 ring-green-500' : ''}`}
+          onClick={() => setQuickFilter(f => f === 'discharged' ? 'all' : 'discharged')}
+        ><CardHeader className="py-4"><CardTitle className="text-sm font-medium text-gray-500">Discharged</CardTitle></CardHeader><CardContent><div className="text-2xl font-bold">{stats.discharged}</div></CardContent></Card>
         <Card className="border-l-4 border-l-blue-500"><CardHeader className="py-4"><CardTitle className="text-sm font-medium text-gray-500">Revenue</CardTitle></CardHeader><CardContent><div className="text-2xl font-bold">{inr(stats.revenue)}</div></CardContent></Card>
       </div>
 
@@ -164,9 +180,9 @@ export default function DayCareModule() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {cases.length === 0 ? (
+                {displayedCases.length === 0 ? (
                   <TableRow><TableCell colSpan={9} className="text-center py-10 text-gray-500">No day care patients yet.</TableCell></TableRow>
-                ) : cases.map(c => (
+                ) : displayedCases.map(c => (
                   <TableRow key={c.id}>
                     <TableCell className="font-mono font-medium text-blue-700">{c.caseNumber}</TableCell>
                     <TableCell>{c.patient ? getFullName(c.patient) : '—'}</TableCell>
