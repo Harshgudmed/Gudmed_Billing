@@ -1,5 +1,5 @@
 import { db } from '../config/db.js'
-import { getOrgId, getActor } from "../lib/reqContext.js";
+import { getOrgId, getActor, safeMoney } from "../lib/reqContext.js";
 import { nextSeriesNumber } from "../lib/counters.js";
 import { resolveRequestedById } from '../lib/requestedBy.js'
 import { todayRange } from '../lib/dates.js'
@@ -172,6 +172,11 @@ export const create = async (req, res, next) => {
         return res.status(400).json({ success: false, error: 'Validation error', details: parsed.error.issues })
       }
 
+      // Reject a negative/non-numeric price before it flows into billing.
+      if (parsed.data.price !== undefined && safeMoney(parsed.data.price) === null) {
+        return res.status(400).json({ success: false, error: 'price must be a non-negative number' })
+      }
+
       const data = await db.labTest.create({
         data: {
           ...parsed.data,
@@ -311,6 +316,12 @@ export const update = async (req, res, next) => {
       }
 
       const { id, resource: _r, ...updates } = parsed.data
+
+      // Reject a negative/non-numeric price on update too (passthrough schema
+      // doesn't type-check it), so it can't slip back in via edit.
+      if (updates.price !== undefined && safeMoney(updates.price) === null) {
+        return res.status(400).json({ success: false, error: 'price must be a non-negative number' })
+      }
 
       // Tenant guard: only touch a test catalog entry that belongs to this org.
       const owned = await db.labTest.findFirst({ where: { id, organizationId: ORGANIZATION_ID }, select: { id: true } })

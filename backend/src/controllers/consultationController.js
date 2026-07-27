@@ -77,6 +77,43 @@ export async function create(req, res, next) {
     const validatedData = req.validatedBody
     const { prescriptionItems, labTests, radiologyExams, ...consultationData } = validatedData
 
+    // Tenant guard: patientId/doctorId/appointmentId arrive in the body and were
+    // only FK-valid, never org-checked. Without this, an actor in one hospital
+    // could create a consultation cross-linked to ANOTHER org's appointment and
+    // the tx.appointment.update below (scoped by id alone) would flip that foreign
+    // appointment 'scheduled' -> 'completed', disrupting the other hospital's
+    // queue. Verify each referenced id belongs to the caller's org up front —
+    // mirrors appointmentController's patient/doctor checks — so a bad reference
+    // returns a clean 404 instead of a raw Prisma FK error (500) or a cross-tenant
+    // write. update()/remove() already guard this way; create() was the only miss.
+    const patient = await db.patient.findFirst({
+      where: { id: consultationData.patientId, organizationId },
+      select: { id: true },
+    })
+    if (!patient) {
+      return res.status(404).json({ success: false, error: 'Patient not found' })
+    }
+
+    const doctor = await db.user.findFirst({
+      where: { id: consultationData.doctorId, organizationId, role: 'doctor' },
+      select: { id: true },
+    })
+    if (!doctor) {
+      return res.status(404).json({ success: false, error: 'Doctor not found' })
+    }
+
+    // appointmentId is optional, but if supplied it must belong to THIS org —
+    // it drives the tx.appointment.update that marks the appointment completed.
+    if (consultationData.appointmentId) {
+      const appointment = await db.appointment.findFirst({
+        where: { id: consultationData.appointmentId, organizationId },
+        select: { id: true },
+      })
+      if (!appointment) {
+        return res.status(404).json({ success: false, error: 'Appointment not found' })
+      }
+    }
+
     // Use a transaction to ensure consultation, prescriptions, lab orders, radiology orders, and appointment updates all succeed or fail together
     const consultation = await db.$transaction(async (tx) => {
       const newConsultation = await tx.consultation.create({
