@@ -37,6 +37,7 @@ export default function DayCareModule() {
   const [error, setError] = useState(null)
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState('all')
+  const [paymentFilter, setPaymentFilter] = useState('all')
   const [open, setOpen] = useState(false)
   const [saving, setSaving] = useState(false)
   const [form, setForm] = useState(EMPTY)
@@ -47,13 +48,14 @@ export default function DayCareModule() {
       const params = new URLSearchParams()
       if (search) params.set('search', search)
       if (statusFilter !== 'all') params.set('status', statusFilter)
+      if (paymentFilter !== 'all') params.set('paymentStatus', paymentFilter)
       const res = await client.get(`/day-care?${params}`)
       if (res.success) setCases(res.data || [])
       else setError(res.error || 'Failed to load')
     } catch (e) { setError(e.message) } finally { setLoading(false) }
   }
 
-  useEffect(() => { fetchCases() }, [search, statusFilter])
+  useEffect(() => { fetchCases() }, [search, statusFilter, paymentFilter])
   useEffect(() => {
     client.get('/settings?resource=users').then(r => { if (r.success) setDoctors((r.data || []).filter(u => u.role === 'doctor' && u.isActive !== false)) }).catch(() => {})
   }, [])
@@ -133,6 +135,15 @@ export default function DayCareModule() {
                   <SelectItem value="observation">Observation</SelectItem>
                   <SelectItem value="discharged">Discharged</SelectItem>
                   <SelectItem value="cancelled">Cancelled</SelectItem>
+                </SelectContent>
+              </Select>
+              <Select value={paymentFilter} onValueChange={setPaymentFilter}>
+                <SelectTrigger className="w-[160px]"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Payments</SelectItem>
+                  <SelectItem value="pending">Pending</SelectItem>
+                  <SelectItem value="partial">Partial</SelectItem>
+                  <SelectItem value="paid">Paid</SelectItem>
                 </SelectContent>
               </Select>
             </div>

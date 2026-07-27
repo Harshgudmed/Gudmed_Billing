@@ -14,9 +14,10 @@ async function nextCaseNumber(orgId) {
 export async function getAll(req, res, next) {
   try {
     const ORG_ID = getOrgId(req)
-    const { search, status, startDate, endDate } = req.query
+    const { search, status, paymentStatus, startDate, endDate } = req.query
     const where = { organizationId: ORG_ID }
     if (status && status !== 'all') where.status = status
+    if (paymentStatus && paymentStatus !== 'all') where.paymentStatus = paymentStatus
     // Hospital-timezone day boundaries (see lib/dates.js) — the server's own
     // timezone must not decide where a day starts.
     if (startDate || endDate) {
