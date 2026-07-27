@@ -54,6 +54,12 @@ export async function create(req, res, next) {
       status, tripDate, driverName, vehicleNumber, contactPhone, notes,
     } = req.body
 
+    // Reject negative/non-numeric money before it's stored (mirror of update()).
+    const safeDistanceKm = safeMoney(distanceKm, { fallback: null })
+    if (safeDistanceKm === null && distanceKm !== '' && distanceKm != null) return res.status(400).json({ success: false, error: 'distanceKm must be a non-negative number' })
+    const safeCharge = safeMoney(charge)
+    if (safeCharge === null) return res.status(400).json({ success: false, error: 'charge must be a non-negative number' })
+
     // Only link a patient that actually belongs to this org (FK safety).
     let safePatientId = null
     if (patientId) {
@@ -70,8 +76,8 @@ export async function create(req, res, next) {
         ambulanceType: ambulanceType || 'BLS',
         fromLocation: fromLocation || null,
         toLocation: toLocation || 'Hospital',
-        distanceKm: distanceKm != null && distanceKm !== '' ? Number(distanceKm) : null,
-        charge: charge != null && charge !== '' ? Number(charge) : 0,
+        distanceKm: safeDistanceKm,
+        charge: safeCharge,
         status: status || 'completed',
         tripDate: tripDate ? new Date(tripDate) : new Date(),
         driverName: driverName || null,

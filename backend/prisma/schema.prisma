@@ -355,6 +355,10 @@ model Patient {
   @@index([mrn])
   @@index([lastName, firstName])
   @@index([phonePrimary])
+  // Default list path: filter organizationId + isActive, sort createdAt desc.
+  // Without this the list scanned+sorted the whole org (100s under load on a
+  // 1M-row table). This composite lets Postgres index-scan straight to the page.
+  @@index([organizationId, isActive, createdAt], map: "idx_patient_org_active_created")
   // Trigram (fuzzy substring) indexes — patientController.js's search does
   // `ILIKE '%term%'` across these 3 columns, which without these indexes does
   // a full sequential scan (benchmarked: ~3s worst case at 1M+ rows). With
