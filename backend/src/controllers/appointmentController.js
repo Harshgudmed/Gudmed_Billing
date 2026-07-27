@@ -5,6 +5,8 @@ import { drName } from "../lib/drName.js";
 import { nextSeriesNumber, invoiceProbe } from "../lib/counters.js";
 import { startOfDay, endOfDay, todayIST } from '../utils/dates.js'
 import { normalizeTimeHHMM, zonedDateTimeToUtc, ymdInZone } from '../lib/dates.js'
+import { isOnLeave } from '../lib/activeDoctor.js'
+import { parseTimetable } from '../lib/doctorTimetable.js'
 import { priorityRank } from '../lib/queuePriority.js'
 import { scopedDoctorId } from '../utils/scope.js'
 import { computeConsultationFee } from '../services/appointmentFees.js'
@@ -283,6 +285,48 @@ export async function create(req, res, next) {
         code: 'PATIENT_DOUBLE_BOOKED',
         error: `This patient already has an appointment at ${validatedData.appointmentTime} on this date. A patient cannot be booked with two doctors at the same time.`,
       })
+    }
+
+    // patientId is required, but nothing verified it pointed at a real patient in
+    // THIS org: a bogus id sailed through to the create below and surfaced as a
+    // raw Prisma foreign-key error (P2003) → HTTP 500. Validate it up front, the
+    // same way doctorId (via computeConsultationFee) and departmentId are, so a
+    // bad reference returns a clean 404 instead. Mirrors the department check.
+    const patient = await db.patient.findFirst({
+      where: { id: validatedData.patientId, organizationId },
+      select: { id: true },
+    })
+    if (!patient) {
+      return res.status(404).json({ success: false, error: 'Patient not found' })
+    }
+
+    // departmentId is optional, but if supplied it must be a real department in
+    // THIS org — otherwise any string (even a patient id) was stored as-is.
+    // Mirrors roomController.createRoom's department check.
+    if (validatedData.departmentId) {
+      const dept = await db.department.findFirst({
+        where: { id: validatedData.departmentId, organizationId },
+        select: { id: true },
+      })
+      if (!dept) {
+        return res.status(400).json({ success: false, error: 'Department not found' })
+      }
+    }
+
+    // A doctor on LEAVE on the selected date cannot be booked. The timetable's
+    // exceptions list is the source of truth (lib/activeDoctor.js#isOnLeave).
+    // The UI hides on-leave doctors, but the API never enforced it — a direct
+    // API call (or a stale client) could still book onto a leave day. Common
+    // sense at the source, not just the screen.
+    if (validatedData.doctorId) {
+      const docForLeave = await db.user.findFirst({
+        where: { id: validatedData.doctorId, organizationId, role: 'doctor' },
+        select: { preferences: true },
+      })
+      const timetable = parseTimetable(docForLeave?.preferences)
+      if (timetable && isOnLeave(timetable, ymdInZone(apptDate))) {
+        return res.status(409).json({ success: false, error: 'This doctor is on leave on the selected date. Please choose another date or doctor.' })
+      }
     }
 
     // Create appointment, invoice, AND commission in transaction. The

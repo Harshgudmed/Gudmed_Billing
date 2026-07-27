@@ -56,6 +56,17 @@ async function getCases(req, res, ORG_ID) {
   res.json({ success: true, data, stats })
 }
 
+// Optional date field → { ok, value }: absent/empty is null; a valid string is
+// a Date; anything unparseable is `ok:false` so the caller returns a clean 400.
+// A bare `new Date("not-a-date")` is a truthy Invalid Date — handing that to
+// Prisma threw, and (before the awaits above) killed the whole process.
+function parseOptionalDate(v) {
+  if (v === undefined || v === null || v === '') return { ok: true, value: null }
+  const d = new Date(v)
+  if (Number.isNaN(d.getTime())) return { ok: false }
+  return { ok: true, value: d }
+}
+
 async function createCase(req, res, ORG_ID) {
   const { patientId, payerType, insurerName, tpaName, policyNumber, coverageLimit, status, validFrom, validTo, notes } = req.body
   if (!patientId) return res.status(400).json({ success: false, error: 'patientId is required' })
@@ -65,6 +76,11 @@ async function createCase(req, res, ORG_ID) {
 
   const coverageVal = safeMoney(coverageLimit)
   if (coverageVal === null) return res.status(400).json({ success: false, error: 'coverageLimit must be a non-negative number' })
+
+  const vf = parseOptionalDate(validFrom)
+  if (!vf.ok) return res.status(400).json({ success: false, error: 'validFrom is not a valid date' })
+  const vt = parseOptionalDate(validTo)
+  if (!vt.ok) return res.status(400).json({ success: false, error: 'validTo is not a valid date' })
 
   const insCase = await db.insuranceCase.create({
     data: {
@@ -76,8 +92,8 @@ async function createCase(req, res, ORG_ID) {
       policyNumber: policyNumber || null,
       coverageLimit: coverageVal,
       status: status || 'Active',
-      validFrom: validFrom ? new Date(validFrom) : null,
-      validTo: validTo ? new Date(validTo) : null,
+      validFrom: vf.value,
+      validTo: vt.value,
       notes: notes || null,
       createdById: req.user?.userId || null,
     },
@@ -100,8 +116,16 @@ async function updateCase(req, res, ORG_ID) {
     if (v === null) return res.status(400).json({ success: false, error: 'coverageLimit must be a non-negative number' })
     data.coverageLimit = v
   }
-  if (req.body.validFrom !== undefined) data.validFrom = req.body.validFrom ? new Date(req.body.validFrom) : null
-  if (req.body.validTo !== undefined) data.validTo = req.body.validTo ? new Date(req.body.validTo) : null
+  if (req.body.validFrom !== undefined) {
+    const vf = parseOptionalDate(req.body.validFrom)
+    if (!vf.ok) return res.status(400).json({ success: false, error: 'validFrom is not a valid date' })
+    data.validFrom = vf.value
+  }
+  if (req.body.validTo !== undefined) {
+    const vt = parseOptionalDate(req.body.validTo)
+    if (!vt.ok) return res.status(400).json({ success: false, error: 'validTo is not a valid date' })
+    data.validTo = vt.value
+  }
 
   const insCase = await db.insuranceCase.update({
     where: { id },
@@ -177,26 +201,32 @@ async function updateClaim(req, res, ORG_ID) {
 
 // ── Dispatchers (resource-based) ───────────────────────────────────────────────
 
+// NOTE the `await` on every delegate below. Without it, an async rejection in
+// createCase/updateCase (e.g. a bad date reaching Prisma) escaped this try/catch,
+// became an unhandledRejection, and — with no process-level handler — KILLED the
+// whole Node process, taking the entire API down for every tenant. Awaiting the
+// delegate keeps its errors inside the try, so they become a clean 500 (or the
+// 400 the date guard now returns) instead of a crash.
 export async function getAll(req, res, next) {
   try {
     const ORG_ID = getOrgId(req)
-    return getCases(req, res, ORG_ID) // only cases are listed (claims come nested)
+    return await getCases(req, res, ORG_ID) // only cases are listed (claims come nested)
   } catch (err) { next(err) }
 }
 
 export async function create(req, res, next) {
   try {
     const ORG_ID = getOrgId(req)
-    if (req.query.resource === 'claims') return createClaim(req, res, ORG_ID)
-    return createCase(req, res, ORG_ID)
+    if (req.query.resource === 'claims') return await createClaim(req, res, ORG_ID)
+    return await createCase(req, res, ORG_ID)
   } catch (err) { next(err) }
 }
 
 export async function update(req, res, next) {
   try {
     const ORG_ID = getOrgId(req)
-    if (req.query.resource === 'claims') return updateClaim(req, res, ORG_ID)
-    return updateCase(req, res, ORG_ID)
+    if (req.query.resource === 'claims') return await updateClaim(req, res, ORG_ID)
+    return await updateCase(req, res, ORG_ID)
   } catch (err) { next(err) }
 }
 

@@ -1,9 +1,9 @@
 import { db } from '../config/db.js'
-import { getOrgId } from "../lib/reqContext.js";
+import { getOrgId, getActor } from "../lib/reqContext.js";
 import { z } from 'zod'
 import { nextQueueNumber } from '../utils/queueNumber.js'
 import { getPagination, paginationMeta } from '../lib/pagination.js'
-import { priorityRank } from '../lib/queuePriority.js'
+import { priorityRank, QUEUE_ORDER_BY } from '../lib/queuePriority.js'
 import { dayRange, todayRange } from '../lib/dates.js'
 import { syncAppointmentsToQueue } from '../lib/queueSync.js'
 import { isOwned } from '../lib/tenant.js'
@@ -48,6 +48,24 @@ const queueUpdateSchema = z.object({
 // today's heal (or vice versa).
 const SYNC_EVERY_MS = 60_000
 const lastSyncAt = new Map() // `${orgId}|${startDate}|${endDate}` -> epoch ms
+
+const SEARCHABLE_PATIENT_FIELDS = ['firstName', 'middleName', 'lastName', 'mrn', 'phonePrimary']
+
+function queueSearchWhere(search) {
+  const terms = String(search || '').trim().split(/\s+/).filter(Boolean)
+  if (terms.length === 0) return null
+
+  return {
+    AND: terms.map((term) => ({
+      OR: [
+        { queueNumber: { contains: term, mode: 'insensitive' } },
+        ...SEARCHABLE_PATIENT_FIELDS.map((field) => ({
+          patient: { is: { [field]: { contains: term, mode: 'insensitive' } } },
+        })),
+      ],
+    })),
+  }
+}
 
 async function syncIfDue(organizationId, startDate, endDate) {
   const key = `${organizationId}|${startDate || ''}|${endDate || ''}`
@@ -96,13 +114,21 @@ export async function getQueue(req, res, next) {
     if (startDate || endDate) {
       baseWhere.joinedQueueAt = dayRange(startDate, endDate)
     }
-    if (search) {
-      baseWhere.OR = [
-        { queueNumber: { contains: search, mode: 'insensitive' } },
-        { patient: { firstName: { contains: search, mode: 'insensitive' } } },
-        { patient: { lastName: { contains: search, mode: 'insensitive' } } },
-        { patient: { mrn: { contains: search, mode: 'insensitive' } } },
-      ]
+    const searchWhere = queueSearchWhere(search)
+    if (searchWhere) Object.assign(baseWhere, searchWhere)
+
+    // A DOCTOR sees only THEIR OWN patients' queue — the ones booked with them
+    // (assignedToId) or returning to them (followUpDoctorId) — never the rest of
+    // the hospital's. Admin/reception see everything. Combined via AND so it
+    // still respects any active search/date/status filter above.
+    // (No-op while AUTH_ENFORCED is off in dev, since there is no actor role
+    // then; it takes effect in production where the role comes from the token.)
+    const actor = getActor(req)
+    if (actor.role === 'doctor' && actor.id) {
+      const mine = { OR: [{ assignedToId: actor.id }, { followUpDoctorId: actor.id }] }
+      baseWhere.AND = baseWhere.AND
+        ? [...(Array.isArray(baseWhere.AND) ? baseWhere.AND : [baseWhere.AND]), mine]
+        : [mine]
     }
 
     // The listed page (and its total) additionally honour the status filter.
@@ -112,11 +138,10 @@ export async function getQueue(req, res, next) {
 
     // priorityRank first (urgent group on top), then joinedQueueAt — which is
     // stamped to "now" on a priority change, so a newly-urgent patient lands at
-    // the BOTTOM of the urgent group (the client's rule). createdAt is the final
-    // tiebreak so two rows with an identical joinedQueueAt (bulk check-in, or the
-    // same instant) always sort the same way — without it Postgres returned tied
-    // rows in an unstable physical order and the board reshuffled on every poll.
-    const orderBy = [{ priorityRank: 'desc' }, { joinedQueueAt: 'asc' }, { createdAt: 'asc' }]
+    // the BOTTOM of the urgent group (the client's rule). See QUEUE_ORDER_BY for
+    // why createdAt is the final tiebreak and why this must stay one shared
+    // constant rather than a copy re-typed at each call site.
+    const orderBy = QUEUE_ORDER_BY
 
     // Counts span the whole filtered set, not just this page — otherwise the
     // header tiles would only ever count the rows currently on screen.
@@ -264,12 +289,6 @@ export async function updateQueue(req, res, next) {
   }
 }
 
-// POST /api/queue/:id/prescription-uploaded — the display board's actual
-// "you are next" trigger (see Smart Waiting Time in the client requirements):
-// stamped by the GudMed/Scribble prescription-upload webhook once it exists,
-// and by a manual "Prescription Ready" staff button in the meantime — both
-// call this same function so the display board never has to know which one
-// fired it.
 /**
  * POST /api/queue/call-next — the doctor's one button.
  *
@@ -360,13 +379,30 @@ export async function callNextPatient(req, res, next) {
         })
       }
 
-      // Same ordering the board and the queue list use, so the person the
-      // screen showed as next is the person who actually gets called.
-      const upNext = pinned ?? await tx.queueManagement.findFirst({
-        where: { ...scope, status: { in: ['waiting', 'called'] } },
-        orderBy: [{ priorityRank: 'desc' }, { joinedQueueAt: 'asc' }],
-        select: { id: true },
-      })
+      // Who walks in next. "Alert" is a PROMISE to the patient — the board told
+      // them "you're next, get ready" — so the person a human deliberately
+      // alerted (status 'called') must be the one who actually comes in. Only if
+      // nobody has been alerted do we fall back to the head of the plain waiting
+      // list. Without this, call-next treated 'called' and 'waiting' as equal and
+      // just took the top of the queue by priority+time, so a higher-priority or
+      // earlier-arriving patient could be called in over the one shown in orange
+      // on the wall — the alerted patient was left standing while someone below
+      // them was waved in.
+      //
+      // Same QUEUE_ORDER_BY the board and the queue list sort by, so the
+      // patient the SCREEN shows at the top of the orange highlights is
+      // exactly the one who gets called.
+      const upNext = pinned
+        ?? await tx.queueManagement.findFirst({
+          where: { ...scope, status: 'called' },
+          orderBy: QUEUE_ORDER_BY,
+          select: { id: true },
+        })
+        ?? await tx.queueManagement.findFirst({
+          where: { ...scope, status: 'waiting' },
+          orderBy: QUEUE_ORDER_BY,
+          select: { id: true },
+        })
       if (!upNext) return { completedId: current?.id ?? null, nowServing: null }
 
       const nowServing = await tx.queueManagement.update({
@@ -389,38 +425,31 @@ export async function callNextPatient(req, res, next) {
   }
 }
 
-export async function markPrescriptionUploaded(req, res, next) {
+// POST/DELETE /api/queue/:id/prescription-uploaded — the display board's actual
+// "you are next" trigger (see Smart Waiting Time in the client requirements):
+// stamped by the GudMed/Scribble prescription-upload webhook once it exists,
+// and by a manual "Prescription Ready" staff button in the meantime — both
+// call the same setter so the display board never has to know which one
+// fired it. DELETE undoes a misclick, or resets when a different patient is
+// called into the room before the marked one.
+//
+// markPrescriptionUploaded and clearPrescriptionUploaded are two thin routes
+// over one shared setter — they differ only in the value written, so a
+// duplicate-code scan (jscpd) flagged the near-identical find/404/update shape
+// that used to be copy-pasted between them.
+async function setPrescriptionUploaded(req, res, next, value) {
   try {
     const ORG_ID = getOrgId(req)
     const { id } = req.params
     const existing = await db.queueManagement.findFirst({ where: { id, organizationId: ORG_ID }, select: { id: true } })
     if (!existing) return res.status(404).json({ success: false, error: 'Queue item not found' })
 
-    const item = await db.queueManagement.update({
-      where: { id },
-      data: { prescriptionUploadedAt: new Date() },
-    })
+    const item = await db.queueManagement.update({ where: { id }, data: { prescriptionUploadedAt: value } })
     res.json({ success: true, data: item })
   } catch (err) {
     next(err)
   }
 }
 
-// DELETE /api/queue/:id/prescription-uploaded — undo a misclick, or reset
-// when a different patient is called into the room before the marked one.
-export async function clearPrescriptionUploaded(req, res, next) {
-  try {
-    const ORG_ID = getOrgId(req)
-    const { id } = req.params
-    const existing = await db.queueManagement.findFirst({ where: { id, organizationId: ORG_ID }, select: { id: true } })
-    if (!existing) return res.status(404).json({ success: false, error: 'Queue item not found' })
-
-    const item = await db.queueManagement.update({
-      where: { id },
-      data: { prescriptionUploadedAt: null },
-    })
-    res.json({ success: true, data: item })
-  } catch (err) {
-    next(err)
-  }
-}
+export const markPrescriptionUploaded = (req, res, next) => setPrescriptionUploaded(req, res, next, new Date())
+export const clearPrescriptionUploaded = (req, res, next) => setPrescriptionUploaded(req, res, next, null)

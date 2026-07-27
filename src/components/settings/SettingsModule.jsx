@@ -10,7 +10,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import {
   Settings, Building2, Users, Package, Link2, Database,
   Save, Plus, Edit, Eye, CheckCircle, XCircle, AlertCircle, RefreshCw, Loader2, Clock, Palette,
-  MessageCircle, Bell, DoorOpen,
+  MessageCircle, Bell, DoorOpen, MonitorPlay,
 } from 'lucide-react'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -30,6 +30,7 @@ import { useServerPagination } from '@/lib/useServerPagination'
 import { Pagination } from '@/components/common/Pagination'
 import IntegrationsHub from './IntegrationsHub'
 import RoomsManager from './RoomsManager'
+import DisplayBoardsModule from '../display-boards/DisplayBoardsModule'
 
 const ORG_ID = 'org-demo'
 const ITEMS_PER_PAGE = 10
@@ -315,12 +316,10 @@ export default function SettingsModule() {
         <TabsList className="grid w-full grid-cols-6">
           <TabsTrigger value="organization"><Building2 className="h-4 w-4 mr-2" />Organization</TabsTrigger>
           <TabsTrigger value="users"><Users className="h-4 w-4 mr-2" />Users</TabsTrigger>
+          <TabsTrigger value="displayBoards"><MonitorPlay className="h-4 w-4 mr-2" />TV Boards</TabsTrigger>
           <TabsTrigger value="rooms"><DoorOpen className="h-4 w-4 mr-2" />Rooms</TabsTrigger>
           <TabsTrigger value="modules"><Package className="h-4 w-4 mr-2" />Modules</TabsTrigger>
           <TabsTrigger value="integrations"><Link2 className="h-4 w-4 mr-2" />Integrations</TabsTrigger>
-          {/* Notifications tab hidden — to show again: uncomment this trigger AND its <TabsContent>, then bump grid-cols by one */}
-          {/* <TabsTrigger value="notifications"><MessageCircle className="h-4 w-4 mr-2" />Notifications</TabsTrigger> */}
-          <TabsTrigger value="backup"><Database className="h-4 w-4 mr-2" />Backup</TabsTrigger>
         </TabsList>
 
         {/* Organization Tab */}
@@ -679,6 +678,11 @@ export default function SettingsModule() {
               )}
             </CardContent>
           </Card>
+        </TabsContent>
+
+        {/* TV Boards Tab */}
+        <TabsContent value="displayBoards" className="space-y-4">
+          <DisplayBoardsModule />
         </TabsContent>
 
         {/* Modules Tab */}

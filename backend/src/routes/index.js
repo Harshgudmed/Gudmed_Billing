@@ -22,6 +22,7 @@ import preTriageRoutes from './preTriageRoutes.js'
 import queueRoutes from './queueRoutes.js'
 import roomRoutes from './roomRoutes.js'
 import displayRoutes from './displayRoutes.js'
+import screenRoutes from './screenRoutes.js'
 import dayCareRoutes from './dayCareRoutes.js'
 import ambulanceRoutes from './ambulanceRoutes.js'
 import insuranceRoutes from './insuranceRoutes.js'
@@ -75,6 +76,7 @@ router.use('/pre-triage',            authorize(), preTriageRoutes)
 router.use('/queue',                 authorize(), queueRoutes)
 router.use('/rooms',                 authorize(), roomRoutes)
 router.use('/display',               authorize(), displayRoutes)
+router.use('/screens',               authorize(), screenRoutes)
 router.use('/day-care',              authorize(), dayCareRoutes)
 router.use('/ambulance',             authorize(), ambulanceRoutes)
 router.use('/insurance',             authorize(), insuranceRoutes)

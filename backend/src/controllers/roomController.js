@@ -2,7 +2,7 @@ import { z } from 'zod'
 import { db } from '../config/db.js'
 import { getOrgId, getActor } from '../lib/reqContext.js'
 import { resolveActiveDoctor, otherConcurrentDoctors, nextSessionForRoom } from '../lib/activeDoctor.js'
-import { parseTimetable, shiftsForRoom } from '../lib/doctorTimetable.js'
+import { parseTimetable, shiftsForRoom, roomIdsInTimetable } from '../lib/doctorTimetable.js'
 import { todayRange } from '../lib/dates.js'
 
 export const DOCTOR_SELECT = { id: true, fullName: true, preferences: true }
@@ -273,10 +273,28 @@ export async function deleteRoom(req, res, next) {
     const { id } = req.params
     const existing = await db.room.findFirst({ where: { id, organizationId: ORG_ID }, select: { id: true } })
     if (!existing) return res.status(404).json({ success: false, error: 'Room not found' })
-    // doctorLinks is this room's OWN child index (onDelete: Cascade on
-    // roomId) — deleting it along with the room is correct. Any doctor whose
-    // timetable still points a shift at this (now-gone) room simply resolves
-    // to nothing for that shift on their next save/view — not a dangling FK.
+
+    // The room's id also lives INSIDE each doctor's timetable JSON
+    // (User.preferences → weeklySlots[].shifts[].roomId) — the source of truth
+    // the DoctorRoomAssignment index is merely derived from. That FK index
+    // cascades on delete, but the roomId buried in the timetable JSON does NOT,
+    // so deleting a referenced room would silently leave every such doctor with
+    // a shift pointing at a room that no longer exists (activeDoctor.js then
+    // resolves nothing for that shift). Block instead — the same block-if-
+    // referenced convention deleteFloor uses when a floor still has rooms — so
+    // an admin clears those shifts in the Timetable first. `contains` narrows
+    // the scan to candidate doctors; roomIdsInTimetable confirms a real
+    // reference (guards against the id merely appearing as a JSON substring).
+    const candidateDoctors = await db.user.findMany({
+      where: { organizationId: ORG_ID, role: 'doctor', preferences: { contains: id } },
+      select: { fullName: true, preferences: true },
+    })
+    const usingDoctors = candidateDoctors.filter((d) => roomIdsInTimetable(parseTimetable(d.preferences)).includes(id))
+    if (usingDoctors.length > 0) {
+      const names = usingDoctors.map((d) => d.fullName).join(', ')
+      return res.status(409).json({ success: false, error: `Remove this room from the timetable of ${usingDoctors.length} doctor(s) first: ${names}` })
+    }
+
     await db.room.delete({ where: { id } })
     res.json({ success: true })
   } catch (err) { next(err) }

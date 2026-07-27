@@ -17,3 +17,18 @@ export const DEFAULT_PRIORITY_RANK = RANK.normal
 export function priorityRank(priority) {
   return RANK[priority] ?? DEFAULT_PRIORITY_RANK
 }
+
+// The queue's ONE canonical sort order: highest priority first, then who has
+// been waiting longest, with createdAt as the final tiebreak so two rows with
+// an identical joinedQueueAt (a bulk check-in, or the same instant) always
+// sort the same way — without it Postgres returns tied rows in an unstable
+// physical order and the board reshuffles the same patients on every poll.
+//
+// This was copy-pasted at four call sites (queueController's list and
+// call-next, displayController's board feed and floor grid) with a comment at
+// each one saying it "must match" the others — a convention nothing enforced,
+// so a future edit to one had nothing stopping it from silently drifting from
+// the rest. If they disagree, the person the QUEUE SCREEN shows as next is not
+// the person a "call next" press actually calls — import this everywhere
+// instead of retyping the array.
+export const QUEUE_ORDER_BY = [{ priorityRank: 'desc' }, { joinedQueueAt: 'asc' }, { createdAt: 'asc' }]

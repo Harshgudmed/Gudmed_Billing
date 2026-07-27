@@ -137,7 +137,13 @@ function useBranding() {
         if (s.navbarColor)   setNavbarColor(s.navbarColor)
         if (orgName)         setHospitalName(orgName)
         if (res.data?.modulesEnabled) setModulesEnabled(res.data.modulesEnabled)
-        applyBranding({ ...s, hospitalName: orgName })
+        // primaryColor/secondaryColor are their own columns on Organization
+        // (Settings → Organization → colour picker) — NOT inside the nested
+        // `settings` JSON blob (`s`, which only holds currency/timezone/etc).
+        // This was reading them off `s`, where they never existed, so
+        // --color-primary/--color-secondary were never actually set — any
+        // CSS relying on them (this screen's brand colour) silently failed.
+        applyBranding({ ...s, primaryColor: res.data?.primaryColor, secondaryColor: res.data?.secondaryColor, hospitalName: orgName })
       } catch (err) {
         console.error('Failed to load settings:', err)
       }
