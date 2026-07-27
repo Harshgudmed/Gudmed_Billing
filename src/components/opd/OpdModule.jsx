@@ -452,13 +452,17 @@ export default function OpdModule() {
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
             <Input className="pl-9 rounded-xl" placeholder="Search by patient, UHID, diagnosis..." value={filterSearch} onChange={e => setFilterSearch(e.target.value)} />
           </div>
-          <Select value={filterDoctor} onValueChange={setFilterDoctor}>
-            <SelectTrigger className="w-52 rounded-xl"><SelectValue placeholder="Filter by doctor" /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Doctors</SelectItem>
-              {doctors.map(d => <SelectItem key={d.id} value={d.id}>{drName(d.fullName)}</SelectItem>)}
-            </SelectContent>
-          </Select>
+          <SearchableSelect
+            options={[
+              { value: 'all', label: 'All Doctors' },
+              ...doctors.map(d => ({ value: d.id, label: drName(d.fullName) }))
+            ]}
+            value={filterDoctor}
+            onChange={setFilterDoctor}
+            placeholder="Filter by doctor"
+            searchPlaceholder="Type doctor name..."
+            className="w-52 rounded-xl"
+          />
           <Select value={filterDate} onValueChange={setFilterDate}>
             <SelectTrigger className="w-40 rounded-xl"><SelectValue placeholder="Date" /></SelectTrigger>
             <SelectContent>
