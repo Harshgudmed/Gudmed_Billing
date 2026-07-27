@@ -231,6 +231,15 @@ export async function create(req, res, next) {
     // and the stored value is string-sorted (see normalizeTimeHHMM).
     validatedData.appointmentTime = normalizeTimeHHMM(validatedData.appointmentTime)
 
+    // No booking in the past — the DATE and the TIME. At 11:00 a 10:00 slot today
+    // is rejected too, not just past dates. Combine day + time into the real
+    // instant in the hospital's timezone and compare with now (a 1-minute grace
+    // avoids rejecting a booking made for the current minute).
+    const apptInstant = zonedDateTimeToUtc(validatedData.appointmentDate, validatedData.appointmentTime)
+    if (apptInstant.getTime() < Date.now() - 60_000) {
+      return res.status(400).json({ success: false, error: 'Cannot book an appointment in the past — pick today or a future date and time.' })
+    }
+
     // Pin to midnight of the hospital's day. `appointmentDate` is the DAY; the
     // time of day lives in `appointmentTime`. The browser sends a full instant
     // (the form defaults to `new Date()` and posts .toISOString()), so storing
