@@ -29,11 +29,18 @@ export async function handleGet(req, res, next) {
     // A logged-in doctor only ever sees their own accountability data.
     const myDoctorId = scopedDoctorId(req)
 
-    // Parse and validate pagination parameters
+    // Pagination is OPT-IN: a caller that passes neither `limit` nor `offset`
+    // gets the FULL list. The Doctor-Timetable view and the commission/doctor
+    // dropdowns read every doctor (a small, bounded set) and pass no paging —
+    // defaulting them to a 10-row page silently hid all but the first 10 doctors
+    // (the timetable showed ~10 of 1,100). Explicit limit/offset still pages the
+    // big table views.
+    const wantsPaging = req.query.limit !== undefined || req.query.offset !== undefined
     let limit = parseInt(req.query.limit) || 10
     let offset = parseInt(req.query.offset) || 0
     limit = Math.max(1, Math.min(limit, 1000))
     offset = Math.max(0, offset)
+    const pageArgs = wantsPaging ? { take: limit, skip: offset } : {}
 
     if (resource === 'doctors') {
       const where = { organizationId: ORG_ID, role: 'doctor', isActive: true, ...(myDoctorId ? { id: myDoctorId } : {}) }
@@ -45,20 +52,19 @@ export async function handleGet(req, res, next) {
             commissionConfig: true,
           },
           orderBy: { fullName: 'asc' },
-          take: limit,
-          skip: offset,
+          ...pageArgs,
         }),
         db.user.count({ where }),
       ])
 
-      const hasMore = (offset + limit) < total
-      const page = Math.floor(offset / limit) + 1
-      const totalPages = Math.ceil(total / limit)
+      const hasMore = wantsPaging ? (offset + limit) < total : false
+      const page = wantsPaging ? Math.floor(offset / limit) + 1 : 1
+      const totalPages = wantsPaging ? Math.ceil(total / limit) : 1
 
       return res.json({
         success: true,
         data: doctors,
-        meta: { total, limit, offset, page, totalPages, hasMore }
+        meta: { total, limit: wantsPaging ? limit : total, offset, page, totalPages, hasMore }
       })
     }
 
@@ -79,20 +85,19 @@ export async function handleGet(req, res, next) {
             settledBy: { select: { id: true, fullName: true } },
           },
           orderBy: { createdAt: 'desc' },
-          take: limit,
-          skip: offset,
+          ...pageArgs,
         }),
         db.doctorCommission.count({ where }),
       ])
 
-      const hasMore = (offset + limit) < total
-      const page = Math.floor(offset / limit) + 1
-      const totalPages = Math.ceil(total / limit)
+      const hasMore = wantsPaging ? (offset + limit) < total : false
+      const page = wantsPaging ? Math.floor(offset / limit) + 1 : 1
+      const totalPages = wantsPaging ? Math.ceil(total / limit) : 1
 
       return res.json({
         success: true,
         data: commissions,
-        meta: { total, limit, offset, page, totalPages, hasMore }
+        meta: { total, limit: wantsPaging ? limit : total, offset, page, totalPages, hasMore }
       })
     }
 
