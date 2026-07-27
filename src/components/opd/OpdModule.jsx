@@ -109,6 +109,7 @@ export default function OpdModule() {
   const [specificDate, setSpecificDate] = useState('')
   const [customStart, setCustomStart] = useState('')
   const [customEnd, setCustomEnd] = useState('')
+  const [filterHasRx, setFilterHasRx] = useState(false)
 
   // Turn the today/week/month/specific/custom date modes into a concrete
   // {startDate,endDate} the server can filter on.
@@ -130,6 +131,7 @@ export default function OpdModule() {
       doctorId: filterDoctor === 'all' ? '' : filterDoctor,
       startDate: opdDateRange.startDate,
       endDate: opdDateRange.endDate,
+      hasRx: filterHasRx ? 'true' : '',
     },
   })
   const consultations = consultationsPagination.rows
@@ -420,12 +422,19 @@ export default function OpdModule() {
           </div>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
             {[
-              { label: 'Total', value: stats.total, color: 'text-blue-600', bg: 'bg-blue-50' },
-              { label: 'Today', value: stats.today, color: 'text-green-600', bg: 'bg-green-50' },
-              { label: 'This Week', value: stats.thisWeek, color: 'text-purple-600', bg: 'bg-purple-50' },
-              { label: 'With Rx', value: stats.withRx, color: 'text-orange-600', bg: 'bg-orange-50' },
+              { label: 'Total', value: stats.total, color: 'text-blue-600', bg: 'bg-blue-50', active: filterDate === 'all' && !filterHasRx, onClick: () => { setFilterDate('all'); setFilterHasRx(false) } },
+              { label: 'Today', value: stats.today, color: 'text-green-600', bg: 'bg-green-50', active: filterDate === 'today', onClick: () => setFilterDate(d => d === 'today' ? 'all' : 'today') },
+              { label: 'This Week', value: stats.thisWeek, color: 'text-purple-600', bg: 'bg-purple-50', active: filterDate === 'week', onClick: () => setFilterDate(d => d === 'week' ? 'all' : 'week') },
+              { label: 'With Rx', value: stats.withRx, color: 'text-orange-600', bg: 'bg-orange-50', active: filterHasRx, onClick: () => setFilterHasRx(v => !v) },
             ].map(s => (
-              <Card key={s.label} className={`${s.bg} border-0 shadow-sm`}>
+              <Card
+                key={s.label}
+                role="button"
+                tabIndex={0}
+                onClick={s.onClick}
+                onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); s.onClick() } }}
+                className={`${s.bg} border-0 shadow-sm cursor-pointer transition-all hover:shadow-md hover:-translate-y-0.5 ${s.active ? 'ring-2 ring-offset-1 ring-[#2E4168]' : ''}`}
+              >
                 <CardContent className="p-4 flex justify-between items-center">
                   <div>
                     <p className="text-sm text-gray-500">{s.label}</p>
@@ -471,8 +480,14 @@ export default function OpdModule() {
               <Input type="date" className="w-40 rounded-xl" value={customEnd} min={customStart || undefined} onChange={e => setCustomEnd(e.target.value)} />
             </>
           )}
-          {(filterDoctor !== 'all' || filterSearch || filterDate !== 'all') && (
-            <Button variant="ghost" size="sm" className="text-gray-500" onClick={() => { setFilterDoctor('all'); setFilterSearch(''); setFilterDate('all'); setSpecificDate(''); setCustomStart(''); setCustomEnd('') }}><X className="h-4 w-4 mr-1" />Clear</Button>
+          {filterHasRx && (
+            <Badge variant="outline" className="rounded-full border-orange-300 bg-orange-50 text-orange-700 gap-1 pl-2.5 pr-1.5 py-1">
+              With Rx
+              <button type="button" onClick={() => setFilterHasRx(false)} className="rounded-full hover:bg-orange-100 p-0.5"><X className="h-3 w-3" /></button>
+            </Badge>
+          )}
+          {(filterDoctor !== 'all' || filterSearch || filterDate !== 'all' || filterHasRx) && (
+            <Button variant="ghost" size="sm" className="text-gray-500" onClick={() => { setFilterDoctor('all'); setFilterSearch(''); setFilterDate('all'); setSpecificDate(''); setCustomStart(''); setCustomEnd(''); setFilterHasRx(false) }}><X className="h-4 w-4 mr-1" />Clear</Button>
           )}
         </div>
 
