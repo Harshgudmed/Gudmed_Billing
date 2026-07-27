@@ -14,7 +14,7 @@
 // keeps this module trivially unit-testable against a fixed clock instead
 // of the real wall clock.
 
-import { nowInZone, ymdInZone } from './dates.js'
+import { nowInZone, ymdInZone, normalizeTimeHHMM } from './dates.js'
 import { DAY_NAMES, shiftsForRoom, toMinutes } from './doctorTimetable.js'
 
 /**
@@ -188,12 +188,25 @@ export function otherConcurrentDoctors(roomId, doctors, opts = {}) {
 export function assertValidShift(shift) {
   const start = toMinutes(shift.start)
   const end = toMinutes(shift.end)
-  if (!Number.isFinite(start) || !Number.isFinite(end)) {
+  // A finite minute count is necessary but NOT sufficient: "25:00" and "12:70"
+  // both collapse to a finite total (1500, 790) yet aren't real clock times.
+  // The hour (0–23) and minute (0–59) bounds have to be checked on the raw
+  // fields, before they're flattened into a single minute count.
+  if (!Number.isFinite(start) || !Number.isFinite(end) || !isInRangeHHMM(shift.start) || !isInRangeHHMM(shift.end)) {
     throw new Error(`Invalid shift time (expected HH:mm): "${shift.start}"–"${shift.end}"`)
   }
   if (start >= end) {
     throw new Error('Shift start time must be before end time (overnight shifts are not supported yet)')
   }
+}
+
+/** True only for a real 24h wall-clock time: hours 0–23 and minutes 0–59.
+ * Normalizes through the same helper toMinutes uses so validation happens at
+ * one layer, then range-checks the hour/minute parts the minute-count total
+ * can no longer distinguish (790 mins is a valid instant; "12:70" is not). */
+function isInRangeHHMM(timeStr) {
+  const [h, m] = normalizeTimeHHMM(timeStr).split(':').map(Number)
+  return Number.isFinite(h) && Number.isFinite(m) && h >= 0 && h <= 23 && m >= 0 && m <= 59
 }
 
 /** Throws if any two shifts in `shifts` (all for the SAME doctor, SAME day,

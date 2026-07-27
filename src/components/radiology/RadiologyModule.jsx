@@ -1114,11 +1114,6 @@ ${order.clinicalIndication ? `<div class="section"><div class="section-header">C
                   <TableRow><TableCell colSpan={5} className="text-center py-6 text-gray-400">No reports yet</TableCell></TableRow>
                 ) : reports.slice(0, 5).map(r => {
                   const order = orders.find(o => o.id === r.orderId)
-                  console.log("Report OrderId:", r.orderId);
-
-orders.forEach((o, index) => {
-  console.log(index, o.id, o.orderId);
-});
                   return (
                     <TableRow key={r.id}>
                       <TableCell className="text-sm">{getFullName(order?.patient)}</TableCell>

@@ -4,9 +4,28 @@ import { z } from 'zod'
 // "99:99" through, which then sorted after every real slot on the board.
 const HHMM = /^([01]\d|2[0-3]):[0-5]\d$/
 
+// A calendar-VALID date. `new Date('2027-02-29')` does NOT throw — 2027 isn't a
+// leap year, so JS silently rolls the impossible day to a real but DIFFERENT one
+// (2027-02-28), and the appointment lands on a day the user never picked. The
+// parseability check below can't catch that (the rolled date isn't NaN). Take the
+// leading YYYY-MM-DD (the browser posts a full ISO instant) and confirm the
+// UTC date we build back from those parts still reads the same y/m/d — a
+// rolled-over date won't. Non-ISO-shaped strings are left to the parse check.
+const isValidCalendarDate = (v) => {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(v))
+  if (!m) return true
+  const y = +m[1], mo = +m[2], d = +m[3]
+  const dt = new Date(Date.UTC(y, mo - 1, d))
+  return dt.getUTCFullYear() === y && dt.getUTCMonth() === mo - 1 && dt.getUTCDate() === d
+}
+
 // appointmentDate must be a parseable date — a bare z.string() let "not-a-date"
-// reach new Date() and throw a 500 deep in the controller instead of a clean 400.
-const dateString = z.string().refine((v) => !Number.isNaN(new Date(v).getTime()), 'Invalid date')
+// reach new Date() and throw a 500 deep in the controller instead of a clean 400 —
+// AND a calendar-valid one, so an impossible day is rejected rather than rolled.
+const dateString = z
+  .string()
+  .refine((v) => !Number.isNaN(new Date(v).getTime()), 'Invalid date')
+  .refine(isValidCalendarDate, 'Appointment date is not a valid calendar date')
 
 export const createAppointmentSchema = z.object({
   patientId: z.string(),
