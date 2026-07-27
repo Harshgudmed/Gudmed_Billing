@@ -127,6 +127,14 @@ export async function receive(req, res, next) {
       })
       if (!order) throw makeError('Purchase order not found', 404, 'PURCHASE_ORDER_NOT_FOUND')
 
+      // INVENTORY INTEGRITY: receiving is idempotent. An already-received PO must
+      // not add its quantities to stock a second time. Guarded inside the same
+      // transaction that flips status + increments stock, so a concurrent double
+      // call can't slip a second stock add past this check.
+      if (order.status === 'received') {
+        throw makeError('Purchase order already received', 409, 'PURCHASE_ORDER_ALREADY_RECEIVED')
+      }
+
       for (const item of parsed.items) {
         if (item.batchNumber && item.expiryDate && item.quantityReceived > 0) {
           await tx.pharmacyBatch.create({

@@ -14,6 +14,39 @@ import { nextQueueNumber } from '../utils/queueNumber.js'
 import { deriveRoomAndVisitType } from '../lib/queueDerivation.js'
 import { PATIENT_NAME_SELECT } from '../lib/patientName.js'
 
+// Appointment status state-machine. `status` is a free string column, so before
+// this any PATCH could jump it to ANY value — cancelled → completed, a no-show
+// back to scheduled — corrupting reports and re-attaching money to a visit that
+// never happened. This is the single source of truth for which status changes
+// are legal. Rules: the four TERMINAL states (completed, cancelled, no_show,
+// rescheduled) have NO outgoing edges — once a visit is finished or voided it
+// stays that way. The active states move forward only. Re-stating the SAME
+// status is always allowed (a no-op) so an edit that resends the current status
+// while changing other fields is never rejected. 'rescheduled' is set only by
+// the dedicated reschedule() flow (which writes the row directly, bypassing this
+// map), so it is intentionally absent as a target here.
+export const APPOINTMENT_STATUS_TRANSITIONS = {
+  scheduled:   ['confirmed', 'checked_in', 'in_progress', 'completed', 'cancelled', 'no_show'],
+  confirmed:   ['checked_in', 'in_progress', 'completed', 'cancelled', 'no_show'],
+  checked_in:  ['in_progress', 'completed', 'cancelled', 'no_show'],
+  in_progress: ['completed', 'cancelled', 'no_show'],
+  completed:   [], // terminal
+  cancelled:   [], // terminal
+  no_show:     [], // terminal
+  rescheduled: [], // terminal
+}
+
+// Returns null when the transition is legal, or an error string when it is not.
+// A same-status change is treated as a legal no-op. An unknown current status
+// is treated permissively (fall through) so legacy/imported rows aren't bricked.
+export function statusTransitionError(from, to) {
+  if (from === to) return null
+  const allowed = APPOINTMENT_STATUS_TRANSITIONS[from]
+  if (!allowed) return null // unknown source status — don't block
+  if (allowed.includes(to)) return null
+  return `Cannot change appointment status from '${from}' to '${to}'`
+}
+
 export async function getAll(req, res, next) {
   try {
     const organizationId = getOrgId(req)
@@ -340,6 +373,20 @@ export async function create(req, res, next) {
     let appointment, draftInvoiceNumber, commission
     try {
       ({ appointment, draftInvoiceNumber, commission } = await db.$transaction(async (tx) => {
+      // Single source of truth for the fee. The receipt/appointment-card prints
+      // `appointment.consultationFee`, while the invoice line charges this same
+      // effective amount. Previously the appointment stored the raw `consultationFee`
+      // (null when no doctor/slab applied) but the invoice fell back to the billing
+      // service price or ₹500 — so the card showed no fee (or blank) while the
+      // patient was actually billed the fallback. Deriving both from ONE value here
+      // keeps the printed fee and the charged fee in agreement. A genuine free
+      // follow-up is fee 0 (not null), so it still prints ₹0 and bills ₹0.
+      const opdService = await tx.billingService.findFirst({
+        where: { organizationId, isActive: true, serviceCategory: 'consultation' },
+        orderBy: { createdAt: 'asc' },
+      })
+      const effectiveFee = consultationFee ?? opdService?.unitPrice ?? 500
+
       const appointment = await tx.appointment.create({
         data: {
           organizationId,
@@ -351,7 +398,7 @@ export async function create(req, res, next) {
           priority: validatedData.priority || 'normal',
           notes: validatedData.notes,
           departmentId: validatedData.departmentId,
-          consultationFee,
+          consultationFee: effectiveFee,
           status: 'scheduled',
           reminderSent: false,
         },
@@ -404,13 +451,11 @@ export async function create(req, res, next) {
         },
       })
 
-      // Create draft invoice
+      // Create draft invoice. unitPrice IS the appointment's stored consultationFee
+      // (effectiveFee above) — same value, so the printed card and the invoice can
+      // never disagree.
       const aptType = validatedData.appointmentType || 'OPD'
-      const opdService = await tx.billingService.findFirst({
-        where: { organizationId, isActive: true, serviceCategory: 'consultation' },
-        orderBy: { createdAt: 'asc' },
-      })
-      const unitPrice = consultationFee ?? opdService?.unitPrice ?? 500
+      const unitPrice = effectiveFee
       // The line must say WHAT was billed, so reception/patient/audit can tell an
       // OPD visit from a follow-up on the receipt itself. Naming the service
       // alone ("OPD Consultation") made every appointment type — including
@@ -543,9 +588,19 @@ export async function update(req, res, next) {
     const scopeWhere = { id, organizationId }
     const myDoctorId = scopedDoctorId(req)
     if (myDoctorId) scopeWhere.doctorId = myDoctorId
-    const existing = await db.appointment.findFirst({ where: scopeWhere, select: { id: true } })
+    const existing = await db.appointment.findFirst({ where: scopeWhere, select: { id: true, status: true } })
     if (!existing) {
       return res.status(404).json({ success: false, error: 'Appointment not found' })
+    }
+
+    // Enforce the status state-machine: reject illegal jumps (e.g. a cancelled
+    // or completed appointment being moved to any other status) with a clean 400
+    // instead of silently corrupting the record and its linked money.
+    if (body.status !== undefined) {
+      const transitionError = statusTransitionError(existing.status, body.status)
+      if (transitionError) {
+        return res.status(400).json({ success: false, code: 'INVALID_STATUS_TRANSITION', error: transitionError })
+      }
     }
 
     // Whitelist: only these fields can be changed — sensitive fields like
@@ -645,6 +700,39 @@ export async function update(req, res, next) {
           where: { appointmentId: id, status: { notIn: ['completed', 'cancelled', 'no_show'] } },
           data: { status: body.status },
         })
+      }
+
+      // Cancelling the appointment must VOID the money it generated, so reports
+      // don't keep showing phantom "pending" revenue and a commission for a visit
+      // that never happened. create() links a draft auto-voucher invoice via the
+      // real FK Invoice.appointmentId, and the doctor commission via
+      // DoctorCommission.invoiceId → that invoice. We void (mark cancelled), never
+      // hard-delete, so the audit trail survives. Only UNTOUCHED invoices (still
+      // draft + unpaid) are voided — a real invoice someone has since sent or
+      // taken payment on is left exactly as-is (a refund is a separate decision).
+      // Likewise only PENDING commissions are voided; an approved/paid one is a
+      // settled obligation and is not silently reversed here.
+      if (body.status === 'cancelled') {
+        const draftInvoices = await tx.invoice.findMany({
+          where: { organizationId, appointmentId: id, status: 'draft', paymentStatus: 'unpaid' },
+          select: { id: true },
+        })
+        if (draftInvoices.length) {
+          const invoiceIds = draftInvoices.map((inv) => inv.id)
+          await tx.invoice.updateMany({
+            where: { id: { in: invoiceIds } },
+            data: {
+              status: 'cancelled',
+              paymentStatus: 'cancelled',
+              cancelledAt: new Date(),
+              cancellationReason: body.cancellationReason || 'Appointment cancelled',
+            },
+          })
+          await tx.doctorCommission.updateMany({
+            where: { invoiceId: { in: invoiceIds }, status: 'pending' },
+            data: { status: 'cancelled' },
+          })
+        }
       }
 
       return updated
@@ -796,7 +884,54 @@ export async function bulkUpdateStatus(req, res, next) {
     const myDoctorId = scopedDoctorId(req)
     if (myDoctorId) where.doctorId = myDoctorId
 
-    const result = await db.appointment.updateMany({ where, data })
+    // Enforce the SAME state-machine as the single update. Without this, bulk was
+    // a back door to move a cancelled/completed appointment anywhere. Fetch the
+    // in-scope rows' current statuses and reject the whole batch if ANY transition
+    // is illegal, so a bulk action is all-or-nothing rather than partially applied.
+    const targets = await db.appointment.findMany({ where, select: { id: true, status: true } })
+    const offenders = targets.filter((a) => statusTransitionError(a.status, status))
+    if (offenders.length) {
+      return res.status(400).json({
+        success: false,
+        code: 'INVALID_STATUS_TRANSITION',
+        error: `${offenders.length} appointment(s) cannot move to '${status}' from their current status`,
+        offenders: offenders.map((a) => ({ id: a.id, from: a.status })),
+      })
+    }
+
+    const result = await db.$transaction(async (tx) => {
+      const updated = await tx.appointment.updateMany({ where, data })
+
+      // Mirror the single-cancel money void (see update()): a bulk cancel must
+      // also void the linked draft invoices + pending commissions and drop the
+      // patients from the queue, or bulk becomes a way to leak phantom money and
+      // leave cancelled patients on the board.
+      if (status === 'cancelled' || status === 'no_show') {
+        await tx.queueManagement.updateMany({
+          where: { appointmentId: { in: ids }, status: { notIn: ['completed', 'cancelled', 'no_show'] } },
+          data: { status },
+        })
+      }
+      if (status === 'cancelled') {
+        const draftInvoices = await tx.invoice.findMany({
+          where: { organizationId, appointmentId: { in: ids }, status: 'draft', paymentStatus: 'unpaid' },
+          select: { id: true },
+        })
+        if (draftInvoices.length) {
+          const invoiceIds = draftInvoices.map((inv) => inv.id)
+          await tx.invoice.updateMany({
+            where: { id: { in: invoiceIds } },
+            data: { status: 'cancelled', paymentStatus: 'cancelled', cancelledAt: new Date(), cancellationReason: 'Appointment cancelled' },
+          })
+          await tx.doctorCommission.updateMany({
+            where: { invoiceId: { in: invoiceIds }, status: 'pending' },
+            data: { status: 'cancelled' },
+          })
+        }
+      }
+
+      return updated
+    })
     res.json({ success: true, count: result.count })
   } catch (err) {
     next(err)

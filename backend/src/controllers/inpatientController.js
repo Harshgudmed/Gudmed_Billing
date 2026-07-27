@@ -1,5 +1,5 @@
 import { db } from "../config/db.js";
-import { getOrgId, getActor, svcErr } from "../lib/reqContext.js";
+import { getOrgId, getActor, svcErr, safeMoney } from "../lib/reqContext.js";
 import { todayRange } from "../lib/dates.js";
 import { round2 as r2 } from "../lib/money.js";
 import { z } from "zod";
@@ -1383,7 +1383,39 @@ async function createPostCharge(req, res, orgId, body) {
         if (dup) return res.json({ success: true, data: dup, deduped: true });
       }
 
-      const discountPct = Number(body.discountPct) || 0;
+      // MONEY-SAFETY FLOOR: validate user-supplied money inputs BEFORE pricing or
+      // persisting, so no single IPD charge (and therefore the running bill total)
+      // can ever be driven below 0 via a negative amount or an over-100% discount.
+      const rawDiscount = body.discountPct;
+      const discountPct =
+        rawDiscount === undefined || rawDiscount === null || rawDiscount === ""
+          ? 0
+          : Number(rawDiscount);
+      if (!Number.isFinite(discountPct) || discountPct < 0 || discountPct > 100) {
+        return res.status(400).json({
+          success: false,
+          error: "discountPct must be a number between 0 and 100",
+        });
+      }
+      if (
+        body.quantity !== undefined &&
+        body.quantity !== null &&
+        body.quantity !== ""
+      ) {
+        const q = Number(body.quantity);
+        if (!Number.isFinite(q) || q <= 0) {
+          return res.status(400).json({
+            success: false,
+            error: "quantity must be a positive number",
+          });
+        }
+      }
+      if (base !== undefined && safeMoney(base) === null) {
+        return res.status(400).json({
+          success: false,
+          error: "base amount must be a non-negative number",
+        });
+      }
       let chargeData;
       try {
         if (pharmacyDrugId) {
@@ -1463,6 +1495,16 @@ async function createPostCharge(req, res, orgId, body) {
         return res
           .status(e.status || 500)
           .json({ success: false, error: e.message });
+      }
+
+      // Final floor guard at the insert point: even if pricing produced a negative
+      // line (e.g. a negative catalog price), refuse to persist a charge that would
+      // reduce the bill. Valid charges (amount ≥ 0, discount ≤ amount) are unaffected.
+      if (!(Number(chargeData.lineTotal) >= 0)) {
+        return res.status(400).json({
+          success: false,
+          error: "Charge total cannot be negative",
+        });
       }
 
       const charge = await db.ipdCharge.create({

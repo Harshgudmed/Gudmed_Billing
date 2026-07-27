@@ -8,6 +8,46 @@ const patientSelect = { ...PATIENT_NAME_SELECT, mrn: true, phonePrimary: true }
 // Statuses that consume the policy's coverage limit.
 const CONSUMING = ['approved', 'settled']
 
+// The only valid claim statuses. Anything outside this set is junk and rejected
+// with 400 (previously any string was stored verbatim).
+const CLAIM_STATUSES = ['pending', 'submitted', 'approved', 'rejected', 'settled']
+
+// A claim's effective consumption against coverage — mirrors withUsage: the
+// approved amount once known, otherwise the claimed amount.
+function effectiveAmount(claim) {
+  return claim.approvedAmount ?? claim.claimAmount ?? 0
+}
+
+// Money-safety guard: block a CONSUMING (approved/settled) claim from pushing a
+// case's total usage past its coverageLimit (which would drive `balance`
+// unboundedly negative). Sums the effective amount of OTHER consuming claims on
+// the case and rejects if adding this one exceeds the limit.
+// coverageLimit of 0/null is treated as NO coverage (limit 0), consistent with
+// withUsage's `coverageLimit || 0`, so any positive consuming amount is rejected —
+// the safer reading for money safety. Returns an error string or null.
+async function coverageError(caseId, orgId, newStatus, effAmount, excludeClaimId) {
+  if (!CONSUMING.includes(newStatus)) return null
+  const insCase = await db.insuranceCase.findFirst({
+    where: { id: caseId, organizationId: orgId },
+    select: {
+      coverageLimit: true,
+      claims: {
+        where: excludeClaimId ? { id: { not: excludeClaimId } } : undefined,
+        select: { status: true, claimAmount: true, approvedAmount: true },
+      },
+    },
+  })
+  if (!insCase) return null // case-existence is validated separately by the caller
+  const limit = insCase.coverageLimit || 0
+  const consumed = insCase.claims
+    .filter((c) => CONSUMING.includes(c.status))
+    .reduce((sum, c) => sum + effectiveAmount(c), 0)
+  if (consumed + effAmount > limit) {
+    return `Claim exceeds coverage limit: already consumed ${consumed} of ${limit}, this claim would add ${effAmount}`
+  }
+  return null
+}
+
 function withUsage(insCase) {
   const claims = insCase.claims || []
   const amountUsed = claims
@@ -149,6 +189,13 @@ async function createClaim(req, res, ORG_ID) {
     return res.status(400).json({ success: false, error: 'claimAmount / approvedAmount must be non-negative numbers' })
 
   const st = status || 'pending'
+  if (!CLAIM_STATUSES.includes(st))
+    return res.status(400).json({ success: false, error: `status must be one of: ${CLAIM_STATUSES.join(', ')}` })
+
+  // Money-safety: a new approved/settled claim must not overrun the case coverage.
+  const covErr = await coverageError(caseId, ORG_ID, st, approvedVal ?? claimVal ?? 0, null)
+  if (covErr) return res.status(400).json({ success: false, error: covErr })
+
   const claim = await db.insuranceClaim.create({
     data: {
       organizationId: ORG_ID,
@@ -171,8 +218,13 @@ async function updateClaim(req, res, ORG_ID) {
   const { id } = req.body
   if (!id) return res.status(400).json({ success: false, error: 'id is required' })
   // Tenant guard: only touch a claim that belongs to this org (blocks cross-tenant
-  // tampering with claimAmount / approvedAmount / status).
-  if (!(await isOwned('insuranceClaim', id, ORG_ID))) return res.status(404).json({ success: false, error: 'Insurance claim not found' })
+  // tampering with claimAmount / approvedAmount / status). Fetch its current
+  // values too, so we can validate the RESULT of the edit against coverage.
+  const existing = await db.insuranceClaim.findFirst({
+    where: { id, organizationId: ORG_ID },
+    select: { id: true, caseId: true, status: true, claimAmount: true, approvedAmount: true },
+  })
+  if (!existing) return res.status(404).json({ success: false, error: 'Insurance claim not found' })
   const data = {}
   if (req.body.diagnosis !== undefined) data.diagnosis = req.body.diagnosis || null
   if (req.body.remarks !== undefined) data.remarks = req.body.remarks || null
@@ -191,10 +243,23 @@ async function updateClaim(req, res, ORG_ID) {
     }
   }
   if (req.body.status !== undefined) {
+    if (!CLAIM_STATUSES.includes(req.body.status))
+      return res.status(400).json({ success: false, error: `status must be one of: ${CLAIM_STATUSES.join(', ')}` })
     data.status = req.body.status
     if (['submitted', 'approved', 'rejected', 'settled'].includes(req.body.status)) data.submittedAt = new Date()
     if (req.body.status === 'settled') data.settledAt = new Date()
   }
+
+  // Money-safety: validate the claim's RESULTING state (post-edit status +
+  // amounts) against the case coverage, excluding THIS claim from the already-
+  // consumed sum so an in-place edit doesn't double-count itself.
+  const resultStatus = data.status ?? existing.status
+  const resultClaimAmount = data.claimAmount ?? existing.claimAmount
+  const resultApprovedAmount = 'approvedAmount' in data ? data.approvedAmount : existing.approvedAmount
+  const effAmount = resultApprovedAmount ?? resultClaimAmount ?? 0
+  const covErr = await coverageError(existing.caseId, ORG_ID, resultStatus, effAmount, existing.id)
+  if (covErr) return res.status(400).json({ success: false, error: covErr })
+
   const claim = await db.insuranceClaim.update({ where: { id }, data })
   res.json({ success: true, data: claim })
 }
