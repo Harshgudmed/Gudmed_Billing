@@ -334,9 +334,18 @@ export const create = async (req, res, next) => {
         reportedById, verifiedById, verifiedAt,
       } = parsed.data
 
+      // Tenant guard: only report against an order that belongs to this org.
+      // Without this, a caller could stamp a report onto ANOTHER org's order and
+      // (below) flip that foreign order to 'reported'.
+      const ownedOrder = await db.radiologyOrder.findFirst({
+        where: { id: orderId, organizationId: ORGANIZATION_ID },
+        select: { id: true },
+      })
+      if (!ownedOrder) return res.status(404).json({ success: false, error: 'Radiology order not found' })
+
       const data = await db.radiologyReport.create({
         data: {
-          organizationId: getOrgId(req),
+          organizationId: ORGANIZATION_ID,
           orderId,
           status: 'draft',
           ...(technique !== undefined ? { technique } : {}),
@@ -384,6 +393,9 @@ export const update = async (req, res, next) => {
         return res.status(400).json({ success: false, error: 'Validation error', details: parsed.error.issues })
       }
       const { id, resource: _r, ...fields } = parsed.data
+      // Never let a client rewrite tenant/identity via mass-assignment (.passthrough()).
+      delete fields.organizationId
+      delete fields.id
 
       if (fields.scheduledDate) fields.scheduledDate = new Date(fields.scheduledDate)
 
@@ -409,6 +421,9 @@ export const update = async (req, res, next) => {
         return res.status(400).json({ success: false, error: 'Validation error', details: parsed.error.issues })
       }
       const { id, resource: _r, ...fields } = parsed.data
+      // Never let a client rewrite tenant/identity via mass-assignment (.passthrough()).
+      delete fields.organizationId
+      delete fields.id
 
       if (fields.verifiedAt) fields.verifiedAt = new Date(fields.verifiedAt)
 
@@ -433,6 +448,9 @@ export const update = async (req, res, next) => {
         return res.status(400).json({ success: false, error: 'Validation error', details: parsed.error.issues })
       }
       const { id, resource: _r, ...fields } = parsed.data
+      // Never let a client rewrite tenant/identity via mass-assignment (.passthrough()).
+      delete fields.organizationId
+      delete fields.id
 
       // Tenant guard: only touch an exam catalog entry that belongs to this org.
       const owned = await db.radiologyExam.findFirst({ where: { id, organizationId: ORGANIZATION_ID }, select: { id: true } })
