@@ -9,7 +9,7 @@ import { PATIENT_NAME_SELECT } from '../lib/patientName.js'
 export async function getAll(req, res, next) {
   try {
     const organizationId = getOrgId(req)
-    const { patientId, doctorId, date, search = '', startDate = '', endDate = '' } = req.query
+    const { patientId, doctorId, date, search = '', startDate = '', endDate = '', hasRx = '' } = req.query
 
     // baseWhere = org + patient/doctor scope + search, but NOT the date filter, so
     // the stat cards (Total / Today / This Week / With Rx) stay stable across tabs.
@@ -36,6 +36,7 @@ export async function getAll(req, res, next) {
     } else if (startDate || endDate) {
       where.visitDate = dayRange(startDate, endDate)
     }
+    if (hasRx === 'true') where.prescriptions = { some: {} }
 
     const include = {
       patient: {
