@@ -99,12 +99,12 @@ export default function PharmacyModule() {
   const [lowStockPage, setLowStockPage] = useState(1);
   const batchPage = useServerPagination("/pharmacy/batches", { perPage: PHARMACY_BATCHES_PER_PAGE });
   const [poStatusFilter, setPoStatusFilter] = useState("all");
-  const poPage = useServerPagination("/pharmacy/purchase-orders", { 
+  const poPage = useServerPagination("/pharmacy/purchase-orders", {
     perPage: PHARMACY_PO_PER_PAGE,
     params: { status: poStatusFilter === "all" ? "" : poStatusFilter }
   });
   const [prescriptionFilter, setPrescriptionFilter] = useState("all");
-  const [salesPeriod, setSalesPeriod] = useState("month"); 
+  const [salesPeriod, setSalesPeriod] = useState("month");
 
   const rxPage = useServerPagination("/pharmacy/prescriptions", {
     perPage: DRUGS_PER_PAGE,
@@ -115,8 +115,8 @@ export default function PharmacyModule() {
     if (salesPeriod === "all") return "";
     const d =
       salesPeriod === "today" ? startOfDay(new Date())
-      : salesPeriod === "week" ? startOfWeek(new Date(), { weekStartsOn: 1 })
-      : startOfMonth(new Date());
+        : salesPeriod === "week" ? startOfWeek(new Date(), { weekStartsOn: 1 })
+          : startOfMonth(new Date());
     return format(d, "yyyy-MM-dd");
   }, [salesPeriod]);
   const salePage = useServerPagination("/pharmacy/sales", {
@@ -379,11 +379,11 @@ export default function PharmacyModule() {
 
     const body = `
 ${infoBox("Patient Information", [
-  { label: "Patient Name", html: `<strong>${escapeHtml(name)}</strong>` },
-  { label: "UHID", value: rx.patient?.mrn || "—" },
-  { label: "Prescribed By", value: rx.doctor?.fullName ? drName(rx.doctor.fullName) : "—" },
-  { label: "Prescription Date", value: rxDate },
-])}
+      { label: "Patient Name", html: `<strong>${escapeHtml(name)}</strong>` },
+      { label: "UHID", value: rx.patient?.mrn || "—" },
+      { label: "Prescribed By", value: rx.doctor?.fullName ? drName(rx.doctor.fullName) : "—" },
+      { label: "Prescription Date", value: rxDate },
+    ])}
 <table>
   <thead><tr>
     <th style="width:30%">DRUG</th><th style="width:14%">DOSAGE</th><th style="width:16%">FREQUENCY</th>
@@ -573,7 +573,7 @@ ${rx.notes ? `<div class="note-bar"><strong>Notes:</strong> ${escapeHtml(rx.note
 
   const expiringBatches = stats?.expiringBatches ?? [];
   const totalStockValue = stats?.stockValue ?? 0;
-  const inStockCount  = stats?.inStock ?? 0;
+  const inStockCount = stats?.inStock ?? 0;
   const lowStockCount = stats ? Math.max(0, stats.lowStock - stats.outOfStock) : 0;
   const outStockCount = stats?.outOfStock ?? 0;
   const lowStockDrugs = stats?.lowStockDrugs ?? [];
@@ -783,7 +783,7 @@ ${rx.notes ? `<div class="note-bar"><strong>Notes:</strong> ${escapeHtml(rx.note
               <hr className="mb-2" />
               <p className="text-xs font-semibold text-gray-500 uppercase">Initial Stock & Batch (Optional)</p>
             </div>
-            
+
             <div>
               <Label>Initial Stock Qty</Label>
               <Input type="number" min="0" value={drugForm.initialQty} onChange={(e) => setDrugForm((p) => ({ ...p, initialQty: e.target.value }))} />
@@ -1087,10 +1087,10 @@ ${rx.notes ? `<div class="note-bar"><strong>Notes:</strong> ${escapeHtml(rx.note
               ) : (
                 <div className="space-y-3">
                   {poItems.map((item, idx) => {
-                    const qty  = item.quantityOrdered || 1;
+                    const qty = item.quantityOrdered || 1;
                     const rate = item.rate || item.unitCost || 0;
                     const disc = item.discountPercentage || 0;
-                    const netRate  = rate - (rate * disc / 100);
+                    const netRate = rate - (rate * disc / 100);
                     const lineTotal = qty * netRate;
 
                     return (
@@ -1289,10 +1289,10 @@ ${rx.notes ? `<div class="note-bar"><strong>Notes:</strong> ${escapeHtml(rx.note
                           p.map((x, i) =>
                             i === idx
                               ? {
-                                  ...x,
-                                  quantityReceived:
-                                    parseInt(e.target.value) || 0,
-                                }
+                                ...x,
+                                quantityReceived:
+                                  parseInt(e.target.value) || 0,
+                              }
                               : x,
                           ),
                         )
@@ -1407,9 +1407,9 @@ ${rx.notes ? `<div class="note-bar"><strong>Notes:</strong> ${escapeHtml(rx.note
                       <p>
                         {viewingPo.expectedDeliveryDate
                           ? format(
-                              new Date(viewingPo.expectedDeliveryDate),
-                              "dd MMM yyyy",
-                            )
+                            new Date(viewingPo.expectedDeliveryDate),
+                            "dd MMM yyyy",
+                          )
                           : "—"}
                       </p>
                     </div>
@@ -1458,6 +1458,58 @@ ${rx.notes ? `<div class="note-bar"><strong>Notes:</strong> ${escapeHtml(rx.note
         </DialogContent>
       </Dialog>
 
+      {/* ── ADJUST / RESTOCK DIALOG ── */}
+      <Dialog open={showStockDialog} onOpenChange={setShowStockDialog}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Adjust Stock — {selectedDrug?.drugName}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div>
+              <p className="text-sm text-gray-500 mb-1">
+                Current Stock: <span className="font-semibold text-gray-900">{selectedDrug?.quantityInStock || 0}</span>
+              </p>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <Label>Action</Label>
+                <Select
+                  value={stockAdjust.type}
+                  onValueChange={(v) => setStockAdjust((p) => ({ ...p, type: v }))}
+                >
+                  <SelectTrigger className="mt-1">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="add">Add Stock (+)</SelectItem>
+                    <SelectItem value="remove">Remove Stock (-)</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <Label>Quantity</Label>
+                <Input
+                  type="number"
+                  min="1"
+                  className="mt-1"
+                  placeholder="Enter qty"
+                  value={stockAdjust.amount || ""}
+                  onChange={(e) => setStockAdjust((p) => ({ ...p, amount: e.target.value }))}
+                />
+              </div>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowStockDialog(false)}>
+              Cancel
+            </Button>
+            <Button onClick={onAdjustStock}>
+              Save Stock
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       {/* ── DIRECT SALE ── */}
       <Dialog open={showSaleDialog} onOpenChange={setShowSaleDialog}>
         <DialogContent className="max-w-lg">
@@ -1476,13 +1528,13 @@ ${rx.notes ? `<div class="note-bar"><strong>Notes:</strong> ${escapeHtml(rx.note
             {saleItems.map((item, idx) => (
               <div key={idx} className="flex gap-2 items-end">
                 <div className="flex-1">
-                  <PosDrugCombo 
+                  <PosDrugCombo
                     selectedName={item.drugName}
-                    onSelect={(d) => 
+                    onSelect={(d) =>
                       setSaleItems((p) =>
                         p.map((x, i) => (i === idx ? { ...x, drugId: d.id, drugName: d.drugName, sellingPrice: d.sellingPrice } : x)),
                       )
-                    } 
+                    }
                   />
                 </div>
                 <div className="w-20">
