@@ -1,5 +1,6 @@
 import { db } from '../config/db.js'
 import { getOrgId, getActor } from "../lib/reqContext.js";
+import { emitDisplayRefresh } from "../lib/realtime.js";
 import { z } from 'zod'
 import { nextQueueNumber } from '../utils/queueNumber.js'
 import { getPagination, paginationMeta } from '../lib/pagination.js'
@@ -227,6 +228,7 @@ export async function addToQueue(req, res, next) {
           include: patientInclude,
         })
 
+    emitDisplayRefresh(ORG_ID) // push: a new patient joined the queue
     res.status(201).json({ success: true, data: queueItem, message: 'Added to queue' })
   } catch (err) {
     next(err)
@@ -283,6 +285,7 @@ export async function updateQueue(req, res, next) {
         patient: { select: { ...PATIENT_NAME_SELECT, } },
       },
     })
+    emitDisplayRefresh(ORG_ID) // push: a queue entry changed (room/status/etc.)
     res.json({ success: true, data: item })
   } catch (err) {
     next(err)
@@ -413,6 +416,7 @@ export async function callNextPatient(req, res, next) {
       return { completedId: current?.id ?? null, nowServing }
     })
 
+    emitDisplayRefresh(ORG_ID) // push: next patient called — the board's main live event
     res.json({
       success: true,
       data: result,
@@ -445,6 +449,7 @@ async function setPrescriptionUploaded(req, res, next, value) {
     if (!existing) return res.status(404).json({ success: false, error: 'Queue item not found' })
 
     const item = await db.queueManagement.update({ where: { id }, data: { prescriptionUploadedAt: value } })
+    emitDisplayRefresh(ORG_ID) // push: "prescription ready / you are next" — the board's you-are-next trigger
     res.json({ success: true, data: item })
   } catch (err) {
     next(err)

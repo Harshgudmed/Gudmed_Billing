@@ -13,6 +13,12 @@
 // is a reasonable v2 if that becomes a real operational pain point.
 import { db } from '../config/db.js'
 import { getOrgId } from '../lib/reqContext.js'
+
+// A board calls this once to learn its organization, so it can join the right
+// realtime room and only receive its own hospital's queue pushes.
+export function whoami(req, res) {
+  res.json({ success: true, organizationId: getOrgId(req) })
+}
 import { resolveActiveDoctor } from '../lib/activeDoctor.js'
 import { toRoomDTO, ROOM_INCLUDE, DOCTOR_SELECT } from './roomController.js'
 import { todayRange, nowInZone } from '../lib/dates.js'

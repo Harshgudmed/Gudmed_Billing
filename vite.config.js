@@ -27,12 +27,16 @@ export default defineConfig(({ mode }) => {
       allowedHosts: ['.trycloudflare.com'],
       proxy: {
         '/api': { target: backendUrl, changeOrigin: true },
+        // Socket.IO (live queue push) — ws:true so the WebSocket upgrade is proxied too.
+        '/socket.io': { target: backendUrl, changeOrigin: true, ws: true },
       },
     },
     preview: {
       port: 4173,
       proxy: {
         '/api': { target: backendUrl, changeOrigin: true },
+        // Socket.IO (live queue push) — ws:true so the WebSocket upgrade is proxied too.
+        '/socket.io': { target: backendUrl, changeOrigin: true, ws: true },
       },
     },
   }

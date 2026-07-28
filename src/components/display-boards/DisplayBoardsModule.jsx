@@ -259,7 +259,7 @@ export default function DisplayBoardsModule() {
 
   return (
     <div className="space-y-6 p-6">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-y-3 gap-x-4">
         <div className="flex items-center gap-3">
           <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-white shadow-sm" style={{ backgroundColor: PRIMARY }}>
             <MonitorPlay className="h-5 w-5" />
@@ -269,7 +269,7 @@ export default function DisplayBoardsModule() {
             <p className="text-sm text-gray-500">Map consultation rooms to specific TV screens for patient queue visibility.</p>
           </div>
         </div>
-        <div className="space-x-3">
+        <div className="flex flex-wrap items-center justify-end gap-2">
           {view === 'screens' ? (
             <>
               {/* Live health of every physical display — online/offline + pairing. */}
