@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { Routes, Route, useNavigate, useParams, useSearchParams } from 'react-router-dom'
+import { useLiveRefresh } from '@/hooks/useLiveRefresh'
 import { ChevronRight, DoorOpen, Bell } from 'lucide-react'
 import { toast } from 'sonner'
 import client from '@/api/client'
@@ -251,11 +252,8 @@ function OverviewScreen() {
     setFloors(res.data)
   }, [])
 
-  useEffect(() => {
-    load()
-    const id = setInterval(load, POLL_MS)
-    return () => clearInterval(id)
-  }, [load])
+  // Live push (with a slow polling fallback) instead of a 3s poll — see useLiveRefresh.
+  useLiveRefresh(load)
 
   return (
     <Board>
@@ -402,11 +400,8 @@ function FloorScreen() {
     setRooms(res.data)
   }, [floorId, deptId])
 
-  useEffect(() => {
-    loadRooms()
-    const id = setInterval(loadRooms, POLL_MS)
-    return () => clearInterval(id)
-  }, [loadRooms])
+  // Live push (with a slow polling fallback) instead of a 3s poll — see useLiveRefresh.
+  useLiveRefresh(loadRooms)
 
   const floor = floors.find((f) => f.id === floorId)
 
@@ -668,11 +663,8 @@ function RoomScreen() {
     'Could not call the next patient',
   )
 
-  useEffect(() => {
-    load()
-    const id = setInterval(load, POLL_MS)
-    return () => clearInterval(id)
-  }, [load])
+  // Live push (with a slow polling fallback) instead of a 3s poll — see useLiveRefresh.
+  useLiveRefresh(load)
 
   if (!data) return <Board><div className="p-10 text-slate-500">Loading…</div></Board>
 
@@ -883,11 +875,8 @@ function FloorGridScreen() {
     setData(res.data)
   }, [floorId, screen, screens])
 
-  useEffect(() => {
-    load()
-    const id = setInterval(load, POLL_MS)
-    return () => clearInterval(id)
-  }, [load])
+  // Live push (with a slow polling fallback) instead of a 3s poll — see useLiveRefresh.
+  useLiveRefresh(load)
 
   return (
     <GridBoard
@@ -915,11 +904,8 @@ function ScreenBoardView() {
     setData(res.data)
   }, [screenId])
 
-  useEffect(() => {
-    load()
-    const id = setInterval(load, POLL_MS)
-    return () => clearInterval(id)
-  }, [load])
+  // Live push (with a slow polling fallback) instead of a 3s poll — see useLiveRefresh.
+  useLiveRefresh(load)
 
   // When this board was reached from the self-pairing page (/display/auto), a
   // deviceId rides along in the URL. Keep sending heartbeats so Screen Health

@@ -1,6 +1,6 @@
 import { Router } from 'express'
-import { getFloorsOverview, getRoomQueue, getFloorQueue, getScreenQueue } from '../controllers/displayController.js'
-import { registerDevice, getDeviceStatusEndpoint, heartbeatDevice, listDevices, assignDevice, removeDevice } from '../controllers/deviceController.js'
+import { getFloorsOverview, getRoomQueue, getFloorQueue, getScreenQueue, whoami } from '../controllers/displayController.js'
+import { registerDevice, getDeviceStatusEndpoint, heartbeatDevice, listDevices, assignDevice, removeDevice, markDeviceOffline } from '../controllers/deviceController.js'
 
 const router = Router()
 
@@ -8,6 +8,7 @@ router.get('/floors', getFloorsOverview)
 router.get('/queue', getRoomQueue)
 router.get('/floor-queue', getFloorQueue)
 router.get('/screen-queue', getScreenQueue)
+router.get('/whoami', whoami)
 
 // Display devices (the physical TVs/boxes): self-register, poll pairing status,
 // heartbeat, and — for admins — list + assign to a screen. All org-scoped.
@@ -15,6 +16,7 @@ router.get('/devices', listDevices)
 router.post('/devices/register', registerDevice)
 router.get('/devices/:deviceId/status', getDeviceStatusEndpoint)
 router.post('/devices/:deviceId/heartbeat', heartbeatDevice)
+router.post('/devices/:deviceId/offline', markDeviceOffline)
 router.post('/devices/:deviceId/assign', assignDevice)
 router.delete('/devices/:deviceId', removeDevice)
 

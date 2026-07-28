@@ -146,6 +146,20 @@ export async function assignDevice(req, res, next) {
   } catch (err) { next(err) }
 }
 
+// POST /api/display/devices/:deviceId/offline  — the Display Manager calls this
+// the instant a monitor is unplugged, so the admin sees 🔴 immediately instead
+// of waiting out the ~90s heartbeat timeout. Push lastSeenAt into the past so
+// getDeviceStatus computes 'offline' now; a reconnect's next heartbeat revives it.
+export async function markDeviceOffline(req, res, next) {
+  try {
+    const ORG_ID = getOrgId(req)
+    const existing = await db.displayDevice.findFirst({ where: { deviceId: req.params.deviceId, organizationId: ORG_ID }, select: { id: true } })
+    if (!existing) return res.status(404).json({ success: false, error: 'Device not found' })
+    await db.displayDevice.update({ where: { id: existing.id }, data: { lastSeenAt: new Date(Date.now() - 120_000) } })
+    res.json({ success: true })
+  } catch (err) { next(err) }
+}
+
 // DELETE /api/display/devices/:deviceId  — admin removes a stale/duplicate device
 // from the list (org-scoped). If that display ever reconnects it just re-registers.
 export async function removeDevice(req, res, next) {

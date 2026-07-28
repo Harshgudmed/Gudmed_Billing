@@ -1,33 +1,43 @@
-// GudMed Display Manager — the desktop app that makes the queue boards truly
-// plug-and-play. On boot it detects every connected monitor and opens the
-// self-pairing display page (/display/auto) fullscreen on each, giving each a
-// STABLE per-slot identity so plugging/unplugging the same monitors reuses the
-// same devices (no new row each time). No URL typing, ever.
+// GudMed Display Manager — makes the queue boards plug-and-play. On boot it
+// detects every external monitor and opens the self-pairing display page
+// (/display/auto) fullscreen on each. Each window is tied to that specific
+// monitor (by its OS display id), so unplugging ONE never disturbs the others.
+// No URL typing, ever.
 const { app, BrowserWindow, screen, globalShortcut } = require('electron')
 const store = require('./deviceStore')
 
-// slotIndex -> BrowserWindow. Slots are stable: the monitors sorted left-to-right
-// map to slot 0, 1, 2… so the same layout always reuses the same identities.
+// display.id -> BrowserWindow. Keyed by the OS monitor id (not a running index),
+// so removing one monitor only closes that one window and leaves the rest alone.
 const windows = new Map()
 let quitting = false
 
-// Deterministic ordering of the connected monitors (left-to-right, then top-down)
-// so slot 0 is always the same physical screen across replugs.
-function sortedDisplays() {
-  return screen.getAllDisplays().slice().sort(
-    (a, b) => (a.bounds.x - b.bounds.x) || (a.bounds.y - b.bounds.y)
-  )
+// The external monitors we put boards on — a laptop's built-in panel is skipped
+// (boards belong on the TVs, not the operator's screen). If every display is
+// internal, or GUDMED_INCLUDE_INTERNAL=1, use them all.
+function targetDisplays() {
+  const all = screen.getAllDisplays()
+  const external = all.filter((d) => !d.internal)
+  return (process.env.GUDMED_INCLUDE_INTERNAL === '1' || external.length === 0) ? all : external
 }
 
-function urlForSlot(slotIndex) {
+function urlForDisplay(display) {
   const base = store.getConfig().baseUrl.replace(/\/$/, '')
-  const deviceId = store.deviceIdForSlot(slotIndex)
+  const deviceId = store.deviceIdForDisplay(display)
   return `${base}/display/auto?deviceId=${encodeURIComponent(deviceId)}`
 }
 
-function openWindowForSlot(slotIndex, display) {
-  if (windows.has(slotIndex)) return
+// Tell the server this monitor just went away so the admin sees it offline
+// instantly, instead of waiting out the ~90s heartbeat gap.
+function markDisplayOffline(display) {
+  const base = store.getConfig().baseUrl.replace(/\/$/, '')
+  const deviceId = store.deviceIdForDisplay(display)
+  fetch(`${base}/api/display/devices/${encodeURIComponent(deviceId)}/offline`, { method: 'POST' }).catch(() => {})
+}
+
+function openWindowForDisplay(display) {
+  if (windows.has(display.id)) return
   const { x, y, width, height } = display.bounds
+  const deviceId = store.deviceIdForDisplay(display)
   const win = new BrowserWindow({
     x, y, width, height,
     fullscreen: true,
@@ -35,47 +45,62 @@ function openWindowForSlot(slotIndex, display) {
     frame: false,
     autoHideMenuBar: true,
     backgroundColor: '#0b1120',
-    // Persistent per-slot session so identity/storage never collide between screens.
-    webPreferences: { partition: `persist:slot-${slotIndex}`, contextIsolation: true, nodeIntegration: false },
+    webPreferences: { partition: `persist:dev-${deviceId}`, contextIsolation: true, nodeIntegration: false },
   })
 
-  win.loadURL(urlForSlot(slotIndex))
+  win.loadURL(urlForDisplay(display))
 
-  // Retry if the web app is briefly unreachable (server restart / network blip).
-  win.webContents.on('did-fail-load', () => {
-    setTimeout(() => { if (!win.isDestroyed()) win.loadURL(urlForSlot(slotIndex)) }, 5000)
+  // Retry only on a REAL load failure. Ignore ERR_ABORTED (-3): that fires on a
+  // normal client-side navigation (e.g. /display/auto redirecting to the board)
+  // and must NOT trigger a reload, or the board bounces in a loop.
+  win.webContents.on('did-fail-load', (_e, errorCode, _desc, _url, isMainFrame) => {
+    if (!isMainFrame || errorCode === -3) return
+    setTimeout(() => { if (!win.isDestroyed()) win.loadURL(urlForDisplay(display)) }, 5000)
   })
 
   win.on('closed', () => {
-    windows.delete(slotIndex)
-    // Reopen unless quitting or that slot no longer has a monitor.
-    if (!quitting && sortedDisplays()[slotIndex]) {
-      setTimeout(() => { const d = sortedDisplays()[slotIndex]; if (d) openWindowForSlot(slotIndex, d) }, 1000)
+    windows.delete(display.id)
+    // Reopen unless quitting or that monitor is truly gone.
+    if (!quitting && screen.getAllDisplays().some((d) => d.id === display.id)) {
+      setTimeout(() => { const d = screen.getAllDisplays().find((x) => x.id === display.id); if (d && !windows.has(d.id)) openWindowForDisplay(d) }, 1000)
     }
   })
 
-  windows.set(slotIndex, win)
+  windows.set(display.id, win)
 }
 
 function syncDisplays() {
-  const displays = sortedDisplays()
-  displays.forEach((d, i) => {
-    // If a window for this slot exists but the monitor moved, reposition it.
-    const existing = windows.get(i)
+  const displays = targetDisplays()
+  const liveIds = new Set(displays.map((d) => d.id))
+
+  displays.forEach((d) => {
+    const existing = windows.get(d.id)
     if (existing && !existing.isDestroyed()) {
       const b = d.bounds
-      existing.setBounds({ x: b.x, y: b.y, width: b.width, height: b.height })
+      existing.setBounds({ x: b.x, y: b.y, width: b.width, height: b.height }) // follow a moved monitor
     } else {
-      openWindowForSlot(i, d)
+      openWindowForDisplay(d)
     }
   })
-  // Close windows for slots that no longer have a monitor.
-  for (const [slot, win] of windows) {
-    if (slot >= displays.length) { win.destroy(); windows.delete(slot) }
+
+  // Only the unplugged monitor's window closes — the others are untouched.
+  for (const [id, win] of windows) {
+    if (!liveIds.has(id)) {
+      const gone = screen.getAllDisplays().find((x) => x.id === id) || { id, bounds: { width: 0, height: 0, x: 0, y: 0 } }
+      markDisplayOffline(gone)
+      win.destroy()
+      windows.delete(id)
+    }
   }
 }
 
+// Only ONE Display Manager may run — a second launch would open competing
+// windows on the same monitors. Any extra instance quits immediately.
+const gotSingleInstanceLock = app.requestSingleInstanceLock()
+if (!gotSingleInstanceLock) app.quit()
+
 app.whenReady().then(() => {
+  if (!gotSingleInstanceLock) return
   store.init(app.getPath('userData'))
   app.setLoginItemSettings({ openAtLogin: true })
 
@@ -84,7 +109,6 @@ app.whenReady().then(() => {
   screen.on('display-removed', syncDisplays)
   screen.on('display-metrics-changed', syncDisplays)
 
-  // Support escape hatch: quit the kiosk.
   globalShortcut.register('CommandOrControl+Shift+Q', () => { quitting = true; app.quit() })
 })
 

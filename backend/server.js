@@ -1,4 +1,5 @@
 import 'dotenv/config'
+import { createServer } from 'http'
 import express from 'express'
 import cors from 'cors'
 import helmet from 'helmet'
@@ -10,6 +11,7 @@ import { router } from './src/routes/index.js'
 import { errorHandler } from './src/middleware/errorHandler.js'
 import { assertSecurityConfig } from './src/config/security.js'
 import { startAllListeners } from './src/integration/hl7Listener.js'
+import { initRealtime } from './src/lib/realtime.js'
 
 // Fail-closed: refuse to boot an exploitable server in production (C7).
 assertSecurityConfig()
@@ -94,7 +96,11 @@ app.use('/api', router)
 app.use(errorHandler)
 
 // ── Start ─────────────────────────────────────────────────────────────────────
-app.listen(PORT, () => {
+// Wrap Express in an HTTP server so Socket.IO can share the same port — the
+// display boards get pushed queue refreshes instead of polling every 3s.
+const httpServer = createServer(app)
+initRealtime(httpServer)
+httpServer.listen(PORT, () => {
   console.log(`[${process.env.NODE_ENV}] Backend running on http://localhost:${PORT}`)
 
   // HL7 lab-analyzer listeners — opt-in via ENABLE_HL7_LISTENERS=true so this
