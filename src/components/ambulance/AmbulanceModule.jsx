@@ -43,6 +43,8 @@ export default function AmbulanceModule() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [search, setSearch] = useState('')
+  const [typeFilter, setTypeFilter] = useState('all')
+  const [statusFilter, setStatusFilter] = useState('all')
   const [saving, setSaving] = useState(false)
   const [form, setForm] = useState(EMPTY)
 
@@ -59,12 +61,17 @@ export default function AmbulanceModule() {
 
   useEffect(() => { fetchTrips() }, [search])
 
+  const filteredTrips = useMemo(() => trips.filter(t =>
+    (typeFilter === 'all' || t.ambulanceType === typeFilter) &&
+    (statusFilter === 'all' || t.status === statusFilter)
+  ), [trips, typeFilter, statusFilter])
+
   const stats = useMemo(() => ({
-    total: trips.length,
-    completed: trips.filter(t => t.status === 'completed').length,
-    active: trips.filter(t => ['scheduled', 'enroute'].includes(t.status)).length,
-    revenue: trips.reduce((s, t) => s + (t.charge || 0), 0),
-  }), [trips])
+    total: filteredTrips.length,
+    completed: filteredTrips.filter(t => t.status === 'completed').length,
+    active: filteredTrips.filter(t => ['scheduled', 'enroute'].includes(t.status)).length,
+    revenue: filteredTrips.reduce((s, t) => s + (t.charge || 0), 0),
+  }), [filteredTrips])
 
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }))
 
@@ -117,9 +124,28 @@ export default function AmbulanceModule() {
           <CardHeader>
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
               <CardTitle className="flex items-center gap-2"><Ambulance className="h-5 w-5 text-blue-600" /> Ambulance Billing</CardTitle>
-              <div className="relative w-full md:w-64">
-                <Search className="h-4 w-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
-                <Input placeholder="Search trip, patient, location..." className="pl-9" value={search} onChange={e => setSearch(e.target.value)} />
+              <div className="flex flex-col sm:flex-row gap-2 w-full md:w-auto">
+                <div className="relative w-full sm:w-56">
+                  <Search className="h-4 w-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                  <Input placeholder="Search trip, patient, location..." className="pl-9" value={search} onChange={e => setSearch(e.target.value)} />
+                </div>
+                <Select value={typeFilter} onValueChange={setTypeFilter}>
+                  <SelectTrigger className="w-full sm:w-[140px]"><SelectValue placeholder="Type" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Types</SelectItem>
+                    {TYPES.map(t => <SelectItem key={t.value} value={t.value}>{t.value}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+                <Select value={statusFilter} onValueChange={setStatusFilter}>
+                  <SelectTrigger className="w-full sm:w-[140px]"><SelectValue placeholder="Status" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Statuses</SelectItem>
+                    <SelectItem value="scheduled">Scheduled</SelectItem>
+                    <SelectItem value="enroute">En Route</SelectItem>
+                    <SelectItem value="completed">Completed</SelectItem>
+                    <SelectItem value="cancelled">Cancelled</SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
             </div>
           </CardHeader>
@@ -148,9 +174,9 @@ export default function AmbulanceModule() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {trips.length === 0 ? (
-                    <TableRow><TableCell colSpan={10} className="text-center py-10 text-gray-500">No ambulance trips yet.</TableCell></TableRow>
-                  ) : trips.map(t => (
+                  {filteredTrips.length === 0 ? (
+                    <TableRow><TableCell colSpan={10} className="text-center py-10 text-gray-500">No ambulance trips found.</TableCell></TableRow>
+                  ) : filteredTrips.map(t => (
                     <TableRow key={t.id}>
                       <TableCell className="font-mono font-medium text-blue-700">{t.tripNumber}</TableCell>
                       <TableCell>{t.patient ? getFullName(t.patient) : '—'}</TableCell>
