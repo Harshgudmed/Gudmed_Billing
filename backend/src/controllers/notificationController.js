@@ -24,16 +24,17 @@ export async function sendConsultationNotification(req, res) {
     const { consultationId } = req.body
     if (!consultationId) return res.status(400).json({ success: false, error: 'consultationId required' })
 
+    const reqOrgId = getOrgId(req)
     const [consultation, org] = await Promise.all([
-      db.consultation.findUnique({
-        where: { id: consultationId },
+      db.consultation.findFirst({
+        where: { id: consultationId, organizationId: reqOrgId },
         include: {
           patient:       { select: { ...PATIENT_NAME_SELECT, phonePrimary: true } },
           doctor:        { select: { id: true, fullName: true } },
           prescriptions: { select: { id: true, items: true } },
         },
       }),
-      getOrg(req.organizationId),
+      getOrg(reqOrgId),
     ])
 
     if (!consultation) return res.status(404).json({ success: false, error: 'Consultation not found' })
@@ -57,8 +58,8 @@ export async function sendPrescriptionNotification(req, res) {
 
     const reqOrgId = getOrgId(req)
     const [prescription, org] = await Promise.all([
-      db.prescription.findUnique({
-        where: { id: prescriptionId },
+      db.prescription.findFirst({
+        where: { id: prescriptionId, organizationId: reqOrgId },
         include: {
           patient: { select: { ...PATIENT_NAME_SELECT, phonePrimary: true } },
         },
@@ -86,7 +87,7 @@ export async function sendPrescriptionNotification(req, res) {
 
     // If an invoice was provided, send receipt instead
     if (invoiceId) {
-      const invoice = await db.invoice.findUnique({ where: { id: invoiceId } })
+      const invoice = await db.invoice.findFirst({ where: { id: invoiceId, organizationId: reqOrgId } })
       const patName = patientFullName(prescription.patient)
       const message = tpl.paymentReceipt(invoice || {}, patName, org)
       const result  = await whatsapp.sendMessage(prescription.patient?.phonePrimary, message)
@@ -133,15 +134,16 @@ export async function sendLabResultNotification(req, res) {
     const { orderId } = req.body
     if (!orderId) return res.status(400).json({ success: false, error: 'orderId required' })
 
+    const reqOrgId = getOrgId(req)
     const [order, org] = await Promise.all([
-      db.labOrder.findUnique({
-        where: { id: orderId },
+      db.labOrder.findFirst({
+        where: { id: orderId, organizationId: reqOrgId },
         include: {
           patient: { select: { ...PATIENT_NAME_SELECT, phonePrimary: true } },
           results: { include: { test: { select: { testName: true, unit: true, normalRange: true } } } },
         },
       }),
-      getOrg(req.organizationId),
+      getOrg(reqOrgId),
     ])
 
     if (!order) return res.status(404).json({ success: false, error: 'Lab order not found' })
@@ -162,16 +164,17 @@ export async function sendRadiologyNotification(req, res) {
     const { orderId } = req.body
     if (!orderId) return res.status(400).json({ success: false, error: 'orderId required' })
 
+    const reqOrgId = getOrgId(req)
     const [order, org] = await Promise.all([
-      db.radiologyOrder.findUnique({
-        where: { id: orderId },
+      db.radiologyOrder.findFirst({
+        where: { id: orderId, organizationId: reqOrgId },
         include: {
           patient: { select: { ...PATIENT_NAME_SELECT, phonePrimary: true } },
           exam:   { select: { examName: true, examCategory: true } },
           report: true,
         },
       }),
-      getOrg(req.organizationId),
+      getOrg(reqOrgId),
     ])
 
     if (!order) return res.status(404).json({ success: false, error: 'Radiology order not found' })
@@ -195,14 +198,15 @@ export async function notifyPharmacyTeam(req, res) {
 
     if (!prescriptionId) return res.status(400).json({ success: false, error: 'prescriptionId required' })
 
+    const reqOrgId = getOrgId(req)
     const [prescription, org] = await Promise.all([
-      db.prescription.findUnique({
-        where: { id: prescriptionId },
+      db.prescription.findFirst({
+        where: { id: prescriptionId, organizationId: reqOrgId },
         include: {
           patient: { select: { ...PATIENT_NAME_SELECT, mrn: true } },
         },
       }),
-      getOrg(req.organizationId),
+      getOrg(reqOrgId),
     ])
 
     if (!prescription) return res.status(404).json({ success: false, error: 'Prescription not found' })

@@ -83,8 +83,21 @@ export const create = async (req, res, next) => {
 
 export const update = async (req, res, next) => {
   try {
+    const ORGANIZATION_ID = getOrgId(req)
     const { id, ...rest } = req.body
     if (!id) return res.status(400).json({ success: false, error: 'id is required' })
+
+    // Tenant guard: only update a row this org owns (prevents cross-tenant writes).
+    const owned = await db.machineIntegration.findFirst({
+      where: { id, organizationId: ORGANIZATION_ID },
+      select: { id: true },
+    })
+    if (!owned) return res.status(404).json({ success: false, error: 'Not found' })
+
+    // Mass-assignment protection: never let the body rewrite identity/tenant.
+    delete rest.organizationId
+    delete rest.id
+
     const data = await db.machineIntegration.update({ where: { id }, data: rest })
     return res.json({ success: true, data })
   } catch (err) {
@@ -95,8 +108,17 @@ export const update = async (req, res, next) => {
 /** Manually (re)process one queue item — used for "manual_review"/"failed" rows. */
 export const reprocess = async (req, res, next) => {
   try {
+    const ORGANIZATION_ID = getOrgId(req)
     const { id } = req.body
     if (!id) return res.status(400).json({ success: false, error: 'queue item id is required' })
+
+    // Tenant guard: only reprocess a queue item this org owns.
+    const owned = await db.machineResultsQueue.findFirst({
+      where: { id, organizationId: ORGANIZATION_ID },
+      select: { id: true },
+    })
+    if (!owned) return res.status(404).json({ success: false, error: 'Not found' })
+
     const result = await processQueueItem(id)
     return res.json({ success: true, data: result })
   } catch (err) {

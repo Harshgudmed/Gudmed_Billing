@@ -239,6 +239,20 @@ export const create = async (req, res, next) => {
       const { orderId, testId, resultValue, resultUnit, isAbnormal, isCritical, flag, comment } =
         parsed.data
 
+      // Tenant guard: only attach a result to an order/test that belong to this
+      // org, otherwise a caller could bind a result onto another org's records.
+      const ownedOrder = await db.labOrder.findFirst({
+        where: { id: orderId, organizationId: getOrgId(req) },
+        select: { id: true },
+      })
+      if (!ownedOrder) return res.status(404).json({ success: false, error: 'Lab order not found' })
+
+      const ownedTest = await db.labTest.findFirst({
+        where: { id: testId, organizationId: getOrgId(req) },
+        select: { id: true },
+      })
+      if (!ownedTest) return res.status(404).json({ success: false, error: 'Lab test not found' })
+
       const data = await db.labResult.create({
         data: {
           organizationId: getOrgId(req),
@@ -274,6 +288,14 @@ export const update = async (req, res, next) => {
 
       const { id, resource: _r, ...updates } = parsed.data
 
+      // Strip identity/tenant fields so a passthrough body can't relocate this
+      // order to another org or corrupt its identity via the `...updates` spread.
+      delete updates.organizationId
+      delete updates.id
+      delete updates.patientId
+      delete updates.orderNumber
+      delete updates.requestedById
+
       // Tenant guard: only touch an order that belongs to this org.
       const owned = await db.labOrder.findFirst({ where: { id, organizationId: ORGANIZATION_ID }, select: { id: true } })
       if (!owned) return res.status(404).json({ success: false, error: 'Lab order not found' })
@@ -292,6 +314,12 @@ export const update = async (req, res, next) => {
       }
 
       const { id, resource: _r, ...updates } = parsed.data
+
+      // Strip identity/tenant fields so a passthrough body can't reattach this
+      // result to another org's order or corrupt its identity via `...updates`.
+      delete updates.organizationId
+      delete updates.id
+      delete updates.orderId
 
       // Tenant guard via the parent order's org (LabResult.organizationId is nullable,
       // so verify ownership through the order it belongs to). Blocks cross-tenant
@@ -316,6 +344,11 @@ export const update = async (req, res, next) => {
       }
 
       const { id, resource: _r, ...updates } = parsed.data
+
+      // Strip identity/tenant fields so a passthrough body can't relocate this
+      // test catalog entry to another org via the `...updates` spread.
+      delete updates.organizationId
+      delete updates.id
 
       // Reject a negative/non-numeric price on update too (passthrough schema
       // doesn't type-check it), so it can't slip back in via edit.
