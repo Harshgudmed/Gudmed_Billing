@@ -49,6 +49,14 @@ export async function getAll(req, res, next) {
   }
 }
 
+// Payment status is DERIVED from fee vs amount paid — never trusted from the
+// client — so a case can't be flagged "paid" without the money actually being in.
+function derivePaymentStatus(fee, paid) {
+  if (fee <= 0) return 'paid'      // nothing to pay
+  if (paid <= 0) return 'pending'
+  return paid >= fee ? 'paid' : 'partial'
+}
+
 export async function create(req, res, next) {
   try {
     const ORG_ID = getOrgId(req)
@@ -73,6 +81,7 @@ export async function create(req, res, next) {
     const feeVal = safeMoney(fee)
     const paidVal = safeMoney(amountPaid)
     if (feeVal === null || paidVal === null) return res.status(400).json({ success: false, error: 'fee and amountPaid must be non-negative numbers' })
+    if (paidVal > feeVal) return res.status(400).json({ success: false, error: 'amountPaid cannot exceed fee' })
 
     const caseNumber = await nextCaseNumber(ORG_ID)
     const dayCase = await db.dayCareCase.create({
@@ -86,7 +95,7 @@ export async function create(req, res, next) {
         admissionDate: admissionDate ? new Date(admissionDate) : new Date(),
         dischargeTime: dischargeTime || null,
         fee: feeVal,
-        paymentStatus: paymentStatus || 'pending',
+        paymentStatus: derivePaymentStatus(feeVal, paidVal),
         amountPaid: paidVal,
         status: status || 'admitted',
         notes: notes || null,
@@ -110,10 +119,12 @@ export async function update(req, res, next) {
     if (!id) return res.status(400).json({ success: false, error: 'id is required' })
 
     // Tenant guard: only touch a case that belongs to this org (no cross-tenant write).
-    if (!(await isOwned('dayCareCase', id, ORG_ID))) return res.status(404).json({ success: false, error: 'Day-care case not found' })
+    const existing = await db.dayCareCase.findFirst({ where: { id, organizationId: ORG_ID }, select: { fee: true, amountPaid: true } })
+    if (!existing) return res.status(404).json({ success: false, error: 'Day-care case not found' })
 
     const data = {}
-    const allowed = ['procedure', 'dischargeTime', 'paymentStatus', 'status', 'notes']
+    // paymentStatus is intentionally NOT client-settable — it is derived below.
+    const allowed = ['procedure', 'dischargeTime', 'status', 'notes']
     for (const k of allowed) if (req.body[k] !== undefined) data[k] = req.body[k] || null
     if (req.body.fee !== undefined) {
       const v = safeMoney(req.body.fee)
@@ -124,6 +135,14 @@ export async function update(req, res, next) {
       const v = safeMoney(req.body.amountPaid)
       if (v === null) return res.status(400).json({ success: false, error: 'amountPaid must be a non-negative number' })
       data.amountPaid = v
+    }
+    // When fee OR amount paid changes, re-check paid <= fee and re-derive the
+    // status from the RESULTING pair (unchanged side read back from the DB).
+    if (data.fee !== undefined || data.amountPaid !== undefined) {
+      const feeVal = data.fee !== undefined ? data.fee : Number(existing.fee)
+      const paidVal = data.amountPaid !== undefined ? data.amountPaid : Number(existing.amountPaid)
+      if (paidVal > feeVal) return res.status(400).json({ success: false, error: 'amountPaid cannot exceed fee' })
+      data.paymentStatus = derivePaymentStatus(feeVal, paidVal)
     }
     if (req.body.admissionDate !== undefined) data.admissionDate = new Date(req.body.admissionDate)
     if (req.body.doctorId !== undefined) {
