@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { toast } from 'sonner'
 import client from '@/api/client'
 import { Card, CardContent } from '@/components/ui/card'
-import { RotateCw, MonitorPlay } from 'lucide-react'
+import { RotateCw, MonitorPlay, Trash2 } from 'lucide-react'
 
 // One place that decides how each status looks — matches the backend's
 // getDeviceStatus() values (unpaired | online | reconnecting | offline).
@@ -68,6 +68,20 @@ export default function ScreenHealth({ screens = [] }) {
     }
   }
 
+  async function remove(deviceId) {
+    if (!window.confirm('Remove this display from the list? If it reconnects it will show up again.')) return
+    setSavingId(deviceId)
+    try {
+      await client.delete(`/display/devices/${deviceId}`)
+      toast.success('Display removed')
+      await load()
+    } catch (err) {
+      toast.error(err.message || 'Could not remove')
+    } finally {
+      setSavingId(null)
+    }
+  }
+
   const online = devices.filter(d => d.status === 'online').length
   const offline = devices.filter(d => d.status === 'offline' || d.status === 'reconnecting').length
   const unpaired = devices.filter(d => d.status === 'unpaired').length
@@ -126,15 +140,25 @@ export default function ScreenHealth({ screens = [] }) {
                   <td className="px-4 py-3 text-gray-700">{d.screen?.name || <span className="text-gray-400">—</span>}</td>
                   <td className="px-4 py-3 text-gray-500 tabular-nums">{ago(d.lastSeenAt)}</td>
                   <td className="px-4 py-3">
-                    <select
-                      value={d.screenId || ''}
-                      disabled={savingId === d.deviceId}
-                      onChange={e => assign(d.deviceId, e.target.value)}
-                      className="rounded-md border px-2 py-1.5 text-sm disabled:opacity-50"
-                    >
-                      <option value="">— Unassigned —</option>
-                      {screens.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-                    </select>
+                    <div className="flex items-center gap-2">
+                      <select
+                        value={d.screenId || ''}
+                        disabled={savingId === d.deviceId}
+                        onChange={e => assign(d.deviceId, e.target.value)}
+                        className="rounded-md border px-2 py-1.5 text-sm disabled:opacity-50"
+                      >
+                        <option value="">— Unassigned —</option>
+                        {screens.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                      </select>
+                      <button
+                        onClick={() => remove(d.deviceId)}
+                        disabled={savingId === d.deviceId}
+                        title="Remove this display"
+                        className="rounded-md p-1.5 text-gray-400 hover:bg-red-50 hover:text-red-600 disabled:opacity-50"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))}

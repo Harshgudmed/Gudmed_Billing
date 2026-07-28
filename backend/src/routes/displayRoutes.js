@@ -1,6 +1,6 @@
 import { Router } from 'express'
 import { getFloorsOverview, getRoomQueue, getFloorQueue, getScreenQueue } from '../controllers/displayController.js'
-import { registerDevice, getDeviceStatusEndpoint, heartbeatDevice, listDevices, assignDevice } from '../controllers/deviceController.js'
+import { registerDevice, getDeviceStatusEndpoint, heartbeatDevice, listDevices, assignDevice, removeDevice } from '../controllers/deviceController.js'
 
 const router = Router()
 
@@ -16,5 +16,6 @@ router.post('/devices/register', registerDevice)
 router.get('/devices/:deviceId/status', getDeviceStatusEndpoint)
 router.post('/devices/:deviceId/heartbeat', heartbeatDevice)
 router.post('/devices/:deviceId/assign', assignDevice)
+router.delete('/devices/:deviceId', removeDevice)
 
 export default router
