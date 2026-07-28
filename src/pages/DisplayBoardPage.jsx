@@ -10,11 +10,6 @@ import { useAuth } from '@/lib/auth'
 import { drName } from '@/lib/utils'
 import { formatTime12h } from '@/lib/format'
 
-// Real hospital queue displays poll rather than push — a lobby TV has one
-// reader per screen and tolerates a few seconds of staleness invisibly, so a
-// WebSocket/SSE layer buys nothing here. See the project's queue research
-// notes for the reasoning (OpenMRS's own production display board polls too).
-const POLL_MS = 3000
 
 // An UNATTENDED wall display should drift back to the overview after someone
 // taps into a floor or room and walks away — the next person arriving should
