@@ -32,6 +32,7 @@ export default function InsuranceModule() {
   const [error, setError] = useState(null)
   const [search, setSearch] = useState('')
   const [payerFilter, setPayerFilter] = useState('all')
+  const [pendingClaimsOnly, setPendingClaimsOnly] = useState(false)
 
   const [caseOpen, setCaseOpen] = useState(false)
   const [caseForm, setCaseForm] = useState(EMPTY_CASE)
@@ -63,6 +64,10 @@ export default function InsuranceModule() {
     }
   }, [cases]) // eslint-disable-line react-hooks/exhaustive-deps
 
+
+  const displayedCases = useMemo(() => (
+    pendingClaimsOnly ? cases.filter(c => (c.claims || []).some(cl => cl.status === 'pending')) : cases
+  ), [cases, pendingClaimsOnly])
 
   const setCase = (k, v) => setCaseForm(f => ({ ...f, [k]: v }))
   const setClaim = (k, v) => setClaimForm(f => ({ ...f, [k]: v }))
@@ -121,9 +126,27 @@ export default function InsuranceModule() {
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <Card><CardHeader className="py-4"><CardTitle className="text-sm font-medium text-gray-500 flex items-center gap-2"><Users className="h-4 w-4" /> TPA Patients</CardTitle></CardHeader><CardContent><div className="text-2xl font-bold">{stats.tpaPatients}</div></CardContent></Card>
-        <Card><CardHeader className="py-4"><CardTitle className="text-sm font-medium text-gray-500 flex items-center gap-2"><FileText className="h-4 w-4" /> Insurance Patients</CardTitle></CardHeader><CardContent><div className="text-2xl font-bold">{stats.insurancePatients}</div></CardContent></Card>
-        <Card className="border-l-4 border-l-orange-500"><CardHeader className="py-4"><CardTitle className="text-sm font-medium text-gray-500 flex items-center gap-2"><Clock className="h-4 w-4" /> Claims Pending</CardTitle></CardHeader><CardContent><div className="text-2xl font-bold">{stats.claimsPending}</div></CardContent></Card>
+        <Card
+          className={`cursor-pointer transition-shadow hover:shadow-md ${payerFilter === 'TPA' ? 'ring-2 ring-[#2E4168]' : ''}`}
+          onClick={() => { setPendingClaimsOnly(false); setPayerFilter(p => p === 'TPA' ? 'all' : 'TPA') }}
+        >
+          <CardHeader className="py-4"><CardTitle className="text-sm font-medium text-gray-500 flex items-center gap-2"><Users className="h-4 w-4" /> TPA Patients</CardTitle></CardHeader>
+          <CardContent><div className="text-2xl font-bold">{stats.tpaPatients}</div></CardContent>
+        </Card>
+        <Card
+          className={`cursor-pointer transition-shadow hover:shadow-md ${payerFilter === 'INSURANCE' ? 'ring-2 ring-[#2E4168]' : ''}`}
+          onClick={() => { setPendingClaimsOnly(false); setPayerFilter(p => p === 'INSURANCE' ? 'all' : 'INSURANCE') }}
+        >
+          <CardHeader className="py-4"><CardTitle className="text-sm font-medium text-gray-500 flex items-center gap-2"><FileText className="h-4 w-4" /> Insurance Patients</CardTitle></CardHeader>
+          <CardContent><div className="text-2xl font-bold">{stats.insurancePatients}</div></CardContent>
+        </Card>
+        <Card
+          className={`cursor-pointer transition-shadow hover:shadow-md border-l-4 border-l-orange-500 ${pendingClaimsOnly ? 'ring-2 ring-orange-500' : ''}`}
+          onClick={() => setPendingClaimsOnly(v => !v)}
+        >
+          <CardHeader className="py-4"><CardTitle className="text-sm font-medium text-gray-500 flex items-center gap-2"><Clock className="h-4 w-4" /> Claims Pending</CardTitle></CardHeader>
+          <CardContent><div className="text-2xl font-bold">{stats.claimsPending}</div></CardContent>
+        </Card>
       </div>
 
       <Card>
@@ -161,9 +184,9 @@ export default function InsuranceModule() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {cases.length === 0 ? (
-                  <TableRow><TableCell colSpan={8} className="text-center py-10 text-gray-500">No insurance/TPA cases yet.</TableCell></TableRow>
-                ) : cases.map(c => (
+                {displayedCases.length === 0 ? (
+                  <TableRow><TableCell colSpan={8} className="text-center py-10 text-gray-500">{pendingClaimsOnly ? 'No cases with pending claims.' : 'No insurance/TPA cases yet.'}</TableCell></TableRow>
+                ) : displayedCases.map(c => (
                   <TableRow key={c.id}>
                     <TableCell>{c.patient ? getFullName(c.patient) : '—'}</TableCell>
                     <TableCell>
