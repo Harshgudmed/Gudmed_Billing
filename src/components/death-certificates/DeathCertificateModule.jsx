@@ -23,12 +23,13 @@ export default function DeathCertificateModule() {
   const [selectedCertId, setSelectedCertId] = useState(null)
   const [searchQuery, setSearchQuery] = useState('')
   const [placeFilter, setPlaceFilter] = useState('all')
+  const [statusFilter, setStatusFilter] = useState('all')
 
   // Server-side pagination: the DB slices and returns one page, plus a `summary`
   // block with the counts across the WHOLE filtered set for the stat cards.
   const certificatesPagination = useServerPagination('/death-certificates', {
     perPage: ITEMS_PER_PAGE,
-    params: { search: searchQuery, place: placeFilter },
+    params: { search: searchQuery, place: placeFilter, status: statusFilter },
   })
   const certificates = certificatesPagination.rows
   const stats = certificatesPagination.summary || { total: 0, issued: 0, pendingIssuance: 0, maternal: 0 }
@@ -160,10 +161,30 @@ export default function DeathCertificateModule() {
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        <Card><CardHeader className="py-4"><CardTitle className="text-sm font-medium text-gray-500">Total Registered</CardTitle></CardHeader><CardContent><div className="text-2xl font-bold">{stats.total}</div></CardContent></Card>
-        <Card className="border-l-4 border-l-green-500"><CardHeader className="py-4"><CardTitle className="text-sm font-medium text-gray-500">Issued to Family</CardTitle></CardHeader><CardContent><div className="text-2xl font-bold">{stats.issued}</div></CardContent></Card>
-        <Card className="border-l-4 border-l-orange-500"><CardHeader className="py-4"><CardTitle className="text-sm font-medium text-gray-500">Pending Issuance</CardTitle></CardHeader><CardContent><div className="text-2xl font-bold">{stats.pendingIssuance}</div></CardContent></Card>
-        <Card className="border-l-4 border-l-purple-500"><CardHeader className="py-4"><CardTitle className="text-sm font-medium text-gray-500">Maternal Deaths</CardTitle></CardHeader><CardContent><div className="text-2xl font-bold">{stats.maternal}</div></CardContent></Card>
+        <Card
+          className={`cursor-pointer transition-shadow hover:shadow-md ${statusFilter === 'all' ? 'ring-2 ring-[#2E4168]' : ''}`}
+          onClick={() => setStatusFilter('all')}
+        >
+          <CardHeader className="py-4"><CardTitle className="text-sm font-medium text-gray-500">Total Registered</CardTitle></CardHeader><CardContent><div className="text-2xl font-bold">{stats.total}</div></CardContent>
+        </Card>
+        <Card
+          className={`cursor-pointer transition-shadow hover:shadow-md border-l-4 border-l-green-500 ${statusFilter === 'issued' ? 'ring-2 ring-green-500' : ''}`}
+          onClick={() => setStatusFilter(f => f === 'issued' ? 'all' : 'issued')}
+        >
+          <CardHeader className="py-4"><CardTitle className="text-sm font-medium text-gray-500">Issued to Family</CardTitle></CardHeader><CardContent><div className="text-2xl font-bold">{stats.issued}</div></CardContent>
+        </Card>
+        <Card
+          className={`cursor-pointer transition-shadow hover:shadow-md border-l-4 border-l-orange-500 ${statusFilter === 'pending' ? 'ring-2 ring-orange-500' : ''}`}
+          onClick={() => setStatusFilter(f => f === 'pending' ? 'all' : 'pending')}
+        >
+          <CardHeader className="py-4"><CardTitle className="text-sm font-medium text-gray-500">Pending Issuance</CardTitle></CardHeader><CardContent><div className="text-2xl font-bold">{stats.pendingIssuance}</div></CardContent>
+        </Card>
+        <Card
+          className={`cursor-pointer transition-shadow hover:shadow-md border-l-4 border-l-purple-500 ${statusFilter === 'maternal' ? 'ring-2 ring-purple-500' : ''}`}
+          onClick={() => setStatusFilter(f => f === 'maternal' ? 'all' : 'maternal')}
+        >
+          <CardHeader className="py-4"><CardTitle className="text-sm font-medium text-gray-500">Maternal Deaths</CardTitle></CardHeader><CardContent><div className="text-2xl font-bold">{stats.maternal}</div></CardContent>
+        </Card>
       </div>
 
       <Card>

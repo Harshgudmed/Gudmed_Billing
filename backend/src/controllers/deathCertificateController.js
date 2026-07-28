@@ -6,9 +6,12 @@ import { PATIENT_NAME_SELECT } from '../lib/patientName.js'
 export async function getAll(req, res, next) {
   try {
     const ORG_ID = getOrgId(req)
-    const { search, place } = req.query
+    const { search, place, status } = req.query
     const where = { organizationId: ORG_ID }
     if (place && place !== 'all') where.placeOfDeath = place
+    if (status === 'issued') where.issuedAt = { not: null }
+    else if (status === 'pending') where.issuedAt = null
+    else if (status === 'maternal') where.isMaternalDeath = true
     if (search) {
       where.OR = [
         { certificateNumber: { contains: search, mode: 'insensitive' } },
