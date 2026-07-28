@@ -6,6 +6,7 @@ import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
 import { Textarea } from '@/components/ui/textarea'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import PatientLookup from '@/components/common/PatientLookup'
 import { Ambulance, Plus, Search, Trash2, Loader2, AlertCircle } from 'lucide-react'
@@ -47,6 +48,7 @@ export default function AmbulanceModule() {
   const [statusFilter, setStatusFilter] = useState('all')
   const [saving, setSaving] = useState(false)
   const [form, setForm] = useState(EMPTY)
+  const [formOpen, setFormOpen] = useState(false)
 
   async function fetchTrips() {
     setLoading(true); setError(null)
@@ -81,7 +83,7 @@ export default function AmbulanceModule() {
     setSaving(true)
     try {
       const res = await client.post('/ambulance', form)
-      if (res.success) { toast.success(`Trip ${res.data.tripNumber} added`); setForm(EMPTY); setSelectedPatient(null); fetchTrips() }
+      if (res.success) { toast.success(`Trip ${res.data.tripNumber} added`); setForm(EMPTY); setSelectedPatient(null); setFormOpen(false); fetchTrips() }
       else toast.error(res.error || 'Failed to add trip')
     } catch (e) { toast.error(e.message || 'Failed to add trip') } finally { setSaving(false) }
   }
@@ -118,13 +120,15 @@ export default function AmbulanceModule() {
         <Card className="border-l-4 border-l-blue-500"><CardHeader className="py-4"><CardTitle className="text-sm font-medium text-gray-500">Revenue</CardTitle></CardHeader><CardContent><div className="text-2xl font-bold">{inr(stats.revenue)}</div></CardContent></Card>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Billing table */}
-        <Card className="lg:col-span-2">
-          <CardHeader>
+      {/* Billing table */}
+      <Card>
+        <CardHeader>
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
               <CardTitle className="flex items-center gap-2"><Ambulance className="h-5 w-5 text-blue-600" /> Ambulance Billing</CardTitle>
               <div className="flex flex-col sm:flex-row gap-2 w-full md:w-auto">
+                <Button className="bg-green-600 hover:bg-green-700 shrink-0" onClick={() => setFormOpen(true)}>
+                  <Plus className="h-4 w-4 mr-2" /> New Ambulance Trip
+                </Button>
                 <div className="relative w-full sm:w-56">
                   <Search className="h-4 w-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
                   <Input placeholder="Search trip, patient, location..." className="pl-9" value={search} onChange={e => setSearch(e.target.value)} />
@@ -208,10 +212,12 @@ export default function AmbulanceModule() {
           </CardContent>
         </Card>
 
-        {/* New trip form */}
-        <Card>
-          <CardHeader><CardTitle className="flex items-center gap-2"><Plus className="h-5 w-5 text-green-600" /> New Ambulance Trip</CardTitle></CardHeader>
-          <CardContent>
+      {/* New trip form */}
+      <Dialog open={formOpen} onOpenChange={setFormOpen}>
+        <DialogContent className="max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2"><Plus className="h-5 w-5 text-green-600" /> New Ambulance Trip</DialogTitle>
+          </DialogHeader>
             <form onSubmit={handleSubmit} className="space-y-4">
               <div>
                 <Label>Patient</Label>
@@ -258,9 +264,8 @@ export default function AmbulanceModule() {
                 {saving ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Plus className="h-4 w-4 mr-2" />} Add Trip
               </Button>
             </form>
-          </CardContent>
-        </Card>
-      </div>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }
