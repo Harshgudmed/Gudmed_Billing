@@ -189,6 +189,8 @@ export default function BillingModule({ onBack }) {
   // GET /insurance returns cases, each with its nested claims — flatten to rows.
   const [claims, setClaims] = useState([])
   const [claimsLoading, setClaimsLoading] = useState(false)
+  const [claimSearch, setClaimSearch] = useState('')
+  const [claimStatusFilter, setClaimStatusFilter] = useState('all')
 
   // New invoice form
   const newForm = () => ({
@@ -813,6 +815,18 @@ export default function BillingModule({ onBack }) {
   // ── Filtered invoices ──────────────────────────────────────────────────────
   const filteredBills = bills // Backend handles pagination and filtering now
 
+  // ── Filtered insurance claims (client-side; claims list is fetched in full) ─
+  const filteredClaims = claims.filter(c => {
+    const matchesStatus = claimStatusFilter === 'all' || c.status === claimStatusFilter
+    const q = claimSearch.trim().toLowerCase()
+    const matchesSearch = !q ||
+      (c.claimNumber || '').toLowerCase().includes(q) ||
+      (c.patient || '').toLowerCase().includes(q) ||
+      (c.insurer || '').toLowerCase().includes(q) ||
+      (c.policy || '').toLowerCase().includes(q)
+    return matchesStatus && matchesSearch
+  })
+
   // ── Recent transactions (last 10) ─────────────────────────────────────────
   const recentBills = [...bills].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt)).slice(0, 10)
 
@@ -1243,24 +1257,59 @@ export default function BillingModule({ onBack }) {
               <CardDescription>Track and manage insurance claims and reimbursements</CardDescription>
             </CardHeader>
             <CardContent>
-              <div className="grid grid-cols-4 gap-4 mb-6">
-                <div className="bg-blue-50 rounded-lg p-4 text-center">
+              <div className="grid grid-cols-4 gap-4">
+                <div
+                  className={`bg-blue-50 rounded-lg p-4 text-center cursor-pointer transition-shadow hover:shadow-md ${claimStatusFilter === 'all' ? 'ring-2 ring-blue-400' : ''}`}
+                  onClick={() => setClaimStatusFilter('all')}
+                >
                   <p className="text-sm text-blue-600 font-medium">Total Claims</p>
                   <p className="text-3xl font-bold text-blue-700">{claims.length}</p>
                 </div>
-                <div className="bg-green-50 rounded-lg p-4 text-center">
+                <div
+                  className={`bg-green-50 rounded-lg p-4 text-center cursor-pointer transition-shadow hover:shadow-md ${claimStatusFilter === 'approved' ? 'ring-2 ring-green-400' : ''}`}
+                  onClick={() => setClaimStatusFilter('approved')}
+                >
                   <p className="text-sm text-green-600 font-medium">Approved / Settled</p>
                   <p className="text-3xl font-bold text-green-700">{claims.filter(c => c.status === 'approved' || c.status === 'settled').length}</p>
                 </div>
-                <div className="bg-yellow-50 rounded-lg p-4 text-center">
+                <div
+                  className={`bg-yellow-50 rounded-lg p-4 text-center cursor-pointer transition-shadow hover:shadow-md ${claimStatusFilter === 'pending' ? 'ring-2 ring-yellow-400' : ''}`}
+                  onClick={() => setClaimStatusFilter('pending')}
+                >
                   <p className="text-sm text-yellow-600 font-medium">Pending / Submitted</p>
                   <p className="text-3xl font-bold text-yellow-700">{claims.filter(c => c.status === 'pending' || c.status === 'submitted').length}</p>
                 </div>
-                <div className="bg-red-50 rounded-lg p-4 text-center">
+                <div
+                  className={`bg-red-50 rounded-lg p-4 text-center cursor-pointer transition-shadow hover:shadow-md ${claimStatusFilter === 'rejected' ? 'ring-2 ring-red-400' : ''}`}
+                  onClick={() => setClaimStatusFilter('rejected')}
+                >
                   <p className="text-sm text-red-600 font-medium">Rejected</p>
                   <p className="text-3xl font-bold text-red-700">{claims.filter(c => c.status === 'rejected').length}</p>
                 </div>
               </div>
+            </CardContent>
+          </Card>
+
+          <div className="flex flex-wrap gap-3">
+            <div className="relative flex-1 min-w-48">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+              <Input className="pl-9" placeholder="Search claim #, patient, insurer or policy..." value={claimSearch} onChange={e => setClaimSearch(e.target.value)} />
+            </div>
+            <Select value={claimStatusFilter} onValueChange={setClaimStatusFilter}>
+              <SelectTrigger className="w-40"><SelectValue placeholder="All" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All</SelectItem>
+                <SelectItem value="submitted">Submitted</SelectItem>
+                <SelectItem value="pending">Pending</SelectItem>
+                <SelectItem value="approved">Approved</SelectItem>
+                <SelectItem value="settled">Settled</SelectItem>
+                <SelectItem value="rejected">Rejected</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
+          <Card>
+            <CardContent className="p-0">
               <Table>
                 <TableHeader>
                   <TableRow>
@@ -1277,9 +1326,9 @@ export default function BillingModule({ onBack }) {
                 <TableBody>
                   {claimsLoading ? (
                     <TableRow><TableCell colSpan={8} className="text-center py-8 text-gray-500">Loading claims…</TableCell></TableRow>
-                  ) : claims.length === 0 ? (
-                    <TableRow><TableCell colSpan={8} className="text-center py-8 text-gray-500">No insurance claims yet. Add a policy and raise a claim from the Insurance module.</TableCell></TableRow>
-                  ) : claims.map(c => (
+                  ) : filteredClaims.length === 0 ? (
+                    <TableRow><TableCell colSpan={8} className="text-center py-8 text-gray-500">{claims.length === 0 ? 'No insurance claims yet. Add a policy and raise a claim from the Insurance module.' : 'No claims match your search/filter.'}</TableCell></TableRow>
+                  ) : filteredClaims.map(c => (
                     <TableRow key={c.id}>
                       <TableCell className="font-mono text-sm text-blue-600">{c.claimNumber}</TableCell>
                       <TableCell className="font-medium">{c.patient}</TableCell>
