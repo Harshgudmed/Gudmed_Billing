@@ -78,6 +78,7 @@ import {
 // hand-rolled bare HTML, so it printed as unstyled browser default.
 import { gudmedDocument, infoBox, escapeHtml } from "@/lib/printTemplate";
 import { stockBadge, statusBadge } from "./pharmacyHelpers";
+import { formatMoney } from "@/lib/format";
 import DashboardTab from "./tabs/DashboardTab";
 import InventoryTab from "./tabs/InventoryTab";
 import PrescriptionsTab from "./tabs/PrescriptionsTab";
@@ -1451,6 +1452,69 @@ ${rx.notes ? `<div class="note-bar"><strong>Notes:</strong> ${escapeHtml(rx.note
             <Button
               variant="outline"
               onClick={() => setShowPoViewDialog(false)}
+            >
+              Close
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── VIEW DRUG ── */}
+      <Dialog open={showViewDrugDialog} onOpenChange={setShowViewDrugDialog}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>{viewingDrug?.drugName}</DialogTitle>
+          </DialogHeader>
+          {viewingDrug && (
+            <div className="grid grid-cols-2 gap-3 text-sm bg-gray-50 p-3 rounded-lg">
+              <div>
+                <p className="text-gray-500 font-medium">Generic Name</p>
+                <p className="font-semibold">{viewingDrug.genericName || "—"}</p>
+              </div>
+              <div>
+                <p className="text-gray-500 font-medium">Brand Name</p>
+                <p className="font-semibold">{viewingDrug.brandName || "—"}</p>
+              </div>
+              <div>
+                <p className="text-gray-500 font-medium">Category</p>
+                <p>{viewingDrug.drugCategory || "—"}</p>
+              </div>
+              <div>
+                <p className="text-gray-500 font-medium">Form / Strength</p>
+                <p>
+                  {viewingDrug.dosageForm} {viewingDrug.strength}
+                </p>
+              </div>
+              <div>
+                <p className="text-gray-500 font-medium">MRP</p>
+                <p>{formatMoney(viewingDrug.sellingPrice)}</p>
+              </div>
+              <div>
+                <p className="text-gray-500 font-medium">Cost Price</p>
+                <p>{formatMoney(viewingDrug.costPrice)}</p>
+              </div>
+              <div>
+                <p className="text-gray-500 font-medium">Stock</p>
+                <p>{viewingDrug.quantityInStock || 0}</p>
+              </div>
+              <div>
+                <p className="text-gray-500 font-medium">Reorder Level</p>
+                <p>{viewingDrug.reorderLevel ?? "—"}</p>
+              </div>
+              <div>
+                <p className="text-gray-500 font-medium">Drug Code</p>
+                <p>{viewingDrug.drugCode || "—"}</p>
+              </div>
+              <div>
+                <p className="text-gray-500 font-medium">Status</p>
+                {stockBadge(viewingDrug)}
+              </div>
+            </div>
+          )}
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setShowViewDrugDialog(false)}
             >
               Close
             </Button>
