@@ -145,3 +145,14 @@ export async function assignDevice(req, res, next) {
     res.json({ success: true, data: publicDevice(device) })
   } catch (err) { next(err) }
 }
+
+// DELETE /api/display/devices/:deviceId  — admin removes a stale/duplicate device
+// from the list (org-scoped). If that display ever reconnects it just re-registers.
+export async function removeDevice(req, res, next) {
+  try {
+    const ORG_ID = getOrgId(req)
+    const { count } = await db.displayDevice.deleteMany({ where: { deviceId: req.params.deviceId, organizationId: ORG_ID } })
+    if (count === 0) return res.status(404).json({ success: false, error: 'Device not found' })
+    res.json({ success: true })
+  } catch (err) { next(err) }
+}
