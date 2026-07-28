@@ -65,15 +65,15 @@ export default function AmbulanceModule() {
 
   const filteredTrips = useMemo(() => trips.filter(t =>
     (typeFilter === 'all' || t.ambulanceType === typeFilter) &&
-    (statusFilter === 'all' || t.status === statusFilter)
+    (statusFilter === 'all' || (statusFilter === 'active' ? ['scheduled', 'enroute'].includes(t.status) : t.status === statusFilter))
   ), [trips, typeFilter, statusFilter])
 
   const stats = useMemo(() => ({
-    total: filteredTrips.length,
-    completed: filteredTrips.filter(t => t.status === 'completed').length,
-    active: filteredTrips.filter(t => ['scheduled', 'enroute'].includes(t.status)).length,
-    revenue: filteredTrips.reduce((s, t) => s + (t.charge || 0), 0),
-  }), [filteredTrips])
+    total: trips.length,
+    completed: trips.filter(t => t.status === 'completed').length,
+    active: trips.filter(t => ['scheduled', 'enroute'].includes(t.status)).length,
+    revenue: trips.reduce((s, t) => s + (t.charge || 0), 0),
+  }), [trips])
 
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }))
 
@@ -114,9 +114,27 @@ export default function AmbulanceModule() {
       </div>
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <Card><CardHeader className="py-4"><CardTitle className="text-sm font-medium text-gray-500">Total Trips</CardTitle></CardHeader><CardContent><div className="text-2xl font-bold">{stats.total}</div></CardContent></Card>
-        <Card className="border-l-4 border-l-amber-500"><CardHeader className="py-4"><CardTitle className="text-sm font-medium text-gray-500">Active</CardTitle></CardHeader><CardContent><div className="text-2xl font-bold">{stats.active}</div></CardContent></Card>
-        <Card className="border-l-4 border-l-green-500"><CardHeader className="py-4"><CardTitle className="text-sm font-medium text-gray-500">Completed</CardTitle></CardHeader><CardContent><div className="text-2xl font-bold">{stats.completed}</div></CardContent></Card>
+        <Card
+          className={`cursor-pointer transition-shadow hover:shadow-md ${statusFilter === 'all' ? 'ring-2 ring-[#2E4168]' : ''}`}
+          onClick={() => setStatusFilter('all')}
+        >
+          <CardHeader className="py-4"><CardTitle className="text-sm font-medium text-gray-500">Total Trips</CardTitle></CardHeader>
+          <CardContent><div className="text-2xl font-bold">{stats.total}</div></CardContent>
+        </Card>
+        <Card
+          className={`cursor-pointer transition-shadow hover:shadow-md border-l-4 border-l-amber-500 ${statusFilter === 'active' ? 'ring-2 ring-amber-500' : ''}`}
+          onClick={() => setStatusFilter('active')}
+        >
+          <CardHeader className="py-4"><CardTitle className="text-sm font-medium text-gray-500">Active</CardTitle></CardHeader>
+          <CardContent><div className="text-2xl font-bold">{stats.active}</div></CardContent>
+        </Card>
+        <Card
+          className={`cursor-pointer transition-shadow hover:shadow-md border-l-4 border-l-green-500 ${statusFilter === 'completed' ? 'ring-2 ring-green-500' : ''}`}
+          onClick={() => setStatusFilter('completed')}
+        >
+          <CardHeader className="py-4"><CardTitle className="text-sm font-medium text-gray-500">Completed</CardTitle></CardHeader>
+          <CardContent><div className="text-2xl font-bold">{stats.completed}</div></CardContent>
+        </Card>
         <Card className="border-l-4 border-l-blue-500"><CardHeader className="py-4"><CardTitle className="text-sm font-medium text-gray-500">Revenue</CardTitle></CardHeader><CardContent><div className="text-2xl font-bold">{inr(stats.revenue)}</div></CardContent></Card>
       </div>
 
@@ -144,6 +162,7 @@ export default function AmbulanceModule() {
                   <SelectTrigger className="w-full sm:w-[140px]"><SelectValue placeholder="Status" /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="all">All Statuses</SelectItem>
+                    <SelectItem value="active">Active</SelectItem>
                     <SelectItem value="scheduled">Scheduled</SelectItem>
                     <SelectItem value="enroute">En Route</SelectItem>
                     <SelectItem value="completed">Completed</SelectItem>
