@@ -1522,6 +1522,63 @@ ${rx.notes ? `<div class="note-bar"><strong>Notes:</strong> ${escapeHtml(rx.note
         </DialogContent>
       </Dialog>
 
+      {/* ── DISPENSE PRESCRIPTION ── */}
+      <Dialog open={showDispenseDialog} onOpenChange={setShowDispenseDialog}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>
+              Dispense — {selectedPrescription?.patient ? getFullName(selectedPrescription.patient) : "Unknown"}
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            {dispenseWarnings.length > 0 && (
+              <div className="space-y-2">
+                {dispenseWarnings.map((w, i) => (
+                  <div
+                    key={i}
+                    className={`flex items-start gap-2 rounded-md p-2 text-sm ${w.severity === "high" ? "bg-red-50 text-red-700" : "bg-amber-50 text-amber-700"}`}
+                  >
+                    <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" />
+                    <span>{w.message}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+            <div className="space-y-2 max-h-72 overflow-y-auto">
+              {(selectedPrescription?.items || []).map((item, idx) => (
+                <div key={idx} className="flex items-start gap-2 border rounded-md p-2">
+                  <Checkbox
+                    checked={!!item.dispensed}
+                    onCheckedChange={() => toggleItemDispensed(idx)}
+                    className="mt-1"
+                  />
+                  <div className="flex-1 text-sm">
+                    <p className="font-medium">{item.drugName}</p>
+                    <p className="text-gray-500">
+                      {[item.dosage, item.frequency, item.duration].filter(Boolean).join(" · ")}
+                    </p>
+                    {item.instructions && <p className="text-gray-400 text-xs mt-0.5">{item.instructions}</p>}
+                  </div>
+                  <Badge variant="outline">Qty {item.quantity}</Badge>
+                </div>
+              ))}
+              {!selectedPrescription?.items?.length && (
+                <p className="text-sm text-gray-400 italic text-center py-4">No items on this prescription</p>
+              )}
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowDispenseDialog(false)} disabled={dispensing}>
+              Cancel
+            </Button>
+            <Button onClick={handleCompleteDispense} disabled={dispensing}>
+              <CheckCircle className="h-4 w-4 mr-1" />
+              {dispensing ? "Dispensing..." : "Complete Dispense"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       {/* ── ADJUST / RESTOCK DIALOG ── */}
       <Dialog open={showStockDialog} onOpenChange={setShowStockDialog}>
         <DialogContent className="max-w-md">
