@@ -38,6 +38,14 @@ const PRIORITY_LEVELS = ['Routine', 'Urgent', 'Emergency', 'Critical']
 
 const MARITAL_STATUSES = ['Single', 'Married', 'Divorced', 'Widowed', 'Other']
 
+/** 'yyyy-MM-dd' for the browser's local today — used as the date input's `min`. */
+function todayYmdLocal() {
+  const now = new Date()
+  const mm = String(now.getMonth() + 1).padStart(2, '0')
+  const dd = String(now.getDate()).padStart(2, '0')
+  return `${now.getFullYear()}-${mm}-${dd}`
+}
+
 // Renders next to a field, right under its Input/Select, for both a Zod
 // validation error caught before submit and a validation error the backend
 // sends back after it (see handleRegisterPatient) — one place, either source.
@@ -91,6 +99,7 @@ export default function RegisterPatientForm({ onSuccess, onCancel }) {
   const savingPatient = creatingPatient || bookingAppointment
   const [doctors, setDoctors] = useState([])
   const [departments, setDepartments] = useState([])
+  const todayYmd = todayYmdLocal()
   const { availableTimeSlots, timetableLoading } = useDoctorTimetable(
     patientForm.doctor,
     patientForm.appointmentDate,
@@ -487,6 +496,7 @@ export default function RegisterPatientForm({ onSuccess, onCancel }) {
               <Input
                 className={cn('mt-1', fieldErrors.appointmentDate && 'border-red-500')}
                 type="date"
+                min={todayYmd}
                 value={patientForm.appointmentDate}
                 onChange={e => setField('appointmentDate', e.target.value)}
                 disabled={!patientForm.doctor || timetableLoading}
@@ -518,6 +528,7 @@ export default function RegisterPatientForm({ onSuccess, onCancel }) {
                   ))}
                 </SelectContent>
               </Select>
+              <FieldError message={fieldErrors.appointmentTime} />
             </div>
           </div>
 
