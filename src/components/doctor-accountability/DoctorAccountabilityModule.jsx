@@ -15,6 +15,7 @@ import {
   UserCog, IndianRupee, CheckCircle2, BarChart3,
   Search, Plus, Edit2, Trash2, CheckSquare, RefreshCw,
   Users, Clock, Wallet, Printer, FileDown, CheckCheck, ChevronLeft, ChevronRight,
+  Eye, EyeOff,
 } from 'lucide-react'
 import client from '@/api/client'
 import DoctorTiming from './DoctorTiming'
@@ -1406,7 +1407,8 @@ export default function DoctorAccountabilityModule() {
   const [addOpen, setAddOpen] = useState(false)
   const [savingDoc, setSavingDoc] = useState(false)
   const [departments, setDepartments] = useState([])
-  const [docForm, setDocForm] = useState({ fullName: '', email: '', specialization: '', phone: '', departmentId: '' })
+  const [docForm, setDocForm] = useState({ fullName: '', email: '', specialization: '', phone: '', departmentId: '', password: '' })
+  const [showDocPassword, setShowDocPassword] = useState(false)
 
   useEffect(() => {
     const loadDepartments = async () => {
@@ -1428,13 +1430,17 @@ export default function DoctorAccountabilityModule() {
       toast.error('Full name and email are required')
       return
     }
+    if (!docForm.password || docForm.password.length < 6) {
+      toast.error('Password must be at least 6 characters')
+      return
+    }
     setSavingDoc(true)
     try {
       const res = await client.post('/settings', { resource: 'user', role: 'doctor', ...docForm })
       if (res.success) {
         toast.success(`Doctor ${res.data.fullName} added`)
         setAddOpen(false)
-        setDocForm({ fullName: '', email: '', specialization: '', phone: '', departmentId: '' })
+        setDocForm({ fullName: '', email: '', specialization: '', phone: '', departmentId: '', password: '' })
         setTab('doctors')
         setReloadKey(k => k + 1)   // remount DoctorsTab so the new doctor appears
       } else toast.error(res.error || 'Failed to add doctor')
@@ -1517,6 +1523,26 @@ export default function DoctorAccountabilityModule() {
                 placeholder="Select department"
                 searchPlaceholder="Search departments..."
               />
+            </div>
+            <div>
+              <Label>Password *</Label>
+              <div className="relative mt-1">
+                <Input
+                  className="pr-9"
+                  type={showDocPassword ? 'text' : 'password'}
+                  value={docForm.password}
+                  onChange={e => setDocForm(f => ({ ...f, password: e.target.value }))}
+                  placeholder="Min. 6 characters"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowDocPassword(s => !s)}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                  tabIndex={-1}
+                >
+                  {showDocPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                </button>
+              </div>
             </div>
             <div className="flex gap-2 justify-end pt-2">
               <Button variant="outline" onClick={() => setAddOpen(false)}>Cancel</Button>
