@@ -736,15 +736,16 @@ ${order.clinicalIndication ? `<div class="section"><div class="section-header">C
                   <TableHead>Exam</TableHead>
                   <TableHead>Urgency</TableHead>
                   <TableHead>Ordered On</TableHead>
+                  <TableHead>Scheduled Date</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead>Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {loading ? (
-                  <TableRow><TableCell colSpan={7} className="text-center py-8">Loading...</TableCell></TableRow>
+                  <TableRow><TableCell colSpan={8} className="text-center py-8">Loading...</TableCell></TableRow>
                 ) : filteredOrders.length === 0 ? (
-                  <TableRow><TableCell colSpan={7} className="text-center py-8 text-gray-400">No orders found</TableCell></TableRow>
+                  <TableRow><TableCell colSpan={8} className="text-center py-8 text-gray-400">No orders found</TableCell></TableRow>
                 ) : filteredOrders.map(o => (
                   <TableRow key={o.id}>
                     <TableCell className="font-mono text-sm">{o.orderNumber}</TableCell>
@@ -758,6 +759,7 @@ ${order.clinicalIndication ? `<div class="section"><div class="section-header">C
                     </TableCell>
                     <TableCell>{urgencyBadge(o.urgency)}</TableCell>
                     <TableCell className="text-sm">{o.orderDate ? format(new Date(o.orderDate), 'dd MMM yyyy') : '—'}</TableCell>
+                    <TableCell className="text-sm">{o.scheduledDate ? format(new Date(o.scheduledDate), 'dd MMM yyyy') : '—'}</TableCell>
                     <TableCell>{statusBadge(o.status)}</TableCell>
                     <TableCell>
                       <div className="flex flex-wrap gap-1">
