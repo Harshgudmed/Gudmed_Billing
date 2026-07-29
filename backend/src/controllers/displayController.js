@@ -122,7 +122,7 @@ export async function getFloorsOverview(req, res, next) {
 // Patient/doctor NAMES are deliberately left unresolved (`_waiting`/
 // `_inProgId` carry only ids) — see hydrateColumns, which the caller runs on
 // just the slice it's about to render, not every column it built.
-async function buildRoomColumns(orgId, rooms) {
+async function buildRoomColumns(orgId, rooms, { includeIdle = false } = {}) {
   const roomIds = rooms.map((r) => r.id)
 
   // Lightweight fetch: every waiting/in-progress row for these rooms, but
@@ -158,8 +158,14 @@ async function buildRoomColumns(orgId, rooms) {
     // Active doctor first within a room, then the rest.
     const ordered = [...groupIds].sort((a, b) => (a === activeId ? -1 : b === activeId ? 1 : 0))
     for (const doctorId of ordered) {
-      const link = dto.doctorLinks.find((l) => l.doctorId === doctorId)
       const waiting = (byDoctor.get(doctorId) || [])
+      const inProgId = inProgByDoctor.get(doctorId)?.id || null
+      // A doctor with nobody waiting AND nobody being served has 0 patients —
+      // keep them off the board (the active doctor's group is always seeded, even
+      // when empty; see groupWaitingByDoctor). `?includeClosed=1` overrides this
+      // to show every sitting doctor, idle or not.
+      if (!includeIdle && waiting.length === 0 && !inProgId) continue
+      const link = dto.doctorLinks.find((l) => l.doctorId === doctorId)
       columns.push({
         roomId: room.id,
         roomNumber: room.roomNumber,
@@ -169,7 +175,7 @@ async function buildRoomColumns(orgId, rooms) {
         active: doctorId === activeId,
         waitingCount: waiting.length,
         _waiting: waiting.slice(0, PER_COL).map((e) => ({ id: e.id, visitType: e.visitType, flash: e.status === 'called' })),
-        _inProgId: inProgByDoctor.get(doctorId)?.id || null,
+        _inProgId: inProgId,
       })
     }
   }
@@ -251,7 +257,7 @@ export async function getFloorQueue(req, res, next) {
     const isOpen = (room) => { const a = toRoomDTO(room).activeDoctor; return !a.unassigned && !a.onBreak }
     const openRooms = includeClosed ? floorRooms : floorRooms.filter(isOpen)
 
-    const allColumns = await buildRoomColumns(ORG_ID, openRooms)
+    const allColumns = await buildRoomColumns(ORG_ID, openRooms, { includeIdle: includeClosed })
 
     // Slice the COLUMNS (doctors) across this floor's TVs.
     const screens = Math.max(1, Math.min(30, Number(req.query.screens) || 1))
@@ -308,7 +314,7 @@ export async function getScreenQueue(req, res, next) {
     const isOpen = (room) => { const a = toRoomDTO(room).activeDoctor; return !a.unassigned && !a.onBreak }
     const rooms = includeClosed ? rawRooms : rawRooms.filter(isOpen)
 
-    const allColumns = await buildRoomColumns(ORG_ID, rooms)
+    const allColumns = await buildRoomColumns(ORG_ID, rooms, { includeIdle: includeClosed })
     const columns = await hydrateColumns(allColumns) // curated by an admin, not a whole floor — hydrate all of it
 
     res.json({

@@ -195,11 +195,16 @@ export default function DisplayBoardsModule() {
 
   const handleSave = async () => {
     try {
+      // maxDoctors is kept as raw typed text in state while the dialog is open
+      // (see the input's onChange) — coerce it to a real, valid number here so a
+      // save triggered without the field ever blurring (e.g. Enter, or a click
+      // that doesn't hand focus away first) can't send "" or a non-number.
+      const payload = { ...formData, maxDoctors: Math.max(1, parseInt(formData.maxDoctors) || 1) }
       if (editingScreen) {
-        await client.put(`/screens/${editingScreen.id}`, formData)
+        await client.put(`/screens/${editingScreen.id}`, payload)
         toast.success('Screen updated')
       } else {
-        await client.post('/screens', formData)
+        await client.post('/screens', payload)
         toast.success('Screen created')
       }
       setShowDialog(false)
@@ -408,7 +413,13 @@ export default function DisplayBoardsModule() {
                   type="number"
                   min={1}
                   value={formData.maxDoctors}
-                  onChange={e => setFormData({...formData, maxDoctors: parseInt(e.target.value) || 1})}
+                  // Keep whatever the user is typing, even "" or "0" mid-edit — forcing a
+                  // fallback to 1 on every keystroke (the old `parseInt(...) || 1`) fought
+                  // the user while they typed a 2-digit number (0 is falsy, so it snapped
+                  // back to 1 before the next digit landed, garbling values like "02").
+                  // Only clamp to a valid minimum once they're done, on blur.
+                  onChange={e => setFormData({...formData, maxDoctors: e.target.value})}
+                  onBlur={e => setFormData({...formData, maxDoctors: Math.max(1, parseInt(e.target.value) || 1)})}
                 />
               </div>
             </div>

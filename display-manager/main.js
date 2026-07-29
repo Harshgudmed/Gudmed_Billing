@@ -3,21 +3,32 @@
 // (/display/auto) fullscreen on each. Each window is tied to that specific
 // monitor (by its OS display id), so unplugging ONE never disturbs the others.
 // No URL typing, ever.
-const { app, BrowserWindow, screen, globalShortcut } = require('electron')
+const { app, BrowserWindow, screen, globalShortcut, Tray, Menu, nativeImage } = require('electron')
+const path = require('node:path')
 const store = require('./deviceStore')
 
 // display.id -> BrowserWindow. Keyed by the OS monitor id (not a running index),
 // so removing one monitor only closes that one window and leaves the rest alone.
 const windows = new Map()
 let quitting = false
+let tray = null
 
 // The external monitors we put boards on — a laptop's built-in panel is skipped
 // (boards belong on the TVs, not the operator's screen). If every display is
 // internal, or GUDMED_INCLUDE_INTERNAL=1, use them all.
 function targetDisplays() {
   const all = screen.getAllDisplays()
-  const external = all.filter((d) => !d.internal)
-  return (process.env.GUDMED_INCLUDE_INTERNAL === '1' || external.length === 0) ? all : external
+  if (process.env.GUDMED_INCLUDE_INTERNAL === '1') return all
+  // The operator's OWN screen is the PRIMARY display (and/or a laptop's built-in
+  // panel). Boards belong on the TVs, not on the machine running the manager.
+  // `internal` alone is unreliable on Windows — it's often reported false for the
+  // built-in panel — so we key off the primary display id, which Windows reports
+  // correctly, and also drop anything explicitly flagged internal.
+  const primaryId = screen.getPrimaryDisplay().id
+  const boards = all.filter((d) => d.id !== primaryId && !d.internal)
+  // Never end up with zero boards (e.g. a single-screen dev laptop): fall back
+  // to every display so something still shows.
+  return boards.length ? boards : all
 }
 
 function urlForDisplay(display) {
@@ -26,11 +37,14 @@ function urlForDisplay(display) {
   return `${base}/display/auto?deviceId=${encodeURIComponent(deviceId)}`
 }
 
-// Tell the server this monitor just went away so the admin sees it offline
-// instantly, instead of waiting out the ~90s heartbeat gap.
-function markDisplayOffline(display) {
+// Tell the server a screen just went away so the admin sees it offline instantly,
+// instead of waiting out the ~90s heartbeat gap. Takes the EXACT deviceId the
+// window was opened with — recomputing it from a removed monitor's (now empty)
+// bounds produced a bogus id, so the real screen was never marked offline and
+// kept showing "online" after an HDMI unplug.
+function markDeviceOffline(deviceId) {
+  if (!deviceId) return
   const base = store.getConfig().baseUrl.replace(/\/$/, '')
-  const deviceId = store.deviceIdForDisplay(display)
   fetch(`${base}/api/display/devices/${encodeURIComponent(deviceId)}/offline`, { method: 'POST' }).catch(() => {})
 }
 
@@ -38,14 +52,27 @@ function openWindowForDisplay(display) {
   if (windows.has(display.id)) return
   const { x, y, width, height } = display.bounds
   const deviceId = store.deviceIdForDisplay(display)
+  // Build the window NORMAL (not fullscreen) and hidden. Creating it with
+  // `fullscreen:true` up front makes Windows fullscreen it on whichever monitor
+  // it first appears on — usually the primary — so a 3rd/4th display got a window
+  // that never actually landed on it and the screen stayed black. Instead we
+  // position it on the exact target monitor, show it, THEN enter kiosk.
   const win = new BrowserWindow({
     x, y, width, height,
-    fullscreen: true,
-    kiosk: true,
+    show: false,
     frame: false,
+    skipTaskbar: true, // signage window — keep it OFF the operator's taskbar
     autoHideMenuBar: true,
     backgroundColor: '#0b1120',
     webPreferences: { partition: `persist:dev-${deviceId}`, contextIsolation: true, nodeIntegration: false },
+  })
+  win.gudmedDeviceId = deviceId // remember it so removal can offline the RIGHT device
+
+  win.once('ready-to-show', () => {
+    if (win.isDestroyed()) return
+    win.setBounds({ x, y, width, height }) // pin to the right monitor first
+    win.show()
+    win.setKiosk(true)                      // now go fullscreen ON that monitor
   })
 
   win.loadURL(urlForDisplay(display))
@@ -86,12 +113,29 @@ function syncDisplays() {
   // Only the unplugged monitor's window closes — the others are untouched.
   for (const [id, win] of windows) {
     if (!liveIds.has(id)) {
-      const gone = screen.getAllDisplays().find((x) => x.id === id) || { id, bounds: { width: 0, height: 0, x: 0, y: 0 } }
-      markDisplayOffline(gone)
+      markDeviceOffline(win.gudmedDeviceId) // the exact device this window used
       win.destroy()
       windows.delete(id)
     }
   }
+}
+
+// A discreet system-tray presence instead of a taskbar button, with a menu to
+// reload/re-scan/quit (the global shortcut still quits too).
+function createTray() {
+  try {
+    const icon = nativeImage.createFromPath(path.join(__dirname, 'icon.png'))
+    tray = new Tray(icon.isEmpty() ? nativeImage.createEmpty() : icon)
+    tray.setToolTip('GudMed Display Manager — boards running')
+    tray.setContextMenu(Menu.buildFromTemplate([
+      { label: 'GudMed Display Manager', enabled: false },
+      { type: 'separator' },
+      { label: 'Reload all boards', click: () => { for (const [, w] of windows) if (!w.isDestroyed()) w.reload() } },
+      { label: 'Re-scan monitors', click: () => syncDisplays() },
+      { type: 'separator' },
+      { label: 'Quit', click: () => { quitting = true; app.quit() } },
+    ]))
+  } catch { /* tray is a nicety; Ctrl+Shift+Q still quits */ }
 }
 
 // Only ONE Display Manager may run — a second launch would open competing
@@ -104,6 +148,7 @@ app.whenReady().then(() => {
   store.init(app.getPath('userData'))
   app.setLoginItemSettings({ openAtLogin: true })
 
+  createTray()
   syncDisplays()
   screen.on('display-added', syncDisplays)
   screen.on('display-removed', syncDisplays)
