@@ -2,6 +2,7 @@ import { db } from '../config/db.js'
 import { getOrgId } from "../lib/reqContext.js";
 import { scopedDoctorId } from '../utils/scope.js'
 import { PATIENT_NAME_SELECT } from '../lib/patientName.js'
+import { todayRange } from '../lib/dates.js'
 
 // ---------------------------------------------------------------------------
 // Short-lived per-scope cache + single-flight dedup.
@@ -59,6 +60,7 @@ async function computeDashboard(ORG_ID, myDoctorId) {
     appointmentStatusGroups,
     recentPatients,
     upcomingAppointments,
+    queueWaiting,
   ] = await Promise.all([
     db.patient.count({ where: patientWhere }),
 
@@ -132,6 +134,18 @@ async function computeDashboard(ORG_ID, myDoctorId) {
         patient: { select: { ...PATIENT_NAME_SELECT, } },
       },
     }),
+
+    // Today's queue waiting count. A doctor sees only patients waiting for
+    // them (assignedToId) or returning to them (followUpDoctorId) — same
+    // "mine" scoping queueController.js uses for the queue list.
+    db.queueManagement.count({
+      where: {
+        organizationId: ORG_ID,
+        status: 'waiting',
+        joinedQueueAt: todayRange(),
+        ...(isDoctor ? { OR: [{ assignedToId: myDoctorId }, { followUpDoctorId: myDoctorId }] } : {}),
+      },
+    }),
   ])
 
   // Derive occupied & total from the single groupBy result.
@@ -147,7 +161,7 @@ async function computeDashboard(ORG_ID, myDoctorId) {
       todayRevenue: todayPayments._sum.amount || 0,
       occupiedBeds,
       availableBeds: totalBeds - occupiedBeds,
-      queueWaiting: 0,
+      queueWaiting,
       criticalAlerts: criticalLabResults,
     },
     appointmentStatuses: appointmentStatusGroups.reduce((acc, item) => {
