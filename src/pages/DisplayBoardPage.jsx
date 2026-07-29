@@ -753,6 +753,7 @@ const DEFAULT_SLIDE_MS = 30000
 // The default (auto-slide) is for the wall TV, where nobody is there to scroll —
 // there it MUST page itself. See ScreenBoardView vs FloorGridScreen.
 function GridBoard({ headerTitle, headerSubtitle, columns, maxVisible = DEFAULT_MAX_VISIBLE, slideMs = DEFAULT_SLIDE_MS, tickerText, resetKey, horizontalScroll = false }) {
+  const { orgInfo } = useOrgSettings() // the hospital's own name, straight from Settings
   const [page, setPage] = useState(0)
   const totalWaiting = columns.reduce((n, c) => n + (c.waitingCount || 0), 0)
   // In scroll mode there are no pages — the whole list shows and the user scrolls.
@@ -796,7 +797,7 @@ function GridBoard({ headerTitle, headerSubtitle, columns, maxVisible = DEFAULT_
         <div className="flex items-center gap-3">
           <Logo size={36} />
           <div>
-            <div className="text-xl font-bold leading-tight tracking-tight">OPD Live Queue</div>
+            <div className="text-xl font-bold leading-tight tracking-tight">{orgInfo?.name || 'OPD Live Queue'}</div>
             <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.2em] text-white/60">
               <span className="relative flex h-1.5 w-1.5">
                 <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
