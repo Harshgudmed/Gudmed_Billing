@@ -61,6 +61,17 @@ export const pincodeSchema = z
 
 export const requiredDateSchema = (label) => z.string().min(1, `${label} is required`)
 
+// Builds a local Date from a 'YYYY-MM-DD' date and an 'HH:mm' time (time
+// defaults to midnight when omitted) — used to compare an appointment
+// instant against "now" the same way the backend does.
+function toLocalDateTime(dateStr, timeStr) {
+  const [y, mo, d] = String(dateStr).split('-').map(Number)
+  if (!y || !mo || !d) return null
+  const [h, mi] = timeStr ? String(timeStr).split(':').map(Number) : [0, 0]
+  const dt = new Date(y, mo - 1, d, h || 0, mi || 0)
+  return isNaN(dt.getTime()) ? null : dt
+}
+
 // ── Register + first-appointment form ─────────────────────────────────────
 // Mirrors backend/src/controllers/patientController.js `patientSchema` for the
 // patient fields, plus the doctor/date the form additionally requires before
@@ -105,6 +116,40 @@ export const patientFormSchema = z.object({
   appointmentDate: requiredDateSchema('Appointment date'),
   appointmentTime: optionalTextSchema,
   notes: optionalTextSchema,
+}).superRefine((data, ctx) => {
+  // Mirrors the backend's past-booking guard (see appointmentController.js
+  // `create`) so a doomed submission is caught here instead of after the
+  // patient record has already been created.
+  if (!data.appointmentDate) return
+
+  const apptDay = toLocalDateTime(data.appointmentDate, '00:00')
+  if (!apptDay) return // malformed date — requiredDateSchema/backend already flags this
+
+  const now = new Date()
+  const today = toLocalDateTime(
+    `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`,
+    '00:00'
+  )
+
+  if (apptDay.getTime() < today.getTime()) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'Appointment date cannot be in the past',
+      path: ['appointmentDate'],
+    })
+    return
+  }
+
+  if (apptDay.getTime() === today.getTime() && data.appointmentTime) {
+    const apptInstant = toLocalDateTime(data.appointmentDate, data.appointmentTime)
+    if (apptInstant && apptInstant.getTime() < now.getTime()) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Appointment time cannot be in the past',
+        path: ['appointmentTime'],
+      })
+    }
+  }
 })
 
 // ── Error mapping ──────────────────────────────────────────────────────────
