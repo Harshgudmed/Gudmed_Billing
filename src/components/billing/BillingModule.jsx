@@ -196,7 +196,7 @@ export default function BillingModule({ onBack }) {
   const newForm = () => ({
     patientName: '', patientId: '', phone: '', age: '', gender: '', uhid: '',
     date: todayStr(), invoiceNo: newInvNo(), notes: '', payMode: 'Cash',
-    paid: false, items: [], discount: 0, gstPct: 0, homeCollection: '', sendWhatsApp: true,
+    paid: false, items: [], discount: '', gstPct: '', homeCollection: '', sendWhatsApp: true,
   })
   const [form, setForm] = useState(newForm())
   // Department drives the whole New Bill form — no department chosen = nothing shown.
@@ -549,7 +549,7 @@ export default function BillingModule({ onBack }) {
         // Home collection charge → its own line so the invoice total is correct.
         // Lab-only (see the department gate on the input above) — checked again
         // here so a stale value can never reach a non-Lab bill either.
-        if (department === 'Lab' && homeCharge > 0) apiItems.push({ serviceName: 'Home Collection Charges', quantity: 1, unitPrice: homeCharge, total: homeCharge, tax: 0, discount: 0 })
+        if (department === 'Lab' && homeCharge > 0) apiItems.push({ serviceName: 'Home Collection Charges', quantity: 1, unitPrice: homeCharge, total: homeCharge, tax: '', discount: '' })
         const result = await client.post('/billing', {
           resource: 'invoice', patientId: form.patientId, items: apiItems,
           discountAmount: discountAmt, discountPercentage: form.discount,
@@ -1142,12 +1142,12 @@ export default function BillingModule({ onBack }) {
                         <div className="flex justify-between text-sm text-gray-600"><span>Subtotal</span><span className="font-medium">{fmt(subtotal)}</span></div>
                         <div className="flex items-center gap-2">
                           <span className="text-sm text-gray-600 w-24">Discount %</span>
-                          <Input type="number" min="0" max="100" className="h-7 w-20 text-sm text-center" value={Number.isNaN(form.discount) ? '' : form.discount} onChange={e => { const v = parseFloat(e.target.value); setForm(f => ({ ...f, discount: Number.isNaN(v) ? 0 : v })) }} />
+                          <Input type="number" min="0" max="100" className="h-7 w-20 text-sm text-center" placeholder= "0" value={Number.isNaN(form.discount) ? '' : form.discount} onChange={e => { const v = parseFloat(e.target.value); setForm(f => ({ ...f, discount: Number.isNaN(v) ? 0 : v })) }} />
                           {discountAmt > 0 && <span className="text-sm text-green-600 font-medium">− {fmt(discountAmt)}</span>}
                         </div>
                         <div className="flex items-center gap-2">
                           <span className="text-sm text-gray-600 w-24">GST %</span>
-                          <Input type="number" min="0" max="100" className="h-7 w-20 text-sm text-center" value={Number.isNaN(form.gstPct) ? '' : form.gstPct} onChange={e => { const v = parseFloat(e.target.value); setForm(f => ({ ...f, gstPct: Number.isNaN(v) ? 0 : v })) }} />
+                          <Input type="number" min="0" max="100" className="h-7 w-20 text-sm text-center" placeholder="0" value={Number.isNaN(form.gstPct) ? '' : form.gstPct} onChange={e => { const v = parseFloat(e.target.value); setForm(f => ({ ...f, gstPct: Number.isNaN(v) ? 0 : v })) }} />
                           {gstAmt > 0 && <span className="text-sm text-gray-600 font-medium">+ {fmt(gstAmt)}</span>}
                         </div>
                         {/* Home collection — Laboratory only (sample pickup). Doesn't apply
