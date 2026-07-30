@@ -556,8 +556,8 @@ export default function BillingModule({ onBack }) {
         if (department === 'Lab' && homeCharge > 0) apiItems.push({ serviceName: 'Home Collection Charges', quantity: 1, unitPrice: homeCharge, total: homeCharge, tax: 0, discount: 0 })
         const result = await client.post('/billing', {
           resource: 'invoice', patientId: form.patientId, items: apiItems,
-          discountAmount: discountAmt, discountPercentage: form.discount,
-          taxPercentage: form.gstPct || 0,
+          discountAmount: discountAmt, discountPercentage: Number(form.discount) || 0,
+          taxPercentage: Number(form.gstPct) || 0,
           // Tag the invoice with its department + home-collection so the receipt shows it.
           notes: `[${deptLabel}] ${form.notes || ''}${department === 'Lab' && homeCharge > 0 ? ` [HCC:${homeCharge}]` : ''}`.trim(),
         })
