@@ -14,6 +14,7 @@ import { z } from 'zod'
 import {
   requiredNameSchema, optionalTextSchema, requiredMobileSchema, optionalMobileSchema,
   optionalEmailSchema, pincodeSchema, requiredDateSchema, issuesToFieldErrors,
+  requiredCitySchema, requiredStateSchema,
 } from '@/lib/schemas/patientFormSchema'
 
 // Same field rules as RegisterPatientForm's patientFormSchema, minus the
@@ -35,9 +36,9 @@ const walkInPatientSchema = z.object({
   houseNumber: optionalTextSchema,
   street: optionalTextSchema,
   locality: optionalTextSchema,
-  city: optionalTextSchema,
+  city: requiredCitySchema('City'),
   district: optionalTextSchema,
-  state: optionalTextSchema,
+  state: requiredStateSchema('State'),
   pincode: pincodeSchema,
 
   emergencyContactName: optionalTextSchema,
