@@ -102,11 +102,16 @@ export async function heartbeatDevice(req, res, next) {
     const { appVersion } = req.body || {}
     const existing = await db.displayDevice.findFirst({ where: { deviceId: req.params.deviceId, organizationId: ORG_ID }, select: { id: true } })
     if (!existing) return res.status(404).json({ success: false, error: 'Device not found' })
-    await db.displayDevice.update({
+    const device = await db.displayDevice.update({
       where: { id: existing.id },
       data: { lastSeenAt: new Date(), lastIpAddress: clientIp(req), ...(appVersion ? { appVersion } : {}) },
+      select: { screenId: true, status: true },
     })
-    res.json({ success: true })
+    // Echo back the device's CURRENT assignment. A board already showing a
+    // screen has its screenId fixed in its URL, so without this it can never
+    // learn that an admin re-assigned it (or unpaired it) — it just keeps
+    // showing the old screen forever. The board compares this on every beat.
+    res.json({ success: true, screenId: device.screenId, status: device.status })
   } catch (err) { next(err) }
 }
 

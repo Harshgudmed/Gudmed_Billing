@@ -1,21 +1,19 @@
 import { useState } from 'react'
 import { toast } from 'sonner'
-import { RefreshCw, Users, Clock, CheckCircle, Search, MonitorPlay, DoorOpen, Bell } from 'lucide-react'
+import { RefreshCw, Users, Search, MonitorPlay } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { Pagination } from '@/components/common/Pagination'
-import { StatusBadge } from '@/components/common/StatusBadge'
+import { PaginatedTable } from '@/components/common/PaginatedTable'
 import { useDateFilter } from '@/components/common/DateFilter'
 import { useDebounce } from '@/lib/useDebounce'
 import { useServerPagination } from '@/lib/useServerPagination'
 import client from '@/api/client'
 import AppointmentsModule from '@/components/appointments/AppointmentsModule'
 import BillingModule from '@/components/billing/BillingModule'
-import { getFullName } from "@/lib/patient";
+import { QueueRow } from '@/components/queue/QueueRow'
+import { QueueEmptyState } from '@/components/queue/QueueEmptyState'
 
 const PRIORITY_COLORS = {
   urgent: 'bg-red-500 text-white',
@@ -49,12 +47,18 @@ const STAT_TILES = [
 
 const QUEUE_PER_PAGE = 10
 
-function fmtWait(minutes) {
-  if (minutes == null) return '—'
-  if (minutes < 1) return '< 1 min'
-  if (minutes < 60) return `${minutes} min`
-  return `${Math.floor(minutes / 60)}h ${minutes % 60}m`
-}
+// The table's columns, declared once: PaginatedTable renders these as the header
+// AND derives the loading/empty cell's colSpan from the count, so the two can no
+// longer drift apart. Must stay in the same order as the cells in QueueRow.
+const QUEUE_COLUMNS = [
+  { header: '#', className: 'w-10' },
+  { header: 'Patient Name' },
+  { header: 'UHID' },
+  { header: 'Status' },
+  { header: 'Wait Time' },
+  { header: 'Priority' },
+  { header: 'Actions' },
+]
 
 const TODAY_LABEL = new Date().toLocaleDateString('en-IN', {
   weekday: 'long', day: '2-digit', month: 'long', year: 'numeric',
@@ -83,7 +87,9 @@ export default function QueueModule() {
       endDate: dateFilter.range.endDate,
     },
   })
-  const { rows: queue, loading, summary, refresh } = queuePage
+  // `rows` isn't pulled out: PaginatedTable reads them off the pagination object
+  // itself. `loading` drives the Refresh button, `summary` the stat tiles.
+  const { loading, summary, refresh } = queuePage
 
   // One place for the loading/success/error/refresh cycle every queue action
   // shares. setStatus, callNext and changePriority used to each copy-paste this
@@ -216,183 +222,39 @@ export default function QueueModule() {
             )}
           </div>
 
+          {/* The table itself — header, first-load spinner, empty state, the page
+              of rows and the pagination footer — is the shared PaginatedTable,
+              so none of that boilerplate (or the colSpan that has to match the
+              column count) lives here. QUEUE_COLUMNS is the single source of
+              both the headers and that colSpan. */}
           <Card>
             <CardContent className="p-0">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead className="w-10">#</TableHead>
-                    <TableHead>Patient Name</TableHead>
-                    <TableHead>UHID</TableHead>
-                    <TableHead>Status</TableHead>
-                    <TableHead>Wait Time</TableHead>
-                    <TableHead>Priority</TableHead>
-                    <TableHead>Actions</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {/* Only blank the table for the FIRST load (no data yet). On a
-                      refetch after a priority/status change the rows already
-                      exist, so keep showing them instead of wiping the whole list
-                      to a spinner — the change re-ranks one row, not the page. */}
-                  {loading && queue.length === 0 ? (
-                    <TableRow>
-                      <TableCell colSpan={7} className="text-center py-10 text-gray-400">
-                        <RefreshCw className="h-5 w-5 animate-spin inline mr-2" />Loading queue...
-                      </TableCell>
-                    </TableRow>
-                  ) : queue.length === 0 ? (
-                    <TableRow>
-                      <TableCell colSpan={7} className="text-center py-10 text-gray-400">
-                        <Clock className="h-8 w-8 mx-auto mb-2 text-gray-300" />
-                        {/* The queue defaults to TODAY. An empty screen with no
-                            explanation reads as "the queue is broken" when in fact
-                            the filters simply exclude everything — say so, and give
-                            a one-click way out. */}
-                        {dateFilter.active || statusFilter !== 'all' || debouncedSearch ? (
-                          <>
-                            <p className="text-gray-600">No patients match the current filters</p>
-                            <p className="text-xs mt-1">
-                              Showing {dateFilter.active ? <b>{dateFilter.mode === 'today' ? "today" : "the selected dates"}</b> : 'all dates'}
-                              {statusFilter !== 'all' && <> · status <b>{statusFilter}</b></>}
-                              {debouncedSearch && <> · search <b>“{debouncedSearch}”</b></>}
-                            </p>
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              className="mt-3"
-                              onClick={() => {
-                                dateFilter.reset()
-                                setStatusFilter('all')
-                                setSearch('')
-                              }}
-                            >
-                              Clear filters &amp; show all
-                            </Button>
-                          </>
-                        ) : (
-                          <>
-                            <p>No patients in queue</p>
-                            <p className="text-xs mt-1">Queue entries from triage and appointment check-ins appear here</p>
-                          </>
-                        )}
-                      </TableCell>
-                    </TableRow>
-                  ) : queue.map((entry, idx) => {
-                    const patientName = entry.patient
-                      ? getFullName(entry.patient) || '—'
-                      : '—'
-                    const status = entry.status || 'waiting'
-                    const priority = entry.priority || 'normal'
-                    const isCompleted = ['completed', 'cancelled'].includes(status)
-                    const rowNumber = (queuePage.page - 1) * QUEUE_PER_PAGE + idx + 1
-
-                    return (
-                      <TableRow key={entry.id} className={isCompleted ? 'opacity-50' : ''}>
-                        <TableCell className="font-bold text-gray-500">{rowNumber}</TableCell>
-                        <TableCell>
-                          <div className="font-medium">{patientName}</div>
-                          {entry.patient?.phonePrimary && (
-                            <div className="text-xs text-gray-400">{entry.patient.phonePrimary}</div>
-                          )}
-                        </TableCell>
-                        <TableCell className="font-mono text-sm">{entry.patient?.mrn || '—'}</TableCell>
-                        <TableCell><StatusBadge status={status} map={QUEUE_STATUS_COLORS} /></TableCell>
-                        <TableCell className="text-sm text-gray-600">
-                          <div className="flex items-center gap-1">
-                            <Clock className="h-3.5 w-3.5 text-gray-400" />
-                            {fmtWait(entry.waitTime)}
-                          </div>
-                        </TableCell>
-                        <TableCell>
-                          {isCompleted ? (
-                            <StatusBadge status={priority} map={PRIORITY_COLORS} />
-                          ) : (
-                            <Select 
-                              value={priority} 
-                              onValueChange={(value) => changePriority(entry, value)}
-                              disabled={updatingId === `${entry.id}_priority`}
-                            >
-                              <SelectTrigger className={`h-7 w-[110px] px-2 py-1 border-none focus:ring-0 capitalize font-semibold text-xs ${PRIORITY_COLORS[priority] || 'bg-gray-100 text-gray-800'}`}>
-                                <SelectValue placeholder="Priority" />
-                              </SelectTrigger>
-                              <SelectContent>
-                                {PRIORITY_LEVELS.map(level => (
-                                  <SelectItem key={level} value={level} className="capitalize text-xs font-medium">
-                                    {level}
-                                  </SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
-                          )}
-                        </TableCell>
-                        <TableCell>
-                          <div className="flex gap-1 flex-wrap">
-                            {/* The main action: this patient walks in, the one
-                                before them is finished, and the person behind
-                                them starts reading "You are next" on the wall
-                                board — one press, one server transaction. */}
-                            {!isCompleted && status !== 'in_progress' && (
-                              <Button
-                                size="sm"
-                                className="bg-[#2E4168] text-white hover:bg-[#253453]"
-                                disabled={updatingId === `${entry.id}_call`}
-                                onClick={() => callNext(entry)}
-                              >
-                                <DoorOpen className="h-3.5 w-3.5 mr-1" />
-                                Call in
-                              </Button>
-                            )}
-                            {/* Puts "YOU ARE NEXT — PLEASE BE READY" against
-                                this patient on the wall board. Nothing appears
-                                there unless this is pressed — the board never
-                                decides on its own that someone should stand up. */}
-                            {!isCompleted && status !== 'called' && status !== 'in_progress' && (
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                className="border-amber-300 text-amber-700 hover:bg-amber-50"
-                                disabled={updatingId === `${entry.id}_called`}
-                                onClick={() => setStatus(entry, 'called', `${patientName} alerted — "You are next" is now on the display board`)}
-                              >
-                                <Bell className="h-3.5 w-3.5 mr-1" />
-                                Alert next
-                              </Button>
-                            )}
-                            {status === 'called' && (
-                              <Button
-                                size="sm"
-                                variant="ghost"
-                                className="text-gray-500"
-                                disabled={updatingId === `${entry.id}_waiting`}
-                                onClick={() => setStatus(entry, 'waiting', 'Alert removed from the display board')}
-                              >
-                                Undo alert
-                              </Button>
-                            )}
-                            {!isCompleted && (
-                              <Button
-                                size="sm"
-                                className="bg-green-600 hover:bg-green-700 text-white"
-                                disabled={updatingId === `${entry.id}_completed`}
-                                onClick={() => setStatus(entry, 'completed', 'Marked as completed')}
-                              >
-                                <CheckCircle className="h-3.5 w-3.5 mr-1" />
-                                Complete
-                              </Button>
-                            )}
-                            {isCompleted && <span className="text-xs text-gray-400 italic">Done</span>}
-                          </div>
-                        </TableCell>
-                      </TableRow>
-                    )
-                  })}
-                </TableBody>
-              </Table>
-              <Pagination
-                page={queuePage.page}
-                totalPages={queuePage.totalPages}
-                onPageChange={queuePage.setPage}
+              <PaginatedTable
+                pagination={queuePage}
+                columns={QUEUE_COLUMNS}
+                loadingLabel="Loading queue..."
+                empty={
+                  <QueueEmptyState
+                    dateFilter={dateFilter}
+                    statusFilter={statusFilter}
+                    search={debouncedSearch}
+                    onClearFilters={() => { dateFilter.reset(); setStatusFilter('all'); setSearch('') }}
+                  />
+                }
+                renderRow={(entry, idx) => (
+                  <QueueRow
+                    key={entry.id}
+                    entry={entry}
+                    rowNumber={(queuePage.page - 1) * QUEUE_PER_PAGE + idx + 1}
+                    updatingId={updatingId}
+                    statusColors={QUEUE_STATUS_COLORS}
+                    priorityColors={PRIORITY_COLORS}
+                    priorityLevels={PRIORITY_LEVELS}
+                    onCallNext={callNext}
+                    onSetStatus={setStatus}
+                    onChangePriority={changePriority}
+                  />
+                )}
               />
             </CardContent>
           </Card>

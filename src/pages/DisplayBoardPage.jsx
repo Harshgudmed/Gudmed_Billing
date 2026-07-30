@@ -906,14 +906,31 @@ function ScreenBoardView() {
   // When this board was reached from the self-pairing page (/display/auto), a
   // deviceId rides along in the URL. Keep sending heartbeats so Screen Health
   // still shows this TV as online while it displays the board.
+  //
+  // The heartbeat's reply also carries the device's CURRENT assignment, which
+  // is the only way a board can notice an admin re-assigning it: the screenId
+  // it renders comes from its own URL, so nothing else would ever tell this TV
+  // to move. On a change we send it to the new screen (or back to pairing if
+  // it was unpaired), replacing history so the TV can't navigate back.
   useEffect(() => {
     const deviceId = new URLSearchParams(window.location.search).get('deviceId')
     if (!deviceId) return
-    const beat = () => client.post(`/display/devices/${deviceId}/heartbeat`, { appVersion: '1.0.0' }).catch(() => {})
+    const beat = () => client
+      .post(`/display/devices/${deviceId}/heartbeat`, { appVersion: '1.0.0' })
+      .then((res) => {
+        if (res?.status === 'unpaired' || !res?.screenId) {
+          if (res?.status === 'unpaired') window.location.replace(`/display/auto?deviceId=${encodeURIComponent(deviceId)}`)
+          return
+        }
+        if (res.screenId !== screenId) {
+          window.location.replace(`/display/screen/${res.screenId}?deviceId=${encodeURIComponent(deviceId)}`)
+        }
+      })
+      .catch(() => {})
     beat()
     const id = setInterval(beat, 15_000)
     return () => clearInterval(id)
-  }, [])
+  }, [screenId])
 
   return (
     <GridBoard
