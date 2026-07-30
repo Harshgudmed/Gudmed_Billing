@@ -35,9 +35,26 @@ function displayKey(display) {
 }
 
 // The permanent deviceId for a given monitor — created once, reused forever.
-function deviceIdForDisplay(display) {
-  const key = displayKey(display)
-  if (!cache.devices[key]) { cache.devices[key] = crypto.randomUUID(); save() }
+//
+// `hardwareKey` (monitorIdentity.js — the monitor's device path, i.e. the panel
+// on a specific adapter port) is preferred when available: it survives Windows
+// renumbering monitor POSITIONS on a replug, which the bounds key cannot. The
+// bounds key stays as the fallback for when the hardware path can't be read.
+function deviceIdForDisplay(display, hardwareKey) {
+  const posKey = displayKey(display)
+  const key = hardwareKey || posKey
+  if (!cache.devices[key]) {
+    if (hardwareKey && cache.devices[posKey]) {
+      // First sight of this monitor under its hardware identity, but it already
+      // has an id under the position it is sitting at RIGHT NOW — carry that id
+      // over so a screen that is already paired doesn't have to be paired again.
+      cache.devices[key] = cache.devices[posKey]
+      delete cache.devices[posKey]
+    } else {
+      cache.devices[key] = crypto.randomUUID()
+    }
+    save()
+  }
   return cache.devices[key]
 }
 

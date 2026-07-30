@@ -19,6 +19,15 @@ function readStoredId() {
 }
 function cacheId(id) { try { localStorage.setItem(LS_KEY, id) } catch { /* private mode */ } }
 
+// The monitor's own hardware path, passed through by the Display Manager (e.g.
+// DISPLAY\GSM5B55\b&107a8ed1&0&UID257). Reported as this device's friendly name
+// so Screen Health lists the actual panel + port instead of "Unnamed display",
+// which is what makes each row identifiable — and lets anyone check the id
+// really is the monitor's, not one we invented.
+function readMonitorName() {
+  try { return new URLSearchParams(window.location.search).get('monitor') || null } catch { return null }
+}
+
 // Registers this physical display, then keeps it alive (heartbeat) and watches
 // for the admin to pair it to a screen. Returns the live pairing state.
 export function useDisplayDevice() {
@@ -37,7 +46,11 @@ export function useDisplayDevice() {
 
     async function register() {
       try {
-        const res = await client.post('/display/devices/register', { deviceId: readStoredId(), appVersion: APP_VERSION })
+        const res = await client.post('/display/devices/register', {
+          deviceId: readStoredId(),
+          appVersion: APP_VERSION,
+          friendlyName: readMonitorName(),
+        })
         if (alive) apply(res.data)
       } catch {
         if (alive) setState(s => ({ ...s, ready: true, status: 'connecting' }))

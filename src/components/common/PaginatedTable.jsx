@@ -25,6 +25,7 @@ export function PaginatedTable({
   renderRow,
   transform,
   empty = 'No records found',
+  loadingLabel,
   tableClassName,
   headerClassName,
 }) {
@@ -47,6 +48,9 @@ export function PaginatedTable({
             <TableRow>
               <TableCell colSpan={colSpan} className="text-center py-10 text-gray-400">
                 <Loader2 className="h-5 w-5 animate-spin inline-block" />
+                {/* Optional — a screen that already said "Loading queue…" keeps
+                    saying it; callers that pass nothing get the bare spinner. */}
+                {loadingLabel && <span className="ml-2">{loadingLabel}</span>}
               </TableCell>
             </TableRow>
           ) : items.length === 0 ? (

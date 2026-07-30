@@ -7,6 +7,8 @@ import { useDisplayDevice } from '@/hooks/useDisplayDevice'
 // screen's live board (which keeps its own heartbeat going via ?deviceId=).
 export default function DisplayAutoPage() {
   const { ready, status, screenId, pairingCode, deviceId } = useDisplayDevice()
+  // Passed through by the Display Manager — this monitor's hardware path.
+  const monitorId = new URLSearchParams(window.location.search).get('monitor')
 
   // Paired → go to the real board page (identical to opening it directly). We
   // navigate rather than iframe so there's zero nesting; the board heartbeats
@@ -44,7 +46,15 @@ export default function DisplayAutoPage() {
             <p>2. Find the display showing code <b>{pairingCode || '——————'}</b>.</p>
             <p>3. Assign it to a screen. This TV will start showing the queue automatically.</p>
           </div>
-          <div style={styles.footer}>This screen checks for its assignment automatically — leave it on.</div>
+          <div style={styles.footer}>
+            This screen checks for its assignment automatically — leave it on.
+            {monitorId && (
+              // The monitor's own hardware path, shown so it can be checked
+              // against what Windows reports for this panel — proof the screen
+              // is identified by its hardware, not by a number we made up.
+              <div style={styles.monitorId}>{monitorId}</div>
+            )}
+          </div>
         </>
       )}
 
@@ -69,6 +79,7 @@ const styles = {
   },
   steps: { maxWidth: '640px', color: '#aab7d8', fontSize: 'clamp(13px, 1.5vw, 18px)', lineHeight: 1.7, marginTop: '8px' },
   footer: { position: 'absolute', bottom: '5vh', color: '#5f6d92', fontSize: '13px' },
+  monitorId: { marginTop: '6px', color: '#465071', fontSize: '11px', fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', wordBreak: 'break-all' },
   hint: { color: '#9fb0d8', fontSize: 'clamp(14px, 1.6vw, 18px)' },
   spinner: { width: '46px', height: '46px', borderRadius: '50%', border: '4px solid #24314f', borderTopColor: '#6c8cff', animation: 'gm-spin 0.9s linear infinite' },
 }
