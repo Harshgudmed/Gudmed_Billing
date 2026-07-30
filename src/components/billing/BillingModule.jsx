@@ -549,7 +549,11 @@ export default function BillingModule({ onBack }) {
         // Home collection charge → its own line so the invoice total is correct.
         // Lab-only (see the department gate on the input above) — checked again
         // here so a stale value can never reach a non-Lab bill either.
-        if (department === 'Lab' && homeCharge > 0) apiItems.push({ serviceName: 'Home Collection Charges', quantity: 1, unitPrice: homeCharge, total: homeCharge, tax: '', discount: '' })
+        // tax/discount are NUMBERS here, not the form's empty-string placeholders:
+        // the API validates each line with z.number() (billingController's
+        // invoiceItemSchema), which rejects '' outright — so a Lab bill carrying a
+        // home-collection line would fail to save at all.
+        if (department === 'Lab' && homeCharge > 0) apiItems.push({ serviceName: 'Home Collection Charges', quantity: 1, unitPrice: homeCharge, total: homeCharge, tax: 0, discount: 0 })
         const result = await client.post('/billing', {
           resource: 'invoice', patientId: form.patientId, items: apiItems,
           discountAmount: discountAmt, discountPercentage: form.discount,

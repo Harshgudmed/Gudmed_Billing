@@ -23,6 +23,7 @@ import { drName } from '@/lib/utils'
 
 // formatMoney also survives null/undefined — the old local `fmt` threw on them.
 import { formatMoney as fmt } from '@/lib/format'
+import { useOrgSettings } from '@/lib/useOrgSettings'
 
 function periodLabel(p) {
   if (!p) return '—'
@@ -431,7 +432,10 @@ function CommissionsTab({ openAddSignal }) {
   const [filterDoctor, setFilterDoctor] = useState('all')
   const [filterStatus, setFilterStatus] = useState('all')
   const [filterDate, setFilterDate] = useState('all')
-  const [orgInfo, setOrgInfo] = useState({ name: 'Hospital', address: '', city: '', phone: '', email: '' })
+  // The hospital's own details for the printed report — same shape as before,
+  // but actually populated: the old useState's setter was never called, so every
+  // print came out headed 'Hospital'.
+  const { orgInfo } = useOrgSettings()
   // Bulk settle (merged from the old Settlement tab)
   const [selectedIds, setSelectedIds] = useState(new Set())
   const [bulkSettling, setBulkSettling] = useState(false)
