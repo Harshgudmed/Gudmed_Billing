@@ -1146,12 +1146,12 @@ export default function BillingModule({ onBack }) {
                         <div className="flex justify-between text-sm text-gray-600"><span>Subtotal</span><span className="font-medium">{fmt(subtotal)}</span></div>
                         <div className="flex items-center gap-2">
                           <span className="text-sm text-gray-600 w-24">Discount %</span>
-                          <Input type="number" min="0" max="100" className="h-7 w-20 text-sm text-center" placeholder= "0" value={Number.isNaN(form.discount) ? '' : form.discount} onChange={e => { const v = parseFloat(e.target.value); setForm(f => ({ ...f, discount: Number.isNaN(v) ? 0 : v })) }} />
+                          <Input type="number" min="0" max="100" className="h-7 w-20 text-sm text-center" placeholder= "0" value={form.discount} onChange={e => { const v = parseFloat(e.target.value); setForm(f => ({ ...f, discount: e.target.value === '' ? '' : (Number.isNaN(v) ? 0 : v) })) }} />
                           {discountAmt > 0 && <span className="text-sm text-green-600 font-medium">− {fmt(discountAmt)}</span>}
                         </div>
                         <div className="flex items-center gap-2">
                           <span className="text-sm text-gray-600 w-24">GST %</span>
-                          <Input type="number" min="0" max="100" className="h-7 w-20 text-sm text-center" placeholder="0" value={Number.isNaN(form.gstPct) ? '' : form.gstPct} onChange={e => { const v = parseFloat(e.target.value); setForm(f => ({ ...f, gstPct: Number.isNaN(v) ? 0 : v })) }} />
+                          <Input type="number" min="0" max="100" className="h-7 w-20 text-sm text-center" placeholder="0" value={form.gstPct} onChange={e => { const v = parseFloat(e.target.value); setForm(f => ({ ...f, gstPct: e.target.value === '' ? '' : (Number.isNaN(v) ? 0 : v) })) }} />
                           {gstAmt > 0 && <span className="text-sm text-gray-600 font-medium">+ {fmt(gstAmt)}</span>}
                         </div>
                         {/* Home collection — Laboratory only (sample pickup). Doesn't apply
