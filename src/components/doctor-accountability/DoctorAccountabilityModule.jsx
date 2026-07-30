@@ -68,6 +68,8 @@ function DoctorsTab() {
   const [slabCounts, setSlabCounts] = useState({})   // doctorId -> number of follow-up ranges
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
+  const [filterStatus, setFilterStatus] = useState('all')
+  const [filterSpecialization, setFilterSpecialization] = useState('all')
   const [setupPage, setSetupPage] = useState(1)
   const ITEMS_PER_PAGE = 10
 
@@ -98,7 +100,7 @@ function DoctorsTab() {
   }, [])
 
   useEffect(() => { load() }, [load])
-  useEffect(() => { setSetupPage(1) }, [search])
+  useEffect(() => { setSetupPage(1) }, [search, filterStatus, filterSpecialization])
 
   async function openConfigure(doc) {
     setCfgDoctor(doc)
@@ -197,10 +199,18 @@ function DoctorsTab() {
     } catch { toast.error('Error deleting range') }
   }
 
-  const filtered = doctors.filter(d =>
-    d.fullName.toLowerCase().includes(search.toLowerCase()) ||
-    (d.specialization || '').toLowerCase().includes(search.toLowerCase())
-  )
+  const specializations = [...new Set(doctors.map(d => d.specialization).filter(Boolean))].sort()
+
+  const filtered = doctors.filter(d => {
+    const matchesSearch = d.fullName.toLowerCase().includes(search.toLowerCase()) ||
+      (d.specialization || '').toLowerCase().includes(search.toLowerCase())
+    if (!matchesSearch) return false
+    if (filterSpecialization !== 'all' && d.specialization !== filterSpecialization) return false
+    const ready = d.commissionConfig && d.consultationFee != null
+    if (filterStatus === 'active' && !ready) return false
+    if (filterStatus === 'setup-needed' && ready) return false
+    return true
+  })
   const totalPages = Math.ceil(filtered.length / ITEMS_PER_PAGE)
   const paginated = filtered.slice((setupPage - 1) * ITEMS_PER_PAGE, setupPage * ITEMS_PER_PAGE)
 
@@ -211,6 +221,21 @@ function DoctorsTab() {
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
           <Input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search doctor by name..." className="pl-9" />
         </div>
+        <Select value={filterStatus} onValueChange={setFilterStatus}>
+          <SelectTrigger className="w-40"><SelectValue placeholder="Status" /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Status</SelectItem>
+            <SelectItem value="active">Active</SelectItem>
+            <SelectItem value="setup-needed">Setup needed</SelectItem>
+          </SelectContent>
+        </Select>
+        <Select value={filterSpecialization} onValueChange={setFilterSpecialization}>
+          <SelectTrigger className="w-48"><SelectValue placeholder="Specialization" /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Specializations</SelectItem>
+            {specializations.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}
+          </SelectContent>
+        </Select>
         <Button variant="outline" size="sm" onClick={load}><RefreshCw className="h-4 w-4 mr-1" />Refresh</Button>
       </div>
 
