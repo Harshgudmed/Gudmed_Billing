@@ -325,7 +325,7 @@ export default function RegisterPatientForm({ onSuccess, onCancel }) {
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <Label className="text-xs text-gray-600">House / Flat / Building No.</Label>
-              <Input className="mt-1" value={patientForm.houseNumber} onChange={e => setField('houseNumber', e.target.value)} placeholder="e.g. 12-B" />
+              <Input className="mt-1" value={patientForm.houseNumber} onChange={e => setField('houseNumber', e.target.value)} placeholder="e.g. Flat 12B" />
             </div>
             <div>
               <Label className="text-xs text-gray-600">Street / Block</Label>
@@ -338,8 +338,9 @@ export default function RegisterPatientForm({ onSuccess, onCancel }) {
               <Input className="mt-1" value={patientForm.locality} onChange={e => setField('locality', e.target.value)} placeholder="e.g. Andheri West" />
             </div>
             <div>
-              <Label className="text-xs text-gray-600">Village / Town / City</Label>
-              <Input className="mt-1" value={patientForm.city} onChange={e => setField('city', e.target.value)} placeholder="e.g. Mumbai" />
+              <Label className="text-xs text-gray-600">Village / Town / City <span className="text-red-500">*</span></Label>
+              <Input className={cn('mt-1', fieldErrors.city && 'border-red-500')} value={patientForm.city} onChange={e => setField('city', e.target.value)} placeholder="e.g. Mumbai" required />
+              <FieldError message={fieldErrors.city} />
             </div>
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
@@ -348,17 +349,18 @@ export default function RegisterPatientForm({ onSuccess, onCancel }) {
               <Input className="mt-1" value={patientForm.district} onChange={e => setField('district', e.target.value)} placeholder="e.g. Mumbai Suburban" />
             </div>
             <div>
-              <Label className="text-xs text-gray-600">State</Label>
+              <Label className="text-xs text-gray-600">State <span className="text-red-500">*</span></Label>
               <Select value={patientForm.state} onValueChange={v => setField('state', v)}>
-                <SelectTrigger className="mt-1"><SelectValue placeholder="Select state" /></SelectTrigger>
+                <SelectTrigger className={cn('mt-1', fieldErrors.state && 'border-red-500')}><SelectValue placeholder="Select State" /></SelectTrigger>
                 <SelectContent>
                   {INDIAN_STATES.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}
                 </SelectContent>
               </Select>
+              <FieldError message={fieldErrors.state} />
             </div>
             <div>
-              <Label className="text-xs text-gray-600">PIN Code</Label>
-              <Input className={cn('mt-1', fieldErrors.pincode && 'border-red-500')} value={patientForm.pincode} onChange={e => setField('pincode', e.target.value.replace(/\D/g, ''))} placeholder="6-digit PIN" inputMode="numeric" maxLength={6} />
+              <Label className="text-xs text-gray-600">PIN Code <span className="text-red-500">*</span></Label>
+              <Input className={cn('mt-1', fieldErrors.pincode && 'border-red-500')} value={patientForm.pincode} onChange={e => setField('pincode', e.target.value.replace(/\D/g, ''))} placeholder="Enter 6-digit PIN code" inputMode="numeric" maxLength={6} required />
               <FieldError message={fieldErrors.pincode} />
             </div>
           </div>

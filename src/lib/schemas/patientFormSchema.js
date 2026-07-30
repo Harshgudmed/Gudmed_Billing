@@ -55,9 +55,14 @@ export const optionalEmailSchema = z
 export const pincodeSchema = z
   .string()
   .trim()
+  .min(1, 'PIN code is required')
   .regex(/^\d{6}$/, 'PIN code must be 6 digits')
-  .optional()
-  .or(z.literal(''))
+
+export const requiredCitySchema = (label = 'City') =>
+  z.string().trim().min(2, `${label} must be at least 2 characters`)
+
+export const requiredStateSchema = (label = 'State') =>
+  z.string().trim().min(1, `${label} is required`)
 
 export const requiredDateSchema = (label) => z.string().min(1, `${label} is required`)
 
@@ -94,9 +99,9 @@ export const patientFormSchema = z.object({
   houseNumber: optionalTextSchema,
   street: optionalTextSchema,
   locality: optionalTextSchema,
-  city: optionalTextSchema,
+  city: requiredCitySchema('City'),
   district: optionalTextSchema,
-  state: optionalTextSchema,
+  state: requiredStateSchema('State'),
   pincode: pincodeSchema,
 
   emergencyContactName: optionalTextSchema,

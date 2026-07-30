@@ -68,6 +68,8 @@ function DoctorsTab() {
   const [slabCounts, setSlabCounts] = useState({})   // doctorId -> number of follow-up ranges
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
+  const [filterStatus, setFilterStatus] = useState('all')
+  const [filterSpecialization, setFilterSpecialization] = useState('all')
   const [setupPage, setSetupPage] = useState(1)
   const ITEMS_PER_PAGE = 10
 
@@ -98,7 +100,7 @@ function DoctorsTab() {
   }, [])
 
   useEffect(() => { load() }, [load])
-  useEffect(() => { setSetupPage(1) }, [search])
+  useEffect(() => { setSetupPage(1) }, [search, filterStatus, filterSpecialization])
 
   async function openConfigure(doc) {
     setCfgDoctor(doc)
@@ -197,10 +199,18 @@ function DoctorsTab() {
     } catch { toast.error('Error deleting range') }
   }
 
-  const filtered = doctors.filter(d =>
-    d.fullName.toLowerCase().includes(search.toLowerCase()) ||
-    (d.specialization || '').toLowerCase().includes(search.toLowerCase())
-  )
+  const specializations = [...new Set(doctors.map(d => d.specialization).filter(Boolean))].sort()
+
+  const filtered = doctors.filter(d => {
+    const matchesSearch = d.fullName.toLowerCase().includes(search.toLowerCase()) ||
+      (d.specialization || '').toLowerCase().includes(search.toLowerCase())
+    if (!matchesSearch) return false
+    if (filterSpecialization !== 'all' && d.specialization !== filterSpecialization) return false
+    const ready = d.commissionConfig && d.consultationFee != null
+    if (filterStatus === 'active' && !ready) return false
+    if (filterStatus === 'setup-needed' && ready) return false
+    return true
+  })
   const totalPages = Math.ceil(filtered.length / ITEMS_PER_PAGE)
   const paginated = filtered.slice((setupPage - 1) * ITEMS_PER_PAGE, setupPage * ITEMS_PER_PAGE)
 
@@ -211,6 +221,21 @@ function DoctorsTab() {
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
           <Input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search doctor by name..." className="pl-9" />
         </div>
+        <Select value={filterStatus} onValueChange={setFilterStatus}>
+          <SelectTrigger className="w-40"><SelectValue placeholder="Status" /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Status</SelectItem>
+            <SelectItem value="active">Active</SelectItem>
+            <SelectItem value="setup-needed">Setup needed</SelectItem>
+          </SelectContent>
+        </Select>
+        <Select value={filterSpecialization} onValueChange={setFilterSpecialization}>
+          <SelectTrigger className="w-48"><SelectValue placeholder="Specialization" /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Specializations</SelectItem>
+            {specializations.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}
+          </SelectContent>
+        </Select>
         <Button variant="outline" size="sm" onClick={load}><RefreshCw className="h-4 w-4 mr-1" />Refresh</Button>
       </div>
 
@@ -406,6 +431,7 @@ function CommissionsTab({ openAddSignal }) {
   const [filterDoctor, setFilterDoctor] = useState('all')
   const [filterStatus, setFilterStatus] = useState('all')
   const [filterDate, setFilterDate] = useState('all')
+  const [orgInfo, setOrgInfo] = useState({ name: 'Hospital', address: '', city: '', phone: '', email: '' })
   // Bulk settle (merged from the old Settlement tab)
   const [selectedIds, setSelectedIds] = useState(new Set())
   const [bulkSettling, setBulkSettling] = useState(false)
@@ -1275,6 +1301,8 @@ function ReportsTab() {
   const [stats, setStats] = useState([])
   const [loading, setLoading] = useState(true)
   const [reportsPage, setReportsPage] = useState(1)
+  const [search, setSearch] = useState('')
+  const [filterStatus, setFilterStatus] = useState('all')
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -1284,15 +1312,22 @@ function ReportsTab() {
   }, [])
 
   useEffect(() => { load() }, [load])
+  useEffect(() => { setReportsPage(1) }, [search, filterStatus])
 
-  const totalPending = stats.reduce((s, d) => s + d.pendingAmount, 0)
-  const totalSettled = stats.reduce((s, d) => s + d.settledAmount, 0)
-  const totalDoctors = stats.filter(d => d.isActive).length
+  const filteredStats = stats.filter(s => {
+    const matchesSearch = drName(s.doctorName).toLowerCase().includes(search.toLowerCase())
+    const matchesStatus = filterStatus === 'all' || (filterStatus === 'active' ? s.isActive : !s.isActive)
+    return matchesSearch && matchesStatus
+  })
+
+  const totalPending = filteredStats.reduce((s, d) => s + d.pendingAmount, 0)
+  const totalSettled = filteredStats.reduce((s, d) => s + d.settledAmount, 0)
+  const totalDoctors = filteredStats.filter(d => d.isActive).length
 
   function exportReportCSV() {
     const rows = [
       ['Doctor', 'Rate', 'Commission Type', 'Total Invoiced (₹)', 'Total Entries', 'Pending (₹)', 'Pending Count', 'Settled (₹)', 'Settled Count', 'Status'],
-      ...stats.map(s => [
+      ...filteredStats.map(s => [
         drName(s.doctorName),
         s.isActive ? (s.commissionType === 'percentage' ? `${s.commissionRate}%` : `₹${s.commissionRate}`) : 'Not configured',
         s.commissionType || '',
@@ -1323,15 +1358,31 @@ function ReportsTab() {
         <StatCard icon={CheckCircle2} label="Total Settled" value={fmt(totalSettled)} color="bg-green-500" />
         <StatCard icon={Wallet} label="Total Earned" value={fmt(totalPending + totalSettled)} color="bg-purple-500" />
       </div>
-      <div className="flex justify-end">
+      <div className="flex flex-wrap gap-3 items-center justify-between">
+        <div className="flex flex-wrap gap-3 items-center flex-1">
+          <div className="relative w-64">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+            <Input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search doctor by name..." className="pl-9" />
+          </div>
+          <Select value={filterStatus} onValueChange={setFilterStatus}>
+            <SelectTrigger className="w-40"><SelectValue placeholder="Status" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Status</SelectItem>
+              <SelectItem value="active">Active</SelectItem>
+              <SelectItem value="inactive">Inactive</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
         <Button size="sm" variant="outline" onClick={exportReportCSV}>
           <FileDown className="h-4 w-4 mr-1" />Export Report CSV
         </Button>
       </div>
       {loading ? (
         <div className="text-center py-8 text-gray-400">Loading stats...</div>
-      ) : stats.length === 0 ? (
-        <div className="text-center py-8 text-gray-400">No data yet. Set up commissions and add entries first.</div>
+      ) : filteredStats.length === 0 ? (
+        <div className="text-center py-8 text-gray-400">
+          {stats.length === 0 ? 'No data yet. Set up commissions and add entries first.' : 'No doctors match the current filters.'}
+        </div>
       ) : (
         <div className="border rounded-lg">
           <Table>
@@ -1344,10 +1395,10 @@ function ReportsTab() {
             <TableBody>
               {(() => {
                 const ITEMS_PER_PAGE = 10
-                const totalPages = Math.ceil(stats.length / ITEMS_PER_PAGE)
+                const totalPages = Math.ceil(filteredStats.length / ITEMS_PER_PAGE)
                 const startIdx = (reportsPage - 1) * ITEMS_PER_PAGE
                 const endIdx = startIdx + ITEMS_PER_PAGE
-                const paginatedStats = stats.slice(startIdx, endIdx)
+                const paginatedStats = filteredStats.slice(startIdx, endIdx)
                 return paginatedStats.map(s => (
                   <TableRow key={s.doctorId}>
                     <TableCell className="font-medium">{drName(s.doctorName)}</TableCell>
@@ -1370,9 +1421,9 @@ function ReportsTab() {
               })()}
             </TableBody>
           </Table>
-          {stats.length > 10 && (() => {
+          {filteredStats.length > 10 && (() => {
             const ITEMS_PER_PAGE = 10
-            const totalPages = Math.ceil(stats.length / ITEMS_PER_PAGE)
+            const totalPages = Math.ceil(filteredStats.length / ITEMS_PER_PAGE)
             return (
               <div className="flex items-center justify-end gap-2 p-4 border-t bg-gray-50">
                 <Button variant="outline" size="sm" onClick={() => setReportsPage(p => Math.max(1, p - 1))} disabled={reportsPage === 1}>
