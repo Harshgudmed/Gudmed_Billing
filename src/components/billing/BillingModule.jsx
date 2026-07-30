@@ -543,7 +543,12 @@ export default function BillingModule({ onBack }) {
         ...(it.expiryDate ? { expiryDate: it.expiryDate } : {}),
       }
     })
-    const bill = { ...form, department: deptLabel, subtotal, discountAmt, gstAmt, total, createdAt: new Date().toISOString(), id: form.invoiceNo }
+    const bill = {
+      ...form, department: deptLabel, subtotal, discountAmt, gstAmt, total, createdAt: new Date().toISOString(), id: form.invoiceNo,
+      // Mirror the [HCC:] tag onto the local bill so the invoice modal shown right after
+      // save (before fetchBills reloads it from the DB) also displays the home collection line.
+      notes: `[${deptLabel}] ${form.notes || ''}${department === 'Lab' && homeCharge > 0 ? ` [HCC:${homeCharge}]` : ''}`.trim(),
+    }
     try {
       if (form.patientId) {
         // Home collection charge → its own line so the invoice total is correct.
