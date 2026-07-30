@@ -431,6 +431,7 @@ function CommissionsTab({ openAddSignal }) {
   const [filterDoctor, setFilterDoctor] = useState('all')
   const [filterStatus, setFilterStatus] = useState('all')
   const [filterDate, setFilterDate] = useState('all')
+  const [orgInfo, setOrgInfo] = useState({ name: 'Hospital', address: '', city: '', phone: '', email: '' })
   // Bulk settle (merged from the old Settlement tab)
   const [selectedIds, setSelectedIds] = useState(new Set())
   const [bulkSettling, setBulkSettling] = useState(false)
