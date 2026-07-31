@@ -1,5 +1,4 @@
 import { db } from '../config/db.js'
-import { Prisma } from '@prisma/client'
 import { getOrgId } from "../lib/reqContext.js";
 import { drName } from "../lib/drName.js";
 import { nextSeriesNumber, invoiceProbe } from "../lib/counters.js";
@@ -116,8 +115,13 @@ export async function getAll(req, res, next) {
   }
 }
 
-// Calendar cells only need counts, not full appointment rows. The DB groups the
-// rows first, then we merge by yyyy-MM-dd for a compact month/week response.
+// Calendar cells only need counts, not full appointment rows. Uses the same
+// Prisma ORM groupBy as getStats, with ymdInZone for date-bucketing, so the
+// two APIs always agree on which calendar day an appointment belongs to.
+// (The previous raw-SQL implementation used `date_trunc('day', ...)` which
+// truncated in UTC — an appointment at 18:30 UTC, which is midnight IST, was
+// grouped under the PREVIOUS calendar day, producing a silent off-by-one vs
+// the Stats API that defines day boundaries in the hospital timezone.)
 export async function getCalendarCounts(req, res, next) {
   try {
     const organizationId = getOrgId(req)
@@ -129,32 +133,25 @@ export async function getCalendarCounts(req, res, next) {
 
     const from = startOfDay(dateFrom)
     const to = endOfDay(dateTo)
+    const where = { organizationId, appointmentDate: { gte: from, lte: to } }
     const myDoctorId = scopedDoctorId(req)
-    const doctorFilter = myDoctorId
-      ? Prisma.sql`AND "doctorId" = ${myDoctorId}`
-      : Prisma.empty
+    if (myDoctorId) where.doctorId = myDoctorId
 
-    const grouped = await db.$queryRaw`
-      SELECT
-        to_char(date_trunc('day', "appointmentDate"), 'YYYY-MM-DD') AS "date",
-        "status",
-        COUNT(*)::int AS "count"
-      FROM "Appointment"
-      WHERE "organizationId" = ${organizationId}
-        AND "appointmentDate" >= ${from}
-        AND "appointmentDate" <= ${to}
-        ${doctorFilter}
-      GROUP BY date_trunc('day', "appointmentDate"), "status"
-      ORDER BY date_trunc('day', "appointmentDate") ASC
-    `
+    const grouped = await db.appointment.groupBy({
+      by: ['appointmentDate', 'status'],
+      where,
+      _count: true,
+    })
 
+    // Bucket each group into its hospital-timezone calendar day using the same
+    // ymdInZone that startOfDay/endOfDay (and thus getStats) rely on.
     const byDay = new Map()
     for (const row of grouped) {
-      const { date, status } = row
-      const count = Number(row.count || 0)
+      const date = ymdInZone(row.appointmentDate)
+      const count = row._count
       const summary = byDay.get(date) || { date, total: 0, byStatus: {} }
       summary.total += count
-      summary.byStatus[status] = (summary.byStatus[status] || 0) + count
+      summary.byStatus[row.status] = (summary.byStatus[row.status] || 0) + count
       byDay.set(date, summary)
     }
 
