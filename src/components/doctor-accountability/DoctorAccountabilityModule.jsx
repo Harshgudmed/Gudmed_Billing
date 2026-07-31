@@ -625,7 +625,10 @@ function CommissionsTab({ openAddSignal }) {
   function printReceipt(c) {
     const html = `<!DOCTYPE html><html><head><title>Settlement Receipt</title>
 <style>*{box-sizing:border-box;margin:0;padding:0}body{font-family:Arial,sans-serif;padding:24px;font-size:11pt;color:#1e293b}
-.hosp{font-size:16pt;font-weight:bold;color:#1e3a5f;border-bottom:2px solid #1e3a5f;padding-bottom:8px;margin-bottom:16px}
+.hosp-header{border-bottom:2px solid #1e3a5f;padding-bottom:10px;margin-bottom:16px}
+.hosp-name{font-size:16pt;font-weight:bold;color:#1e3a5f;margin-bottom:6px}
+.hosp-info{font-size:9.5pt;color:#475569;line-height:1.5}
+.hosp-info span{display:inline-block;margin-right:12px}
 .title{font-size:13pt;font-weight:bold;margin-bottom:16px;color:#334155}
 .row{display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #f1f5f9}
 .lbl{color:#64748b;font-size:10pt}
@@ -633,7 +636,14 @@ function CommissionsTab({ openAddSignal }) {
 .total{background:#f0fdf4;border:1px solid #bbf7d0;border-radius:6px;padding:10px 14px;margin-top:16px;display:flex;justify-content:space-between}
 .footer{font-size:8pt;color:#94a3b8;text-align:center;margin-top:20px;border-top:1px solid #e2e8f0;padding-top:10px}
 @media print{body{padding:12px}}</style></head><body>
-<div class="hosp">${orgInfo.name}</div>
+<div class="hosp-header">
+  <div class="hosp-name">${orgInfo.name || 'GudMed Hospital'}</div>
+  <div class="hosp-info">
+    <div><strong>Address:</strong> ${orgInfo.address || 'Major Laxmi Chand Road, Chakkarpur, Gurugram, Haryana'}</div>
+    <div><strong>Phone:</strong> ${orgInfo.phone || '7322907656'}</div>
+    <div><strong>Email:</strong> ${orgInfo.email || 'harsh.raj@gudmed.in'}</div>
+  </div>
+</div>
 <div class="title">Commission Settlement Receipt</div>
 <div class="row"><span class="lbl">Doctor</span><span class="val">${drName(c.doctor.fullName)}</span></div>
 <div class="row"><span class="lbl">Invoice ID</span><span class="val">${c.invoiceId || '—'}</span></div>
@@ -642,7 +652,7 @@ function CommissionsTab({ openAddSignal }) {
 <div class="row"><span class="lbl">Settlement Reference</span><span class="val">${c.settlementRef || '—'}</span></div>
 <div class="row"><span class="lbl">Settled On</span><span class="val">${c.settledAt ? format(new Date(c.settledAt), 'dd MMM yyyy HH:mm') : format(new Date(), 'dd MMM yyyy HH:mm')}</span></div>
 <div class="total"><span style="font-weight:600;color:#15803d">Commission Settled</span><span style="font-size:14pt;font-weight:bold;color:#15803d">${fmt(c.commissionAmount)}</span></div>
-<div class="footer">Printed: ${format(new Date(), 'dd MMM yyyy HH:mm')} | ${orgInfo.name} — Doctor Accountability System</div>
+<div class="footer">Printed: ${format(new Date(), 'dd MMM yyyy HH:mm')} | ${orgInfo.name || 'GudMed Hospital'} — Doctor Accountability System</div>
 </body></html>`
     printViaIframe(html)
   }
