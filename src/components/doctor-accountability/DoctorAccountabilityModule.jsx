@@ -637,11 +637,11 @@ function CommissionsTab({ openAddSignal }) {
 .footer{font-size:8pt;color:#94a3b8;text-align:center;margin-top:20px;border-top:1px solid #e2e8f0;padding-top:10px}
 @media print{body{padding:12px}}</style></head><body>
 <div class="hosp-header">
-  <div class="hosp-name">${orgInfo.name || 'GudMed Hospital'}</div>
+  <div class="hosp-name">${orgInfo.name}</div>
   <div class="hosp-info">
-    <div><strong>Address:</strong> ${orgInfo.address || 'Major Laxmi Chand Road, Chakkarpur, Gurugram, Haryana'}</div>
-    <div><strong>Phone:</strong> ${orgInfo.phone || '7322907656'}</div>
-    <div><strong>Email:</strong> ${orgInfo.email || 'harsh.raj@gudmed.in'}</div>
+    <div><strong>Address:</strong> ${orgInfo.address}</div>
+    <div><strong>Phone:</strong> ${orgInfo.phone}</div>
+    <div><strong>Email:</strong> ${orgInfo.email}</div>
   </div>
 </div>
 <div class="title">Commission Settlement Receipt</div>
@@ -756,50 +756,50 @@ function CommissionsTab({ openAddSignal }) {
             </TableHeader>
             <TableBody>
               {commissions.map(c => (
-                  <TableRow key={c.id} className={selectedIds.has(c.id) ? 'bg-blue-50/50' : ''}>
-                    <TableCell>
-                      {c.status === 'pending' ? (
-                        <input type="checkbox" className="h-4 w-4 rounded border-gray-300"
-                          checked={selectedIds.has(c.id)} onChange={() => toggleSelect(c.id)} />
-                      ) : null}
-                    </TableCell>
-                    <TableCell className="text-sm">{format(new Date(c.createdAt), 'dd MMM yyyy')}</TableCell>
-                    <TableCell className="font-medium">{drName(c.doctor.fullName)}</TableCell>
-                    <TableCell className="text-gray-500 text-sm">{c.invoiceId || '—'}</TableCell>
-                    <TableCell>{fmt(c.invoiceAmount)}</TableCell>
-                    <TableCell className="text-gray-500 text-sm">{c.commissionType === 'percentage' ? `${c.commissionRate}%` : fmt(c.commissionRate)}</TableCell>
-                    <TableCell className="font-semibold text-green-700">{fmt(c.commissionAmount)}</TableCell>
-                    <TableCell>
-                      <Badge variant={c.status === 'settled' ? 'default' : 'secondary'} className={c.status === 'settled' ? 'bg-green-100 text-green-700 hover:bg-green-100' : 'bg-amber-100 text-amber-700 hover:bg-amber-100'}>
-                        {c.status === 'settled' ? 'Settled' : 'Pending'}
-                      </Badge>
-                    </TableCell>
-                    <TableCell className="text-right">
-                      <div className="flex gap-1 justify-end">
-                        {c.status === 'pending' && (
-                          <>
-                            {/* Edit */}
-                            <Button size="sm" variant="ghost" className="h-7 px-2 text-blue-600" title="Edit" onClick={() => openEdit(c)}>
-                              <Edit2 className="h-3.5 w-3.5" />
-                            </Button>
-                            {/* Quick settle */}
-                            <Button size="sm" variant="ghost" className="h-7 px-2 text-green-600" title="Settle" onClick={() => openSettle(c)}>
-                              <CheckCheck className="h-3.5 w-3.5" />
-                            </Button>
-                            {/* Delete */}
-                            <Button size="sm" variant="ghost" className="h-7 px-2 text-red-500" title="Delete" onClick={() => deleteCommission(c.id)}>
-                              <Trash2 className="h-3.5 w-3.5" />
-                            </Button>
-                          </>
-                        )}
-                        {c.status === 'settled' && (
-                          <Button size="sm" variant="ghost" className="h-7 px-2 text-gray-500" title="Print Receipt" onClick={() => printReceipt(c)}>
-                            <Printer className="h-3.5 w-3.5" />
+                <TableRow key={c.id} className={selectedIds.has(c.id) ? 'bg-blue-50/50' : ''}>
+                  <TableCell>
+                    {c.status === 'pending' ? (
+                      <input type="checkbox" className="h-4 w-4 rounded border-gray-300"
+                        checked={selectedIds.has(c.id)} onChange={() => toggleSelect(c.id)} />
+                    ) : null}
+                  </TableCell>
+                  <TableCell className="text-sm">{format(new Date(c.createdAt), 'dd MMM yyyy')}</TableCell>
+                  <TableCell className="font-medium">{drName(c.doctor.fullName)}</TableCell>
+                  <TableCell className="text-gray-500 text-sm">{c.invoiceId || '—'}</TableCell>
+                  <TableCell>{fmt(c.invoiceAmount)}</TableCell>
+                  <TableCell className="text-gray-500 text-sm">{c.commissionType === 'percentage' ? `${c.commissionRate}%` : fmt(c.commissionRate)}</TableCell>
+                  <TableCell className="font-semibold text-green-700">{fmt(c.commissionAmount)}</TableCell>
+                  <TableCell>
+                    <Badge variant={c.status === 'settled' ? 'default' : 'secondary'} className={c.status === 'settled' ? 'bg-green-100 text-green-700 hover:bg-green-100' : 'bg-amber-100 text-amber-700 hover:bg-amber-100'}>
+                      {c.status === 'settled' ? 'Settled' : 'Pending'}
+                    </Badge>
+                  </TableCell>
+                  <TableCell className="text-right">
+                    <div className="flex gap-1 justify-end">
+                      {c.status === 'pending' && (
+                        <>
+                          {/* Edit */}
+                          <Button size="sm" variant="ghost" className="h-7 px-2 text-blue-600" title="Edit" onClick={() => openEdit(c)}>
+                            <Edit2 className="h-3.5 w-3.5" />
                           </Button>
-                        )}
-                      </div>
-                    </TableCell>
-                  </TableRow>
+                          {/* Quick settle */}
+                          <Button size="sm" variant="ghost" className="h-7 px-2 text-green-600" title="Settle" onClick={() => openSettle(c)}>
+                            <CheckCheck className="h-3.5 w-3.5" />
+                          </Button>
+                          {/* Delete */}
+                          <Button size="sm" variant="ghost" className="h-7 px-2 text-red-500" title="Delete" onClick={() => deleteCommission(c.id)}>
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </Button>
+                        </>
+                      )}
+                      {c.status === 'settled' && (
+                        <Button size="sm" variant="ghost" className="h-7 px-2 text-gray-500" title="Print Receipt" onClick={() => printReceipt(c)}>
+                          <Printer className="h-3.5 w-3.5" />
+                        </Button>
+                      )}
+                    </div>
+                  </TableCell>
+                </TableRow>
               ))}
             </TableBody>
           </Table>
@@ -1537,9 +1537,8 @@ export default function DoctorAccountabilityModule() {
           <button
             key={t.id}
             onClick={() => setTab(t.id)}
-            className={`flex items-center gap-2 px-4 py-2.5 text-sm font-medium border-b-2 transition-colors ${
-              tab === t.id ? 'border-blue-600 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700'
-            }`}
+            className={`flex items-center gap-2 px-4 py-2.5 text-sm font-medium border-b-2 transition-colors ${tab === t.id ? 'border-blue-600 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700'
+              }`}
           >
             <t.icon className="h-4 w-4" />
             {t.label}
