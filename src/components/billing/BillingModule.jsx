@@ -612,11 +612,16 @@ export default function BillingModule({ onBack }) {
 
   // ── Razorpay payment ───────────────────────────────────────────────────────
   async function payWithRazorpay(bill) {
+    // The OUTSTANDING balance, not the invoice total — a patient who already paid
+    // ₹800 cash against a ₹1,859.50 bill must be charged the remaining ₹1,059.50
+    // online, not the full total again. Same balance math as recordPayment() below.
+    const bal = bill.balanceDue ?? (Number(bill.total || 0) - Number(bill.amountPaid || 0))
+    if (bal <= 0) { toast.info('This invoice is already fully paid'); return }
     try {
       // 1. Create order on backend
       const order = await client.post('/payments/create-order', {
         invoiceId:   bill.dbId,
-        amount:      bill.total,
+        amount:      bal,
         patientName: bill.patientName,
         description: `Invoice ${bill.invoiceNo}`,
       })
@@ -672,11 +677,15 @@ export default function BillingModule({ onBack }) {
 
   // ── Share payment link ─────────────────────────────────────────────────────
   async function sharePaymentLink(bill) {
+    // Same balance-not-total fix as payWithRazorpay — the shared link must ask for
+    // what's actually still owed.
+    const bal = bill.balanceDue ?? (Number(bill.total || 0) - Number(bill.amountPaid || 0))
+    if (bal <= 0) { toast.info('This invoice is already fully paid'); return }
     try {
       toast.loading('Generating payment link...')
       const res = await client.post('/payments/create-link', {
         invoiceId:   bill.dbId,
-        amount:      bill.total,
+        amount:      bal,
         patientName: bill.patientName,
         phone:       bill.phone,
         description: `Invoice ${bill.invoiceNo} — ${orgInfo.name || 'Hospital'}`,
@@ -1564,37 +1573,37 @@ export default function BillingModule({ onBack }) {
       <Dialog open={!!showPayModal} onOpenChange={() => setShowPayModal(null)}>
         <DialogContent className="max-w-md">
           <DialogHeader><DialogTitle>Collect Payment</DialogTitle></DialogHeader>
-          {showPayModal && (
+          {showPayModal && (() => {
+            // Hoisted so the summary AND the Razorpay button agree on one number —
+            // the button used to show/charge the invoice TOTAL regardless of what
+            // was already paid, which would double-charge a partially-paid patient.
+            const paidSoFar = Number(showPayModal.amountPaid || 0)
+            const balance = showPayModal.balanceDue ?? (Number(showPayModal.total || 0) - paidSoFar)
+            return (
             <div className="space-y-4">
               {/* Invoice summary — Total / Paid / Balance */}
-              {(() => {
-                const paidSoFar = Number(showPayModal.amountPaid || 0)
-                const balance = showPayModal.balanceDue ?? (Number(showPayModal.total || 0) - paidSoFar)
-                return (
-                  <div className="bg-blue-50 border border-blue-100 rounded-lg p-4">
-                    <p className="font-semibold text-gray-900">{showPayModal.patientName}</p>
-                    <p className="text-sm text-gray-500">Invoice: {showPayModal.invoiceNo}</p>
-                    <div className="flex justify-between mt-2 text-sm">
-                      <span className="text-gray-500">Total</span><span className="font-semibold">{fmt(showPayModal.total)}</span>
-                    </div>
-                    <div className="flex justify-between text-sm">
-                      <span className="text-gray-500">Paid so far</span><span className="font-semibold text-green-700">{fmt(paidSoFar)}</span>
-                    </div>
-                    <div className="flex justify-between text-base border-t border-blue-200 mt-1 pt-1">
-                      <span className="font-semibold">Balance Due</span><span className="font-bold text-red-600">{fmt(balance)}</span>
-                    </div>
-                  </div>
-                )
-              })()}
+              <div className="bg-blue-50 border border-blue-100 rounded-lg p-4">
+                <p className="font-semibold text-gray-900">{showPayModal.patientName}</p>
+                <p className="text-sm text-gray-500">Invoice: {showPayModal.invoiceNo}</p>
+                <div className="flex justify-between mt-2 text-sm">
+                  <span className="text-gray-500">Total</span><span className="font-semibold">{fmt(showPayModal.total)}</span>
+                </div>
+                <div className="flex justify-between text-sm">
+                  <span className="text-gray-500">Paid so far</span><span className="font-semibold text-green-700">{fmt(paidSoFar)}</span>
+                </div>
+                <div className="flex justify-between text-base border-t border-blue-200 mt-1 pt-1">
+                  <span className="font-semibold">Balance Due</span><span className="font-bold text-red-600">{fmt(balance)}</span>
+                </div>
+              </div>
 
               {/* Online payment via Razorpay */}
               <div className="border rounded-lg p-4 space-y-3">
                 <p className="text-sm font-semibold text-gray-700">💳 Online Payment (Razorpay)</p>
                 <p className="text-xs text-gray-500">Accepts UPI, Cards, Net Banking, Wallets</p>
                 <div className="flex gap-2">
-                  <Button className="flex-1 bg-[#2563EB] hover:bg-[#1d4ed8]"
+                  <Button className="flex-1 bg-[#2563EB] hover:bg-[#1d4ed8]" disabled={balance <= 0}
                     onClick={() => payWithRazorpay(showPayModal)}>
-                    Pay ₹{showPayModal.total?.toLocaleString('en-IN')} Online
+                    Pay {fmt(balance)} Online
                   </Button>
                   <Button variant="outline" className="flex-1"
                     onClick={() => sharePaymentLink(showPayModal)}>
@@ -1631,7 +1640,8 @@ export default function BillingModule({ onBack }) {
                 <p className="text-xs text-gray-400 text-center">Tip: pay part now (e.g. ₹500 Cash), then add another method for the rest — balance updates automatically.</p>
               </div>
             </div>
-          )}
+            )
+          })()}
           <DialogFooter>
             <Button variant="ghost" onClick={() => setShowPayModal(null)}>Cancel</Button>
           </DialogFooter>
