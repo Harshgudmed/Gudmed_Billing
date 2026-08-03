@@ -196,7 +196,7 @@ export default function BillingModule({ onBack }) {
   const newForm = () => ({
     patientName: '', patientId: '', phone: '', age: '', gender: '', uhid: '',
     date: todayStr(), invoiceNo: newInvNo(), notes: '', payMode: 'Cash',
-    paid: false, items: [], discount: '', gstPct: '', homeCollection: '', sendWhatsApp: true,
+    paid: false, amountReceived: '', items: [], discount: '', gstPct: '', homeCollection: '', sendWhatsApp: true,
   })
   const [form, setForm] = useState(newForm())
   // Department drives the whole New Bill form — no department chosen = nothing shown.
@@ -517,6 +517,9 @@ export default function BillingModule({ onBack }) {
     if (!department) { toast.error('Select a department first'); return }
     if (!form.patientId && !form.patientName) { toast.error('Select a patient'); return }
     if (form.items.length === 0) { toast.error('Add at least one service'); return }
+    const amtReceived = Number(form.amountReceived) || 0
+    if (amtReceived < 0) { toast.error('Amount received cannot be negative'); return }
+    if (amtReceived > total + 0.01) { toast.error(`Amount received cannot exceed total ₹${total.toLocaleString('en-IN')}`); return }
     setSaving(true)
     const deptLabel = DEPT_LABEL[department] || department
     // Build item array for the backend. The backend enforces structure and
@@ -570,11 +573,14 @@ export default function BillingModule({ onBack }) {
           bill.dbId = result.data.id
           bill.id = result.data.invoiceNumber
           bill.invoiceNo = result.data.invoiceNumber
-          if (form.paid) {
+          if (amtReceived > 0) {
             await client.post('/billing', {
               resource: 'payment', invoiceId: result.data.id,
-              patientId: form.patientId, amount: total, paymentMethod: form.payMode,
+              patientId: form.patientId, amount: amtReceived, paymentMethod: form.payMode,
             })
+            bill.amountPaid = amtReceived
+            bill.balanceDue = Math.max(0, total - amtReceived)
+            bill.paid = bill.balanceDue <= 0.009
           }
           await fetchBills()
         }
@@ -1198,6 +1204,22 @@ export default function BillingModule({ onBack }) {
                             ))}
                           </SelectContent>
                         </Select>
+                      </div>
+
+                      {/* Optional: collect payment right now, in full or in part.
+                          Left blank/0 → invoice saves as Pending (pay later), which
+                          is the common case for insurance/credit patients. */}
+                      <div className="space-y-2">
+                        <div className="flex items-center justify-between">
+                          <Label className="text-xs">Amount Received Now</Label>
+                          <button type="button" className="text-xs text-blue-600 hover:underline"
+                            onClick={() => setForm(f => ({ ...f, amountReceived: String(total) }))}>
+                            Full amount ({fmt(total)})
+                          </button>
+                        </div>
+                        <Input type="number" min="0" max={total} className="h-9" placeholder="0 (leave blank if unpaid)"
+                          value={form.amountReceived}
+                          onChange={e => setForm(f => ({ ...f, amountReceived: e.target.value }))} />
                       </div>
 
                       <div className="space-y-2">
