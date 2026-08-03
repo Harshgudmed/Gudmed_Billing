@@ -13,15 +13,40 @@
 // The hospital's timezone. Override per-deployment with HOSPITAL_TIMEZONE.
 export const HOSPITAL_TZ = process.env.HOSPITAL_TIMEZONE || 'Asia/Kolkata'
 
+// Intl.DateTimeFormat construction (locale/timezone data lookup) is far more
+// expensive than actually calling an already-built formatter — building one
+// fresh per row in a hot loop (e.g. getCalendarCounts bucketing hundreds of
+// grouped rows) dominated the request. Formatters are stateless once built
+// and only ever vary by timeZone (effectively constant per process), so they
+// are built once and reused.
+const offsetFormatterCache = new Map()
+function offsetFormatter(timeZone) {
+  let dtf = offsetFormatterCache.get(timeZone)
+  if (!dtf) {
+    dtf = new Intl.DateTimeFormat('en-US', {
+      timeZone,
+      hour12: false,
+      year: 'numeric', month: '2-digit', day: '2-digit',
+      hour: '2-digit', minute: '2-digit', second: '2-digit',
+    })
+    offsetFormatterCache.set(timeZone, dtf)
+  }
+  return dtf
+}
+
+const ymdFormatterCache = new Map()
+function ymdFormatter(timeZone) {
+  let dtf = ymdFormatterCache.get(timeZone)
+  if (!dtf) {
+    dtf = new Intl.DateTimeFormat('en-CA', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit' })
+    ymdFormatterCache.set(timeZone, dtf)
+  }
+  return dtf
+}
+
 /** How far `instant`'s wall-clock in `timeZone` sits from UTC, in ms. */
 function tzOffsetMs(instant, timeZone) {
-  const dtf = new Intl.DateTimeFormat('en-US', {
-    timeZone,
-    hour12: false,
-    year: 'numeric', month: '2-digit', day: '2-digit',
-    hour: '2-digit', minute: '2-digit', second: '2-digit',
-  })
-  const p = Object.fromEntries(dtf.formatToParts(instant).map((x) => [x.type, x.value]))
+  const p = Object.fromEntries(offsetFormatter(timeZone).formatToParts(instant).map((x) => [x.type, x.value]))
   const hour = p.hour === '24' ? 0 : Number(p.hour) // some ICU builds render midnight as 24
   const asIfUtc = Date.UTC(Number(p.year), Number(p.month) - 1, Number(p.day), hour, Number(p.minute), Number(p.second))
   return asIfUtc - instant.getTime()
@@ -42,9 +67,7 @@ function zonedWallTimeToUtc(y, m, d, hh, mm, ss, ms, timeZone) {
 /** The calendar date (YYYY-MM-DD) that `instant` falls on in `timeZone`. */
 export function ymdInZone(instant = new Date(), timeZone = HOSPITAL_TZ) {
   // en-CA formats as YYYY-MM-DD.
-  return new Intl.DateTimeFormat('en-CA', {
-    timeZone, year: 'numeric', month: '2-digit', day: '2-digit',
-  }).format(instant)
+  return ymdFormatter(timeZone).format(instant)
 }
 
 /**

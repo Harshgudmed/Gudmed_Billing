@@ -6,7 +6,7 @@
 // disagreed by 5h30m and "today" silently meant different things. These now
 // delegate to lib/dates.js, which pins the boundary to the hospital timezone.
 
-import { dayRangeOf } from '../lib/dates.js'
+import { dayRangeOf, ymdInZone } from '../lib/dates.js'
 
 /** Start of the given day (00:00:00.000) in the HOSPITAL's timezone. */
 export function startOfDay(date) {
@@ -39,5 +39,5 @@ export function addDays(date, days) {
  * queries (e.g. "today's appointments") can land on the wrong calendar day
  * near midnight IST if the server isn't pinned to IST. */
 export function todayIST() {
-  return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' }).format(new Date())
+  return ymdInZone(new Date(), 'Asia/Kolkata')
 }
