@@ -7,7 +7,7 @@ import { format } from 'date-fns'
 import client from '@/api/client'
 import PatientLookup from '@/components/common/PatientLookup'
 import RefundApprovalsTab from './RefundApprovalsTab'
-import { Receipt, RefreshCw, Plus, Search, Trash2, Shield, Eye, Printer, Download, TrendingUp, Clock, AlertCircle } from 'lucide-react'
+import { Receipt, RefreshCw, Plus, Search, Trash2, Shield, Eye, Printer, Download, TrendingUp, Clock, AlertCircle, Pencil } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -17,6 +17,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Checkbox } from '@/components/ui/checkbox'
 import { printInvoice, printReceipt, printLabReceipt, printRadiologyReceipt, printPharmacyReceipt } from './utils/printBilling'
 
 // ── Catalogue ─────────────────────────────────────────────────────────────────
@@ -247,10 +248,19 @@ export default function BillingModule({ onBack }) {
   const [invoiceFilter, setInvoiceFilter] = useState('all')
   const [totalBills, setTotalBills] = useState(0)
 
-  // Service catalog
+  // Service catalog — mirrors the backend BillingService schema exactly
+  // (serviceName/serviceCode/serviceCategory/department/unitPrice/isTaxable/
+  // taxPercentage/isCoveredByInsurance/insuranceCopayPercentage/description).
+  const emptyService = () => ({
+    name: '', serviceCode: '', category: 'Consultation', department: 'Consultation',
+    price: '', description: '', isTaxable: false, taxPercentage: '',
+    isCoveredByInsurance: true, insuranceCopayPercentage: '',
+  })
   const [showAddServiceDialog, setShowAddServiceDialog] = useState(false)
-  const [newService, setNewService] = useState({ name: '', category: 'Consultation', price: '', description: '' })
+  const [newService, setNewService] = useState(emptyService())
   const [savingService, setSavingService] = useState(false)
+  const [editingServiceId, setEditingServiceId] = useState(null)
+  const [deletingService, setDeletingService] = useState(null)
 
   // Pagination
   const [invoicesPage, setInvoicesPage] = useState(1)
@@ -808,26 +818,82 @@ export default function BillingModule({ onBack }) {
     }
   }
 
-  // ── Add service to catalog ─────────────────────────────────────────────────
-  async function handleAddService() {
-    if (!newService.name || !newService.price) { toast.error('Name and price are required'); return }
+  // ── Add / edit / remove service in catalog ─────────────────────────────────
+  function openAddServiceDialog() {
+    setEditingServiceId(null)
+    setNewService(emptyService())
+    setShowAddServiceDialog(true)
+  }
+
+  function openEditServiceDialog(s) {
+    setEditingServiceId(s.id)
+    setNewService({
+      name: s.serviceName || '',
+      serviceCode: s.serviceCode || '',
+      category: s.serviceCategory || 'Consultation',
+      department: s.department || 'Consultation',
+      price: s.unitPrice != null ? String(s.unitPrice) : '',
+      description: s.description || '',
+      isTaxable: !!s.isTaxable,
+      taxPercentage: s.taxPercentage != null ? String(s.taxPercentage) : '',
+      isCoveredByInsurance: s.isCoveredByInsurance !== false,
+      insuranceCopayPercentage: s.insuranceCopayPercentage != null ? String(s.insuranceCopayPercentage) : '',
+    })
+    setShowAddServiceDialog(true)
+  }
+
+  async function handleSaveService() {
+    if (!newService.name || !newService.serviceCode || !newService.price) {
+      toast.error('Name, service code and price are required'); return
+    }
     setSavingService(true)
+    const payload = {
+      serviceName: newService.name,
+      serviceCode: newService.serviceCode,
+      serviceCategory: newService.category,
+      department: newService.department,
+      unitPrice: parseFloat(newService.price),
+      isTaxable: newService.isTaxable,
+      taxPercentage: newService.isTaxable ? (parseFloat(newService.taxPercentage) || 0) : 0,
+      isCoveredByInsurance: newService.isCoveredByInsurance,
+      insuranceCopayPercentage: newService.isCoveredByInsurance ? (parseFloat(newService.insuranceCopayPercentage) || 0) : 0,
+      description: newService.description || undefined,
+    }
     try {
-      const res = await client.post('/billing', {
-        resource: 'service',
-        name: newService.name,
-        category: newService.category,
-        price: parseFloat(newService.price),
-        description: newService.description,
-      })
-      if (res.success) {
-        setServices(prev => [res.data, ...prev])
-        toast.success('Service added to catalog')
+      if (editingServiceId) {
+        const res = await client.patch('/billing', { resource: 'service', id: editingServiceId, updates: payload })
+        if (res.success) {
+          setServices(prev => prev.map(s => s.id === editingServiceId ? res.data : s))
+          toast.success('Service updated')
+        }
+      } else {
+        const res = await client.post('/billing', { resource: 'service', ...payload })
+        if (res.success) {
+          setServices(prev => [res.data, ...prev])
+          setTotalServices(t => t + 1)
+          toast.success('Service added to catalog')
+        }
       }
       setShowAddServiceDialog(false)
-      setNewService({ name: '', category: 'Consultation', price: '', description: '' })
-    } catch { toast.error('Failed to add service') }
-    finally { setSavingService(false) }
+      setEditingServiceId(null)
+      setNewService(emptyService())
+    } catch (err) {
+      toast.error(typeof err?.message === 'string' && err.message !== '[object Object]' ? err.message : 'Failed to save service')
+    } finally { setSavingService(false) }
+  }
+
+  async function handleDeleteService() {
+    if (!deletingService) return
+    try {
+      const res = await client.patch('/billing', { resource: 'service', id: deletingService.id, updates: { isActive: false } })
+      if (res.success) {
+        setServices(prev => prev.filter(s => s.id !== deletingService.id))
+        setTotalServices(t => Math.max(0, t - 1))
+        toast.success('Service removed from catalog')
+      }
+    } catch (err) {
+      toast.error(err?.message || 'Failed to remove service')
+    } finally { setDeletingService(null) }
   }
 
   // ── Filtered invoices ──────────────────────────────────────────────────────
@@ -1225,8 +1291,8 @@ export default function BillingModule({ onBack }) {
         {/* ── SERVICE CATALOG ── */}
         <TabsContent value="catalog" className="space-y-4">
           <div className="flex justify-between items-center">
-            <p className="text-sm text-gray-500">{services.length} services in catalog</p>
-            <Button onClick={() => setShowAddServiceDialog(true)}><Plus className="h-4 w-4 mr-1" />Add Service</Button>
+            <p className="text-sm text-gray-500">{totalServices || services.length} services in catalog</p>
+            <Button onClick={openAddServiceDialog}><Plus className="h-4 w-4 mr-1" />Add Service</Button>
           </div>
           <Card>
             <CardContent className="p-0">
@@ -1238,20 +1304,33 @@ export default function BillingModule({ onBack }) {
                     <TableHeader>
                       <TableRow>
                         <TableHead>Name</TableHead>
+                        <TableHead>Code</TableHead>
                         <TableHead>Category</TableHead>
+                        <TableHead>Department</TableHead>
                         <TableHead>Price</TableHead>
                         <TableHead>Description</TableHead>
+                        <TableHead className="text-right">Actions</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
                       {services.length === 0 ? (
-                        <TableRow><TableCell colSpan={4} className="text-center py-10 text-gray-400">No services added yet</TableCell></TableRow>
+                        <TableRow><TableCell colSpan={7} className="text-center py-10 text-gray-400">No services added yet</TableCell></TableRow>
                       ) : services.map(s => (
                         <TableRow key={s.id}>
-                          <TableCell className="font-medium">{s.name}</TableCell>
-                          <TableCell><Badge variant="outline">{s.category || '—'}</Badge></TableCell>
-                          <TableCell className="font-semibold">₹{Number(s.price || 0).toLocaleString('en-IN')}</TableCell>
+                          <TableCell className="font-medium">{s.serviceName}</TableCell>
+                          <TableCell className="text-sm text-gray-500">{s.serviceCode || '—'}</TableCell>
+                          <TableCell><Badge variant="outline">{s.serviceCategory || '—'}</Badge></TableCell>
+                          <TableCell className="text-sm text-gray-500">{s.department || '—'}</TableCell>
+                          <TableCell className="font-semibold">₹{Number(s.unitPrice || 0).toLocaleString('en-IN')}</TableCell>
                           <TableCell className="text-sm text-gray-500">{s.description || '—'}</TableCell>
+                          <TableCell className="text-right">
+                            <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => openEditServiceDialog(s)}>
+                              <Pencil className="h-3.5 w-3.5" />
+                            </Button>
+                            <Button variant="ghost" size="icon" className="h-7 w-7 text-red-500" onClick={() => setDeletingService(s)}>
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </Button>
+                          </TableCell>
                         </TableRow>
                       ))}
                     </TableBody>
@@ -1648,23 +1727,33 @@ export default function BillingModule({ onBack }) {
         </DialogContent>
       </Dialog>
 
-      {/* ── Add Service Dialog ── */}
-      <Dialog open={showAddServiceDialog} onOpenChange={setShowAddServiceDialog}>
+      {/* ── Add / Edit Service Dialog ── */}
+      <Dialog open={showAddServiceDialog} onOpenChange={(o) => { setShowAddServiceDialog(o); if (!o) setEditingServiceId(null) }}>
         <DialogContent className="max-w-md">
-          <DialogHeader><DialogTitle>Add Service to Catalog</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle>{editingServiceId ? 'Edit Service' : 'Add Service to Catalog'}</DialogTitle></DialogHeader>
           <div className="space-y-4">
             <div>
               <Label>Service Name *</Label>
               <Input value={newService.name} onChange={e => setNewService(s => ({ ...s, name: e.target.value }))} placeholder="e.g. CBC Test" />
             </div>
             <div>
-              <Label>Category</Label>
-              <Select value={newService.category} onValueChange={v => setNewService(s => ({ ...s, category: v }))}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  {Object.keys(CATALOGUE).map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}
-                </SelectContent>
-              </Select>
+              <Label>Service Code *</Label>
+              <Input value={newService.serviceCode} onChange={e => setNewService(s => ({ ...s, serviceCode: e.target.value }))} placeholder="e.g. LAB-CBC-001" />
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <Label>Department *</Label>
+                <Select value={newService.department} onValueChange={v => setNewService(s => ({ ...s, department: v }))}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {Object.keys(CATALOGUE).map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <Label>Category *</Label>
+                <Input value={newService.category} onChange={e => setNewService(s => ({ ...s, category: e.target.value }))} placeholder="e.g. Haematology" />
+              </div>
             </div>
             <div>
               <Label>Price (₹) *</Label>
@@ -1674,10 +1763,38 @@ export default function BillingModule({ onBack }) {
               <Label>Description</Label>
               <Input value={newService.description} onChange={e => setNewService(s => ({ ...s, description: e.target.value }))} placeholder="Optional description..." />
             </div>
+            <div className="flex items-center gap-2">
+              <Checkbox id="svc-taxable" checked={newService.isTaxable} onCheckedChange={v => setNewService(s => ({ ...s, isTaxable: !!v }))} />
+              <Label htmlFor="svc-taxable" className="font-normal">Taxable</Label>
+              {newService.isTaxable && (
+                <Input className="ml-2 h-8 w-24" type="number" min="0" placeholder="Tax %" value={newService.taxPercentage} onChange={e => setNewService(s => ({ ...s, taxPercentage: e.target.value }))} />
+              )}
+            </div>
+            <div className="flex items-center gap-2">
+              <Checkbox id="svc-insurance" checked={newService.isCoveredByInsurance} onCheckedChange={v => setNewService(s => ({ ...s, isCoveredByInsurance: !!v }))} />
+              <Label htmlFor="svc-insurance" className="font-normal">Covered by insurance</Label>
+              {newService.isCoveredByInsurance && (
+                <Input className="ml-2 h-8 w-24" type="number" min="0" placeholder="Copay %" value={newService.insuranceCopayPercentage} onChange={e => setNewService(s => ({ ...s, insuranceCopayPercentage: e.target.value }))} />
+              )}
+            </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setShowAddServiceDialog(false)}>Cancel</Button>
-            <Button onClick={handleAddService} disabled={savingService}>{savingService ? 'Saving...' : 'Add Service'}</Button>
+            <Button variant="outline" onClick={() => { setShowAddServiceDialog(false); setEditingServiceId(null) }}>Cancel</Button>
+            <Button onClick={handleSaveService} disabled={savingService}>{savingService ? 'Saving...' : (editingServiceId ? 'Save Changes' : 'Add Service')}</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Delete Service Confirm ── */}
+      <Dialog open={!!deletingService} onOpenChange={(o) => !o && setDeletingService(null)}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader><DialogTitle>Remove Service</DialogTitle></DialogHeader>
+          <p className="text-sm text-gray-500">
+            Remove <span className="font-medium text-gray-800">{deletingService?.serviceName}</span> from the catalog? It will no longer appear when billing new items.
+          </p>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDeletingService(null)}>Cancel</Button>
+            <Button variant="destructive" onClick={handleDeleteService}>Remove</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
