@@ -165,15 +165,10 @@ export const getAll = async (req, res, next) => {
       }
       // Search on the server: the screen only holds one 15-row page, so a
       // browser-side filter could never see an order on page 2.
-      if (search) {
-        where.OR = [
-          { orderNumber: { contains: search, mode: 'insensitive' } },
-          { patient: { firstName: { contains: search, mode: 'insensitive' } } },
-          { patient: { middleName: { contains: search, mode: 'insensitive' } } },
-          { patient: { lastName: { contains: search, mode: 'insensitive' } } },
-          { patient: { mrn: { contains: search, mode: 'insensitive' } } },
-        ]
-      }
+      const searchWhere = patientSearchWhere(search, 'patient', (term) => [
+        { orderNumber: { contains: term, mode: 'insensitive' } },
+      ])
+      if (searchWhere) Object.assign(where, searchWhere)
       // dayRange resolves the day boundaries in the hospital's timezone.
       if (startDate || endDate) where.orderDate = dayRange(startDate, endDate)
       const [data, total] = await Promise.all([

@@ -1,4 +1,5 @@
 import { db } from '../config/db.js'
+import { patientSearchWhere } from '../lib/patientSearch.js'
 import { getOrgId, getActor } from "../lib/reqContext.js";
 import { todayRange } from '../lib/dates.js'
 import { nextSeriesNumber, invoiceProbe } from "../lib/counters.js";
@@ -192,15 +193,10 @@ export async function getAll(req, res) {
         else where.paymentStatus = status
       }
       if (patientId) where.patientId = patientId
-      if (search) {
-        const term = search.trim()
-        where.OR = [
-          { invoiceNumber: { contains: term, mode: 'insensitive' } },
-          { patient: { firstName: { contains: term, mode: 'insensitive' } } },
-          { patient: { lastName: { contains: term, mode: 'insensitive' } } },
-          { patient: { phonePrimary: { contains: term } } },
-        ]
-      }
+      const searchWhere = patientSearchWhere(search, 'patient', (term) => [
+        { invoiceNumber: { contains: term, mode: 'insensitive' } },
+      ])
+      if (searchWhere) Object.assign(where, searchWhere)
       // Single-invoice fetch (with its payments) — used to render a receipt.
       if (invoiceId) where.id = invoiceId
 

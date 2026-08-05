@@ -1,4 +1,5 @@
 import { db } from '../config/db.js'
+import { patientSearchWhere } from '../lib/patientSearch.js'
 import { dayRange } from '../lib/dates.js'
 import { getOrgId, safeMoney } from "../lib/reqContext.js";
 import { isOwned } from "../lib/tenant.js";
@@ -24,17 +25,13 @@ export async function getAll(req, res, next) {
     if (startDate || endDate) {
       where.tripDate = dayRange(startDate, endDate)
     }
-    if (search) {
-      where.OR = [
-        { tripNumber: { contains: search, mode: 'insensitive' } },
-        { fromLocation: { contains: search, mode: 'insensitive' } },
-        { toLocation: { contains: search, mode: 'insensitive' } },
-        { driverName: { contains: search, mode: 'insensitive' } },
-        { patient: { firstName: { contains: search, mode: 'insensitive' } } },
-        { patient: { lastName: { contains: search, mode: 'insensitive' } } },
-        { patient: { mrn: { contains: search, mode: 'insensitive' } } },
-      ]
-    }
+    const searchWhere = patientSearchWhere(search, 'patient', (term) => [
+      { tripNumber: { contains: term, mode: 'insensitive' } },
+      { fromLocation: { contains: term, mode: 'insensitive' } },
+      { toLocation: { contains: term, mode: 'insensitive' } },
+      { driverName: { contains: term, mode: 'insensitive' } },
+    ])
+    if (searchWhere) Object.assign(where, searchWhere)
     const trips = await db.ambulanceTrip.findMany({
       where,
       include: { patient: { select: patientSelect } },

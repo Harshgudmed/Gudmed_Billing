@@ -1,3 +1,4 @@
+import { patientSearchWhere } from '../lib/patientSearch.js';
 import { db } from '../config/db.js'
 import { getOrgId } from "../lib/reqContext.js";
 import { drName } from "../lib/drName.js";
@@ -73,14 +74,11 @@ export async function getAll(req, res, next) {
 
     // Free-text search across patient, doctor and chief complaint
     if (search) {
-      const q = search.trim()
-      where.OR = [
-        { patient: { is: { firstName: { contains: q, mode: 'insensitive' } } } },
-        { patient: { is: { lastName:  { contains: q, mode: 'insensitive' } } } },
-        { patient: { is: { mrn:       { contains: q, mode: 'insensitive' } } } },
-        { doctor:  { is: { fullName:  { contains: q, mode: 'insensitive' } } } },
-        { chiefComplaint: { contains: q, mode: 'insensitive' } },
-      ]
+      const searchWhere = patientSearchWhere(search, 'patient', (term) => [
+        { doctor:  { is: { fullName:  { contains: term, mode: 'insensitive' } } } },
+        { chiefComplaint: { contains: term, mode: 'insensitive' } },
+      ])
+      if (searchWhere) Object.assign(where, searchWhere)
     }
 
     // A doctor only sees their own appointments (overrides any doctorId query param).

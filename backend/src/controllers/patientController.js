@@ -1,4 +1,5 @@
 import { db } from '../config/db.js'
+import { patientSearchWhere } from '../lib/patientSearch.js'
 import { patientFullName, PATIENT_NAME_SELECT } from '../lib/patientName.js'
 import { optionalMobileSchema, normalizeIndianMobile } from '../lib/phone.js'
 import { dayRange } from '../lib/dates.js'
@@ -147,13 +148,9 @@ export async function getAll(req, res, next) {
       where.createdAt = dayRange(startDate, endDate)
     }
 
-    if (search) {
-      where.OR = [
-        { firstName: { contains: search, mode: 'insensitive' } },
-        { lastName: { contains: search, mode: 'insensitive' } },
-        { mrn: { contains: search, mode: 'insensitive' } },
-        { phonePrimary: { contains: search, mode: 'insensitive' } },
-      ]
+    const searchWhere = patientSearchWhere(search, null)
+    if (searchWhere) {
+      where.AND = [...(where.AND || []), ...searchWhere.AND]
     }
 
     // Doctors are limited to their own patients. Combine with any search filter via AND

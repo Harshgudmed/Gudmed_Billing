@@ -1,3 +1,4 @@
+import { patientSearchWhere } from '../lib/patientSearch.js'
 import { db } from '../config/db.js'
 import { dayRange } from '../lib/dates.js'
 import { getOrgId } from "../lib/reqContext.js";
@@ -20,15 +21,12 @@ export async function getAll(req, res, next) {
     // baseWhere = everything EXCEPT the status filter, so the summary counts show
     // the full status distribution no matter which status tab is active.
     const baseWhere = { organizationId: ORG_ID }
-    if (search) {
-      baseWhere.OR = [
-        { screeningNumber: { contains: search, mode: 'insensitive' } },
-        { firstName: { contains: search, mode: 'insensitive' } },
-        { lastName: { contains: search, mode: 'insensitive' } },
-        { phone: { contains: search } },
-        { patient: { mrn: { contains: search, mode: 'insensitive' } } },
-      ]
-    }
+    const searchWhere = patientSearchWhere(search, null, (term) => [
+      { screeningNumber: { contains: term, mode: 'insensitive' } },
+      { phone: { contains: term } },
+      { patient: { is: { mrn: { contains: term, mode: 'insensitive' } } } },
+    ])
+    if (searchWhere) Object.assign(baseWhere, searchWhere)
     // Hospital-timezone day boundaries (see lib/dates.js).
     if (startDate || endDate) {
       baseWhere.screenedAt = dayRange(startDate, endDate)
