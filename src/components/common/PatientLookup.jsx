@@ -77,17 +77,14 @@ function FieldError({ message }) {
 // itself as well as expose it — `export ... from` creates no local binding.
 // The implementation lives in lib/patient.js; this file used to carry its own
 // copy, which is how the same patient could read differently on two screens.
-import { getFullName as getPatientFullName } from '@/lib/patient'
+import { getFullName as getPatientFullName, calcAge } from '@/lib/patient'
 export { getPatientFullName }
 
+// Wraps calcAge, translating its '' (no dob) back to null — callers here and in
+// PreTriageModule check `age != null` specifically, not just falsiness.
 export function calculatePatientAge(dateOfBirth) {
-  if (!dateOfBirth) return null
-  const today = new Date()
-  const birth = new Date(dateOfBirth)
-  let age = today.getFullYear() - birth.getFullYear()
-  const m = today.getMonth() - birth.getMonth()
-  if (m < 0 || (m === 0 && today.getDate() < birth.getDate())) age--
-  return age
+  const age = calcAge(dateOfBirth)
+  return age === '' ? null : age
 }
 
 const emptyNew = {
