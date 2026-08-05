@@ -2,7 +2,7 @@ import { db } from '../config/db.js'
 import { getOrgId, getActor } from "../lib/reqContext.js";
 import { nextSeriesNumber } from "../lib/counters.js";
 import { resolveRequestedById } from '../lib/requestedBy.js'
-import { todayRange } from '../lib/dates.js'
+import { todayRange, dayRange } from '../lib/dates.js'
 import { z } from 'zod'
 import { PATIENT_SNAPSHOT_SELECT } from '../utils/patientSnapshot.js'
 
@@ -105,7 +105,7 @@ const patientSelect = PATIENT_SNAPSHOT_SELECT
 export const getAll = async (req, res, next) => {
   try {
     const ORGANIZATION_ID = getOrgId(req)
-    const { resource, status, urgency, examCategory, orderId, search } = req.query
+    const { resource, status, urgency, examCategory, orderId, search, startDate, endDate } = req.query
 
     // Pagination. NOTE: a second `Math.min(limit, 1000)` used to sit below this and
     // silently overrode the 2000 cap, so `?limit=2000` returned only 1000 rows and
@@ -161,7 +161,21 @@ export const getAll = async (req, res, next) => {
         organizationId: ORGANIZATION_ID,
         ...(status ? { status } : {}),
         ...(urgency ? { urgency } : {}),
+        ...(examCategory ? { exam: { examCategory } } : {}),
       }
+      // Search on the server: the screen only holds one 15-row page, so a
+      // browser-side filter could never see an order on page 2.
+      if (search) {
+        where.OR = [
+          { orderNumber: { contains: search, mode: 'insensitive' } },
+          { patient: { firstName: { contains: search, mode: 'insensitive' } } },
+          { patient: { middleName: { contains: search, mode: 'insensitive' } } },
+          { patient: { lastName: { contains: search, mode: 'insensitive' } } },
+          { patient: { mrn: { contains: search, mode: 'insensitive' } } },
+        ]
+      }
+      // dayRange resolves the day boundaries in the hospital's timezone.
+      if (startDate || endDate) where.orderDate = dayRange(startDate, endDate)
       const [data, total] = await Promise.all([
         db.radiologyOrder.findMany({
           where,
