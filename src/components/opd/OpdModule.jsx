@@ -2,7 +2,7 @@
 // Left: clean form (Department -> Problem -> suggested test/medicine chips, vitals,
 // diagnosis, Rx, tests, advice). Right: a sticky LIVE prescription preview that
 // updates as the doctor types. Full doctor CRUD on the /consultations API.
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { getOrgSettings } from '@/lib/orgSettings'
 import { getFullName, calcAge as getAge, initials } from '@/lib/patient'
 import { useServerPagination } from '@/lib/useServerPagination'
@@ -96,6 +96,69 @@ function Section({ icon, title, desc, accent = 'cyan', children, right }) {
 
 const ITEMS_PER_PAGE = 15
 
+// ── Catalogue pickers: search on the server, never download the catalogue ─────
+// These three lists used to be fetched whole up front (`limit=5000` for drugs,
+// `limit=2000` for tests/exams) and filtered in the browser. That cannot work:
+// the pharmacy catalogue alone is ~200k rows, so 97% of it was unreachable and
+// a doctor searching a real medicine that sorted past the cap was told "No
+// matching drugs". It also shipped megabytes to the browser on every OPD load.
+// Now each keystroke (debounced) asks the server, which returns one short page.
+const CATALOGUE_SEARCH_LIMIT = 20
+
+const searchDrugs = (q) =>
+  client.get('/pharmacy/drugs', { params: { search: q, limit: CATALOGUE_SEARCH_LIMIT } })
+    .then(r => r?.data ?? [])
+
+const searchLabTests = (q) =>
+  client.get('/laboratory', { params: { resource: 'tests', search: q, limit: CATALOGUE_SEARCH_LIMIT } })
+    .then(r => (r?.data ?? []).filter(t => t.isActive !== false))
+
+const searchRadExams = (q) =>
+  client.get('/radiology', { params: { resource: 'exams', search: q, limit: CATALOGUE_SEARCH_LIMIT } })
+    .then(r => (r?.data ?? []).filter(e => e.isActive !== false))
+
+/**
+ * State for one server-searched picker: the current result page, whether a
+ * request is in flight, and the full row the user picked (kept locally because
+ * `results` only holds the latest query — the selected row is usually not in it
+ * once the search box is cleared).
+ */
+function useCatalogueSearch(fetchRows) {
+  const [results, setResults] = useState([])
+  const [loading, setLoading] = useState(false)
+  const [selected, setSelected] = useState(null)
+  // Only the newest request may write state; a slow earlier one must not
+  // overwrite the results of a later keystroke.
+  const reqIdRef = useRef(0)
+
+  const search = useCallback(async (q) => {
+    const reqId = ++reqIdRef.current
+    if (!q) { setResults([]); setLoading(false); return }
+    setLoading(true)
+    try {
+      const rows = await fetchRows(q)
+      if (reqId === reqIdRef.current) setResults(rows)
+    } catch {
+      if (reqId === reqIdRef.current) setResults([])
+    } finally {
+      if (reqId === reqIdRef.current) setLoading(false)
+    }
+  }, [fetchRows])
+
+  const clear = useCallback(() => { setSelected(null); setResults([]) }, [])
+
+  return { results, loading, selected, setSelected, search, clear }
+}
+
+/** Exact-then-partial match for a name coming from the clinical KB suggestions. */
+function pickByName(rows, name) {
+  const n = (name || '').toLowerCase()
+  return rows.find(r => (r.drugName || r.testName || '').toLowerCase() === n)
+    ?? rows.find(r => ((r.genericName || '').toLowerCase() === n))
+    ?? rows[0]
+    ?? null
+}
+
 export default function OpdModule() {
   const [view, setView] = useState('list')
   const [orgInfo, setOrgInfo] = useState({ name: 'Hospital' })
@@ -158,9 +221,9 @@ export default function OpdModule() {
 
   const [patients, setPatients] = useState([])
   const [doctors, setDoctors] = useState([])
-  const [drugs, setDrugs] = useState([])
-  const [labTests, setLabTests] = useState([])
-  const [radiologyExams, setRadiologyExams] = useState([])
+  const drugPicker = useCatalogueSearch(searchDrugs)
+  const labTestPicker = useCatalogueSearch(searchLabTests)
+  const radExamPicker = useCatalogueSearch(searchRadExams)
   const [loading, setLoading] = useState(true)
 
   const vitalsForm = useForm({ resolver: zodResolver(vitalsSchema), defaultValues: DEFAULT_VITALS })
@@ -182,24 +245,15 @@ export default function OpdModule() {
 
   const fetchAll = useCallback(async () => {
     setLoading(true)
-    const [pRes, uRes, dRes, lRes, rRes, sRes] = await Promise.allSettled([
+    // The drug / lab-test / radiology-exam catalogues are NOT fetched here — they
+    // are searched on the server as the doctor types (see useCatalogueSearch).
+    const [pRes, uRes, sRes] = await Promise.allSettled([
       client.get('/patients?status=active&limit=500'),
       client.get('/settings?resource=users'),
-      client.get('/pharmacy/drugs?limit=5000'),
-      // 1000 silently truncated the catalogue (1607 tests / 1927 exams), so tests
-      // past the cap could not be ordered. These lists are looked up in memory by
-      // id AND by name below, so they must stay complete. When either catalogue
-      // approaches 2000, move this picker to the debounced server-side `search`
-      // param that BillingModule already uses.
-      client.get('/laboratory?resource=tests&limit=2000'),
-      client.get('/radiology?resource=exams&limit=2000'),
       client.get('/clinical-kb/specialties'),
     ])
     if (pRes.status === 'fulfilled') setPatients(pRes.value?.data ?? [])
     if (uRes.status === 'fulfilled') setDoctors((uRes.value?.data ?? []).filter(u => u.role === 'doctor' && u.isActive))
-    if (dRes.status === 'fulfilled') setDrugs(dRes.value?.data ?? [])
-    if (lRes.status === 'fulfilled') setLabTests((lRes.value?.data ?? []).filter(t => t.isActive !== false))
-    if (rRes.status === 'fulfilled') setRadiologyExams((rRes.value?.data ?? []).filter(e => e.isActive !== false))
     if (sRes.status === 'fulfilled') setSpecialties(sRes.value?.data ?? [])
     setLoading(false)
   }, [])
@@ -255,15 +309,21 @@ export default function OpdModule() {
   const filteredConsultations = consultations
 
   const addDrug = () => {
-    const drug = drugs.find(d => d.id === selectedDrug)
+    const drug = drugPicker.selected
     if (!drug) return
     if (prescriptionItems.some(i => i.drugId === drug.id)) { toast.error('Already added'); return }
     setPrescriptionItems(prev => [...prev, { drugId: drug.id, drugName: drug.drugName, genericName: drug.genericName, dosage: '', frequency: 'TID', duration: '7 days', quantity: 21, instructions: '' }])
     setSelectedDrug('')
+    drugPicker.clear()
   }
-  const addSuggestedDrug = (name) => {
+  // Suggested names come from the clinical KB, so they must be resolved against
+  // the real catalogue to get a drugId. That lookup is a server search now — the
+  // catalogue is far too large to hold in memory. If nothing matches we keep the
+  // existing behaviour and add a `kb-` placeholder under the suggested name.
+  const addSuggestedDrug = async (name) => {
     if (prescriptionItems.some(i => (i.drugName || '').toLowerCase() === name.toLowerCase())) return
-    const match = drugs.find(d => d.drugName?.toLowerCase() === name.toLowerCase() || (d.genericName || '').toLowerCase() === name.toLowerCase())
+    let match = null
+    try { match = pickByName(await searchDrugs(name), name) } catch { /* offline → placeholder */ }
     setPrescriptionItems(prev => [...prev, match
       ? { drugId: match.id, drugName: match.drugName, genericName: match.genericName, dosage: '', frequency: 'TID', duration: '7 days', quantity: 21, instructions: '' }
       : { drugId: `kb-${slug(name)}`, drugName: name, genericName: '', dosage: '', frequency: 'TID', duration: '7 days', quantity: 21, instructions: '' }])
@@ -272,15 +332,17 @@ export default function OpdModule() {
   const updateItem = (i, field, value) => setPrescriptionItems(p => p.map((item, idx) => idx === i ? { ...item, [field]: value } : item))
 
   const addLabTest = () => {
-    const test = labTests.find(t => t.id === selectedLabTest)
+    const test = labTestPicker.selected
     if (!test) return
     if (labOrderItems.some(i => i.testId === test.id)) { toast.error('Already added'); return }
     setLabOrderItems(prev => [...prev, { testId: test.id, testName: test.testName, testCode: test.testCode || '', urgency: 'routine', specimenType: test.specimenType || '' }])
     setSelectedLabTest('')
+    labTestPicker.clear()
   }
-  const addSuggestedTest = (name) => {
+  const addSuggestedTest = async (name) => {
     if (labOrderItems.some(i => (i.testName || '').toLowerCase() === name.toLowerCase())) return
-    const match = labTests.find(t => t.testName?.toLowerCase() === name.toLowerCase())
+    let match = null
+    try { match = pickByName(await searchLabTests(name), name) } catch { /* offline → placeholder */ }
     setLabOrderItems(prev => [...prev, match
       ? { testId: match.id, testName: match.testName, testCode: match.testCode || '', urgency: 'routine', specimenType: match.specimenType || '' }
       : { testId: `kb-${slug(name)}`, testName: name, testCode: '', urgency: 'routine', specimenType: '' }])
@@ -288,11 +350,12 @@ export default function OpdModule() {
   const removeLabItem = (testId) => setLabOrderItems(prev => prev.filter(i => i.testId !== testId))
 
   const addRadExam = () => {
-    const exam = radiologyExams.find(e => e.id === selectedRadExam)
+    const exam = radExamPicker.selected
     if (!exam) return
     if (radiologyOrderItems.some(i => i.examId === exam.id)) { toast.error('Already added'); return }
     setRadiologyOrderItems(prev => [...prev, { examId: exam.id, examName: exam.examName, examCode: exam.examCode || '', examCategory: exam.examCategory || '', urgency: 'routine', bodyPart: exam.bodyPart || '' }])
     setSelectedRadExam('')
+    radExamPicker.clear()
   }
   const removeRadItem = (examId) => setRadiologyOrderItems(prev => prev.filter(i => i.examId !== examId))
 
@@ -303,7 +366,8 @@ export default function OpdModule() {
     vitalsForm.reset(DEFAULT_VITALS)
     clinicalForm.reset()
     setPrescriptionItems([]); setLabOrderItems([]); setRadiologyOrderItems([])
-    setSelectedLabTest(''); setSelectedRadExam('')
+    setSelectedDrug(''); setSelectedLabTest(''); setSelectedRadExam('')
+    drugPicker.clear(); labTestPicker.clear(); radExamPicker.clear()
     setSelectedPatientId(''); setSelectedDoctorId(''); setEditingId(null)
     setDepartment(''); setProblem(''); setConditions([]); setGuidance(null)
   }
@@ -323,7 +387,9 @@ export default function OpdModule() {
     if (c.radiologyOrders && c.radiologyOrders.length > 0) {
       const items = []
       c.radiologyOrders.forEach(order => {
-        const exam = order.exam || radiologyExams.find(e => e.id === order.examId)
+        // The API always includes the `exam` relation on radiologyOrders
+        // (consultationController's include), so no local catalogue lookup.
+        const exam = order.exam
         if (exam) items.push({ examId: exam.id || order.examId, examName: exam.examName, examCode: exam.examCode || '', examCategory: exam.examCategory || '', urgency: order.urgency || 'routine', bodyPart: exam.bodyPart || '' })
       })
       setRadiologyOrderItems(items)
@@ -836,7 +902,18 @@ export default function OpdModule() {
           <Section icon={<Pill className="h-5 w-5" />} title="Medicines (Rx)" accent="green">
             <div className="space-y-4">
               <div className="flex gap-2">
-                <SearchableSelect className="flex-1" value={selectedDrug} onChange={setSelectedDrug} placeholder="Search and add a medicine..." searchPlaceholder="Type drug or generic name..." emptyText={drugs.length === 0 ? 'No drugs available — seed pharmacy first' : 'No matching drugs'} options={drugs.map(d => ({ value: d.id, label: `${d.drugName}${d.strength ? ` — ${d.strength}` : ''}`, sublabel: d.genericName || '', keywords: `${d.genericName || ''} ${d.strength || ''}` }))} />
+                <SearchableSelect
+                  className="flex-1"
+                  value={selectedDrug}
+                  onChange={(id) => { setSelectedDrug(id); drugPicker.setSelected(drugPicker.results.find(d => d.id === id) || null) }}
+                  onSearch={drugPicker.search}
+                  loading={drugPicker.loading}
+                  selectedLabel={drugPicker.selected ? `${drugPicker.selected.drugName}${drugPicker.selected.strength ? ` — ${drugPicker.selected.strength}` : ''}` : ''}
+                  placeholder="Search and add a medicine..."
+                  searchPlaceholder="Type drug or generic name..."
+                  emptyText="No matching drugs"
+                  options={drugPicker.results.map(d => ({ value: d.id, label: `${d.drugName}${d.strength ? ` — ${d.strength}` : ''}`, sublabel: d.genericName || '' }))}
+                />
                 <Button onClick={addDrug} disabled={!selectedDrug} className="bg-[#2E4168] hover:bg-[#24344f]"><Plus className="h-4 w-4 mr-1" />Add</Button>
               </div>
               {prescriptionItems.length === 0 ? (
@@ -871,11 +948,33 @@ export default function OpdModule() {
           <Section icon={<FlaskConical className="h-5 w-5" />} title="Tests & Investigations" accent="blue">
             <div className="space-y-4">
               <div className="flex gap-2">
-                <SearchableSelect className="flex-1" value={selectedLabTest} onChange={setSelectedLabTest} placeholder="Add a lab test..." searchPlaceholder="Type test name or code..." emptyText={labTests.length === 0 ? 'No lab tests available' : 'No matching tests'} options={labTests.map(t => ({ value: t.id, label: `${t.testName}${t.testCode ? ` (${t.testCode})` : ''}`, sublabel: [t.testCategory, t.specimenType].filter(Boolean).join(' · '), keywords: `${t.testCode || ''} ${t.testCategory || ''}` }))} />
+                <SearchableSelect
+                  className="flex-1"
+                  value={selectedLabTest}
+                  onChange={(id) => { setSelectedLabTest(id); labTestPicker.setSelected(labTestPicker.results.find(t => t.id === id) || null) }}
+                  onSearch={labTestPicker.search}
+                  loading={labTestPicker.loading}
+                  selectedLabel={labTestPicker.selected ? `${labTestPicker.selected.testName}${labTestPicker.selected.testCode ? ` (${labTestPicker.selected.testCode})` : ''}` : ''}
+                  placeholder="Add a lab test..."
+                  searchPlaceholder="Type test name or code..."
+                  emptyText="No matching tests"
+                  options={labTestPicker.results.map(t => ({ value: t.id, label: `${t.testName}${t.testCode ? ` (${t.testCode})` : ''}`, sublabel: [t.testCategory, t.specimenType].filter(Boolean).join(' · ') }))}
+                />
                 <Button onClick={addLabTest} disabled={!selectedLabTest} className="bg-[#2E4168] hover:bg-[#24344f]"><Plus className="h-4 w-4 mr-1" />Add</Button>
               </div>
               <div className="flex gap-2">
-                <SearchableSelect className="flex-1" value={selectedRadExam} onChange={setSelectedRadExam} placeholder="Add a radiology exam..." searchPlaceholder="Type exam, modality or body part..." emptyText={radiologyExams.length === 0 ? 'No radiology exams available' : 'No matching exams'} options={radiologyExams.map(e => ({ value: e.id, label: `${e.examName}${e.examCode ? ` (${e.examCode})` : ''}`, sublabel: [e.examCategory && e.examCategory.toUpperCase(), e.bodyPart, e.modality].filter(Boolean).join(' · '), keywords: `${e.examCode || ''} ${e.examCategory || ''} ${e.bodyPart || ''} ${e.modality || ''}` }))} />
+                <SearchableSelect
+                  className="flex-1"
+                  value={selectedRadExam}
+                  onChange={(id) => { setSelectedRadExam(id); radExamPicker.setSelected(radExamPicker.results.find(e => e.id === id) || null) }}
+                  onSearch={radExamPicker.search}
+                  loading={radExamPicker.loading}
+                  selectedLabel={radExamPicker.selected ? `${radExamPicker.selected.examName}${radExamPicker.selected.examCode ? ` (${radExamPicker.selected.examCode})` : ''}` : ''}
+                  placeholder="Add a radiology exam..."
+                  searchPlaceholder="Type exam, modality or body part..."
+                  emptyText="No matching exams"
+                  options={radExamPicker.results.map(e => ({ value: e.id, label: `${e.examName}${e.examCode ? ` (${e.examCode})` : ''}`, sublabel: [e.examCategory && e.examCategory.toUpperCase(), e.bodyPart, e.modality].filter(Boolean).join(' · ') }))}
+                />
                 <Button onClick={addRadExam} disabled={!selectedRadExam} className="bg-[#2E4168] hover:bg-[#24344f]"><Plus className="h-4 w-4 mr-1" />Add</Button>
               </div>
               {(labOrderItems.length > 0 || radiologyOrderItems.length > 0) ? (
