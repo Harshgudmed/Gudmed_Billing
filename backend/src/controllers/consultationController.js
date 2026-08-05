@@ -1,3 +1,4 @@
+import { patientSearchWhere } from '../lib/patientSearch.js'
 import { dayRange, dayRangeOf, startOfToday as hospitalStartOfToday } from '../lib/dates.js'
 import { db } from '../config/db.js'
 import { getOrgId } from "../lib/reqContext.js";
@@ -19,14 +20,10 @@ export async function getAll(req, res, next) {
     // A doctor only sees their own consultations.
     const myDoctorId = scopedDoctorId(req)
     if (myDoctorId) baseWhere.doctorId = myDoctorId
-    if (search) {
-      baseWhere.OR = [
-        { patient: { firstName: { contains: search, mode: 'insensitive' } } },
-        { patient: { lastName: { contains: search, mode: 'insensitive' } } },
-        { patient: { mrn: { contains: search, mode: 'insensitive' } } },
-        { diagnosis: { contains: search, mode: 'insensitive' } },
-      ]
-    }
+    const searchWhere = patientSearchWhere(search, 'patient', (term) => [
+      { diagnosis: { contains: term, mode: 'insensitive' } },
+    ])
+    if (searchWhere) Object.assign(baseWhere, searchWhere)
 
     const where = { ...baseWhere }
     // A single `date` (legacy) OR a startDate/endDate range filters the list.

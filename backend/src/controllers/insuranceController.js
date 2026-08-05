@@ -1,3 +1,4 @@
+import { patientSearchWhere } from '../lib/patientSearch.js'
 import { db } from '../config/db.js'
 import { getOrgId, safeMoney } from "../lib/reqContext.js";
 import { isOwned } from "../lib/tenant.js";
@@ -69,16 +70,12 @@ async function getCases(req, res, ORG_ID) {
   const where = { organizationId: ORG_ID }
   if (payerType && payerType !== 'all') where.payerType = payerType
   if (status && status !== 'all') where.status = status
-  if (search) {
-    where.OR = [
-      { insurerName: { contains: search, mode: 'insensitive' } },
-      { tpaName: { contains: search, mode: 'insensitive' } },
-      { policyNumber: { contains: search, mode: 'insensitive' } },
-      { patient: { firstName: { contains: search, mode: 'insensitive' } } },
-      { patient: { lastName: { contains: search, mode: 'insensitive' } } },
-      { patient: { mrn: { contains: search, mode: 'insensitive' } } },
-    ]
-  }
+  const searchWhere = patientSearchWhere(search, 'patient', (term) => [
+    { insurerName: { contains: term, mode: 'insensitive' } },
+    { tpaName: { contains: term, mode: 'insensitive' } },
+    { policyNumber: { contains: term, mode: 'insensitive' } },
+  ])
+  if (searchWhere) Object.assign(where, searchWhere)
   const cases = await db.insuranceCase.findMany({
     where,
     include: {

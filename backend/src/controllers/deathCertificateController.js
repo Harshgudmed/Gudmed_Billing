@@ -1,4 +1,5 @@
 import { db } from '../config/db.js'
+import { patientSearchWhere } from '../lib/patientSearch.js'
 import { getOrgId } from "../lib/reqContext.js";
 import { listResponse } from "../lib/pagination.js";
 import { PATIENT_NAME_SELECT } from '../lib/patientName.js'
@@ -12,14 +13,11 @@ export async function getAll(req, res, next) {
     if (status === 'issued') where.issuedAt = { not: null }
     else if (status === 'pending') where.issuedAt = null
     else if (status === 'maternal') where.isMaternalDeath = true
-    if (search) {
-      where.OR = [
-        { certificateNumber: { contains: search, mode: 'insensitive' } },
-        { patient: { firstName: { contains: search, mode: 'insensitive' } } },
-        { patient: { lastName: { contains: search, mode: 'insensitive' } } },
-        { patient: { mrn: { contains: search, mode: 'insensitive' } } },
-      ]
-    }
+    const searchWhere = patientSearchWhere(search, 'patient', (term) => [
+      { certificateNumber: { contains: term, mode: 'insensitive' } },
+      { causeOfDeath: { contains: term, mode: 'insensitive' } },
+    ])
+    if (searchWhere) Object.assign(where, searchWhere)
     const include = {
       patient: { select: { ...PATIENT_NAME_SELECT, mrn: true } },
       certifiedBy: { select: { id: true, fullName: true } },

@@ -1,4 +1,5 @@
 import { db } from '../config/db.js'
+import { patientSearchWhere } from '../lib/patientSearch.js'
 import { dayRange, todayRange } from '../lib/dates.js'
 import { getOrgId, safeMoney } from "../lib/reqContext.js";
 import { isOwned } from "../lib/tenant.js";
@@ -25,16 +26,11 @@ export async function getAll(req, res, next) {
     } else if (req.query.today === 'true') {
       where.admissionDate = todayRange()
     }
-    if (search) {
-      where.OR = [
-        { caseNumber: { contains: search, mode: 'insensitive' } },
-        { procedure: { contains: search, mode: 'insensitive' } },
-        { doctorName: { contains: search, mode: 'insensitive' } },
-        { patient: { firstName: { contains: search, mode: 'insensitive' } } },
-        { patient: { lastName: { contains: search, mode: 'insensitive' } } },
-        { patient: { mrn: { contains: search, mode: 'insensitive' } } },
-      ]
-    }
+    const searchWhere = patientSearchWhere(search, 'patient', (term) => [
+      { procedure: { contains: term, mode: 'insensitive' } },
+      { notes: { contains: term, mode: 'insensitive' } },
+    ])
+    if (searchWhere) Object.assign(where, searchWhere)
     const cases = await db.dayCareCase.findMany({
       where,
       include: {

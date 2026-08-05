@@ -104,14 +104,10 @@ export const getAll = async (req, res, next) => {
       const where = { organizationId: ORGANIZATION_ID }
       if (status) where.status = status
       if (priority) where.priority = priority
-      if (search) {
-        where.OR = [
-          { orderNumber: { contains: search, mode: 'insensitive' } },
-          { patient: { firstName: { contains: search, mode: 'insensitive' } } },
-          { patient: { lastName: { contains: search, mode: 'insensitive' } } },
-          { patient: { mrn: { contains: search, mode: 'insensitive' } } },
-        ]
-      }
+      const searchWhere = patientSearchWhere(search, 'patient', (term) => [
+        { orderNumber: { contains: term, mode: 'insensitive' } },
+      ])
+      if (searchWhere) Object.assign(where, searchWhere)
       const body = await listResponse(db.labOrder, {
         where,
         include: { patient: { select: PATIENT_SNAPSHOT_SELECT }, results: { include: { test: true } } },
