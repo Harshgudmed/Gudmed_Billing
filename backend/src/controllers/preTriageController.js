@@ -3,6 +3,7 @@ import { dayRange } from '../lib/dates.js'
 import { getOrgId } from "../lib/reqContext.js";
 import { listResponse } from "../lib/pagination.js";
 import { PATIENT_NAME_SELECT } from '../lib/patientName.js'
+import { ageFromDob } from '../utils/patientSnapshot.js'
 
 function generateScreeningNumber() {
   const date = new Date().toISOString().slice(0, 10).replace(/-/g, '')
@@ -91,9 +92,7 @@ export async function create(req, res, next) {
       if (!patient) {
         return res.status(404).json({ success: false, error: 'Patient not found' })
       }
-      const age = patient.dateOfBirth
-        ? Math.floor((Date.now() - new Date(patient.dateOfBirth).getTime()) / (365.25 * 24 * 60 * 60 * 1000))
-        : null
+      const age = ageFromDob(patient.dateOfBirth)
       data = {
         ...data,
         firstName: patient.firstName,

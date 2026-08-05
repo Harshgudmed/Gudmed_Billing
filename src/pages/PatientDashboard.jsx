@@ -11,6 +11,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } f
 import Logo from '@/components/Logo'
 import client from '@/api/client'
 import { useAuth } from '@/lib/auth'
+import { calcAge } from '@/lib/patient'
 import { Link } from 'react-router-dom'
 
 // Doctor names in the data already include a "Dr." prefix for most records — don't double it.
@@ -34,9 +35,11 @@ function fmtDate(d) {
   if (!d) return '—'
   try { return new Date(d).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) } catch { return '—' }
 }
+// Wraps calcAge, translating its '' (no dob) back to null — this file's `a != null`
+// check below depends on null specifically, not on '' (which is != null too).
 function age(dob) {
-  if (!dob) return null
-  return Math.floor((Date.now() - new Date(dob).getTime()) / (365.25 * 24 * 3600 * 1000))
+  const a = calcAge(dob)
+  return a === '' ? null : a
 }
 import { formatMoney as money } from '@/lib/format'
 function ago(date) {
