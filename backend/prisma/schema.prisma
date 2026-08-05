@@ -2225,7 +2225,11 @@ model LabTest {
   specimenContainer       String?
   resultType              String?
   unit                    String?
-  referenceRanges         String?
+  referenceRanges         String? // legacy free-text range (e.g. "Negative", pre-dates the numeric fields below)
+  referenceMin            Float?
+  referenceMax            Float?
+  criticalLow             Float?
+  criticalHigh            Float?
   price                   Float?
   turnaroundTime          Int?
   department              String?

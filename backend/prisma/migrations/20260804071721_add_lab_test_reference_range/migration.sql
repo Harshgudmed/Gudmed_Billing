@@ -1,0 +1,5 @@
+-- AlterTable
+ALTER TABLE "LabTest" ADD COLUMN     "referenceMin" DOUBLE PRECISION,
+ADD COLUMN     "referenceMax" DOUBLE PRECISION,
+ADD COLUMN     "criticalLow" DOUBLE PRECISION,
+ADD COLUMN     "criticalHigh" DOUBLE PRECISION;

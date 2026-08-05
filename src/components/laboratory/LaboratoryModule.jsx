@@ -41,7 +41,7 @@ import PatientLookup from '@/components/common/PatientLookup'
 import { printLabReceipt } from '@/components/billing/utils/printBilling'
 import PaymentFields from '@/components/billing/PaymentFields'
 import { createInvoiceWithPayment, fetchOrderInvoicePayments } from '@/lib/billing'
-import { getFullName } from "@/lib/patient";
+import { getFullName, calcAge } from "@/lib/patient";
 
 // ============================================
 // API HELPERS
@@ -69,7 +69,11 @@ function transformApiTest(apiTest) {
     specimenVolume: apiTest.specimenVolume || '',
     specimenContainer: apiTest.specimenContainer || '',
     unit: apiTest.unit || '',
-    referenceRanges: [],
+    referenceRanges: apiTest.referenceRanges || '',
+    referenceMin: apiTest.referenceMin ?? null,
+    referenceMax: apiTest.referenceMax ?? null,
+    criticalLow: apiTest.criticalLow ?? null,
+    criticalHigh: apiTest.criticalHigh ?? null,
     price: apiTest.price || 0,
     turnaroundTime: apiTest.turnaroundTime || 2,
     department: apiTest.department || '',
@@ -93,9 +97,9 @@ function transformApiOrder(apiOrder) {
     parsedTests = []
   }
 
-  // Calculate patient age from date of birth
-  const dob = patient?.dateOfBirth ? new Date(patient.dateOfBirth) : null
-  const age = dob ? Math.floor((Date.now() - dob.getTime()) / (365.25 * 24 * 60 * 60 * 1000)) : 0
+  // Calculate patient age from date of birth. calcAge returns '' when there's no
+  // dob; `|| 0` keeps this function's existing contract (a number, never '').
+  const age = calcAge(patient?.dateOfBirth) || 0
 
   return {
     id: apiOrder.id,
@@ -168,6 +172,10 @@ const testSchema = z.object({
   specimenVolume: z.string().min(1, 'Specimen volume is required'),
   specimenContainer: z.string().min(1, 'Specimen container is required'),
   unit: z.string().optional(),
+  referenceMin: z.number().optional(),
+  referenceMax: z.number().optional(),
+  criticalLow: z.number().optional(),
+  criticalHigh: z.number().optional(),
   price: z.number().min(0, 'Price must be positive'),
   turnaroundTime: z.number().min(1, 'Turnaround time is required'),
   department: z.string().min(1, 'Department is required'),
@@ -334,6 +342,7 @@ export default function LaboratoryModule() {
   // Forms
   const testForm = useForm({
     resolver: zodResolver(testSchema),
+    mode: 'onBlur',
     defaultValues: {
       testName: '',
       testCode: '',
@@ -343,6 +352,10 @@ export default function LaboratoryModule() {
       specimenVolume: '',
       specimenContainer: '',
       unit: '',
+      referenceMin: undefined,
+      referenceMax: undefined,
+      criticalLow: undefined,
+      criticalHigh: undefined,
       price: 0,
       turnaroundTime: 2,
       department: '',
@@ -354,6 +367,7 @@ export default function LaboratoryModule() {
 
   const orderForm = useForm({
     resolver: zodResolver(orderSchema),
+    mode: 'onBlur',
     defaultValues: {
       patientId: '',
       tests: [],
@@ -366,6 +380,7 @@ export default function LaboratoryModule() {
 
   const resultForm = useForm({
     resolver: zodResolver(resultSchema),
+    mode: 'onBlur',
     defaultValues: {
       resultValue: '',
       isAbnormal: false,
@@ -1392,6 +1407,10 @@ tr:nth-child(even) td{background:#f9f9f9}
                                         specimenVolume: test.specimenVolume,
                                         specimenContainer: test.specimenContainer,
                                         unit: test.unit,
+                                        referenceMin: test.referenceMin,
+                                        referenceMax: test.referenceMax,
+                                        criticalLow: test.criticalLow,
+                                        criticalHigh: test.criticalHigh,
                                         price: test.price,
                                         turnaroundTime: test.turnaroundTime,
                                         department: test.department,
@@ -2110,6 +2129,85 @@ tr:nth-child(even) td{background:#f9f9f9}
                 />
               </div>
 
+              <div className="grid grid-cols-4 gap-4">
+                <FormField
+                  control={testForm.control}
+                  name="referenceMin"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Reference Min</FormLabel>
+                      <FormControl>
+                        <Input
+                          type="number"
+                          placeholder="e.g., 13.0"
+                          {...field}
+                          value={field.value ?? ''}
+                          onChange={(e) => field.onChange(e.target.value === '' ? undefined : parseFloat(e.target.value))}
+                        />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={testForm.control}
+                  name="referenceMax"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Reference Max</FormLabel>
+                      <FormControl>
+                        <Input
+                          type="number"
+                          placeholder="e.g., 17.0"
+                          {...field}
+                          value={field.value ?? ''}
+                          onChange={(e) => field.onChange(e.target.value === '' ? undefined : parseFloat(e.target.value))}
+                        />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={testForm.control}
+                  name="criticalLow"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Critical Low</FormLabel>
+                      <FormControl>
+                        <Input
+                          type="number"
+                          placeholder="Optional"
+                          {...field}
+                          value={field.value ?? ''}
+                          onChange={(e) => field.onChange(e.target.value === '' ? undefined : parseFloat(e.target.value))}
+                        />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={testForm.control}
+                  name="criticalHigh"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Critical High</FormLabel>
+                      <FormControl>
+                        <Input
+                          type="number"
+                          placeholder="Optional"
+                          {...field}
+                          value={field.value ?? ''}
+                          onChange={(e) => field.onChange(e.target.value === '' ? undefined : parseFloat(e.target.value))}
+                        />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              </div>
+
               <FormField
                 control={testForm.control}
                 name="department"
@@ -2370,18 +2468,22 @@ tr:nth-child(even) td{background:#f9f9f9}
           </DialogHeader>
           <Form {...resultForm}>
             <form onSubmit={resultForm.handleSubmit(handleEnterResults)} className="space-y-4">
-              {selectedTest && selectedTest.referenceRanges && selectedTest.referenceRanges.length > 0 && (
+              {selectedTest && (selectedTest.referenceMin != null || selectedTest.referenceMax != null || selectedTest.referenceRanges) && (
                 <Alert>
                   <AlertCircle className="h-4 w-4" />
                   <AlertTitle>Reference Range</AlertTitle>
                   <AlertDescription>
-                    {selectedTest.referenceRanges[0].minValue} - {selectedTest.referenceRanges[0].maxValue} {selectedTest.referenceRanges[0].unit}
-                    {selectedTest.referenceRanges[0].criticalLow && (
-                      <span className="ml-2 text-red-600">Critical Low: {selectedTest.referenceRanges[0].criticalLow}</span>
-                    )}
-                    {selectedTest.referenceRanges[0].criticalHigh && (
-                      <span className="ml-2 text-red-600">Critical High: {selectedTest.referenceRanges[0].criticalHigh}</span>
-                    )}
+                    {selectedTest.referenceMin != null || selectedTest.referenceMax != null ? (
+                      <>
+                        {selectedTest.referenceMin ?? '?'} - {selectedTest.referenceMax ?? '?'} {selectedTest.unit}
+                        {selectedTest.criticalLow != null && (
+                          <span className="ml-2 text-red-600">Critical Low: {selectedTest.criticalLow}</span>
+                        )}
+                        {selectedTest.criticalHigh != null && (
+                          <span className="ml-2 text-red-600">Critical High: {selectedTest.criticalHigh}</span>
+                        )}
+                      </>
+                    ) : selectedTest.referenceRanges}
                   </AlertDescription>
                 </Alert>
               )}
