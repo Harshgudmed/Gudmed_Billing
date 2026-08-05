@@ -621,12 +621,14 @@ body{font-family:Arial,Helvetica,sans-serif;font-size:10.5pt;color:#000;backgrou
             </Tabs>
           </div>
         )}
-        <DialogFooter>
-          <Button variant="outline" onClick={() => setShowViewDialog(false)}>Close</Button>
-          <Button onClick={() => { setShowViewDialog(false); if (selectedPatient) openEdit(selectedPatient); }}>
-            <Edit className="h-4 w-4 mr-2" />Edit
-          </Button>
-        </DialogFooter>
+        {viewTab === 'overview' && (
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowViewDialog(false)}>Close</Button>
+            <Button onClick={() => { setShowViewDialog(false); if (selectedPatient) openEdit(selectedPatient); }}>
+              <Edit className="h-4 w-4 mr-2" />Edit
+            </Button>
+          </DialogFooter>
+        )}
       </DialogContent>
     </Dialog>
   );
