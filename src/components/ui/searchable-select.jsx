@@ -1,9 +1,10 @@
-import { useState, useMemo } from 'react'
-import { Check, ChevronsUpDown, Search } from 'lucide-react'
+import { useState, useMemo, useEffect } from 'react'
+import { Check, ChevronsUpDown, Search, Loader2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
+import { useDebounce } from '@/lib/useDebounce'
 
 /**
  * A type-to-filter combobox. Drop-in replacement for a Select when the option
@@ -18,6 +19,18 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
  *    dropdown matches the trigger width; pass e.g. `w-[380px]` here when the
  *    trigger is compact but the options are long (room pickers, etc.) so the
  *    labels aren't truncated to "Room ..." / "1st Floo...".
+ *
+ * ── Server-side search (optional) ──
+ * Passing `onSearch` switches the list from "filter a fully-loaded array" to
+ * "ask the server for each query". Use it whenever the catalogue can outgrow
+ * one request: the pharmacy catalogue is ~200k rows, so a picker that loaded
+ * `limit=5000` up-front simply could not see 97% of it, and typing a drug that
+ * sorted past the cap returned "no results" for a drug that plainly exists.
+ *  - onSearch: (query) => void, debounced; the parent fetches and feeds `options`
+ *  - loading: show a spinner while that fetch is in flight
+ *  - minSearchLength: characters required before searching (default 2)
+ *  - selectedLabel: label for `value` when the selected row isn't in `options`
+ *    (server mode only holds the current result page, not the whole catalogue)
  */
 export function SearchableSelect({
   options = [],
@@ -29,19 +42,38 @@ export function SearchableSelect({
   className,
   contentClassName,
   disabled,
+  onSearch,
+  loading = false,
+  minSearchLength = 2,
+  selectedLabel,
 }) {
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState('')
+  const serverMode = typeof onSearch === 'function'
 
+  const debouncedQuery = useDebounce(query, 300)
+  useEffect(() => {
+    if (!serverMode) return
+    const q = debouncedQuery.trim()
+    onSearch(q.length >= minSearchLength ? q : '')
+    // `onSearch` is intentionally not a dep: parents commonly pass an inline
+    // arrow, which would re-fire this on every render and loop.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [debouncedQuery, serverMode, minSearchLength])
+
+  // In server mode `options` IS the result set — filtering it again locally
+  // would hide rows the server deliberately returned.
   const selected = options.find(o => o.value === value)
+  const selectedText = selected?.label ?? (value ? selectedLabel : undefined)
 
   const filtered = useMemo(() => {
+    if (serverMode) return options
     const q = query.trim().toLowerCase()
     if (!q) return options
     return options.filter(o =>
       `${o.label} ${o.sublabel || ''} ${o.keywords || ''}`.toLowerCase().includes(q)
     )
-  }, [options, query])
+  }, [options, query, serverMode])
 
   return (
     <Popover open={open} onOpenChange={(o) => { setOpen(o); if (!o) setQuery('') }}>
@@ -54,8 +86,8 @@ export function SearchableSelect({
           disabled={disabled}
           className={cn('justify-between font-normal', className)}
         >
-          <span className={cn('truncate', !selected && 'text-gray-400')}>
-            {selected ? selected.label : placeholder}
+          <span className={cn('truncate', !selectedText && 'text-gray-400')}>
+            {selectedText || placeholder}
           </span>
           <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
         </Button>
@@ -70,9 +102,16 @@ export function SearchableSelect({
             placeholder={searchPlaceholder}
             className="border-0 focus-visible:ring-0 focus-visible:ring-offset-0 h-10 px-2"
           />
+          {loading && <Loader2 className="h-4 w-4 shrink-0 animate-spin text-gray-400" />}
         </div>
         <div className="max-h-64 overflow-y-auto p-1" onWheel={(e) => e.stopPropagation()}>
-          {filtered.length === 0 ? (
+          {serverMode && query.trim().length < minSearchLength ? (
+            <div className="py-6 text-center text-sm text-gray-400">
+              Type at least {minSearchLength} characters to search
+            </div>
+          ) : loading && filtered.length === 0 ? (
+            <div className="py-6 text-center text-sm text-gray-400">Searching...</div>
+          ) : filtered.length === 0 ? (
             <div className="py-6 text-center text-sm text-gray-400">{emptyText}</div>
           ) : (
             filtered.map(o => (

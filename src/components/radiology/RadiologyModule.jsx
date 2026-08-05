@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { getOrgSettings } from '@/lib/orgSettings'
 import { sendRadiologyNotification } from '@/lib/whatsapp'
-import { format, differenceInYears } from 'date-fns'
+import { format } from 'date-fns'
 import { toast } from 'sonner'
 import { printRadiologyReceipt } from '@/components/billing/utils/printBilling'
 import PaymentFields from '@/components/billing/PaymentFields'
@@ -24,7 +24,7 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import PatientLookup from '@/components/common/PatientLookup'
 import BulkImportDialog from '@/components/common/BulkImportDialog'
 import client from '@/api/client'
-import { getFullName } from "@/lib/patient";
+import { getFullName, calcAge } from "@/lib/patient";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -437,7 +437,7 @@ export default function RadiologyModule() {
       labId: order.orderNumber,
       patientName: order.patient ? getFullName(order.patient) : '—',
       uhid: order.patient?.mrn,
-      age: order.patient?.dateOfBirth ? `${differenceInYears(now, new Date(order.patient.dateOfBirth))} year(s)` : '',
+      age: order.patient?.dateOfBirth ? `${calcAge(order.patient.dateOfBirth)} year(s)` : '',
       sex: order.patient?.gender ? order.patient.gender.charAt(0).toUpperCase() + order.patient.gender.slice(1) : '',
       contact: order.patient?.phonePrimary,
       dateTime: format(now, 'dd MMM yyyy, hh:mm aa'),

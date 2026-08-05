@@ -73,13 +73,29 @@ export default function PrescriptionPurchaseModal({
     async function fetchPrices() {
       setLoadingPrices(true)
       try {
-        const drugsRes = await client.get('/pharmacy/drugs?limit=5000')
-        const drugs = drugsRes?.data || []
-        const enriched = prescriptionItems.map(item => {
-          const match = drugs.find(d =>
-            d.drugName?.toLowerCase().includes(item.drugName?.toLowerCase()) ||
-            item.drugName?.toLowerCase().includes(d.drugName?.toLowerCase())
+        // Price each prescribed item by searching the catalogue for THAT item,
+        // rather than downloading the catalogue and matching in memory. The old
+        // `limit=5000` fetch could only ever see the first 5,000 of ~200,000
+        // drugs, so anything sorting past the cap priced at ₹0 — and ₹0 items are
+        // dropped from the sale below, meaning the patient was never charged for
+        // medicine that was handed over.
+        const candidateLists = await Promise.all(
+          prescriptionItems.map(item =>
+            client.get('/pharmacy/drugs', { params: { search: item.drugName || '', limit: 10 } })
+              .then(r => r?.data || [])
+              .catch(() => [])
           )
+        )
+        const enriched = prescriptionItems.map((item, idx) => {
+          const name = (item.drugName || '').toLowerCase()
+          const candidates = candidateLists[idx]
+          // Exact name first, then the same loose two-way contains the previous
+          // in-memory match used, so anything that resolved before still does.
+          const match = candidates.find(d => (d.drugName || '').toLowerCase() === name)
+            || candidates.find(d =>
+              (d.drugName || '').toLowerCase().includes(name) ||
+              (name && name.includes((d.drugName || '').toLowerCase()))
+            )
           return { ...item, unitPrice: match?.sellingPrice || 0, drugCode: match?.id }
         })
         setEnriched(enriched)
