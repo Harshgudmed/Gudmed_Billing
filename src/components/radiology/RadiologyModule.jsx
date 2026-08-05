@@ -1,4 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
+import { useDebounce } from '@/lib/useDebounce'
+import { dateRangeFor } from '@/components/common/DateFilter'
 import { getOrgSettings } from '@/lib/orgSettings'
 import { sendRadiologyNotification } from '@/lib/whatsapp'
 import { format } from 'date-fns'
@@ -104,8 +106,9 @@ export default function RadiologyModule() {
   const [loading, setLoading] = useState(true)
   const [stats, setStats] = useState({ pending: 0, inProgress: 0, completedToday: 0, criticalFindings: 0, totalExams: 0 })
 
-  // Filters
+  // Filters — applied by the server, not on the loaded page
   const [searchQuery, setSearchQuery] = useState('')
+  const debouncedSearch = useDebounce(searchQuery, 300)
   const [statusFilter, setStatusFilter] = useState('all')
   const [modalityFilter, setModalityFilter] = useState('all')
   const [categoryFilter, setCategoryFilter] = useState('all')
@@ -115,6 +118,11 @@ export default function RadiologyModule() {
   const [examsPage, setExamsPage] = useState(1)
   const [ordersPage, setOrdersPage] = useState(1)
   const [reportsPage, setReportsPage] = useState(1)
+
+  // A narrower filter has fewer pages, so page 3 could land past the new end.
+  useEffect(() => {
+    setExamsPage(1); setOrdersPage(1)
+  }, [debouncedSearch, statusFilter, modalityFilter, categoryFilter, dateFilter])
 
   // Pagination metadata from backend
   const [examsMeta, setExamsMeta] = useState({ total: 0, limit: 10, offset: 0 })
@@ -171,9 +179,21 @@ export default function RadiologyModule() {
       const reportsOffset = (reportsPage - 1) * RADIOLOGY_ITEMS_PER_PAGE
 
       const [eRes, oRes, rRes] = await Promise.all([
-        client.get(`/radiology?resource=exams&limit=${RADIOLOGY_ITEMS_PER_PAGE}&offset=${examsOffset}`),
-        client.get(`/radiology?resource=orders&limit=${RADIOLOGY_ITEMS_PER_PAGE}&offset=${ordersOffset}`),
-        client.get(`/radiology?resource=reports&limit=${RADIOLOGY_ITEMS_PER_PAGE}&offset=${reportsOffset}`),
+        client.get('/radiology', { params: {
+          resource: 'exams', limit: RADIOLOGY_ITEMS_PER_PAGE, offset: examsOffset,
+          search: debouncedSearch || undefined,
+          examCategory: categoryFilter === 'all' ? undefined : categoryFilter,
+        } }),
+        client.get('/radiology', { params: {
+          resource: 'orders', limit: RADIOLOGY_ITEMS_PER_PAGE, offset: ordersOffset,
+          search: debouncedSearch || undefined,
+          status: statusFilter === 'all' ? undefined : statusFilter,
+          examCategory: modalityFilter === 'all' ? undefined : modalityFilter,
+          ...dateRangeFor({ mode: dateFilter }),
+        } }),
+        client.get('/radiology', { params: {
+          resource: 'reports', limit: RADIOLOGY_ITEMS_PER_PAGE, offset: reportsOffset,
+        } }),
       ])
       if (eRes.success) {
         setExams(eRes.data || [])
@@ -189,7 +209,7 @@ export default function RadiologyModule() {
       }
     } catch { /* silent */ }
     setLoading(false)
-  }, [examsPage, ordersPage, reportsPage])
+  }, [examsPage, ordersPage, reportsPage, debouncedSearch, statusFilter, modalityFilter, categoryFilter, dateFilter])
 
   const fetchStats = useCallback(async () => {
     try {
@@ -601,24 +621,10 @@ ${order.clinicalIndication ? `<div class="section"><div class="section-header">C
 
   // ── Filtered data ─────────────────────────────────────────────────────────
 
-  const filteredOrders = orders.filter(o => {
-    const q = searchQuery.toLowerCase()
-    const patName = getFullName(o.patient).toLowerCase()
-    const matchSearch = !q || patName.includes(q) || (o.patient?.mrn || '').toLowerCase().includes(q) || (o.orderNumber || '').toLowerCase().includes(q)
-    const matchStatus = statusFilter === 'all' || o.status === statusFilter
-    const matchModality = modalityFilter === 'all' || o.exam?.examCategory === modalityFilter
-    let matchDate = true
-    if (dateFilter === 'today') matchDate = o.orderDate && new Date(o.orderDate).toDateString() === new Date().toDateString()
-    else if (dateFilter === 'week') { const w = new Date(); w.setDate(w.getDate() - 7); matchDate = o.orderDate && new Date(o.orderDate) >= w }
-    return matchSearch && matchStatus && matchModality && matchDate
-  })
-
-  const filteredExams = exams.filter(e => {
-    const q = searchQuery.toLowerCase()
-    const matchSearch = !q || (e.examName || '').toLowerCase().includes(q) || (e.examCode || '').toLowerCase().includes(q) || (e.bodyPart || '').toLowerCase().includes(q)
-    const matchCat = categoryFilter === 'all' || e.examCategory === categoryFilter
-    return matchSearch && matchCat
-  })
+  // The server already applied search + every filter, so what arrived IS the
+  // filtered page. Re-filtering here would only narrow these 15 rows.
+  const filteredOrders = orders
+  const filteredExams = exams
 
   const reportedCount = orders.filter(o => o.status === 'reported').length
   const criticalFindingsCount = stats.criticalFindings || reports.filter(r => r.hasCriticalFindings).length || orders.filter(o => o.report?.hasCriticalFindings || o.hasCriticalFindings).length
