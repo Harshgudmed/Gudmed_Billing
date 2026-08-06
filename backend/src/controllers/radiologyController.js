@@ -5,6 +5,8 @@ import { resolveRequestedById } from '../lib/requestedBy.js'
 import { todayRange, dayRange } from '../lib/dates.js'
 import { z } from 'zod'
 import { PATIENT_SNAPSHOT_SELECT } from '../utils/patientSnapshot.js'
+import { patientSearchWhere } from '../lib/patientSearch.js'
+import { isOwned } from '../lib/tenant.js'
 
 // ── Zod Schemas ────────────────────────────────────────────────────────────────
 
@@ -299,6 +301,17 @@ export const create = async (req, res, next) => {
       } = parsed.data
 
       const actorId = getActor(req).id
+
+      // patientId/examId are caller-supplied: without these guards an order (and
+      // the patient demographics echoed back in the response) could be attached
+      // to another hospital's patient. Shared isOwned tenant guard.
+      if (!(await isOwned('patient', patientId, ORGANIZATION_ID))) {
+        return res.status(404).json({ success: false, error: 'Patient not found' })
+      }
+      if (!(await isOwned('radiologyExam', examId, ORGANIZATION_ID))) {
+        return res.status(404).json({ success: false, error: 'Exam not found' })
+      }
+
       // Atomic per-org counter inside the insert's transaction — `RAD${Date.now()}`
       // collided on the @unique orderNumber for two orders in the same millisecond.
       const data = await db.$transaction(async (tx) => {

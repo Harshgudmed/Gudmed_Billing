@@ -88,10 +88,14 @@ export function formatPatientSnapshot(p) {
 // transaction client (tx), so this works inside $transaction blocks too.
 // Returns null when no patientId is given or the patient doesn't exist — callers
 // should treat that as a walk-in / OTC sale with no linked patient record.
-export async function getPatientSnapshot(client, patientId) {
+export async function getPatientSnapshot(client, patientId, organizationId) {
   if (!patientId) return null
-  const patient = await client.patient.findUnique({
-    where: { id: patientId },
+  // Org-scoped. findUnique-by-id-alone read ANY hospital's patient: this
+  // snapshot carries name, MRN/UHID, phone, email, DOB-derived age and full
+  // address, and callers echo it back in their response — so a guessed id from
+  // another tenant returned that tenant's PII. findFirst lets us AND the org in.
+  const patient = await client.patient.findFirst({
+    where: { id: patientId, ...(organizationId ? { organizationId } : {}) },
     select: PATIENT_SNAPSHOT_SELECT,
   })
   if (!patient) return null
