@@ -68,12 +68,58 @@ export async function nextSeriesNumber(tx, organizationId, series, label = serie
 const UHID_BASE = 1_000_000_000
 
 export async function generateUHID(tx, organizationId) {
+  // Same self-heal as every other series (see nextSeriesNumber): if the counter
+  // has fallen behind the patients already on file — a migration that copied
+  // Patient but not BillCounter, a restore, a hand-seeded environment — it
+  // otherwise hands out a UHID that exists, registration dies on the unique mrn,
+  // and the rolled-back transaction takes the increment with it, so it fails on
+  // the same number for ever. Registration is the front door; it cannot be the
+  // one series left without this.
+  const lastSeq = await maxUhidSequence(tx, organizationId)
+
   const counter = await tx.billCounter.upsert({
     where: { organizationId_series_year: { organizationId, series: 'UHID', year: 'P' } },
-    create: { organizationId, series: 'UHID', year: 'P', value: 1 },
+    create: { organizationId, series: 'UHID', year: 'P', value: lastSeq + 1 },
     update: { value: { increment: 1 } },
   })
-  return String(UHID_BASE + counter.value)
+
+  let value = counter.value
+  if (value <= lastSeq) {
+    const fixed = await tx.billCounter.update({
+      where: { organizationId_series_year: { organizationId, series: 'UHID', year: 'P' } },
+      data: { value: lastSeq + 1 },
+    })
+    value = fixed.value
+  }
+  return String(UHID_BASE + value)
+}
+
+/**
+ * Highest UHID sequence already issued to this hospital.
+ *
+ * Patient.mrn holds several historical shapes side by side — MRN-26-1048905,
+ * MRN100469, UHID202607178657, DEMOFLOW-*, and the current plain 10 digits — so
+ * this counts only the ones this counter could have produced. Every value it
+ * produces is exactly 10 digits starting with 1 (UHID_BASE is 1,000,000,000 and
+ * stays 10 digits for the next ~9 billion patients), and equal-width numeric
+ * strings sort lexicographically in numeric order, so ordering desc gives the
+ * true maximum. A few rows are read rather than one because `startsWith: '1'`
+ * can also catch a legacy shape that merely begins with a 1.
+ */
+async function maxUhidSequence(tx, organizationId) {
+  const rows = await tx.patient.findMany({
+    where: { organizationId, mrn: { startsWith: '1' } },
+    orderBy: { mrn: 'desc' },
+    take: 5,
+    select: { mrn: true },
+  })
+  let max = 0
+  for (const { mrn } of rows) {
+    if (!/^\d{10}$/.test(mrn)) continue
+    const seq = Number(mrn) - UHID_BASE
+    if (seq > max) max = seq
+  }
+  return max
 }
 
 /** Highest invoice sequence already used for this org+FY. Numbers are zero-padded, so
