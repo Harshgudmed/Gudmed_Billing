@@ -1,4 +1,5 @@
 import { db } from '../config/db.js'
+import { nextSeriesNumber } from '../lib/counters.js'
 import { patientSearchWhere } from '../lib/patientSearch.js'
 import { getOrgId } from "../lib/reqContext.js";
 import { listResponse } from "../lib/pagination.js";
@@ -59,13 +60,6 @@ export async function create(req, res, next) {
     const patient = await db.patient.findFirst({ where: { id: patientId, organizationId: ORG_ID }, select: { id: true } })
     if (!patient) return res.status(404).json({ success: false, error: 'Patient not found' })
 
-    // Certificate number is minted PER ORG (count scoped to this org), so every
-    // hospital's series independently starts at DC-00001. The DB constraint is
-    // the composite @@unique([organizationId, certificateNumber]) — see the
-    // 20260727..._death_cert_number_scoped_per_org migration.
-    const count = await db.deathCertificate.count({ where: { organizationId: ORG_ID } })
-    const certNumber = `DC-${String(count + 1).padStart(5, '0')}`
-
     // Defensive: only link a certifier if that user actually exists in this org.
     // Prevents FK constraint errors when the selected doctor isn't present
     // (e.g. data migrated without the user records). certifiedById is optional.
@@ -78,10 +72,12 @@ export async function create(req, res, next) {
       safeCertifiedById = certifier ? certifiedById : null
     }
 
-    const cert = await db.deathCertificate.create({
-      data: {
-        organizationId: ORG_ID,
-        certificateNumber: certNumber,
+    const cert = await db.$transaction(async (tx) => {
+      const certNumber = await nextSeriesNumber(tx, ORG_ID, 'DEATH_CERT', 'DC')
+      return tx.deathCertificate.create({
+        data: {
+          organizationId: ORG_ID,
+          certificateNumber: certNumber,
         patientId,
         dateOfDeath: new Date(dateOfDeath),
         timeOfDeath: timeOfDeath || null,
@@ -113,6 +109,7 @@ export async function create(req, res, next) {
         patient: { select: { ...PATIENT_NAME_SELECT, mrn: true } },
         certifiedBy: { select: { id: true, fullName: true } },
       },
+    })
     })
     res.json({ success: true, data: cert })
   } catch (err) {
