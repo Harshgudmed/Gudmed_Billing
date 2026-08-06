@@ -53,6 +53,14 @@ const invoiceItemSchema = z.object({
   // and radiology orders the line implies. Absent = a plain, non-clinical line.
   sourceType: z.enum(['pharmacy', 'lab', 'radiology']).optional(),
   sourceId: z.string().optional(),
+  // What KIND of service this line is, for the invoice list's Type column and
+  // its filter. Distinct from sourceType, which exists only for the three lines
+  // that have a catalogue row to act on (draw down stock, raise an order).
+  // A consultation, a procedure or a vaccine has no such catalogue, so without
+  // this they were untyped and the list could only show them as "—".
+  // 'consultation' (not 'opd') because that is what appointmentController's
+  // auto-voucher has always written; the two must stay one vocabulary.
+  type: z.enum(['consultation', 'procedure', 'vaccine', 'pharmacy', 'lab', 'radiology']).optional(),
 })
 
 const invoiceSchema = z.object({
@@ -136,16 +144,25 @@ const serviceUpdateSchema = z.object({
 
 // What each billable line looks like inside Invoice.items, which is a JSON
 // STRING column — so the filter is a substring match on that text, not a JSON
-// path query. A consultation line carries `type`, while pharmacy/lab/radiology
-// lines carry `sourceType` (set by the billing UI so the invoice can draw down
-// stock and raise the orders it implies — see fulfillInvoiceItems). Written
-// without spaces because JSON.stringify emits none; keep these two facts
-// together or the filter silently matches nothing.
+// path query. Written without spaces because JSON.stringify emits none; keep
+// that fact next to these strings or the filter silently matches nothing.
+//
+// Two keys can mark the same kind of line. `sourceType` is set only when the
+// line came from one of the three catalogues the invoice must ACT on (draw down
+// pharmacy stock, raise a lab/radiology order). `type` is set by the billing UI
+// for every line and is the only marker a consultation, procedure or vaccine
+// ever gets. Older invoices — and every appointment auto-voucher — carry only
+// one of the two, so each filter matches on either.
+//
+// Keep in step with BILL_TYPE_LABEL and CATEGORY_TYPE in
+// src/components/billing/BillingModule.jsx, which render and send these.
 const INVOICE_TYPE_MATCH = {
-  opd: '"type":"consultation"',
-  pharmacy: '"sourceType":"pharmacy"',
-  lab: '"sourceType":"lab"',
-  radiology: '"sourceType":"radiology"',
+  opd: ['"type":"consultation"'],
+  pharmacy: ['"sourceType":"pharmacy"', '"type":"pharmacy"'],
+  lab: ['"sourceType":"lab"', '"type":"lab"'],
+  radiology: ['"sourceType":"radiology"', '"type":"radiology"'],
+  procedure: ['"type":"procedure"'],
+  vaccine: ['"type":"vaccine"'],
 }
 
 // Atomic, gap-free, per-org invoice number. Format: INV-2026-27-000123.
@@ -294,16 +311,23 @@ export async function getAll(req, res) {
         else if (status === 'pending') where.paymentStatus = { in: ['unpaid', 'pending'] }
         else where.paymentStatus = status
       }
-      // Filter by what the invoice actually billed for. Done in the DB, not by
-      // loading rows and filtering in the browser — the table grows without
-      // bound and a page-local filter would only ever search the current page.
-      const itemMatch = INVOICE_TYPE_MATCH[type]
-      if (itemMatch) where.items = { contains: itemMatch }
       if (patientId) where.patientId = patientId
       const searchWhere = patientSearchWhere(search, 'patient', (term) => [
         { invoiceNumber: { contains: term, mode: 'insensitive' } },
       ])
       if (searchWhere) Object.assign(where, searchWhere)
+      // Filter by what the invoice actually billed for. Done in the DB, not by
+      // loading rows and filtering in the browser — the table grows without
+      // bound and a page-local filter would only ever search the current page.
+      // An invoice matches if ANY marker for that kind appears, since a line may
+      // be tagged by `type`, by `sourceType`, or (older rows) by only one.
+      // Appended to AND — and AFTER the search assign, which Object.assigns its
+      // own AND over `where` — so search and type compose instead of one
+      // silently replacing the other.
+      const markers = INVOICE_TYPE_MATCH[type]
+      if (markers) {
+        where.AND = [...(where.AND ?? []), { OR: markers.map((m) => ({ items: { contains: m } })) }]
+      }
       // Single-invoice fetch (with its payments) — used to render a receipt.
       if (invoiceId) where.id = invoiceId
 
