@@ -3,6 +3,7 @@ import { patientSearchWhere } from '../lib/patientSearch.js'
 import { patientFullName, PATIENT_NAME_SELECT } from '../lib/patientName.js'
 import { optionalMobileSchema, normalizeIndianMobile } from '../lib/phone.js'
 import { dayRange } from '../lib/dates.js'
+import { generateUHID } from '../lib/counters.js'
 import { getOrgId } from "../lib/reqContext.js";
 import { z } from 'zod'
 
@@ -48,20 +49,9 @@ async function doctorOwnsPatient(doctorId, patientId) {
 // database carrying four different shapes at once — MRN-26-1049513,
 // MRN100469, UHID202607178657 and DEMOFLOW-UHID202607177658.
 //
-// Numbers come from the same atomic BillCounter the invoice numbers use, so two
-// simultaneous registrations can never be handed the same one. Starting the
-// series at 1,000,000,000 keeps every UHID exactly 10 digits (and leaves room
-// for ~9 billion patients before it would grow an eleventh).
-const UHID_BASE = 1_000_000_000
-
-async function generateUHID(tx, organizationId) {
-  const counter = await tx.billCounter.upsert({
-    where: { organizationId_series_year: { organizationId, series: 'UHID', year: 'P' } },
-    create: { organizationId, series: 'UHID', year: 'P', value: 1 },
-    update: { value: { increment: 1 } },
-  })
-  return String(UHID_BASE + counter.value)
-}
+// The generator itself now lives in lib/counters.js alongside the other atomic
+// series, so pre-triage's patient conversion mints UHIDs the same way instead
+// of rolling its own.
 
 const patientSchema = z.object({
   firstName: z.string().min(2),

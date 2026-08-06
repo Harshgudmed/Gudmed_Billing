@@ -5,12 +5,12 @@ import { getOrgId } from "../lib/reqContext.js";
 import { listResponse } from "../lib/pagination.js";
 import { PATIENT_NAME_SELECT } from '../lib/patientName.js'
 import { ageFromDob } from '../utils/patientSnapshot.js'
+import { nextSeriesNumber, generateUHID } from '../lib/counters.js'
 
-function generateScreeningNumber() {
-  const date = new Date().toISOString().slice(0, 10).replace(/-/g, '')
-  const random = Math.floor(Math.random() * 1000).toString().padStart(3, '0')
-  return `SCR${date}${random}`
-}
+// Screening numbers come from the atomic per-org counter, not from 3 random
+// digits. With only 1,000 values a day and a GLOBALLY @unique screeningNumber,
+// the birthday paradox made a collision roughly even money by the ~38th
+// screening of the day — and a collision is a hard 500 at the front desk.
 
 // GET /api/pre-triage
 export async function getAll(req, res, next) {
@@ -101,13 +101,16 @@ export async function create(req, res, next) {
       }
     }
 
-    const screening = await db.preTriage.create({
-      data: {
-        organizationId: ORG_ID,
-        screeningNumber: generateScreeningNumber(),
-        ...data,
-        status: 'screening',
-      },
+    const screening = await db.$transaction(async (tx) => {
+      const screeningNumber = await nextSeriesNumber(tx, ORG_ID, 'PRE_TRIAGE', 'SCR')
+      return tx.preTriage.create({
+        data: {
+          organizationId: ORG_ID,
+          screeningNumber,
+          ...data,
+          status: 'screening',
+        },
+      })
     })
 
     res.status(201).json({ success: true, data: screening })
@@ -153,10 +156,13 @@ export async function convertToPatient(req, res, next) {
     const screening = await db.preTriage.findFirst({ where: { id: req.params.id, organizationId: ORG_ID } })
     if (!screening) return res.status(404).json({ success: false, error: 'Screening not found' })
 
-    const mrn = `UHID${Date.now().toString().slice(-8)}`
-
     // Use a Prisma transaction to guarantee both database operations succeed or fail together
     const patient = await db.$transaction(async (tx) => {
+      // Same atomic UHID series every other registration path uses. The old
+      // `UHID${Date.now().toString().slice(-8)}` used only the last 8 digits of
+      // the clock, which wrap every ~27.8 hours — so a conversion could collide
+      // with yesterday's on the @unique mrn even with zero concurrency.
+      const mrn = await generateUHID(tx, ORG_ID)
       const newPatient = await tx.patient.create({
         data: {
           organizationId: ORG_ID,

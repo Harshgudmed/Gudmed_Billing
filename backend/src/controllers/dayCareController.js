@@ -1,4 +1,5 @@
 import { db } from '../config/db.js'
+import { nextSeriesNumber } from '../lib/counters.js'
 import { patientSearchWhere } from '../lib/patientSearch.js'
 import { dayRange, todayRange } from '../lib/dates.js'
 import { getOrgId, safeMoney } from "../lib/reqContext.js";
@@ -6,11 +7,6 @@ import { isOwned } from "../lib/tenant.js";
 import { PATIENT_NAME_SELECT } from '../lib/patientName.js'
 
 const patientSelect = { ...PATIENT_NAME_SELECT, mrn: true, phonePrimary: true }
-
-async function nextCaseNumber(orgId) {
-  const count = await db.dayCareCase.count({ where: { organizationId: orgId } })
-  return `DC${String(count + 1).padStart(4, '0')}`
-}
 
 export async function getAll(req, res, next) {
   try {
@@ -79,11 +75,15 @@ export async function create(req, res, next) {
     if (feeVal === null || paidVal === null) return res.status(400).json({ success: false, error: 'fee and amountPaid must be non-negative numbers' })
     if (paidVal > feeVal) return res.status(400).json({ success: false, error: 'amountPaid cannot exceed fee' })
 
-    const caseNumber = await nextCaseNumber(ORG_ID)
-    const dayCase = await db.dayCareCase.create({
-      data: {
-        organizationId: ORG_ID,
-        caseNumber,
+    const dayCase = await db.$transaction(async (tx) => {
+      // Prefix is 'DAY', not 'DC': death certificates already own the 'DC-' prefix,
+      // and a number must identify which kind of record it belongs to. The series
+      // key stays 'DAYCARE_CASE' so the existing counter does not restart.
+      const caseNumber = await nextSeriesNumber(tx, ORG_ID, 'DAYCARE_CASE', 'DAY')
+      return tx.dayCareCase.create({
+        data: {
+          organizationId: ORG_ID,
+          caseNumber,
         patientId,
         doctorId: safeDoctorId,
         doctorName,
@@ -96,11 +96,12 @@ export async function create(req, res, next) {
         status: status || 'admitted',
         notes: notes || null,
         createdById: req.user?.userId || null,
-      },
-      include: {
-        patient: { select: patientSelect },
-        doctor: { select: { id: true, fullName: true } },
-      },
+        },
+        include: {
+          patient: { select: patientSelect },
+          doctor: { select: { id: true, fullName: true } },
+        },
+      })
     })
     res.json({ success: true, data: dayCase })
   } catch (err) {

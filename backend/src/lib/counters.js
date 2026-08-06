@@ -47,6 +47,26 @@ export async function nextSeriesNumber(tx, organizationId, series, label = serie
   return `${prefix}${String(value).padStart(6, '0')}`
 }
 
+// Patient UHIDs come from the same atomic BillCounter, so two simultaneous
+// registrations can never be handed the same one. Starting at 1,000,000,000
+// keeps every UHID exactly 10 digits.
+//
+// Lives here (not in patientController) because pre-triage also mints a UHID
+// when it converts a screening into a patient; its own `UHID${Date.now()}`
+// bypassed this counter, produced a different shape, and — since only the last
+// 8 digits of the clock were used — wrapped around every ~27.8 hours, so a
+// conversion could collide with one from the previous day on the @unique mrn.
+const UHID_BASE = 1_000_000_000
+
+export async function generateUHID(tx, organizationId) {
+  const counter = await tx.billCounter.upsert({
+    where: { organizationId_series_year: { organizationId, series: 'UHID', year: 'P' } },
+    create: { organizationId, series: 'UHID', year: 'P', value: 1 },
+    update: { value: { increment: 1 } },
+  })
+  return String(UHID_BASE + counter.value)
+}
+
 /** Highest invoice sequence already used for this org+FY. Numbers are zero-padded, so
  *  lexicographic DESC == numeric order → the top row is the true max. */
 export function invoiceProbe(tx, organizationId) {

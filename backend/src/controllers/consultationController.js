@@ -183,7 +183,6 @@ export async function create(req, res, next) {
       // Create Radiology Orders
       let radiologyOrderId = null
       if (radiologyExams && radiologyExams.length > 0) {
-        const ts = Date.now()
         for (let i = 0; i < radiologyExams.length; i++) {
           await tx.radiologyOrder.create({
             data: {
@@ -192,7 +191,7 @@ export async function create(req, res, next) {
               consultationId: newConsultation.id,
               requestedById: consultationData.doctorId,
               examId: radiologyExams[i].examId,
-              orderNumber: `RAD${ts}-${i}`,
+              orderNumber: await nextSeriesNumber(tx, organizationId, 'RAD_ORDER', 'RAD'),
               clinicalIndication: consultationData.diagnosis,
               urgency: 'routine',
               status: 'pending',
@@ -204,7 +203,7 @@ export async function create(req, res, next) {
 
       if (consultationData.appointmentId) {
         await tx.appointment.update({
-          where: { id: consultationData.appointmentId },
+          where: { id: consultationData.appointmentId, organizationId },
           data: { status: 'completed', completedAt: new Date() },
         })
       }
@@ -290,7 +289,7 @@ export async function update(req, res, next) {
         if (existingPrescription) {
           // Update the existing prescription with the new medicines
           await tx.prescription.update({
-            where: { id: existingPrescription.id },
+            where: { id: existingPrescription.id, organizationId },
             data: { items: JSON.stringify(prescriptionItems) }
           })
         } else {
@@ -318,7 +317,7 @@ export async function update(req, res, next) {
         if (existingLabOrder) {
           // Update the existing lab order
           await tx.labOrder.update({
-            where: { id: existingLabOrder.id },
+            where: { id: existingLabOrder.id, organizationId },
             data: {
               tests: JSON.stringify(labTests),
               clinicalIndication: updateData.diagnosis || existingLabOrder.clinicalIndication,
@@ -332,7 +331,7 @@ export async function update(req, res, next) {
               patientId: currentConsultation.patientId,
               consultationId: currentConsultation.id,
               requestedById: currentConsultation.doctorId,
-              orderNumber: `LAB${Date.now()}`,
+              orderNumber: await nextSeriesNumber(tx, organizationId, 'LAB_ORDER', 'LAB'),
               tests: JSON.stringify(labTests),
               clinicalIndication: updateData.diagnosis,
               priority: 'routine',
@@ -349,9 +348,9 @@ export async function update(req, res, next) {
           where: { consultationId: id }
         })
 
-        // Create new radiology orders — stamp ts once so exams in the same
-        // loop iteration don't share the same ms and collide on @unique.
-        const ts = Date.now()
+        // Create new radiology orders. Numbers come from the atomic RAD_ORDER
+        // counter (same series radiologyController uses), so two doctors saving
+        // in the same millisecond can't collide on the @unique orderNumber.
         for (let i = 0; i < radiologyExams.length; i++) {
           await tx.radiologyOrder.create({
             data: {
@@ -360,7 +359,7 @@ export async function update(req, res, next) {
               consultationId: currentConsultation.id,
               requestedById: currentConsultation.doctorId,
               examId: radiologyExams[i].examId,
-              orderNumber: `RAD${ts}-${i}`,
+              orderNumber: await nextSeriesNumber(tx, organizationId, 'RAD_ORDER', 'RAD'),
               clinicalIndication: updateData.diagnosis,
               urgency: 'routine',
               status: 'pending',
