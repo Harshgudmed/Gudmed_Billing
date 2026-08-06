@@ -9,7 +9,6 @@ import {
   startOfMonth,
   endOfMonth,
   eachDayOfInterval,
-  isSameDay,
   startOfWeek,
   addDays,
 } from "date-fns";
@@ -22,7 +21,7 @@ import { appointmentSchema, editAppointmentSchema } from "./appointmentSchema";
 import { printAppointmentCard } from "./appointmentPrint";
 import { APPOINTMENTS_LIST_PER_PAGE, APPOINTMENT_STATUSES, WEEKLY_DAY_PAGE_SIZE } from "./appointmentConstants";
 import { useAppointments } from "./useAppointments";
-import { parseDate, getPatientFullName, byTime } from "./appointmentHelpers";
+import { parseDate, getPatientFullName } from "./appointmentHelpers";
 import { getFullName } from "@/lib/patient";
 import CancelAppointmentDialog from "./CancelAppointmentDialog";
 import RescheduleAppointmentDialog from "./RescheduleAppointmentDialog";
@@ -132,6 +131,16 @@ export default function AppointmentsModule() {
   // fetched separately (bounded preview) because a single capped range fetch
   // only ever returns the earliest day when volume is high (~2500/day).
   const [weekData, setWeekData] = useState({});
+
+  // Today tab data. Fetched as two separate status-grouped, server-filtered
+  // pages (not a flat day fetch + client-side split) — a single day can carry
+  // up to ~2,850 appointments, well past any one request's row cap, and a
+  // flat fetch ordered by time returns only the earliest ones, silently
+  // dropping the rest of the day from both panes.
+  const [todayData, setTodayData] = useState({
+    upcoming: [], upcomingTotal: 0,
+    completed: [], completedTotal: 0,
+  });
 
   const [calendarCounts, setCalendarCounts] = useState([]);
   const [refreshCount, setRefreshCount] = useState(0);
@@ -379,35 +388,76 @@ export default function AppointmentsModule() {
     refreshCount,
   ]);
 
-  // Load just the date window the today/doctor-slot tabs need (the List tab and
-  // Weekly tab fetch their own paginated data separately).
+  // Load the doctor-slots tab's week window (the List tab and Weekly tab fetch
+  // their own paginated data separately; the Today tab has its own effect below).
+  // Scoped to selectedDoctor so picking one doctor gets their COMPLETE week
+  // (bounded per-doctor, not sharing the cap with every other doctor's
+  // bookings) — see weekTotal below for when "All Doctors" still truncates.
+  const [weekTotal, setWeekTotal] = useState(0);
   useEffect(() => {
+    if (activeTab !== "doctor-slots") return;
     const loadRange = async () => {
       try {
-        let from, to;
-        if (activeTab === "doctor-slots") {
-          from = dates.currentWeek;
-          to = addDays(dates.currentWeek, 6);
-        } else if (activeTab === "today") {
-          from = new Date();
-          to = new Date();
-        } else {
-          return;
-        }
+        const from = dates.currentWeek;
+        const to = addDays(dates.currentWeek, 6);
         // Send calendar-day strings (yyyy-MM-dd), NOT toISOString(): the latter
         // shifts to UTC and drops the last day of the week in +offset zones like
         // IST. Matches the single-day fetch the List/calendar views already use.
-        await loadAppointmentsRange(
+        const { total } = await loadAppointmentsRange(
           format(from, "yyyy-MM-dd"),
           format(to, "yyyy-MM-dd"),
+          { doctorId: selectedDoctor },
         )
+        setWeekTotal(total);
       } catch (err) {
         console.error('Failed to load appointments range:', err)
       }
     }
 
     loadRange()
-  }, [activeTab, dates.currentWeek, loadAppointmentsRange, mutationCount, refreshCount]);
+  }, [activeTab, dates.currentWeek, selectedDoctor, loadAppointmentsRange, mutationCount, refreshCount]);
+
+  // Load the Today tab's two panes as separate status-grouped server pages
+  // (see todayData comment above for why a flat fetch can't be trusted here).
+  useEffect(() => {
+    if (activeTab !== "today") return;
+    let cancelled = false;
+
+    const loadToday = async () => {
+      try {
+        const today = format(new Date(), "yyyy-MM-dd");
+        const [upcoming, completed] = await Promise.all([
+          fetchAppointmentsPage({
+            page: 1,
+            pageSize: 1000,
+            date: today,
+            status: APPOINTMENT_STATUSES.upcoming.join(","),
+          }),
+          fetchAppointmentsPage({
+            page: 1,
+            pageSize: 1000,
+            date: today,
+            status: APPOINTMENT_STATUSES.completed.join(","),
+          }),
+        ]);
+        if (cancelled) return;
+        setTodayData({
+          upcoming: upcoming.rows,
+          upcomingTotal: upcoming.total,
+          completed: completed.rows,
+          completedTotal: completed.total,
+        });
+      } catch (err) {
+        console.error('Failed to load today\'s appointments:', err)
+        if (!cancelled) setTodayData({ upcoming: [], upcomingTotal: 0, completed: [], completedTotal: 0 });
+      }
+    };
+
+    loadToday();
+    return () => {
+      cancelled = true;
+    };
+  }, [activeTab, fetchAppointmentsPage, mutationCount, refreshCount]);
 
   // Weekly view: fetch a BOUNDED preview per day (first N) plus each day's true
   // total. A single flat range fetch is capped (limit 1000) and ordered by date,
@@ -479,30 +529,10 @@ export default function AppointmentsModule() {
     [weekData, fetchAppointmentsPage],
   );
 
-  // Today's appointments split by lifecycle stage and sorted by time. Computed
-  // once here so the "Today" tab's empty-check and its list render share one
-  // source instead of filtering + sorting the same data twice.
-  const { todaysUpcomingAppointments, todaysCompletedAppointments } = useMemo(() => {
-    const today = new Date();
-
-    const upcoming = appointments
-      .filter(
-        (apt) =>
-          isSameDay(parseDate(apt.appointmentDate), today) &&
-          APPOINTMENT_STATUSES.upcoming.includes(apt.status),
-      )
-      .sort(byTime);
-
-    const completed = appointments
-      .filter(
-        (apt) =>
-          isSameDay(parseDate(apt.appointmentDate), today) &&
-          APPOINTMENT_STATUSES.completed.includes(apt.status),
-      )
-      .sort(byTime);
-
-    return { todaysUpcomingAppointments: upcoming, todaysCompletedAppointments: completed };
-  }, [appointments]);
+  // Today's two panes come pre-filtered and pre-sorted (by date, then time)
+  // from the server — see the loadToday effect above.
+  const todaysUpcomingAppointments = todayData.upcoming;
+  const todaysCompletedAppointments = todayData.completed;
 
   // List view data — fetched from the server (paginated + filtered) instead of
   // filtering the whole table in the browser. Debounced so typing in the search
@@ -996,7 +1026,9 @@ export default function AppointmentsModule() {
         <TabsContent value="today" className="space-y-4">
           <TodayView
             upcomingAppointments={todaysUpcomingAppointments}
+            upcomingTotal={todayData.upcomingTotal}
             completedAppointments={todaysCompletedAppointments}
+            completedTotal={todayData.completedTotal}
             getPatient={getPatient}
             onConfirm={handleConfirm}
             onCheckIn={handleCheckIn}
@@ -1014,6 +1046,7 @@ export default function AppointmentsModule() {
             currentWeek={dates.currentWeek}
             setCurrentWeek={(week) => setDatesField("currentWeek", week)}
             appointments={appointments}
+            weekTotal={weekTotal}
             getPatient={getPatient}
           />
         </TabsContent>

@@ -43,12 +43,19 @@ export function useAppointments() {
     fetchData();
   }, [fetchData]);
 
-  // Load the appointments for a date window (used by the calendar/week/today/
-  // doctor-slots tabs) into shared state. Bounded → safe at any table size.
-  const loadAppointmentsRange = useCallback(async (dateFrom, dateTo) => {
+  // Load the appointments for a date window (used by the doctor-slots tab)
+  // into shared state. Bounded → safe at any table size. Scoping to one doctor
+  // when given keeps that doctor's whole week under the row cap even on a
+  // hospital-wide busy week — without it, the cap is shared across every
+  // doctor and one doctor's slots can be crowded out entirely. Returns the
+  // server's total so the caller can tell the difference between "this is
+  // everything" and "this was cut off".
+  const loadAppointmentsRange = useCallback(async (dateFrom, dateTo, { doctorId } = {}) => {
     const params = new URLSearchParams({ dateFrom, dateTo, limit: "1000" });
+    if (doctorId && doctorId !== "all") params.set("doctorId", doctorId);
     const res = await client.get(`/appointments?${params.toString()}`);
     setAppointments(res.data ?? []);
+    return { total: res.meta?.total ?? (res.data?.length ?? 0) };
   }, []);
 
   // Today's status counts, computed by the DB.
