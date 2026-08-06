@@ -1,3 +1,4 @@
+import { nextSeriesNumber } from '../lib/counters.js'
 import { patientSearchWhere } from '../lib/patientSearch.js'
 import { db } from '../config/db.js'
 import { getOrgId, safeMoney } from "../lib/reqContext.js";
@@ -56,11 +57,6 @@ function withUsage(insCase) {
     .reduce((sum, c) => sum + (c.approvedAmount ?? c.claimAmount ?? 0), 0)
   const claimsPending = claims.filter((c) => ['pending', 'submitted'].includes(c.status)).length
   return { ...insCase, amountUsed, balance: (insCase.coverageLimit || 0) - amountUsed, claimsPending }
-}
-
-async function nextClaimNumber(orgId) {
-  const count = await db.insuranceClaim.count({ where: { organizationId: orgId } })
-  return `CLM${String(count + 1).padStart(4, '0')}`
 }
 
 // ── Cases ────────────────────────────────────────────────────────────────────
@@ -193,11 +189,12 @@ async function createClaim(req, res, ORG_ID) {
   const covErr = await coverageError(caseId, ORG_ID, st, approvedVal ?? claimVal ?? 0, null)
   if (covErr) return res.status(400).json({ success: false, error: covErr })
 
-  const claim = await db.insuranceClaim.create({
-    data: {
-      organizationId: ORG_ID,
-      caseId,
-      claimNumber: await nextClaimNumber(ORG_ID),
+  const claim = await db.$transaction(async (tx) => {
+    return tx.insuranceClaim.create({
+      data: {
+        organizationId: ORG_ID,
+        caseId,
+        claimNumber: await nextSeriesNumber(tx, ORG_ID, 'INS_CLAIM', 'CLM'),
       claimAmount: claimVal,
       approvedAmount: approvedVal,
       status: st,
@@ -205,8 +202,9 @@ async function createClaim(req, res, ORG_ID) {
       remarks: remarks || null,
       submittedAt: ['submitted', 'approved', 'rejected', 'settled'].includes(st) ? new Date() : null,
       settledAt: st === 'settled' ? new Date() : null,
-      createdById: req.user?.userId || null,
-    },
+        createdById: req.user?.userId || null,
+      },
+    })
   })
   res.json({ success: true, data: claim })
 }
