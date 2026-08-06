@@ -49,8 +49,15 @@ export async function getStats(req, res, next) {
       db.prescription.count({
         where: { organizationId: ORGANIZATION_ID, status: 'pending' },
       }),
+      // A cancelled sale (invoice cancel/reversal voids the PharmacySale rather
+      // than deleting it, so stock returns can be traced) must not still count
+      // as revenue — otherwise "today's sales" overstates cash actually taken.
       db.pharmacySale.aggregate({
-        where: { organizationId: ORGANIZATION_ID, createdAt: { gte: today, lt: tomorrow } },
+        where: {
+          organizationId: ORGANIZATION_ID,
+          createdAt: { gte: today, lt: tomorrow },
+          paymentStatus: { not: 'cancelled' },
+        },
         _sum: { totalAmount: true },
         _count: { id: true },
       }),
