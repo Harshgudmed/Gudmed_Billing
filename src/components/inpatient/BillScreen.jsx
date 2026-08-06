@@ -64,16 +64,19 @@ export default function BillScreen({ admission, orgInfo = {} }) {
   useEffect(() => { load() }, [load])
 
   // Live tariff preview while typing a manual service charge.
+  // Typing 1200 fires previews for 1, 12, 120, 1200 — a slow reply for 120 landing last
+  // would show a price for an amount the user has already replaced. Ignore stale replies.
   useEffect(() => {
     const base = Number(form.base)
     if (!base || !admissionId) { setPreview(null); return }
+    let cancelled = false
     const t = setTimeout(async () => {
       try {
         const res = await client.get(`/inpatient?resource=tariff-preview&admissionId=${admissionId}&base=${base}&serviceGroup=${form.serviceGroup}`)
-        setPreview(res.data)
-      } catch { setPreview(null) }
+        if (!cancelled) setPreview(res.data)
+      } catch { if (!cancelled) setPreview(null) }
     }, 350)
-    return () => clearTimeout(t)
+    return () => { cancelled = true; clearTimeout(t) }
   }, [form.base, form.serviceGroup, admissionId])
 
   const isFinal = bill?.status === 'FINAL'
