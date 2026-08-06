@@ -60,7 +60,7 @@ export async function registerDevice(req, res, next) {
       : null
 
     if (device) {
-      device = await db.displayDevice.update({ where: { id: device.id }, data: diag, include: { screen: { select: { id: true, name: true } } } })
+      device = await db.displayDevice.update({ where: { id: device.id, organizationId: ORG_ID }, data: diag, include: { screen: { select: { id: true, name: true } } } })
     } else {
       device = await db.displayDevice.create({
         data: {

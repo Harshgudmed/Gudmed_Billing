@@ -2,8 +2,7 @@
 // paidTotal/balanceDue are recomputed on the Bill from its SUCCESS payments.
 import { db } from '../config/db.js'
 import { dayRange } from '../lib/dates.js'
-import { financialYear } from './billService.js'
-import { round2 } from '../lib/money.js'
+import { financialYear, round2 } from '../lib/money.js'
 
 const METHODS = ['CASH', 'UPI', 'CARD', 'BANK_TRANSFER', 'CHEQUE']
 

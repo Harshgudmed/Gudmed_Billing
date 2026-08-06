@@ -4,9 +4,7 @@
 import { db } from '../config/db.js'
 import { computeRunningBill } from './tariffService.js'
 import { recalcBill, ensureLegacyDepositAdvance } from './billPaymentService.js'
-import { round2 } from '../lib/money.js'
-// Re-export so existing importers (billPaymentService) keep working unchanged.
-export { financialYear } from '../lib/money.js'
+import { financialYear, round2 } from '../lib/money.js'
 
 // The "current" bill for an admission: the open DRAFT if any, else the latest.
 export async function getCurrentBill(organizationId, admissionId) {
