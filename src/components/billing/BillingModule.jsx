@@ -144,9 +144,67 @@ const DEFAULT_CLINIC = {
 const todayStr = () => new Date().toISOString().slice(0, 10)
 const newInvNo = () => 'INV-' + Date.now().toString().slice(-8)
 
+// What an invoice billed for, read off its line items. A consultation line is
+// tagged `type`, while pharmacy/lab/radiology lines are tagged `sourceType`
+// (the billing UI sets it so the invoice can draw down stock and raise orders).
+// Both keys are checked because one invoice can legitimately carry several
+// kinds of line — a consultation plus the tests ordered in it — and the row has
+// to say so rather than pick one and hide the rest.
+// Keep in step with INVOICE_TYPE_MATCH in backend/src/controllers/billingController.js,
+// which filters on these same two keys server-side.
+const BILL_TYPE_LABEL = {
+  opd: { label: 'OPD', className: 'bg-purple-100 text-purple-700' },
+  pharmacy: { label: 'Pharmacy', className: 'bg-teal-100 text-teal-700' },
+  lab: { label: 'Laboratory', className: 'bg-blue-100 text-blue-700' },
+  radiology: { label: 'Radiology', className: 'bg-amber-100 text-amber-700' },
+  procedure: { label: 'Procedure', className: 'bg-orange-100 text-orange-700' },
+  vaccine: { label: 'Vaccine', className: 'bg-green-100 text-green-700' },
+}
+
+// The cart's category (what the biller picked) → the `type` stored on the line.
+// 'consultation' rather than 'opd' because that is the word appointmentController's
+// auto-voucher has always written; one vocabulary, or the filter finds half the rows.
+const CATEGORY_TYPE = {
+  Consultation: 'consultation',
+  Lab: 'lab',
+  Pharmacy: 'pharmacy',
+  Radiology: 'radiology',
+  Procedure: 'procedure',
+  Vaccine: 'vaccine',
+}
+
+// Two keys can mark a line: `sourceType` is set only for the three catalogues the
+// invoice has to act on, while `type` is set for every line the billing screen
+// writes. Both are read so a consultation/procedure/vaccine (which has no
+// catalogue, and so no sourceType) is still typed, and so invoices written before
+// `type` existed still resolve from sourceType alone.
+function invoiceTypesOf(rawItems) {
+  const found = new Set()
+  for (const item of rawItems || []) {
+    if (item?.type === 'consultation') found.add('opd')
+    else if (BILL_TYPE_LABEL[item?.type]) found.add(item.type)
+    if (BILL_TYPE_LABEL[item?.sourceType]) found.add(item.sourceType)
+  }
+  return [...found]
+}
+
+function TypeBadges({ types }) {
+  if (!types?.length) return <span className="text-gray-400 text-xs">—</span>
+  return (
+    <div className="flex flex-wrap gap-1">
+      {types.map((t) => (
+        <Badge key={t} className={BILL_TYPE_LABEL[t].className}>{BILL_TYPE_LABEL[t].label}</Badge>
+      ))}
+    </div>
+  )
+}
+
 // ── Status badge helper ───────────────────────────────────────────────────────
 function PayBadge({ invoice }) {
   if (!invoice) return null
+  // Checked before paid/partial: a cancelled bill is void whatever was collected
+  // on it, and must never read as money still owed.
+  if (invoice.cancelled) return <Badge className="bg-gray-200 text-gray-700">Cancelled</Badge>
   if (invoice.paid) return <Badge className="bg-green-100 text-green-800">Paid</Badge>
   const total = Number(invoice.total || 0)
   const paidAmt = Number(invoice.amountPaid || 0)
@@ -246,6 +304,7 @@ export default function BillingModule({ onBack }) {
   const [invoiceSearch, setInvoiceSearch] = useState('')
   const [debouncedInvoiceSearch, setDebouncedInvoiceSearch] = useState('')
   const [invoiceFilter, setInvoiceFilter] = useState('all')
+  const [invoiceType, setInvoiceType] = useState('all')
   const [totalBills, setTotalBills] = useState(0)
 
   // Service catalog — mirrors the backend BillingService schema exactly
@@ -274,7 +333,7 @@ export default function BillingModule({ onBack }) {
 
   useEffect(() => {
     setInvoicesPage(1)
-  }, [debouncedInvoiceSearch, invoiceFilter])
+  }, [debouncedInvoiceSearch, invoiceFilter, invoiceType])
 
   // Derived cart totals
   const subtotal = form.items.reduce((a, i) => a + i.qty * i.amt, 0)
@@ -294,8 +353,9 @@ export default function BillingModule({ onBack }) {
           limit: BILLING_ITEMS_PER_PAGE, 
           offset,
           search: debouncedInvoiceSearch || undefined,
-          status: invoiceFilter === 'all' ? undefined : invoiceFilter
-        } 
+          status: invoiceFilter === 'all' ? undefined : invoiceFilter,
+          type: invoiceType === 'all' ? undefined : invoiceType
+        }
       })
       if (res.success) {
         setTotalBills(res.meta?.total || 0)
@@ -332,6 +392,13 @@ export default function BillingModule({ onBack }) {
             notes: (inv.notes || '').replace(/^\[[^\]]+\]\s*/, ''),
             department: deptMatch ? deptMatch[1] : '',
             payMode: 'Cash', paid: inv.paymentStatus === 'paid',
+            // Carried through so the row can read as void. Without it the list
+            // had no way to tell a cancelled bill apart from an unpaid one, so
+            // it rendered "Pending" with a live Pay button — the cashier took
+            // the money at the counter and only then hit the server's refusal.
+            cancelled: inv.status === 'cancelled' || inv.paymentStatus === 'cancelled',
+            // From the RAW items: normItems drops type/sourceType.
+            billTypes: invoiceTypesOf(items),
             items: normItems, discount: inv.discountPercentage || 0, gstPct: 0,
             subtotal: inv.subtotal, discountAmt: inv.discountAmount,
             gstAmt: inv.taxAmount || 0, total: inv.totalAmount,
@@ -346,7 +413,7 @@ export default function BillingModule({ onBack }) {
       }
     } catch { /* silent */ }
     finally { setBillsLoading(false) }
-  }, [invoicesPage, debouncedInvoiceSearch, invoiceFilter])
+  }, [invoicesPage, debouncedInvoiceSearch, invoiceFilter, invoiceType])
 
   const fetchStats = useCallback(async () => {
     try {
@@ -401,34 +468,35 @@ export default function BillingModule({ onBack }) {
   }, [])
 
   // Real Lab test catalog search
-  const searchLabTests = useCallback(async (query) => {
+  // isCancelled() lets the caller disown a reply whose search term is already stale.
+  const searchLabTests = useCallback(async (query, isCancelled = () => false) => {
     setCatalogLoading(true)
     try {
       const res = await client.get('/laboratory', { params: { resource: 'tests', search: query.trim(), limit: 500 } })
-      if (res.success) setLabTests(res.data || [])
-    } catch { toast.error('Failed to search lab tests') }
-    finally { setCatalogLoading(false) }
+      if (!isCancelled() && res.success) setLabTests(res.data || [])
+    } catch { if (!isCancelled()) toast.error('Failed to search lab tests') }
+    finally { if (!isCancelled()) setCatalogLoading(false) }
   }, [])
 
   // Real Radiology exam catalog search
-  const searchRadiologyExams = useCallback(async (query) => {
+  const searchRadiologyExams = useCallback(async (query, isCancelled = () => false) => {
     setCatalogLoading(true)
     try {
       const res = await client.get('/radiology', { params: { resource: 'exams', search: query.trim(), limit: 500 } })
-      if (res.success) setRadiologyExams(res.data || [])
-    } catch { toast.error('Failed to search radiology exams') }
-    finally { setCatalogLoading(false) }
+      if (!isCancelled() && res.success) setRadiologyExams(res.data || [])
+    } catch { if (!isCancelled()) toast.error('Failed to search radiology exams') }
+    finally { if (!isCancelled()) setCatalogLoading(false) }
   }, [])
 
   // Real Pharmacy drug catalog — ~2 lakh drugs, so searched server-side (same
   // /pharmacy/drugs endpoint the Pharmacy module itself uses) rather than loaded whole.
-  const searchPharmacyDrugs = useCallback(async (query) => {
+  const searchPharmacyDrugs = useCallback(async (query, isCancelled = () => false) => {
     setCatalogLoading(true)
     try {
       const res = await client.get('/pharmacy/drugs', { params: { search: query.trim(), limit: 500 } })
-      if (res.success) setPharmacyDrugs(res.data || [])
-    } catch { toast.error('Failed to search pharmacy inventory') }
-    finally { setCatalogLoading(false) }
+      if (!isCancelled() && res.success) setPharmacyDrugs(res.data || [])
+    } catch { if (!isCancelled()) toast.error('Failed to search pharmacy inventory') }
+    finally { if (!isCancelled()) setCatalogLoading(false) }
   }, [])
 
   const fetchAll = useCallback(() => {
@@ -456,17 +524,21 @@ export default function BillingModule({ onBack }) {
   }, [hookOrgInfo])
 
   // ── Patient search ─────────────────────────────────────────────────────────
+  // clearTimeout only stops a debounce that hasn't fired — a request already in flight
+  // still returns, so a slow reply for an earlier prefix could repaint the dropdown and
+  // let the cashier click a patient who no longer matches the box. Drop late replies.
   useEffect(() => {
     if (!patientSearch || patientSearch.length < 2) { setPatientResults([]); return }
+    let cancelled = false
     const t = setTimeout(async () => {
       setPatSearchLoading(true)
       try {
         const res = await client.get('/patients', { params: { search: patientSearch, limit: 8 } })
-        if (res.success) setPatientResults(res.data || [])
+        if (!cancelled && res.success) setPatientResults(res.data || [])
       } catch { /* silent */ }
-      finally { setPatSearchLoading(false) }
+      finally { if (!cancelled) setPatSearchLoading(false) }
     }, 300)
-    return () => clearTimeout(t)
+    return () => { cancelled = true; clearTimeout(t) }
   }, [patientSearch])
 
   useEffect(() => {
@@ -476,13 +548,18 @@ export default function BillingModule({ onBack }) {
   }, [])
 
   // ── Unified server-side catalog search (Lab, Radiology, Pharmacy) ────────
+  // A slow reply for an earlier keystroke (or for the department the user just switched
+  // away from) can land after a newer one and repaint the catalogue, so the cashier adds
+  // a test/drug that no longer matches what they typed. isCancelled discards those.
   useEffect(() => {
+    let cancelled = false
+    const isCancelled = () => cancelled
     const t = setTimeout(() => {
-      if (department === 'Lab') searchLabTests(catSearch)
-      else if (department === 'Radiology') searchRadiologyExams(catSearch)
-      else if (department === 'Pharmacy') searchPharmacyDrugs(catSearch)
+      if (department === 'Lab') searchLabTests(catSearch, isCancelled)
+      else if (department === 'Radiology') searchRadiologyExams(catSearch, isCancelled)
+      else if (department === 'Pharmacy') searchPharmacyDrugs(catSearch, isCancelled)
     }, 300)
-    return () => clearTimeout(t)
+    return () => { cancelled = true; clearTimeout(t) }
   }, [department, catSearch, searchLabTests, searchRadiologyExams, searchPharmacyDrugs])
 
   function selectPatient(p) {
@@ -537,8 +614,7 @@ export default function BillingModule({ onBack }) {
     const apiItems = form.items.map(it => {
       const itemTotal = it.qty * it.amt
       const itemDiscount = subtotal > 0 ? (itemTotal / subtotal) * discountAmt : 0
-      // If department is Pharmacy, prices are GST-inclusive. Otherwise, tax is computed from gstPct.
-      const itemTax = department === 'Pharmacy' ? 0 : Math.round((itemTotal - itemDiscount) * (form.gstPct || 0) / 100)
+      const itemTax = Math.round((itemTotal - itemDiscount) * (form.gstPct || 0) / 100)
       
       return {
         serviceName: it.name,
@@ -550,6 +626,11 @@ export default function BillingModule({ onBack }) {
         // Only the three clinical catalogues carry a master-data id; billing it
         // decrements pharmacy stock / raises the lab-radiology order.
         ...(it.id && SOURCE_TYPE[it.cat] ? { sourceType: SOURCE_TYPE[it.cat], sourceId: it.id } : {}),
+        // What kind of service this is, for the invoice list's Type column and
+        // filter. sourceType cannot serve: it only exists for the three lines
+        // with a catalogue to act on, so a consultation, procedure or vaccine
+        // reached the list untyped and could only be shown as "—".
+        ...(CATEGORY_TYPE[it.cat] ? { type: CATEGORY_TYPE[it.cat] } : {}),
         // gstRate/batchNumber/expiryDate pass through for Pharmacy receipts
         ...(it.gstRate ? { gstRate: Number(it.gstRate) } : {}),
         ...(it.batchNumber ? { batchNumber: it.batchNumber } : {}),
@@ -1024,6 +1105,20 @@ export default function BillingModule({ onBack }) {
                 <SelectItem value="paid">Paid</SelectItem>
                 <SelectItem value="partial">Partial</SelectItem>
                 <SelectItem value="pending">Pending</SelectItem>
+                <SelectItem value="cancelled">Cancelled</SelectItem>
+                <SelectItem value="refunded">Refunded</SelectItem>
+              </SelectContent>
+            </Select>
+            <Select value={invoiceType} onValueChange={setInvoiceType}>
+              <SelectTrigger className="w-40"><SelectValue placeholder="All types" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All types</SelectItem>
+                <SelectItem value="opd">OPD</SelectItem>
+                <SelectItem value="pharmacy">Pharmacy</SelectItem>
+                <SelectItem value="lab">Laboratory</SelectItem>
+                <SelectItem value="radiology">Radiology</SelectItem>
+                <SelectItem value="procedure">Procedure</SelectItem>
+                <SelectItem value="vaccine">Vaccine</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -1038,6 +1133,7 @@ export default function BillingModule({ onBack }) {
                       <TableRow>
                         <TableHead>Invoice #</TableHead>
                         <TableHead>Patient</TableHead>
+                        <TableHead>Type</TableHead>
                         <TableHead>Phone</TableHead>
                         <TableHead>Total</TableHead>
                         <TableHead>Paid</TableHead>
@@ -1049,11 +1145,12 @@ export default function BillingModule({ onBack }) {
                     </TableHeader>
                     <TableBody>
                       {filteredBills.length === 0 ? (
-                        <TableRow><TableCell colSpan={8} className="text-center py-10 text-gray-400">No invoices found</TableCell></TableRow>
+                        <TableRow><TableCell colSpan={9} className="text-center py-10 text-gray-400">No invoices found</TableCell></TableRow>
                       ) : filteredBills.map(b => (
                         <TableRow key={b.id}>
                           <TableCell className="font-mono text-sm text-blue-600">{b.invoiceNo}</TableCell>
                           <TableCell className="font-medium">{b.patientName}</TableCell>
+                          <TableCell><TypeBadges types={b.billTypes} /></TableCell>
                           <TableCell className="text-sm text-gray-500">{b.phone || '—'}</TableCell>
                           <TableCell className="font-semibold">{fmt(b.total)}</TableCell>
                           <TableCell className="text-sm text-green-700">{fmt(b.amountPaid || 0)}</TableCell>
@@ -1063,7 +1160,7 @@ export default function BillingModule({ onBack }) {
                           <TableCell>
                             <div className="flex gap-1">
                               <Button size="sm" variant="outline" onClick={() => setShowInvoiceModal(b)}>View</Button>
-                              {(!b.paid || (b.balanceDue ?? (b.total - (b.amountPaid || 0))) > 0) && (
+                              {!b.cancelled && (!b.paid || (b.balanceDue ?? (b.total - (b.amountPaid || 0))) > 0) && (
                                 <Button size="sm" onClick={() => { setShowPayModal(b); setPayMethod('Cash') }}>Pay</Button>
                               )}
                             </div>
