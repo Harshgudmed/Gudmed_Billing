@@ -1,5 +1,7 @@
 import { db } from '../config/db.js'
 import { getOrgId, getActor, safeMoney } from "../lib/reqContext.js";
+import { isOwned } from '../lib/tenant.js'
+import { patientSearchWhere } from '../lib/patientSearch.js'
 import { nextSeriesNumber } from "../lib/counters.js";
 import { resolveRequestedById } from '../lib/requestedBy.js'
 import { todayRange } from '../lib/dates.js'
@@ -102,7 +104,15 @@ export const getAll = async (req, res, next) => {
 
     if (resource === 'orders') {
       const where = { organizationId: ORGANIZATION_ID }
-      if (status) where.status = status
+      // `status` accepts one value or a comma-separated list. The lab screens ask
+      // for GROUPS of statuses ("open" = pending + sample_collected + in_progress);
+      // with single-value matching only, they had to pull the whole table and
+      // split it in the browser, which silently dropped rows past the cap.
+      if (status) {
+        const wanted = String(status).split(',').map((s) => s.trim()).filter(Boolean)
+        if (wanted.length > 1) where.status = { in: wanted }
+        else if (wanted.length === 1) where.status = wanted[0]
+      }
       if (priority) where.priority = priority
       const searchWhere = patientSearchWhere(search, 'patient', (term) => [
         { orderNumber: { contains: term, mode: 'insensitive' } },
@@ -145,7 +155,13 @@ export const getAll = async (req, res, next) => {
           db.labOrder.count({
             where: { ...baseWhere, status: 'completed', resultsReportedAt: todayRange() },
           }),
-          db.labResult.count({ where: { isCritical: true, verifiedAt: null } }),
+          // Scoped through the parent order: LabResult.organizationId is nullable,
+          // so the org filter has to come from the LabOrder it belongs to. Without
+          // it this tile counted EVERY hospital's unverified criticals — one
+          // tenant's alarm number driven by another tenant's patients.
+          db.labResult.count({
+            where: { isCritical: true, verifiedAt: null, order: { organizationId: ORGANIZATION_ID } },
+          }),
           db.labTest.count({ where: { organizationId: ORGANIZATION_ID, isActive: true } }),
         ])
 
@@ -200,6 +216,13 @@ export const create = async (req, res, next) => {
       // The order number is drawn from the atomic per-org counter inside the same
       // transaction as the insert, so two orders raised in the same millisecond
       // cannot collide on the @unique orderNumber (which `LAB${Date.now()}` did).
+      // patientId is caller-supplied: without this an order (and the patient
+      // demographics echoed back in the response) could be attached to another
+      // hospital's patient. Shared isOwned tenant guard.
+      if (!(await isOwned('patient', patientId, ORGANIZATION_ID))) {
+        return res.status(404).json({ success: false, error: 'Patient not found' })
+      }
+
       const data = await db.$transaction(async (tx) => {
         const orderNumber = await nextSeriesNumber(tx, ORGANIZATION_ID, 'LAB_ORDER', 'LAB')
         const requestedById = await resolveRequestedById(tx, ORGANIZATION_ID, actorId)
