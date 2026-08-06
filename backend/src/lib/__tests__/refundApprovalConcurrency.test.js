@@ -103,8 +103,13 @@ test('two concurrent refund approvals: exactly one wins, exactly one revised inv
   assert.equal(revised.length, 1, `expected exactly ONE revised invoice, found ${revised.length}`)
 
   // The money that actually left the books must be a single 300 refund, not 600.
+  // Matched by payment id, not by invoiceId: an approved refund is re-pointed at
+  // the revised invoice it belongs to (recalcInvoice derives amountPaid from the
+  // Payment rows, so the collections and the refund that reduces them have to live
+  // on the same invoice or the revision recomputes to money-never-collected).
   const approvedRefunds = await db.payment.aggregate({
-    where: { invoiceId, isRefund: true, status: 'APPROVED' }, _sum: { amount: true },
+    where: { id: { in: [r1.body.data.id, r2.body.data.id] }, isRefund: true, status: 'APPROVED' },
+    _sum: { amount: true },
   })
   assert.equal(approvedRefunds._sum.amount, 300, 'only the winning refund should be APPROVED')
 })
