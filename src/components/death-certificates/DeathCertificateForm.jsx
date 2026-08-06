@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react'
+import { useState } from 'react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -46,8 +46,6 @@ const deathCertificateSchema = z.object({
 })
 
 export default function DeathCertificateForm({ initialData, onSuccess }) {
-  const [patients, setPatients] = useState([])
-  const [patientSearch, setPatientSearch] = useState('')
   const [selectedPatient, setSelectedPatient] = useState(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
 
@@ -82,22 +80,6 @@ export default function DeathCertificateForm({ initialData, onSuccess }) {
     },
   })
 
-  useEffect(() => {
-    client.get('/patients').then(res => {
-      if (res.success) setPatients(res.data || [])
-    })
-  }, [])
-
-  const filteredPatients = useMemo(() => {
-    if (!patientSearch) return []
-    const lower = patientSearch.toLowerCase()
-    return patients.filter(p =>
-      p.firstName.toLowerCase().includes(lower) ||
-      p.lastName.toLowerCase().includes(lower) ||
-      p.mrn.toLowerCase().includes(lower)
-    ).slice(0, 5)
-  }, [patients, patientSearch])
-
   function handleSelectPatient(patient) {
     setSelectedPatient(patient)
     form.setValue('patientId', patient.id)
@@ -109,7 +91,6 @@ export default function DeathCertificateForm({ initialData, onSuccess }) {
       patient.houseNumber, patient.street, patient.locality,
       patient.city, patient.district, patient.state,
     ].filter(Boolean).join(', ') + (patient.pincode ? ` - ${patient.pincode}` : ''))
-    setPatientSearch('')
   }
 
   async function onSubmit(data) {
