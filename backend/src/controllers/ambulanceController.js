@@ -1,4 +1,5 @@
 import { db } from '../config/db.js'
+import { nextSeriesNumber } from '../lib/counters.js'
 import { patientSearchWhere } from '../lib/patientSearch.js'
 import { dayRange } from '../lib/dates.js'
 import { getOrgId, safeMoney } from "../lib/reqContext.js";
@@ -6,13 +7,6 @@ import { isOwned } from "../lib/tenant.js";
 import { PATIENT_NAME_SELECT } from '../lib/patientName.js'
 
 const patientSelect = { ...PATIENT_NAME_SELECT, mrn: true, phonePrimary: true }
-
-// Generate the next per-org trip number (AM0001, AM0002, ...). The
-// @@unique([organizationId, tripNumber]) constraint is the real safety net.
-async function nextTripNumber(orgId) {
-  const count = await db.ambulanceTrip.count({ where: { organizationId: orgId } })
-  return `AM${String(count + 1).padStart(4, '0')}`
-}
 
 export async function getAll(req, res, next) {
   try {
@@ -64,11 +58,12 @@ export async function create(req, res, next) {
       safePatientId = p ? patientId : null
     }
 
-    const tripNumber = await nextTripNumber(ORG_ID)
-    const trip = await db.ambulanceTrip.create({
-      data: {
-        organizationId: ORG_ID,
-        tripNumber,
+    const trip = await db.$transaction(async (tx) => {
+      const tripNumber = await nextSeriesNumber(tx, ORG_ID, 'AMBULANCE_TRIP', 'AM')
+      return tx.ambulanceTrip.create({
+        data: {
+          organizationId: ORG_ID,
+          tripNumber,
         patientId: safePatientId,
         ambulanceType: ambulanceType || 'BLS',
         fromLocation: fromLocation || null,
@@ -82,8 +77,9 @@ export async function create(req, res, next) {
         contactPhone: contactPhone || null,
         notes: notes || null,
         createdById: req.user?.userId || null,
-      },
-      include: { patient: { select: patientSelect } },
+        },
+        include: { patient: { select: patientSelect } },
+      })
     })
     res.json({ success: true, data: trip })
   } catch (err) {

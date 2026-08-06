@@ -106,18 +106,32 @@ export async function patientLogin(req, res, next) {
     }
     const id = String(identifier).trim()
 
-    const patient = await db.patient.findFirst({
+    // The patient portal has no hospital selector — a patient signs in with just
+    // phone/UHID/email, org unknown. mrn is only unique PER ORG (schema:
+    // @@unique([organizationId, mrn])), and phonePrimary/email aren't unique at
+    // all, so this identifier can legitimately match patients at more than one
+    // hospital. findFirst() used to pick whichever candidate came back first and
+    // check ONLY that one's password — if a second hospital's patient shared the
+    // identifier and, e.g., a shared demo password, the wrong hospital's patient
+    // record would be returned and their PHI exposed. Instead, check every
+    // candidate's password and only proceed if exactly one matches.
+    const candidates = await db.patient.findMany({
       where: { OR: [{ phonePrimary: id }, { mrn: id }, { email: id }] },
     })
-
+    const matches = []
+    for (const candidate of candidates) {
+      if (candidate.passwordHash && await bcrypt.compare(password, candidate.passwordHash)) {
+        matches.push(candidate)
+      }
+    }
     // Generic message so we don't reveal which identifiers exist.
-    if (!patient || !patient.passwordHash) {
+    if (matches.length === 0) {
       return res.status(401).json({ success: false, error: 'Invalid credentials' })
     }
-    const ok = await bcrypt.compare(password, patient.passwordHash)
-    if (!ok) {
-      return res.status(401).json({ success: false, error: 'Invalid credentials' })
+    if (matches.length > 1) {
+      return res.status(409).json({ success: false, error: 'This ID matches records at more than one hospital. Please contact your hospital for help signing in.' })
     }
+    const patient = matches[0]
     if (patient.isActive === false) {
       return res.status(403).json({ success: false, error: 'This account is inactive. Please contact the hospital.' })
     }
@@ -144,46 +158,54 @@ export async function patientLogin(req, res, next) {
  * POST /api/auth/logout
  * Clears the auth cookie.
  */
-export async function logout(_req, res) {
-  res.clearCookie(TOKEN_COOKIE, clearCookieOptions)
-  res.json({ success: true, message: 'Logged out' })
+export async function logout(_req, res, next) {
+  try {
+    res.clearCookie(TOKEN_COOKIE, clearCookieOptions)
+    res.json({ success: true, message: 'Logged out' })
+  } catch (err) {
+    next(err)
+  }
 }
 
 /**
  * GET /api/auth/me
  * Returns the currently authenticated user (staff OR patient) decoded from the cookie/header.
  */
-export async function me(req, res) {
-  // Patient session
-  if (req.user?.role === 'patient' && req.user.patientId) {
-    const patient = await db.patient.findUnique({ where: { id: req.user.patientId } })
-    if (!patient) return res.status(401).json({ success: false, error: 'Not authenticated' })
-    return res.json({
+export async function me(req, res, next) {
+  try {
+    // Patient session
+    if (req.user?.role === 'patient' && req.user.patientId) {
+      const patient = await db.patient.findUnique({ where: { id: req.user.patientId } })
+      if (!patient) return res.status(401).json({ success: false, error: 'Not authenticated' })
+      return res.json({
+        success: true,
+        user: {
+          id: patient.id,
+          role: 'patient',
+          fullName: patientFullName(patient),
+          mrn: patient.mrn,
+          organizationId: req.user.organizationId,
+        },
+      })
+    }
+
+    // Staff session
+    if (!req.user?.userId) {
+      return res.status(401).json({ success: false, error: 'Not authenticated' })
+    }
+    const user = await db.user.findUnique({ where: { id: req.user.userId } })
+    if (!user) return res.status(401).json({ success: false, error: 'Not authenticated' })
+    res.json({
       success: true,
       user: {
-        id: patient.id,
-        role: 'patient',
-        fullName: patientFullName(patient),
-        mrn: patient.mrn,
+        id: user.id,
+        fullName: user.fullName,
+        email: user.email,
+        role: user.role,
         organizationId: req.user.organizationId,
       },
     })
+  } catch (err) {
+    next(err)
   }
-
-  // Staff session
-  if (!req.user?.userId) {
-    return res.status(401).json({ success: false, error: 'Not authenticated' })
-  }
-  const user = await db.user.findUnique({ where: { id: req.user.userId } })
-  if (!user) return res.status(401).json({ success: false, error: 'Not authenticated' })
-  res.json({
-    success: true,
-    user: {
-      id: user.id,
-      fullName: user.fullName,
-      email: user.email,
-      role: user.role,
-      organizationId: req.user.organizationId,
-    },
-  })
 }

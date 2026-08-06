@@ -263,7 +263,16 @@ model Patient {
   organizationId String
 
   // Identification
-  mrn        String  @unique // Medical Record Number
+  // Scoped-unique per hospital, NOT globally: the UHID is minted by a per-org
+  // counter (counters.js#generateUHID), so every org's series independently
+  // starts at 1000000001. A column-level @unique made that number global across
+  // every tenant — the SECOND hospital to register anyone hit a P2002 on
+  // "1000000001" and could not admit a single patient. Invoices and death
+  // certificates already got this right (@@unique([organizationId, invoiceNumber]),
+  // @@unique([organizationId, certificateNumber])); a UHID is the same kind of
+  // number — a hospital's own patient number, meaningless outside that hospital.
+  // See @@unique([organizationId, mrn]) below.
+  mrn        String // Medical Record Number / UHID
   externalId String?
 
   // Patient-portal login (optional — set when the patient is given portal access)
@@ -352,6 +361,7 @@ model Patient {
   insuranceCases      InsuranceCase[]
   deathCertificates   DeathCertificate[]
 
+  @@unique([organizationId, mrn])
   @@index([organizationId])
   @@index([mrn])
   @@index([lastName, firstName])
@@ -856,7 +866,10 @@ model PharmacySale {
   payments      String? // JSON array of payment records for the receipt's Payment table
 
   // Receipt
-  receiptNumber String @unique
+  // Scoped-unique per hospital, NOT globally — the number is minted by the
+  // per-org OPD_RCP counter, so hospital #2's very first sale also mints
+  // RCP-<FY>-000001. Same fix as @@unique([organizationId, invoiceNumber]).
+  receiptNumber String
 
   createdAt   DateTime @default(now())
   createdById String?
@@ -866,6 +879,7 @@ model PharmacySale {
   prescription Prescription? @relation(fields: [prescriptionId], references: [id])
   servedBy     User?         @relation("PharmacySalesBy", fields: [servedById], references: [id])
 
+  @@unique([organizationId, receiptNumber])
   @@index([organizationId])
   @@index([patientId])
   @@index([saleDate])
@@ -1091,7 +1105,10 @@ model Invoice {
   cancelledBy  User?         @relation("InvoicesCancelled", fields: [cancelledById], references: [id])
   payments     Payment[]
 
+  idempotencyKey String?
+
   @@unique([organizationId, invoiceNumber])
+  @@unique([organizationId, idempotencyKey])
   @@index([organizationId])
   @@index([patientId])
   @@index([invoiceNumber])
@@ -1110,7 +1127,11 @@ model Payment {
 
   // Payment Details
   paymentDate   DateTime @default(now())
-  receiptNumber String   @unique
+  // Scoped-unique per hospital, NOT globally — the number is minted by the
+  // per-org OPD_RCP counter, so hospital #2's first receipt is also
+  // RCP-<FY>-000001. IPD already got this right on BillPayment
+  // (@@unique([organizationId, receiptNumber])); OPD must match.
+  receiptNumber String
   amount        Float
 
   // Payment Method
@@ -1156,6 +1177,7 @@ model Payment {
   patient      Patient?     @relation(fields: [patientId], references: [id])
   processedBy  User?        @relation("PaymentsProcessed", fields: [processedById], references: [id])
 
+  @@unique([organizationId, receiptNumber])
   @@unique([organizationId, idempotencyKey])
   @@index([organizationId])
   @@index([invoiceId])
@@ -2255,7 +2277,9 @@ model LabOrder {
   consultationId       String?
   requestedById        String
   orderDate            DateTime  @default(now())
-  orderNumber          String    @unique
+  // Scoped-unique per hospital, NOT globally — minted by the per-org LAB_ORDER
+  // counter, so hospital #2's first lab order is also LAB-<FY>-000001.
+  orderNumber          String
   tests                String
   clinicalIndication   String?
   provisionalDiagnosis String?
@@ -2263,7 +2287,12 @@ model LabOrder {
   status               String    @default("pending")
   sampleCollectedAt    DateTime?
   sampleCollectedById  String?
-  accessionNumber      String?   @unique
+  // Also per-hospital: the only lookup (integration/queueProcessor.js, matching
+  // an incoming HL7 result to its order) already filters by organizationId, and
+  // a MachineIntegration belongs to one org — so an analyzer can never reach
+  // another hospital's order. Nullable, and Postgres treats NULLs as distinct,
+  // so orders without an accession are unaffected.
+  accessionNumber      String?
   resultsEnteredAt     DateTime?
   resultsEnteredById   String?
   resultsVerifiedAt    DateTime?
@@ -2282,6 +2311,8 @@ model LabOrder {
   sampleCollectedBy User?         @relation("LabOrdersCollected", fields: [sampleCollectedById], references: [id])
   results           LabResult[]
 
+  @@unique([organizationId, orderNumber])
+  @@unique([organizationId, accessionNumber])
   @@index([accessionNumber])
   @@index([organizationId])
   @@index([patientId])
@@ -2369,7 +2400,9 @@ model RadiologyOrder {
   examId         String
 
   orderDate   DateTime @default(now())
-  orderNumber String   @unique
+  // Scoped-unique per hospital, NOT globally — minted by the per-org RAD_ORDER
+  // counter, so hospital #2's first scan order is also RAD-<FY>-000001.
+  orderNumber String
 
   clinicalIndication   String?
   provisionalDiagnosis String?
@@ -2398,6 +2431,7 @@ model RadiologyOrder {
   exam         RadiologyExam    @relation(fields: [examId], references: [id])
   report       RadiologyReport?
 
+  @@unique([organizationId, orderNumber])
   @@index([organizationId])
   @@index([patientId])
   @@index([status])
@@ -2449,7 +2483,9 @@ model PreTriage {
   organizationId String
 
   // Screening Information
-  screeningNumber String @unique
+  // Scoped-unique per hospital, NOT globally — minted by the per-org PRE_TRIAGE
+  // counter, so hospital #2's first screening is also SCR-<FY>-000001.
+  screeningNumber String
 
   // Basic Demographics
   firstName String?
@@ -2495,6 +2531,7 @@ model PreTriage {
   screenedBy   User?        @relation("ScreenedBy", fields: [screenedById], references: [id])
   routedBy     User?        @relation("RoutedBy", fields: [routedById], references: [id])
 
+  @@unique([organizationId, screeningNumber])
   @@index([organizationId])
   @@index([screeningNumber])
   @@index([status])
