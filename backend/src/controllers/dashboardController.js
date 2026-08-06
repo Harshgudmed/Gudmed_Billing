@@ -28,10 +28,14 @@ const dashCache = new Map()     // key -> { expires: number, data: object }
 const dashInflight = new Map()  // key -> Promise<object>
 
 async function computeDashboard(ORG_ID, myDoctorId) {
-  // Use UTC boundaries so the server timezone never skews "today".
-  const now = new Date()
-  const todayStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 0, 0, 0, 0))
-  const todayEnd   = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 23, 59, 59, 999))
+  // "Today" is the HOSPITAL's day (todayRange, Asia/Kolkata), not the UTC day.
+  // These were hand-rolled UTC midnight boundaries, which is a different 24h
+  // window entirely: an appointment booked for today is stored at the start of
+  // the IST day (18:30Z the previous date), so it fell BEFORE 00:00Z and the
+  // "Today's Appointments" tile never counted a single appointment booked
+  // through the app — while the queue tile, which already used todayRange,
+  // counted the same patient correctly. One screen, two different "todays".
+  const todayWindow = todayRange()
 
   const isDoctor = Boolean(myDoctorId)
 
@@ -44,7 +48,7 @@ async function computeDashboard(ORG_ID, myDoctorId) {
 
   const todayApptWhere = {
     organizationId: ORG_ID,
-    appointmentDate: { gte: todayStart, lte: todayEnd },
+    appointmentDate: todayWindow,
     ...apptDoctor,
   }
 
@@ -86,7 +90,7 @@ async function computeDashboard(ORG_ID, myDoctorId) {
     isDoctor
       ? Promise.resolve({ _sum: { amount: 0 } })
       : db.payment.aggregate({
-          where: { organizationId: ORG_ID, paymentDate: { gte: todayStart, lte: todayEnd }, isRefund: false },
+          where: { organizationId: ORG_ID, paymentDate: todayWindow, isRefund: false },
           _sum: { amount: true },
         }),
 
@@ -125,7 +129,7 @@ async function computeDashboard(ORG_ID, myDoctorId) {
       where: {
         organizationId: ORG_ID,
         status: { in: ['scheduled', 'confirmed'] },
-        appointmentDate: { gte: todayStart },
+        appointmentDate: { gte: todayWindow.gte },
         ...apptDoctor,
       },
       take: 10,
