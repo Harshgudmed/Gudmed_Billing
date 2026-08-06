@@ -5,6 +5,7 @@ import { todayRange } from '../lib/dates.js'
 import { nextSeriesNumber, invoiceProbe } from "../lib/counters.js";
 import { recalcInvoice, refundableAmount } from "../lib/invoiceLedger.js";
 import { fulfillInvoiceItems } from "../lib/invoiceFulfillment.js";
+import { recordStockChange } from "../pharmacy/stockService.js";
 import { round2 } from "../lib/money.js";
 import { z } from 'zod'
 import { PATIENT_NAME_SELECT } from '../lib/patientName.js'
@@ -62,6 +63,7 @@ const invoiceSchema = z.object({
   discountPercentage: z.number().nonnegative().default(0),
   taxPercentage: z.number().nonnegative().default(0),
   notes: z.string().optional(),
+  idempotencyKey: z.string().min(1).optional(),
 })
 
 const paymentSchema = z.object({
@@ -132,6 +134,20 @@ const serviceUpdateSchema = z.object({
 // financialYear now lives in ../lib/money.js and the counter machinery in
 // ../lib/counters.js (shared, single source of truth).
 
+// What each billable line looks like inside Invoice.items, which is a JSON
+// STRING column — so the filter is a substring match on that text, not a JSON
+// path query. A consultation line carries `type`, while pharmacy/lab/radiology
+// lines carry `sourceType` (set by the billing UI so the invoice can draw down
+// stock and raise the orders it implies — see fulfillInvoiceItems). Written
+// without spaces because JSON.stringify emits none; keep these two facts
+// together or the filter silently matches nothing.
+const INVOICE_TYPE_MATCH = {
+  opd: '"type":"consultation"',
+  pharmacy: '"sourceType":"pharmacy"',
+  lab: '"sourceType":"lab"',
+  radiology: '"sourceType":"radiology"',
+}
+
 // Atomic, gap-free, per-org invoice number. Format: INV-2026-27-000123.
 // `invoiceProbe` lets the counter self-heal past invoices that a data migration
 // copied without their BillCounter row (the live incident that deadlocked billing).
@@ -148,11 +164,97 @@ function nextRefundNumber(tx, organizationId) {
   return nextSeriesNumber(tx, organizationId, 'OPD_REF', 'REF')
 }
 
+/**
+ * Undo everything `fulfillInvoiceItems` (lib/invoiceFulfillment.js) created for an
+ * invoice that is being cancelled. Returns what was reversed, for the audit row.
+ *
+ * WHY: cancelling only flipped Invoice.status, so the real-world side effects of
+ * billing survived a voided bill — the medicine stayed deducted from pharmacy
+ * stock (it can never be sold again), the PharmacySale kept counting as pharmacy
+ * revenue, and the lab / radiology orders were still collected and reported on.
+ *
+ * The links back are structural, not note text: the sale carries
+ * receiptNumber = invoiceNumber, the lab order is `LAB-<invoiceNumber>` and each
+ * radiology order is `RAD-<invoiceNumber>-<n>` — all three columns are @unique.
+ *
+ * Must be called inside the caller's transaction so the cancellation and the
+ * reversal commit together.
+ */
+async function reverseInvoiceFulfillment(tx, { organizationId, invoice, actorId }) {
+  const reversed = { saleId: null, stockReturned: [], labOrderIds: [], radiologyOrderIds: [] }
+
+  const sale = await tx.pharmacySale.findFirst({
+    where: { organizationId, receiptNumber: invoice.invoiceNumber },
+    select: { id: true, items: true },
+  })
+  if (sale) {
+    let soldItems = []
+    try { soldItems = JSON.parse(sale.items || '[]') } catch { soldItems = [] }
+
+    for (const item of soldItems) {
+      const quantity = Number(item.quantity) || 0
+      if (!item.drugId || quantity <= 0) continue
+      // Positive delta THROUGH recordStockChange, never a bare increment: the
+      // StockLedger must show the return, or every later balanceAfter is wrong
+      // and the shelf count can never be audited back to a document.
+      // Batch quantities are intentionally not restored — one line can be drawn
+      // FIFO across several batches and batch tracking is best-effort
+      // (stockService.js); quantityInStock stays the authority for selling.
+      await recordStockChange(tx, {
+        organizationId,
+        drugId: item.drugId,
+        changeType: 'return',
+        quantityDelta: quantity,
+        reference: sale.id,
+        note: `Cancelled billing invoice ${invoice.invoiceNumber}`,
+        createdById: actorId || null,
+      })
+      reversed.stockReturned.push({ drugId: item.drugId, quantity })
+    }
+
+    // Void the sale rather than delete it: the row is the record of what was
+    // dispensed and later reversed, and the ledger rows point at its id.
+    await tx.pharmacySale.update({ where: { id: sale.id }, data: { paymentStatus: 'cancelled' } })
+    reversed.saleId = sale.id
+  }
+
+  // Only orders nobody has acted on yet are cancelled. Once a sample is collected
+  // or an exam performed, the clinical work exists — silently dropping it off the
+  // worklist would lose a real result; that case needs a human (re-bill or reject).
+  const pendingOrderWhere = { organizationId, status: 'pending' }
+
+  const labOrders = await tx.labOrder.findMany({
+    where: { ...pendingOrderWhere, orderNumber: `LAB-${invoice.invoiceNumber}` },
+    select: { id: true },
+  })
+  if (labOrders.length) {
+    await tx.labOrder.updateMany({
+      where: { id: { in: labOrders.map((o) => o.id) } },
+      data: { status: 'cancelled', rejectionReason: `Invoice ${invoice.invoiceNumber} cancelled` },
+    })
+    reversed.labOrderIds = labOrders.map((o) => o.id)
+  }
+
+  const radiologyOrders = await tx.radiologyOrder.findMany({
+    where: { ...pendingOrderWhere, orderNumber: { startsWith: `RAD-${invoice.invoiceNumber}-` } },
+    select: { id: true },
+  })
+  if (radiologyOrders.length) {
+    await tx.radiologyOrder.updateMany({
+      where: { id: { in: radiologyOrders.map((o) => o.id) } },
+      data: { status: 'cancelled', cancellationReason: `Invoice ${invoice.invoiceNumber} cancelled` },
+    })
+    reversed.radiologyOrderIds = radiologyOrders.map((o) => o.id)
+  }
+
+  return reversed
+}
+
 
 export async function getAll(req, res) {
   try {
     const ORGANIZATION_ID = getOrgId(req)
-    const { resource, category, status, patientId, invoiceId, search } = req.query
+    const { resource, category, status, patientId, invoiceId, search, type } = req.query
     const limit = Math.min(Math.max(parseInt(req.query.limit) || 10, 1), 1000) // hard cap → no unbounded query DoS
     // Guard like `limit`: a bare parseInt let `offset=-5` (or `offset=abc` → NaN)
     // reach Prisma, which threw a 500. A bad page offset is a client mistake — it
@@ -192,6 +294,11 @@ export async function getAll(req, res) {
         else if (status === 'pending') where.paymentStatus = { in: ['unpaid', 'pending'] }
         else where.paymentStatus = status
       }
+      // Filter by what the invoice actually billed for. Done in the DB, not by
+      // loading rows and filtering in the browser — the table grows without
+      // bound and a page-local filter would only ever search the current page.
+      const itemMatch = INVOICE_TYPE_MATCH[type]
+      if (itemMatch) where.items = { contains: itemMatch }
       if (patientId) where.patientId = patientId
       const searchWhere = patientSearchWhere(search, 'patient', (term) => [
         { invoiceNumber: { contains: term, mode: 'insensitive' } },
@@ -361,8 +468,33 @@ export async function create(req, res) {
         return res.status(400).json({ success: false, error: parsed.error.flatten() })
       }
 
-      const { patientId, consultationId, discountAmount, discountPercentage, taxPercentage, notes } =
+      const { patientId, consultationId, discountAmount, discountPercentage, taxPercentage, notes, idempotencyKey } =
         parsed.data
+
+      // IDEMPOTENCY: if this exact submit was already recorded (same client token),
+      // return that invoice instead of creating again. Prevents duplicate invoices
+      // on a double-click / network retry.
+      if (idempotencyKey) {
+        const existing = await db.invoice.findFirst({
+          where: { organizationId: ORGANIZATION_ID, idempotencyKey },
+          include: {
+            patient: {
+              select: {
+                ...PATIENT_NAME_SELECT,
+                phonePrimary: true,
+                hasInsurance: true,
+                insuranceProvider: true,
+              },
+            },
+          },
+        })
+        if (existing) {
+          if (existing.patientId !== patientId) {
+            return res.status(409).json({ success: false, code: 'IDEMPOTENCY_KEY_REUSED', error: 'This invoice reference was already used for a different patient.' })
+          }
+          return res.status(200).json({ success: true, data: existing, idempotent: true })
+        }
+      }
 
       // Reprice every line from quantity x unitPrice before it is trusted or stored.
       const items = parsed.data.items.map(priceLine)
@@ -373,12 +505,14 @@ export async function create(req, res) {
         return res.status(400).json({ success: false, error: 'Discount cannot exceed the total value of the items' })
       }
 
-      const totalAmount = subtotal - discountAmount + taxAmount
+      const totalAmount = round2(subtotal - discountAmount + taxAmount)
 
-      // Transaction: the invoice number is drawn from a per-org counter inside
-      // the same tx, so concurrent creates cannot collide on the @unique column.
-      const invoice = await db.$transaction(async (tx) => {
-        // Verify the patient actually exists in THIS database before writing the
+      let invoice
+      try {
+        // Transaction: the invoice number is drawn from a per-org counter inside
+        // the same tx, so concurrent creates cannot collide on the @unique column.
+        invoice = await db.$transaction(async (tx) => {
+          // Verify the patient actually exists in THIS database before writing the
         // invoice. Without this check, a stale/foreign patientId (e.g. from a UI
         // still holding IDs from a different environment or an old DB snapshot)
         // hits the `patientId` foreign key at insert time and Prisma throws a raw
@@ -414,6 +548,7 @@ export async function create(req, res) {
             balanceDue: totalAmount,
             amountPaid: 0,
             invoiceDate: new Date(),
+            idempotencyKey: idempotencyKey || null,
           },
           include: {
             patient: {
@@ -441,6 +576,25 @@ export async function create(req, res) {
 
         return created
       })
+      } catch (e) {
+        if (e?.code === 'P2002' && idempotencyKey) {
+          const winner = await db.invoice.findFirst({ 
+            where: { organizationId: ORGANIZATION_ID, idempotencyKey },
+            include: {
+              patient: {
+                select: {
+                  ...PATIENT_NAME_SELECT,
+                  phonePrimary: true,
+                  hasInsurance: true,
+                  insuranceProvider: true,
+                },
+              },
+            },
+          })
+          if (winner) return res.status(200).json({ success: true, data: winner, idempotent: true })
+        }
+        throw e
+      }
 
       return res.status(201).json({ success: true, data: invoice })
     }
@@ -720,7 +874,7 @@ export async function create(req, res) {
 
         if (action === 'REJECT') {
           const updatedPayment = await tx.payment.update({
-            where: { id: paymentId },
+            where: { id: paymentId, organizationId: ORGANIZATION_ID },
             data: {
               status: 'REJECTED',
               // Was `|| 'SYSTEM'`, which wrote a sentinel string into a user-id
@@ -775,7 +929,7 @@ export async function create(req, res) {
 
         // 1. Update Payment (only the CAS winner reaches here)
         const approvedPayment = await tx.payment.update({
-          where: { id: paymentId },
+          where: { id: paymentId, organizationId: ORGANIZATION_ID },
           data: {
             status: 'APPROVED',
             approvedByUserId: actor.id,
@@ -787,10 +941,7 @@ export async function create(req, res) {
         let parsedItems = []
         try { parsedItems = JSON.parse(oldInvoice.items) } catch (e) { parsedItems = [] }
 
-        const newTotalAmount = oldInvoice.totalAmount - refundedAmount
-        const newAmountPaid = oldInvoice.amountPaid - refundedAmount
-        const newBalanceDue = newTotalAmount - newAmountPaid
-        const newPaymentStatus = newAmountPaid >= newTotalAmount ? 'paid' : (newAmountPaid > 0 ? 'partially_paid' : 'unpaid')
+        const newTotalAmount = round2(oldInvoice.totalAmount - refundedAmount)
 
         // Keep line-item integrity: carry the original lines and append a negative
         // "Refund Adjustment" line so the items SUM equals the revised total (the old
@@ -807,8 +958,14 @@ export async function create(req, res) {
         ]
 
         // Sequential, collision-free revision number: base + -R<n> (was random(0-999)).
+        // Counted over the whole chain, not this parent's direct children: revising
+        // an already-revised invoice (the normal flow — a second refund is raised
+        // against the revision) found zero children and reissued "-R1", which died
+        // on the unique (organizationId, invoiceNumber) index as a 500 at approval.
         const baseNumber = oldInvoice.invoiceNumber.replace(/-R\d+$/, '')
-        const revCount = await tx.invoice.count({ where: { organizationId: ORGANIZATION_ID, parentInvoiceId: oldInvoice.id } })
+        const revCount = await tx.invoice.count({
+          where: { organizationId: ORGANIZATION_ID, invoiceNumber: { startsWith: `${baseNumber}-R` } },
+        })
         const revisedNumber = `${baseNumber}-R${revCount + 1}`
 
         const revisedInvoice = await tx.invoice.create({
@@ -825,14 +982,49 @@ export async function create(req, res) {
             discountAmount: oldInvoice.discountAmount,
             discountPercentage: oldInvoice.discountPercentage,
             totalAmount: newTotalAmount,
-            amountPaid: newAmountPaid,
-            balanceDue: newBalanceDue,
-            paymentStatus: newPaymentStatus,
+            // Placeholders only — recalcInvoice below derives the real figures from
+            // the Payment rows once they have been moved across.
+            amountPaid: 0,
+            balanceDue: newTotalAmount,
+            paymentStatus: 'unpaid',
             insuranceClaimAmount: oldInvoice.insuranceClaimAmount,
             patientCopayAmount: oldInvoice.patientCopayAmount,
             notes: 'Revised Invoice due to Refund ' + payment.receiptNumber,
           }
         })
+
+        // 4. Move the whole payment ledger onto the revised invoice.
+        //
+        // WHY: Payment rows are the source of truth — recalcInvoice derives
+        // amountPaid from them and overwrites whatever is cached on the invoice.
+        // The revised invoice used to be created with a hand-copied
+        // `amountPaid = old.amountPaid - refund` while every Payment row stayed
+        // attached to the archived original. The first later recalc (the patient
+        // pays the balance, or a line is added) then saw ONLY that new payment and
+        // reset amountPaid to it — ₹10,000 billed / ₹6,000 collected / ₹1,000
+        // refunded became "₹4,000 paid, ₹5,000 due" and the counter re-billed money
+        // it had already taken.
+        //
+        // Exactly the rows invoiceLedger() reads move across: every collection, plus
+        // refunds that are APPROVED (recalc computes paid − approvedRefunds, so the
+        // approved refund must sit alongside the collections it reduces). A refund
+        // still PENDING_APPROVAL — or REJECTED — stays with the superseded document:
+        // it belongs to a bill that no longer exists and must be re-raised against
+        // the revision, which is exactly what the 409 above tells the approver.
+        await tx.payment.updateMany({
+          where: {
+            invoiceId: oldInvoice.id,
+            organizationId: ORGANIZATION_ID,
+            OR: [{ isRefund: false }, { isRefund: true, status: 'APPROVED' }],
+          },
+          data: { invoiceId: revisedInvoice.id },
+        })
+        await recalcInvoice(tx, revisedInvoice.id)
+
+        // The archived original deliberately keeps its frozen amountPaid/balanceDue
+        // as the historical document; it is paymentStatus 'refunded', so no
+        // outstanding-balance report counts it twice.
+        const revisedWithTotals = await tx.invoice.findUnique({ where: { id: revisedInvoice.id } })
 
         await tx.auditLog.create({
           data: {
@@ -842,13 +1034,17 @@ export async function create(req, res) {
             entityId: oldInvoice.id,
             metadata: JSON.stringify({
               refundId: paymentId,
-              revisedInvoiceId: revisedInvoice.id
+              revisedInvoiceId: revisedInvoice.id,
+              // The figures the ledger derived, so the money trail is provable
+              // from the audit row alone.
+              revisedAmountPaid: revisedWithTotals.amountPaid,
+              revisedBalanceDue: revisedWithTotals.balanceDue,
             }),
             performedAt: new Date(),
           }
         })
 
-        return { payment: approvedPayment, revisedInvoice }
+        return { payment: approvedPayment, revisedInvoice: revisedWithTotals }
       })
 
       return res.status(200).json({ success: true, data: result })
@@ -952,7 +1148,7 @@ export async function update(req, res) {
         // Tenant guard: only touch an invoice that belongs to this org.
         const existing = await tx.invoice.findFirst({
           where: { id, organizationId: ORGANIZATION_ID },
-          select: { id: true, amountPaid: true, paymentStatus: true },
+          select: { id: true, invoiceNumber: true, amountPaid: true, paymentStatus: true },
         })
         if (!existing) {
           const err = new Error('Invoice not found')
@@ -970,6 +1166,31 @@ export async function update(req, res) {
           }
           updateData.cancelledAt = new Date()
           updateData.paymentStatus = 'cancelled'
+
+          // Claim the cancellation atomically. The read above is a snapshot: two
+          // concurrent cancels (or a double-clicked button) would both pass it and
+          // each return the medicine to stock, so the shelf would gain goods that
+          // were only ever dispensed once. Only the CAS winner reverses anything.
+          const claimed = await tx.invoice.updateMany({
+            where: { id, organizationId: ORGANIZATION_ID, status: { not: 'cancelled' } },
+            data: updateData,
+          })
+          if (claimed.count !== 1) {
+            const err = new Error('Invoice is already cancelled')
+            err.status = 409
+            throw err
+          }
+
+          // Cancelling the document is only half the job — the stock it consumed
+          // and the lab/radiology work it raised have to be undone in the SAME
+          // transaction, or a voided bill leaves the shelf short and the lab
+          // still processing work nobody will pay for.
+          const reversed = await reverseInvoiceFulfillment(tx, {
+            organizationId: ORGANIZATION_ID,
+            invoice: existing,
+            actorId: getActor(req).id,
+          })
+
           await tx.auditLog.create({
             data: {
               organizationId: ORGANIZATION_ID,
@@ -979,10 +1200,13 @@ export async function update(req, res) {
               metadata: JSON.stringify({
                 cancelledAt: updateData.cancelledAt,
                 reason: updates.cancellationReason || null,
+                reversed,
               }),
               performedAt: new Date(),
             },
           })
+
+          return tx.invoice.findUnique({ where: { id } })
         }
 
         return tx.invoice.update({ where: { id }, data: updateData })

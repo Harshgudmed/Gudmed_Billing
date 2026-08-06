@@ -63,7 +63,16 @@ export async function getAll(req, res, next) {
       // Calendar/week views fetch a bounded date range instead of everything
       where.appointmentDate = { gte: startOfDay(dateFrom), lte: endOfDay(dateTo) }
     }
-    if (status) where.status = status
+    // `status` accepts one value or a comma-separated list. The Today screen's
+    // two panes are each a GROUP of statuses ("upcoming" = scheduled/confirmed/
+    // checked_in/in_progress), and with only single-value matching it had to
+    // pull the whole day and split it in the browser — which silently lost every
+    // appointment past the row cap on a busy day.
+    if (status) {
+      const wanted = String(status).split(',').map((s) => s.trim()).filter(Boolean)
+      if (wanted.length > 1) where.status = { in: wanted }
+      else if (wanted.length === 1) where.status = wanted[0]
+    }
     if (doctorId) where.doctorId = doctorId
     if (patientId) where.patientId = patientId
 
@@ -724,7 +733,7 @@ export async function update(req, res, next) {
         if (draftInvoices.length) {
           const invoiceIds = draftInvoices.map((inv) => inv.id)
           await tx.invoice.updateMany({
-            where: { id: { in: invoiceIds } },
+            where: { id: { in: invoiceIds }, organizationId },
             data: {
               status: 'cancelled',
               paymentStatus: 'cancelled',
@@ -822,7 +831,7 @@ export async function reschedule(req, res, next) {
         },
       })
       await tx.appointment.update({
-        where: { id: original.id },
+        where: { id: original.id, organizationId },
         data: { status: 'rescheduled', rescheduledToId: newAppointment.id },
       })
 
@@ -924,7 +933,7 @@ export async function bulkUpdateStatus(req, res, next) {
         if (draftInvoices.length) {
           const invoiceIds = draftInvoices.map((inv) => inv.id)
           await tx.invoice.updateMany({
-            where: { id: { in: invoiceIds } },
+            where: { id: { in: invoiceIds }, organizationId },
             data: { status: 'cancelled', paymentStatus: 'cancelled', cancelledAt: new Date(), cancellationReason: 'Appointment cancelled' },
           })
           await tx.doctorCommission.updateMany({
