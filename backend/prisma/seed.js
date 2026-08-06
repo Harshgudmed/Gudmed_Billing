@@ -189,12 +189,17 @@ async function main() {
   }
   console.log(`✅ Floors + Rooms: ${roomCount} rooms across ${FLOOR_NAMES.length} floors`)
 
-  // 7. Patients (30) — mrn is unique, upsert on it ----------------------------
+  // 7. Patients (30) — keyed on (organizationId, mrn) -------------------------
+  // NOT `where: { mrn }`. An MRN is unique WITHIN a hospital, not across the
+  // system (@@unique([organizationId, mrn]) — see the
+  // 20260806040818_scope_document_numbers_per_org migration), so mrn alone is
+  // not a valid unique selector and Prisma rejects the call outright. This ran
+  // on every deploy and took the whole build down with it.
   const patients = []
   for (let i = 1; i <= 30; i++) {
     const mrn = `MRN-DEMO-${String(i).padStart(4, '0')}`
     const p = await db.patient.upsert({
-      where: { mrn },
+      where: { organizationId_mrn: { organizationId: ORG_ID, mrn } },
       update: {},
       create: {
         organizationId: ORG_ID, mrn,
