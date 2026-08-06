@@ -18,7 +18,11 @@ import { parseTimetable } from './doctorTimetable.js'
 // Without the re-stamp, `joinedQueueAt` held the moment the row happened to be
 // created, so a 5pm patient could sit above a 9am one.
 
-const NOT_QUEUEABLE = ['cancelled', 'no_show', 'rescheduled']
+// Statuses that mean the visit is off: it must never hold a live queue row.
+// Exported because the sync is not the only way into the queue — queueController's
+// addToQueue can be called directly, and it has to refuse the same statuses or it
+// puts back exactly what the sync is careful to leave out.
+export const NOT_QUEUEABLE = ['cancelled', 'no_show', 'rescheduled']
 
 // Postgres caps a single prepared statement at 32,767 bind variables, and
 // every id in an `appointmentId: { in: [...] }` list is one bind variable.

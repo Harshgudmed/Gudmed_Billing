@@ -6,7 +6,7 @@ import { nextQueueNumber } from '../utils/queueNumber.js'
 import { getPagination, paginationMeta } from '../lib/pagination.js'
 import { priorityRank, QUEUE_ORDER_BY } from '../lib/queuePriority.js'
 import { dayRange, todayRange } from '../lib/dates.js'
-import { syncAppointmentsToQueue } from '../lib/queueSync.js'
+import { syncAppointmentsToQueue, NOT_QUEUEABLE } from '../lib/queueSync.js'
 import { isOwned } from '../lib/tenant.js'
 import { PATIENT_NAME_SELECT, patientFullName } from '../lib/patientName.js'
 
@@ -197,8 +197,41 @@ export async function addToQueue(req, res, next) {
   try {
     const ORG_ID = getOrgId(req)
     const validatedData = queueSchema.parse(req.body)
+    // Every caller-supplied id is org-checked, not just the room. Without the
+    // patient/appointment guards a crafted request could join another hospital's
+    // patient to this queue — and the appointmentId upsert below would return
+    // THEIR existing queue row (patient name and all) in the response, making it
+    // a cross-tenant read as well as a write.
     if (validatedData.roomId && !(await isOwned('room', validatedData.roomId, ORG_ID))) {
       return res.status(400).json({ success: false, error: 'Room not found' })
+    }
+    if (validatedData.patientId && !(await isOwned('patient', validatedData.patientId, ORG_ID))) {
+      return res.status(404).json({ success: false, error: 'Patient not found' })
+    }
+    if (validatedData.appointmentId) {
+      // Ownership AND liveness in one read. isOwned() only proves the row exists
+      // in this org — it cannot see the status, and a cancelled appointment still
+      // exists. Without the status check this endpoint put the patient the
+      // receptionist had just cancelled back on the queue and the public display
+      // board, which is how three such rows reached production (the queue rows
+      // were created a MONTH after their appointment was cancelled).
+      const appointment = await db.appointment.findFirst({
+        where: { id: validatedData.appointmentId, organizationId: ORG_ID },
+        select: { status: true },
+      })
+      if (!appointment) {
+        return res.status(404).json({ success: false, error: 'Appointment not found' })
+      }
+      if (NOT_QUEUEABLE.includes(appointment.status)) {
+        return res.status(409).json({
+          success: false,
+          code: 'APPOINTMENT_NOT_LIVE',
+          error: `This appointment is ${appointment.status} — it cannot be added to the queue.`,
+        })
+      }
+    }
+    if (validatedData.assignedToId && !(await isOwned('user', validatedData.assignedToId, ORG_ID))) {
+      return res.status(404).json({ success: false, error: 'Doctor not found' })
     }
     const patientInclude = { patient: { select: { ...PATIENT_NAME_SELECT, } } }
 
