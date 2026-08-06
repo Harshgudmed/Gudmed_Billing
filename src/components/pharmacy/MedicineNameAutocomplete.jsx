@@ -30,23 +30,34 @@ export default function MedicineNameAutocomplete({ value, onChange, onSelect, pl
     clearTimeout(debounceRef.current);
     if (q.length < 2) {
       setResults([]);
+      // Cleared here too: a request already in flight is now cancelled, and a
+      // cancelled reply deliberately skips setLoading(false) — so backspacing
+      // below two characters mid-request would otherwise leave the spinner
+      // turning forever. Same as PatientLookup's short-query branch.
+      setLoading(false);
       setOpen(false);
       return;
     }
+    // A slow reply for an earlier prefix ("amox") can land after a newer one ("amoxil"),
+    // repainting the list with brands the user has already typed past — picking one then
+    // auto-fills the wrong composition/company/price. Drop replies we no longer want.
+    let cancelled = false;
     debounceRef.current = setTimeout(async () => {
       setLoading(true);
       try {
         const res = await client.get(`/pharmacy/medicine-reference?q=${encodeURIComponent(q)}`);
-        setResults(res.data || []);
-        setOpen(true);
-        setHighlight(-1);
+        if (!cancelled) {
+          setResults(res.data || []);
+          setOpen(true);
+          setHighlight(-1);
+        }
       } catch {
-        setResults([]);
+        if (!cancelled) setResults([]);
       } finally {
-        setLoading(false);
+        if (!cancelled) setLoading(false);
       }
     }, 250);
-    return () => clearTimeout(debounceRef.current);
+    return () => { cancelled = true; clearTimeout(debounceRef.current); };
   }, [value]);
 
   // Close when clicking outside.

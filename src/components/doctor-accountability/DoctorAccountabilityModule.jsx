@@ -13,7 +13,7 @@ import { toast } from 'sonner'
 import { format } from 'date-fns'
 import {
   UserCog, IndianRupee, CheckCircle2, BarChart3,
-  Search, Plus, Edit2, Trash2, CheckSquare, RefreshCw,
+  Search, Plus, Edit2, Trash2, RefreshCw,
   Users, Clock, Wallet, Printer, FileDown, CheckCheck, ChevronLeft, ChevronRight,
   Eye, EyeOff,
 } from 'lucide-react'
@@ -24,16 +24,6 @@ import { drName } from '@/lib/utils'
 // formatMoney also survives null/undefined — the old local `fmt` threw on them.
 import { formatMoney as fmt } from '@/lib/format'
 import { useOrgSettings } from '@/lib/useOrgSettings'
-
-function periodLabel(p) {
-  if (!p) return '—'
-  const s = String(p)
-  // New format: a plain number of days. Old data may still be "YYYY-MM".
-  if (/^\d+$/.test(s)) return `${s} day${s === '1' ? '' : 's'}`
-  const [y, m] = s.split('-')
-  if (!m) return s
-  return new Date(Number(y), Number(m) - 1).toLocaleString('default', { month: 'long', year: 'numeric' })
-}
 
 function printViaIframe(html) {
   const iframe = document.createElement('iframe')
@@ -436,8 +426,11 @@ function CommissionsTab({ openAddSignal }) {
   // but actually populated: the old useState's setter was never called, so every
   // print came out headed 'Hospital'.
   const { orgInfo } = useOrgSettings()
-  // Bulk settle (merged from the old Settlement tab)
-  const [selectedIds, setSelectedIds] = useState(new Set())
+  // Bulk settle. Keyed id → commissionAmount rather than a Set of ids: selections
+  // survive paging, but the table only ever holds ONE page, so summing the amounts
+  // off `commissions` showed the operator the total of the rows still on screen
+  // while settling every row they had ticked — money paid out that nobody checked.
+  const [selected, setSelected] = useState(new Map())
   const [bulkSettling, setBulkSettling] = useState(false)
 
   // Add dialog
@@ -495,9 +488,16 @@ function CommissionsTab({ openAddSignal }) {
 
   useEffect(() => {
     setCommissionsPage(1)
+    // Drop the selection too: rows ticked under one filter are invisible under the
+    // next, and settling money the operator can no longer see is not acceptable.
+    setSelected(new Map())
   }, [filterDoctor, filterStatus, filterDate])
 
   // ── Client-side date filter ────────────────────────────────────────────────
+  // Doctor/status page on the server; date does NOT — `resource=commissions` has
+  // no date-range param — so this only narrows the page already fetched. The
+  // banner below says so, because a filter that looks global but is per-page had
+  // the table showing every row while the empty-state claimed there were none.
   const now = new Date()
   const displayed = commissions.filter(c => {
     if (filterDate === 'all') return true
@@ -593,21 +593,24 @@ function CommissionsTab({ openAddSignal }) {
   }
 
   // ── Bulk settle selected pending commissions ───────────────────────────────
-  function toggleSelect(id) {
-    setSelectedIds(prev => {
-      const next = new Set(prev)
-      if (next.has(id)) next.delete(id); else next.add(id)
+  function toggleSelect(entry) {
+    setSelected(prev => {
+      const next = new Map(prev)
+      if (next.has(entry.id)) next.delete(entry.id)
+      else next.set(entry.id, entry.commissionAmount || 0)
       return next
     })
   }
+  const selectedTotal = [...selected.values()].reduce((sum, amount) => sum + amount, 0)
+
   async function bulkSettle() {
-    const ids = [...selectedIds]
+    const ids = [...selected.keys()]
     if (ids.length === 0) return
     setBulkSettling(true)
     const res = await client.patch('/doctor-accountability?resource=settle', { commissionIds: ids })
     if (res.success) {
       toast.success(`${ids.length} commission(s) settled`)
-      setSelectedIds(new Set())
+      setSelected(new Map())
       load()
     } else toast.error(res.error || 'Failed to settle')
     setBulkSettling(false)
@@ -714,8 +717,10 @@ function CommissionsTab({ openAddSignal }) {
           </SelectContent>
         </Select>
         <div className="ml-auto flex gap-2">
-          <Button size="sm" variant="outline" onClick={exportCSV} title="Export CSV">
-            <FileDown className="h-4 w-4 mr-1" />Export CSV
+          {/* Named for what it actually does: `displayed` is this page, not the whole
+              filtered set — "Export CSV" read as a full ledger export and wasn't. */}
+          <Button size="sm" variant="outline" onClick={exportCSV} title="Export the commissions shown on this page">
+            <FileDown className="h-4 w-4 mr-1" />Export This Page
           </Button>
           <Button size="sm" onClick={() => setAddDialog(true)}>
             <Plus className="h-4 w-4 mr-1" />Add Commission
@@ -723,16 +728,22 @@ function CommissionsTab({ openAddSignal }) {
         </div>
       </div>
 
+      {filterDate !== 'all' && (
+        <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+          The date filter narrows only the {ITEMS_PER_PAGE} entries on this page — older entries matching it sit on later pages.
+        </p>
+      )}
+
       {/* Bulk settle bar */}
-      {selectedIds.size > 0 && (
+      {selected.size > 0 && (
         <div className="flex items-center justify-between bg-blue-50 border border-blue-200 rounded-lg px-4 py-2">
           <span className="text-sm text-blue-800 font-medium">
-            {selectedIds.size} selected — total {fmt(commissions.filter(c => selectedIds.has(c.id)).reduce((s, c) => s + (c.commissionAmount || 0), 0))}
+            {selected.size} selected across all pages — total {fmt(selectedTotal)}
           </span>
           <div className="flex gap-2">
-            <Button size="sm" variant="ghost" onClick={() => setSelectedIds(new Set())}>Clear</Button>
+            <Button size="sm" variant="ghost" onClick={() => setSelected(new Map())}>Clear</Button>
             <Button size="sm" onClick={bulkSettle} disabled={bulkSettling}>
-              <CheckCheck className="h-4 w-4 mr-1" />{bulkSettling ? 'Settling...' : 'Settle Selected'}
+              <CheckCheck className="h-4 w-4 mr-1" />{bulkSettling ? 'Settling...' : `Settle ${selected.size} selected — ${fmt(selectedTotal)}`}
             </Button>
           </div>
         </div>
@@ -741,7 +752,7 @@ function CommissionsTab({ openAddSignal }) {
       {/* Table */}
       {loading ? (
         <div className="text-center py-12 text-gray-400">Loading...</div>
-      ) : displayed.length === 0 ? (
+      ) : commissions.length === 0 ? (
         <div className="text-center py-12 text-gray-400">No commission entries found.</div>
       ) : (
         <div className="border rounded-lg">
@@ -755,12 +766,16 @@ function CommissionsTab({ openAddSignal }) {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {commissions.map(c => (
-                <TableRow key={c.id} className={selectedIds.has(c.id) ? 'bg-blue-50/50' : ''}>
+              {displayed.length === 0 ? (
+                // Keep the pagination footer reachable: gating the whole table on the
+                // page-local date filter stranded the user with no way to page on.
+                <TableRow><TableCell colSpan={9} className="text-center py-10 text-gray-400">No entries on this page match the date filter.</TableCell></TableRow>
+              ) : displayed.map(c => (
+                <TableRow key={c.id} className={selected.has(c.id) ? 'bg-blue-50/50' : ''}>
                   <TableCell>
                     {c.status === 'pending' ? (
                       <input type="checkbox" className="h-4 w-4 rounded border-gray-300"
-                        checked={selectedIds.has(c.id)} onChange={() => toggleSelect(c.id)} />
+                        checked={selected.has(c.id)} onChange={() => toggleSelect(c)} />
                     ) : null}
                   </TableCell>
                   <TableCell className="text-sm">{format(new Date(c.createdAt), 'dd MMM yyyy')}</TableCell>
@@ -927,113 +942,6 @@ function CommissionsTab({ openAddSignal }) {
           )}
         </DialogContent>
       </Dialog>
-    </div>
-  )
-}
-
-function SettlementTab() {
-  const [commissions, setCommissions] = useState([])
-  const [loading, setLoading] = useState(true)
-  const [selected, setSelected] = useState(new Set())
-  const [settling, setSettling] = useState(false)
-  const [note, setNote] = useState('')
-  const [ref, setRef] = useState('')
-
-  const load = useCallback(async () => {
-    setLoading(true)
-    const res = await client.get('/doctor-accountability?resource=commissions&status=pending')
-    if (res.success) setCommissions(res.data)
-    setLoading(false)
-    setSelected(new Set())
-  }, [])
-
-  useEffect(() => { load() }, [load])
-
-  function toggle(id) {
-    setSelected(prev => { const next = new Set(prev); next.has(id) ? next.delete(id) : next.add(id); return next })
-  }
-
-  function toggleAll() {
-    if (selected.size === commissions.length) setSelected(new Set())
-    else setSelected(new Set(commissions.map(c => c.id)))
-  }
-
-  async function settle() {
-    if (selected.size === 0) { toast.error('Select at least one commission to settle'); return }
-    setSettling(true)
-    const res = await client.patch('/doctor-accountability?resource=settle', {
-      commissionIds: Array.from(selected), settlementNote: note, settlementRef: ref,
-    })
-    if (res.success) { toast.success(res.message || 'Settled successfully'); setNote(''); setRef(''); load() }
-    else toast.error(res.error || 'Failed to settle')
-    setSettling(false)
-  }
-
-  const totalSelected = commissions.filter(c => selected.has(c.id)).reduce((s, c) => s + c.commissionAmount, 0)
-
-  return (
-    <div className="space-y-4">
-      {loading ? (
-        <div className="text-center py-12 text-gray-400">Loading...</div>
-      ) : commissions.length === 0 ? (
-        <div className="text-center py-12 text-gray-400">No pending commissions to settle.</div>
-      ) : (
-        <>
-          <div className="flex items-center justify-between">
-            <p className="text-sm text-gray-500">{commissions.length} pending commissions</p>
-            <Button variant="outline" size="sm" onClick={toggleAll}>
-              <CheckSquare className="h-4 w-4 mr-1" />
-              {selected.size === commissions.length ? 'Deselect All' : 'Select All'}
-            </Button>
-          </div>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead className="w-10" />
-                <TableHead>Doctor</TableHead><TableHead>Invoice Amt</TableHead>
-                <TableHead>Commission</TableHead><TableHead>Follow-up Valid</TableHead><TableHead>Invoice ID</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {commissions.map(c => (
-                <TableRow key={c.id} className={selected.has(c.id) ? 'bg-blue-50' : ''}>
-                  <TableCell>
-                    <input type="checkbox" checked={selected.has(c.id)} onChange={() => toggle(c.id)} className="h-4 w-4 cursor-pointer" />
-                  </TableCell>
-                  <TableCell className="font-medium">{drName(c.doctor.fullName)}</TableCell>
-                  <TableCell>{fmt(c.invoiceAmount)}</TableCell>
-                  <TableCell className="font-semibold text-green-700">{fmt(c.commissionAmount)}</TableCell>
-                  <TableCell className="text-sm text-gray-500">{periodLabel(c.period)}</TableCell>
-                  <TableCell className="text-sm text-gray-500">{c.invoiceId || '—'}</TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-          {selected.size > 0 && (
-            <Card className="border-blue-200 bg-blue-50">
-              <CardContent className="p-4 space-y-3">
-                <div className="flex items-center justify-between">
-                  <span className="font-semibold text-blue-800">{selected.size} commission(s) selected — Total: {fmt(totalSelected)}</span>
-                </div>
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <Label className="text-xs">Settlement Reference</Label>
-                    <Input value={ref} onChange={e => setRef(e.target.value)} placeholder="Cheque / Transfer ref" className="mt-1 h-9 bg-white" />
-                  </div>
-                  <div>
-                    <Label className="text-xs">Settlement Note</Label>
-                    <Input value={note} onChange={e => setNote(e.target.value)} placeholder="Optional note" className="mt-1 h-9 bg-white" />
-                  </div>
-                </div>
-                <Button onClick={settle} disabled={settling} className="w-full bg-green-600 hover:bg-green-700">
-                  <CheckCircle2 className="h-4 w-4 mr-2" />
-                  {settling ? 'Settling...' : `Settle ${selected.size} Commission(s) — ${fmt(totalSelected)}`}
-                </Button>
-              </CardContent>
-            </Card>
-          )}
-        </>
-      )}
     </div>
   )
 }
