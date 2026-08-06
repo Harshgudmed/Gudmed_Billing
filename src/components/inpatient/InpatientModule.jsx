@@ -40,6 +40,39 @@ function admissionStatusBadge(status) {
   return <Badge className={map[status]||'bg-gray-100 text-gray-800'}>{status}</Badge>
 }
 
+const ADMITTED_PAGE_SIZE = 500
+
+/**
+ * EVERY currently-admitted patient, plus the server's own count of them.
+ *
+ * The live tabs (Nursing, Discharge, Dashboard, Billing, Movement) and the bed
+ * map's patient names all need the WHOLE set. This used to be one
+ * `limit: 1000` request, which the backend silently truncates: patient 1001
+ * vanished from the discharge list and their occupied bed showed no name on the
+ * map — a missing patient looks exactly like a patient who was never admitted.
+ * So page until the server's own `meta.total` is reached instead of trusting a
+ * single capped request.
+ *
+ * `complete` is false when a page failed mid-way, so the caller can tell a
+ * partial list from a genuinely short one rather than quietly reporting fewer
+ * patients than the hospital has.
+ */
+async function fetchAllAdmitted() {
+  const first = await inpatientApi.getAdmissions({ status: 'admitted', limit: ADMITTED_PAGE_SIZE, offset: 0 })
+  if (!first.success) return { rows: [], total: 0, complete: false }
+  const rows = [...(first.data || [])]
+  // `?? rows.length` — a total of 0 is a real answer, so `||` must not replace it.
+  const total = first.meta?.total ?? rows.length
+  while (rows.length < total) {
+    const next = await inpatientApi.getAdmissions({ status: 'admitted', limit: ADMITTED_PAGE_SIZE, offset: rows.length })
+    // An empty or failed page would otherwise loop forever against a live screen
+    // that refetches every 60s.
+    if (!next.success || !(next.data || []).length) return { rows, total, complete: false }
+    rows.push(...next.data)
+  }
+  return { rows, total, complete: true }
+}
+
 export default function InpatientModule() {
   const [activeTab, setActiveTab] = useState('dashboard')
   const [doctors, setDoctors] = useState([])
@@ -47,6 +80,7 @@ export default function InpatientModule() {
   const [wards, setWards] = useState([])
   const [admissions, setAdmissions] = useState([])      // paginated list (Admissions + Patient History tabs)
   const [admittedAll, setAdmittedAll] = useState([])    // ALL currently-admitted (Nursing/Discharge/Dashboard/Billing/Movement)
+  const [admittedTotal, setAdmittedTotal] = useState(0) // server's count of them — never `admittedAll.length`
   const [loading, setLoading] = useState(true)
   const [searchQuery, setSearchQuery] = useState('')
   const [orgInfo, setOrgInfo] = useState({ name: 'Hospital', address: '', city: '', phone: '', email: '' })
@@ -103,9 +137,9 @@ export default function InpatientModule() {
       // AND separately fetch only admitted to guarantee Discharge/Dashboard tabs stay clean
       const [wardsResult, admittedResult, pageResult, hospitalStaffResult, departmentsResult] = await Promise.all([
         inpatientApi.getWards(),
-        // ALL currently-admitted patients (no pagination) — the live tabs (Nursing,
-        // Discharge, Dashboard, Billing, Movement, bed map) must see every one.
-        inpatientApi.getAdmissions({ status: 'admitted', limit: 1000 }),
+        // ALL currently-admitted patients — the live tabs (Nursing, Discharge,
+        // Dashboard, Billing, Movement, bed map) must see every one.
+        fetchAllAdmitted(),
         // Paginated list of ALL statuses — only for the Admissions + Patient History tabs.
         inpatientApi.getAdmissions({ limit: ADMISSIONS_PER_PAGE, offset: admissionsOffset }),
         client.get('/settings?resource=users'),
@@ -114,7 +148,11 @@ export default function InpatientModule() {
       if (wardsResult.success) {
         setWards(wardsResult.data || [])
       }
-      if (admittedResult.success) setAdmittedAll(admittedResult.data || [])
+      setAdmittedAll(admittedResult.rows)
+      setAdmittedTotal(admittedResult.total)
+      // A half-loaded list is worse than a visibly failed one: staff would read
+      // the Discharge/Nursing tabs as complete and miss a patient.
+      if (!admittedResult.complete) toast.error('Could not load every admitted patient — some may be missing from the live tabs')
       if (pageResult.success) {
         setAdmissions(pageResult.data || [])
         if (pageResult.meta) setAdmissionsMeta(pageResult.meta)
@@ -296,7 +334,9 @@ export default function InpatientModule() {
   const stats = {
     totalBeds: allBeds.length || wards.reduce((s, w) => s + (w.capacity || 0), 0),
     occupiedBeds: allBeds.filter((b) => b.status === 'occupied').length,
-    admitted: admittedAll.length,
+    // Server's count, not `admittedAll.length` — a count of rows we managed to
+    // load is a count of the network, not of the hospital.
+    admitted: admittedTotal,
     criticalPatients: admittedAll.filter((a) => a.isCritical).length,
   }
   const occupancyPct = stats.totalBeds > 0 ? Math.round((stats.occupiedBeds / stats.totalBeds) * 100) : 0

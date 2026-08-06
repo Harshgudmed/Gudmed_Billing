@@ -84,12 +84,17 @@ export async function createOrder(organizationId, input, actor) {
  * Apply a lifecycle transition. Validates the state machine, stamps who/when,
  * and appends a timeline event. Returns { order, before }.
  * NOTE: discipline-scoped completion (orderAllowed) is enforced in the controller.
+ *
+ * Accepts an optional `tx` (a Prisma transaction client). The controller's
+ * cancel path also has to cancel the order's IpdCharge in the same write — pass
+ * a tx there so a crash between the two calls can't leave a CANCELLED order
+ * still billing the patient (or a cancelled charge left on a still-active order).
  */
-export async function transition(organizationId, orderId, action, actor, { reason } = {}) {
+export async function transition(organizationId, orderId, action, actor, { reason } = {}, tx = db) {
   const cfg = TRANSITIONS[action]
   if (!cfg) throw err(400, 'IPD_ORDER_BAD_ACTION', `Unknown order action: ${action}`)
 
-  const order = await db.clinicalOrder.findFirst({ where: { id: orderId, organizationId } })
+  const order = await tx.clinicalOrder.findFirst({ where: { id: orderId, organizationId } })
   if (!order) throw err(404, 'IPD_ORDER_NOT_FOUND', 'Order not found')
 
   if (!cfg.from.includes(order.status)) {
@@ -99,8 +104,8 @@ export async function transition(organizationId, orderId, action, actor, { reaso
   const data = { status: cfg.to, ...actorFields(cfg.stamp, actor) }
   if (action === 'cancel') data.cancelReason = reason || null
 
-  const updated = await db.clinicalOrder.update({ where: { id: order.id }, data })
-  await db.clinicalOrderEvent.create({
+  const updated = await tx.clinicalOrder.update({ where: { id: order.id }, data })
+  await tx.clinicalOrderEvent.create({
     data: { organizationId, orderId: order.id, fromStatus: order.status, toStatus: cfg.to, actorId: actor?.id || null, actorName: actor?.name || null, actorRole: actor?.role || null, remark: reason || null },
   })
   return { order: updated, before: order.status }

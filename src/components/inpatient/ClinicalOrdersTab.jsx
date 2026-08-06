@@ -243,18 +243,22 @@ function NewOrderView({ admissionId, patientLabel, onClose, onPlaced }) {
   const [saving, setSaving] = useState(false)
   const timer = useRef(null)
 
+  // A slow reply for an earlier term (or for the type filter the user just changed) can
+  // land after a newer one and repaint the list, so the nurse picks an orderable that no
+  // longer matches the box; the same reply can also flip the spinner after the dialog closes.
   useEffect(() => {
     if (timer.current) clearTimeout(timer.current)
+    let cancelled = false
     timer.current = setTimeout(async () => {
       if (!q.trim()) { setResults([]); return }
       setSearching(true)
       try {
         const res = await client.get(`/inpatient?resource=orderables&q=${encodeURIComponent(q.trim())}${type ? `&type=${type}` : ''}`)
-        setResults(res.data || [])
+        if (!cancelled) setResults(res.data || [])
       } catch { /* silent */ }
-      setSearching(false)
+      if (!cancelled) setSearching(false)
     }, 250)
-    return () => timer.current && clearTimeout(timer.current)
+    return () => { cancelled = true; if (timer.current) clearTimeout(timer.current) }
   }, [q, type])
 
   const place = async () => {

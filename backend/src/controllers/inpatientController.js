@@ -2167,26 +2167,29 @@ async function createOrderTransition(req, res, orgId, body, resource) {
         return res.status(400).json({ success: false, error: "id required" });
       const actor = getActor(req);
       try {
-        const { order, before } = await orderTransition(
-          orgId,
-          body.id,
-          action,
-          actor,
-          { reason: body.reason },
-        );
+        // Cancel goes through $transaction because it may also cancel the
+        // order's IpdCharge below — the status flip and the charge cancel must
+        // land together, or a crash in between leaves either a cancelled order
+        // still billing the patient, or a cancelled charge on a live order.
+        // ack/start never touch billing, so they run outside a transaction.
+        const { order, before } = action === "cancel"
+          ? await db.$transaction(async (tx) => {
+              const result = await orderTransition(orgId, body.id, action, actor, { reason: body.reason }, tx);
+              if (result.order.ipdChargeId) {
+                await tx.ipdCharge.update({
+                  where: { id: result.order.ipdChargeId },
+                  data: {
+                    status: "CANCELLED",
+                    cancelReason: body.reason || "Order cancelled",
+                    cancelledById: actor.id,
+                    cancelledAt: new Date()
+                  }
+                });
+              }
+              return result;
+            })
+          : await orderTransition(orgId, body.id, action, actor, { reason: body.reason });
 
-        // Auto-cancel associated charge if the order is cancelled
-        if (action === "cancel" && order.ipdChargeId) {
-          await db.ipdCharge.update({
-            where: { id: order.ipdChargeId },
-            data: {
-              status: "CANCELLED",
-              cancelReason: body.reason || "Order cancelled",
-              cancelledById: actor.id,
-              cancelledAt: new Date()
-            }
-          });
-        }
         const auditAction = {
           ack: "acknowledge",
           start: "start",
@@ -2463,31 +2466,41 @@ async function updateConsultation(req, res, orgId, id, updates) {
         return res.json({ success: true, data: fresh, charge: result.charge, commission: result.commission });
       }
 
-      // Simple status transitions (REQUESTED → IN_PROGRESS, or CANCELLED)
-      const updated = await db.ipdConsultation.update({
-        where: { id },
-        data: {
-          ...(newStatus !== undefined && { status: newStatus }),
-          ...(consultationNotes !== undefined && { consultationNotes }),
-          ...(diagnosis         !== undefined && { diagnosis }),
-          ...(recommendedPlan   !== undefined && { recommendedPlan }),
-          ...(followUpNotes     !== undefined && { followUpNotes }),
-          ...(followUpRequired  !== undefined && { followUpRequired: Boolean(followUpRequired) }),
-        },
-      });
-
-      // Auto-cancel associated charge if the consultation is cancelled
-      if (newStatus === "CANCELLED" && consult.ipdChargeId) {
-        await db.ipdCharge.update({
-          where: { id: consult.ipdChargeId },
+      // Simple status transitions (REQUESTED → IN_PROGRESS, or CANCELLED).
+      //
+      // ONE transaction: the status flip and the charge cancellation must commit
+      // or fail together. They used to be two separate calls, so a failure on the
+      // second left the consultation CANCELLED with its IpdCharge still ACTIVE —
+      // and an ACTIVE charge is picked up by the discharge bill, making the
+      // patient pay for a consultation that was called off.
+      const updated = await db.$transaction(async (tx) => {
+        const consultation = await tx.ipdConsultation.update({
+          where: { id },
           data: {
-            status: "CANCELLED",
-            cancelReason: "Consultation cancelled",
-            cancelledById: req.user?.id || req.user?.userId || null,
-            cancelledAt: new Date()
-          }
+            ...(newStatus !== undefined && { status: newStatus }),
+            ...(consultationNotes !== undefined && { consultationNotes }),
+            ...(diagnosis         !== undefined && { diagnosis }),
+            ...(recommendedPlan   !== undefined && { recommendedPlan }),
+            ...(followUpNotes     !== undefined && { followUpNotes }),
+            ...(followUpRequired  !== undefined && { followUpRequired: Boolean(followUpRequired) }),
+          },
         });
-      }
+
+        // Auto-cancel associated charge if the consultation is cancelled
+        if (newStatus === "CANCELLED" && consult.ipdChargeId) {
+          await tx.ipdCharge.update({
+            where: { id: consult.ipdChargeId },
+            data: {
+              status: "CANCELLED",
+              cancelReason: "Consultation cancelled",
+              cancelledById: req.user?.id || req.user?.userId || null,
+              cancelledAt: new Date()
+            }
+          });
+        }
+
+        return consultation;
+      });
 
       return res.json({ success: true, data: updated });
 }
