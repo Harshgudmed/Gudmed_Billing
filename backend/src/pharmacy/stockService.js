@@ -60,13 +60,23 @@ export async function consumeFromBatches(tx, { drugId, quantity }) {
   for (const b of batches) {
     if (remaining <= 0) break
     const take = Math.min(b.quantityRemaining, remaining)
-    await tx.pharmacyBatch.update({
-      where: { id: b.id },
-      data: {
-        quantityRemaining: { decrement: take },
-        ...(b.quantityRemaining - take === 0 ? { status: 'depleted' } : {}),
-      },
+    
+    // Atomic update to prevent negative stock race conditions
+    const updated = await tx.pharmacyBatch.updateMany({
+      where: { id: b.id, quantityRemaining: { gte: take } },
+      data: { quantityRemaining: { decrement: take } },
     })
+    
+    if (updated.count === 0) {
+      throw Object.assign(new Error('Batch stock changed concurrently. Please try again.'), { status: 409, code: 'CONCURRENCY_ERROR' })
+    }
+    
+    // Mark as depleted if it reached 0
+    const current = await tx.pharmacyBatch.findUnique({ where: { id: b.id }, select: { quantityRemaining: true } })
+    if (current && current.quantityRemaining <= 0) {
+       await tx.pharmacyBatch.update({ where: { id: b.id }, data: { status: 'depleted' } })
+    }
+    
     consumed.push({ batchId: b.id, batchNumber: b.batchNumber, expiryDate: b.expiryDate, quantity: take })
     remaining -= take
   }

@@ -5,6 +5,7 @@ import { createSaleSchema } from '../validations/sale.validation.js'
 import { getPagination, paginationMeta, handleServiceError, makeError } from '../utils.js'
 import { recordStockChange, consumeFromBatches } from '../stockService.js'
 import { getPatientSnapshot } from '../../utils/patientSnapshot.js'
+import { nextSeriesNumber } from '../../lib/counters.js'
 import { PATIENT_NAME_SELECT } from '../../lib/patientName.js'
 
 const SORTABLE_FIELDS = ['saleDate', 'totalAmount', 'paymentStatus', 'createdAt']
@@ -139,7 +140,13 @@ export async function create(req, res, next) {
       // has real per-row data. Stored as JSON on the sale (see schema `payments`).
       // A single-method sale still records ONE payment row so every receipt shows
       // a consistent Payment log (same as Lab/Radiology/Billing).
-      const receiptNumber = `RCP-${Date.now()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`
+      // Same 'OPD_RCP' series every other receipt path draws from (billing,
+      // paymentController, prescription dispense) — one continuous sequence
+      // across every money-collection point, matching a single physical receipt
+      // book. Date.now()+Math.random() (the old code) can mint the same string
+      // twice for two sales in the same millisecond, and receiptNumber is
+      // @@unique — a live collision is a hard 500 in front of a pharmacist.
+      const receiptNumber = await nextSeriesNumber(tx, ORGANIZATION_ID, 'OPD_RCP', 'RCP')
       const splitInput = Array.isArray(parsed.payments) && parsed.payments.length
         ? parsed.payments
         : [{ amount: totalAmount, paymentMethod: parsed.paymentMethod || 'cash' }]
@@ -158,7 +165,7 @@ export async function create(req, res, next) {
       // that isn't a real patient), otherwise the patientId foreign key would blow
       // up the sale. Values typed in the sale dialog (parsed.phone / parsed.uhid)
       // always take priority so walk-in / OTC sales still show what was entered.
-      const snapshot = await getPatientSnapshot(tx, parsed.patientId)
+      const snapshot = await getPatientSnapshot(tx, parsed.patientId, ORGANIZATION_ID)
       const linkedPatientId = snapshot?.patientId ?? null
       // A typed identifier that isn't a real patient row is still worth showing as
       // the UHID on the receipt (e.g. an external MRN the operator typed).
@@ -175,7 +182,7 @@ export async function create(req, res, next) {
           discountAmount,
           totalAmount,
           paymentMethod: paymentSplits.length ? paymentSplits.map((p) => p.paymentMethod).join(' + ') : (parsed.paymentMethod ?? 'cash'),
-          paymentStatus: parsed.paymentStatus ?? 'paid',
+          paymentStatus: amountPaidTotal >= totalAmount - 0.005 ? 'paid' : (amountPaidTotal > 0 ? 'partially_paid' : 'unpaid'),
           amountPaid: amountPaidTotal,
           receiptNumber,
           payments: paymentSplits.length ? JSON.stringify(paymentSplits) : null,
@@ -199,10 +206,13 @@ export async function create(req, res, next) {
         })
       }
 
-      // Mark linked prescription as fully dispensed
+      // Mark linked prescription as fully dispensed. Org-scoped via updateMany:
+      // update-by-bare-id let one hospital flip ANOTHER hospital's prescription
+      // to dispensed, so their pharmacy would refuse to dispense it. updateMany
+      // simply matches nothing when the id belongs to another tenant.
       if (parsed.prescriptionId) {
-        await tx.prescription.update({
-          where: { id: parsed.prescriptionId },
+        await tx.prescription.updateMany({
+          where: { id: parsed.prescriptionId, organizationId: ORGANIZATION_ID },
           data: { status: 'fully_dispensed' },
         })
       }

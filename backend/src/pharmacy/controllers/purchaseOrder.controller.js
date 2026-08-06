@@ -6,6 +6,8 @@ import {
   receivePurchaseOrderSchema,
 } from '../validations/purchaseOrder.validation.js'
 import { getPagination, paginationMeta, handleServiceError, makeError } from '../utils.js'
+import { recordStockChange } from '../stockService.js'
+import { nextSeriesNumber } from '../../lib/counters.js'
 
 const SORTABLE_FIELDS = ['orderDate', 'status', 'supplierName', 'totalAmount', 'createdAt']
 
@@ -58,28 +60,29 @@ export async function create(req, res, next) {
     const ORGANIZATION_ID = getOrgId(req)
     const parsed = createPurchaseOrderSchema.parse(req.body)
 
-    const now = new Date()
-    const yyyymm = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}`
-    const existingCount = await db.pharmacyPurchaseOrder.count({
-      where: { organizationId: ORGANIZATION_ID },
-    })
-    const poNumber = `PO-${yyyymm}-${String(existingCount + 1).padStart(4, '0')}`
-
-    const data = await db.pharmacyPurchaseOrder.create({
-      data: {
-        organizationId: ORGANIZATION_ID,
-        poNumber,
-        supplierName: parsed.supplierName,
-        supplierContact: parsed.supplierContact ?? null,
-        supplierEmail: parsed.supplierEmail ?? null,
-        items: JSON.stringify(parsed.items),
-        totalAmount: parsed.items.reduce((s, i) => s + (i.totalCost || 0), 0),
-        expectedDeliveryDate: parsed.expectedDeliveryDate
-          ? new Date(parsed.expectedDeliveryDate)
-          : undefined,
-        notes: parsed.notes ?? null,
-        status: 'draft',
-      },
+    // PO numbers come from the atomic counter, not `count() + 1`. Two buyers
+    // clicking "create" together both read the same count and both mint the same
+    // number — and because poNumber has no unique constraint, nothing stops it:
+    // the duplicate is written silently and two different orders answer to one
+    // PO number for the rest of their life.
+    const data = await db.$transaction(async (tx) => {
+      const poNumber = await nextSeriesNumber(tx, ORGANIZATION_ID, 'PURCHASE_ORDER', 'PO')
+      return tx.pharmacyPurchaseOrder.create({
+        data: {
+          organizationId: ORGANIZATION_ID,
+          poNumber,
+          supplierName: parsed.supplierName,
+          supplierContact: parsed.supplierContact ?? null,
+          supplierEmail: parsed.supplierEmail ?? null,
+          items: JSON.stringify(parsed.items),
+          totalAmount: parsed.items.reduce((s, i) => s + (i.totalCost || 0), 0),
+          expectedDeliveryDate: parsed.expectedDeliveryDate
+            ? new Date(parsed.expectedDeliveryDate)
+            : undefined,
+          notes: parsed.notes ?? null,
+          status: 'draft',
+        },
+      })
     })
 
     res.status(201).json({ success: true, data, message: 'Purchase order created successfully' })
@@ -137,7 +140,17 @@ export async function receive(req, res, next) {
 
       for (const item of parsed.items) {
         if (item.batchNumber && item.expiryDate && item.quantityReceived > 0) {
-          await tx.pharmacyBatch.create({
+          // The PO itself is org-checked above, but each drugId in the body is
+          // caller-supplied: without this, a receive could name ANOTHER
+          // hospital's drug and inflate their stock (and attach our batch to it).
+          const ownDrug = await tx.pharmacyDrug.findFirst({
+            where: { id: item.drugId, organizationId: ORGANIZATION_ID },
+            select: { id: true },
+          })
+          if (!ownDrug) {
+            throw makeError(`Drug not found: ${item.drugId}`, 404, 'DRUG_NOT_FOUND')
+          }
+          const batch = await tx.pharmacyBatch.create({
             data: {
               organizationId: ORGANIZATION_ID,
               drugId: item.drugId,
@@ -151,9 +164,19 @@ export async function receive(req, res, next) {
               status: 'active',
             },
           })
-          await tx.pharmacyDrug.update({
-            where: { id: item.drugId },
-            data: { quantityInStock: { increment: item.quantityReceived } },
+          // Goods-in goes through recordStockChange, never a bare increment: the
+          // raw update moved quantityInStock without appending a StockLedger row,
+          // so every later row's balanceAfter was short by this receipt and the
+          // shelf count could not be reconciled against the ledger.
+          await recordStockChange(tx, {
+            organizationId: ORGANIZATION_ID,
+            drugId: item.drugId,
+            batchId: batch.id,
+            changeType: 'purchase',
+            quantityDelta: item.quantityReceived,
+            reference: order.poNumber,
+            note: `PO ${order.poNumber} received — batch ${batch.batchNumber}`,
+            createdById: req.user?.userId ?? null,
           })
         }
       }

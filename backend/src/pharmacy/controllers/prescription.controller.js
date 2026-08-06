@@ -1,5 +1,7 @@
 import { db } from '../../config/db.js'
 import { getOrgId } from "../../lib/reqContext.js";
+import { isOwned } from '../../lib/tenant.js'
+import { nextSeriesNumber } from '../../lib/counters.js'
 import { createPrescriptionSchema, updatePrescriptionSchema } from '../validations/prescription.validation.js'
 import { getPagination, paginationMeta, handleServiceError, makeError } from '../utils.js'
 import { recordStockChange, consumeFromBatches, findShortages, insufficientStockError } from '../stockService.js'
@@ -67,6 +69,16 @@ export async function create(req, res, next) {
   try {
     const ORGANIZATION_ID = getOrgId(req)
     const parsed = createPrescriptionSchema.parse(req.body)
+
+    // patientId/doctorId are caller-supplied: without these guards a prescription
+    // could be attached to ANOTHER hospital's patient (and the response would
+    // confirm the id was valid). Uses the shared isOwned tenant guard.
+    if (!(await isOwned('patient', parsed.patientId, ORGANIZATION_ID))) {
+      return res.status(404).json({ success: false, error: 'Patient not found' })
+    }
+    if (!(await isOwned('user', parsed.doctorId, ORGANIZATION_ID))) {
+      return res.status(404).json({ success: false, error: 'Doctor not found' })
+    }
 
     const data = await db.prescription.create({
       data: {
@@ -185,7 +197,10 @@ export async function dispense(req, res, next) {
             paymentMethod: 'cash',
             paymentStatus: 'paid',
             amountPaid: totalAmount,
-            receiptNumber: `RCP-${Date.now()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`,
+            // One counter for every receipt: Payment.receiptNumber is globally
+            // unique, so this path must draw from the same 'OPD_RCP' series as
+            // the rest of billing. `Date.now()` + 4 random chars collided.
+            receiptNumber: await nextSeriesNumber(tx, ORGANIZATION_ID, 'OPD_RCP', 'RCP'),
             servedById: createdById ?? undefined,
           },
         })
