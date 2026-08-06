@@ -17,7 +17,9 @@ import { formatTime12h } from "@/lib/format";
 
 export default function TodayView({
   upcomingAppointments,
+  upcomingTotal,
   completedAppointments,
+  completedTotal,
   getPatient,
   onConfirm,
   onCheckIn,
@@ -37,6 +39,12 @@ export default function TodayView({
           <CardDescription>
             Active and pending appointments for today
           </CardDescription>
+          {upcomingTotal > upcomingAppointments.length && (
+            <p className="text-xs text-amber-600 bg-amber-50 rounded px-2 py-1 mt-1">
+              Showing {upcomingAppointments.length} of {upcomingTotal} — an unusually busy
+              day. Use the List tab to search the rest.
+            </p>
+          )}
         </CardHeader>
         <CardContent>
         <ScrollArea className="h-[calc(100vh-320px)] pr-4">
@@ -159,6 +167,12 @@ export default function TodayView({
           <CardDescription>
             Finished, cancelled, or no-show appointments
           </CardDescription>
+          {completedTotal > completedAppointments.length && (
+            <p className="text-xs text-amber-600 bg-amber-50 rounded px-2 py-1 mt-1">
+              Showing {completedAppointments.length} of {completedTotal} — an unusually busy
+              day. Use the List tab to search the rest.
+            </p>
+          )}
         </CardHeader>
         <CardContent>
          <ScrollArea className="h-[calc(100vh-220px)] pr-4">

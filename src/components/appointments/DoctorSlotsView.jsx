@@ -26,6 +26,7 @@ export default function DoctorSlotsView({
   currentWeek,
   setCurrentWeek,
   appointments,
+  weekTotal,
   getPatient,
 }) {
   // Build a "yyyy-MM-dd|HH:mm" → appointments[] lookup ONCE per render (filtered
@@ -141,6 +142,14 @@ export default function DoctorSlotsView({
               </div>
             </div>
           </div>
+          {weekTotal > appointments.length && (
+            <p className="text-xs text-amber-600 bg-amber-50 rounded px-2 py-1">
+              Showing {appointments.length} of {weekTotal} bookings this week
+              {selectedDoctor === "all"
+                ? " — pick one doctor above to see their full week."
+                : " — an unusually busy week."}
+            </p>
+          )}
         </CardHeader>
       </Card>
 
