@@ -178,6 +178,7 @@ const SERIES_MODELS = {
   OPD_RCP: [['payment', 'receiptNumber'], ['pharmacySale', 'receiptNumber']],
   OPD_REF: [['payment', 'receiptNumber']],
   LAB_ORDER: [['labOrder', 'orderNumber']],
+  LAB_ACCESSION: [['labOrder', 'accessionNumber']],
   RAD_ORDER: [['radiologyOrder', 'orderNumber']],
   PRE_TRIAGE: [['preTriage', 'screeningNumber']],
   DEATH_CERT: [['deathCertificate', 'certificateNumber']],
