@@ -318,14 +318,35 @@ export const update = async (req, res, next) => {
       delete updates.patientId
       delete updates.orderNumber
       delete updates.requestedById
+      // The accession number labels the physical tube, so it is minted HERE and
+      // never accepted from the client. The UI used to build it as
+      // `ACC-${Math.floor(Math.random() * 10000)}` — 10,000 possible values
+      // against a @@unique column, which by the birthday bound is more likely
+      // than not to repeat within ~118 samples and then 500s in front of a
+      // technician holding the tube. Worse, it called that twice per collection,
+      // once for this request and once for the on-screen copy, so the number
+      // printed on the tube was never the number stored against the order.
+      delete updates.accessionNumber
 
       // Tenant guard: only touch an order that belongs to this org.
       const owned = await db.labOrder.findFirst({ where: { id, organizationId: ORGANIZATION_ID }, select: { id: true } })
       if (!owned) return res.status(404).json({ success: false, error: 'Lab order not found' })
 
-      const data = await db.labOrder.update({
-        where: { id },
-        data: { ...updates },
+      const data = await db.$transaction(async (tx) => {
+        // First collection only. Re-collecting, or any later status change, must
+        // not renumber a tube that is already on a rack in the lab.
+        if (updates.status === 'sample_collected') {
+          const accessionNumber = await nextSeriesNumber(tx, ORGANIZATION_ID, 'LAB_ACCESSION', 'ACC')
+          // Compare-and-set: only claim the number if the order still has none.
+          // A double-clicked Collect button would otherwise relabel the tube with
+          // a second number after the first one was already written and printed.
+          // A losing click leaves a gap in the series, which is harmless.
+          await tx.labOrder.updateMany({
+            where: { id, organizationId: ORGANIZATION_ID, accessionNumber: null },
+            data: { accessionNumber },
+          })
+        }
+        return tx.labOrder.update({ where: { id }, data: { ...updates } })
       })
       return res.json({ success: true, data })
     }

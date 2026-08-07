@@ -1,61 +1,44 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import { useOrgSettings } from '@/lib/useOrgSettings'
 import { sendLabResultNotification } from '@/lib/whatsapp'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from '@/components/ui/card'
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import {
-  FlaskConical, Plus, Eye, Edit, Trash2, Calendar, Clock, User, FileText,
-  AlertTriangle, CheckCircle, XCircle, Filter, Search, Printer, Send,
-  ChevronDown, ChevronUp, ChevronLeft, ChevronRight, Save, AlertCircle, Activity, TestTube,
-  X, RefreshCw, Microscope, Beaker, Droplet, ClipboardList, FileBarChart,
-  ArrowUpDown, ArrowUp, ArrowDown, Ban, Play, Pause, CheckSquare, Loader2, Receipt, Upload
-} from 'lucide-react'
+import { FlaskConical, Plus, Eye, Edit, Trash2, Clock, User, FileText, AlertTriangle, CheckCircle, Search, Printer, Send, ChevronDown, Save, AlertCircle, Activity, TestTube, RefreshCw, Microscope, Beaker, Droplet, ClipboardList, FileBarChart, Play, CheckSquare, Loader2, Receipt, Upload } from 'lucide-react'
 import { format, formatDistanceToNow } from 'date-fns'
 import { toast } from 'sonner'
-import {
-  Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger, DialogFooter
-} from '@/components/ui/dialog'
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
 import { ScrollArea } from '@/components/ui/scroll-area'
-import { Separator } from '@/components/ui/separator'
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
+import { TableCell, TableRow } from '@/components/ui/table'
 import { Checkbox } from '@/components/ui/checkbox'
 import { z } from 'zod'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
-import { Form, FormControl, FormDescription, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form'
+import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import BulkImportDialog from '@/components/common/BulkImportDialog'
 import { Progress } from '@/components/ui/progress'
-import client from '@/api/client'
+import { labApi, LAB_ENDPOINT } from '@/api/labApi'
 import { useServerPagination } from '@/lib/useServerPagination'
 import { PaginatedTable } from '@/components/common/PaginatedTable'
 import { drName } from '@/lib/utils'
 import PatientLookup from '@/components/common/PatientLookup'
 import { printLabReceipt } from '@/components/billing/utils/printBilling'
+import { printLabReport } from './printLabReport'
 import PaymentFields from '@/components/billing/PaymentFields'
 import { createInvoiceWithPayment, fetchOrderInvoicePayments } from '@/lib/billing'
 import { getFullName, calcAge } from "@/lib/patient";
 
-// ============================================
-// API HELPERS
-// ============================================
-
-async function fetchApi(endpoint, options = {}) {
-  const method = (options.method || 'GET').toLowerCase()
-  const body = options.body ? JSON.parse(options.body) : undefined
-  const res = method === 'get'
-    ? await client.get(endpoint)
-    : await client[method](endpoint, body)
-  if (!res.success) throw new Error(res.error || 'API request failed')
-  return res.data
-}
+// Every call now goes through labApi (src/api/labApi.js), which owns the
+// "/laboratory" endpoint and the `resource` names, and takes plain objects
+// instead of pre-stringified bodies. Same contract as the helper it replaced:
+// it throws on `success: false` and resolves to the inner `data`.
 
 // Transform API LabTest to local UI type
 function transformApiTest(apiTest) {
@@ -204,58 +187,61 @@ const resultSchema = z.object({
 // HELPER FUNCTIONS
 // ============================================
 
-const getCategoryBadgeColor = (category) => {
-  switch (category) {
-    case 'hematology': return 'bg-red-100 text-red-800 border-red-200'
-    case 'chemistry': return 'bg-blue-100 text-blue-800 border-blue-200'
-    case 'urinalysis': return 'bg-yellow-100 text-yellow-800 border-yellow-200'
-    case 'microbiology': return 'bg-purple-100 text-purple-800 border-purple-200'
-    case 'parasitology': return 'bg-green-100 text-green-800 border-green-200'
-    case 'serology': return 'bg-orange-100 text-orange-800 border-orange-200'
-    case 'immunology': return 'bg-pink-100 text-pink-800 border-pink-200'
-    case 'endocrinology': return 'bg-indigo-100 text-indigo-800 border-indigo-200'
-    default: return 'bg-gray-100 text-gray-800 border-gray-200'
-  }
+// Badge colours and sample icons are lookup tables, not branching logic — the
+// same shape STATUS_CONFIG uses in appointments and BILL_TYPE_LABEL in billing.
+// A table can be read at a glance to see which values are handled, and adding a
+// new category or status is one line in one place instead of a case buried in a
+// function body. The fallbacks below keep an unknown value rendering a neutral
+// badge rather than an empty one.
+
+const CATEGORY_BADGE = {
+  hematology: 'bg-red-100 text-red-800 border-red-200',
+  chemistry: 'bg-blue-100 text-blue-800 border-blue-200',
+  urinalysis: 'bg-yellow-100 text-yellow-800 border-yellow-200',
+  microbiology: 'bg-purple-100 text-purple-800 border-purple-200',
+  parasitology: 'bg-green-100 text-green-800 border-green-200',
+  serology: 'bg-orange-100 text-orange-800 border-orange-200',
+  immunology: 'bg-pink-100 text-pink-800 border-pink-200',
+  endocrinology: 'bg-indigo-100 text-indigo-800 border-indigo-200',
+}
+const NEUTRAL_BADGE = 'bg-gray-100 text-gray-800 border-gray-200'
+
+const STATUS_BADGE = {
+  pending: 'bg-yellow-100 text-yellow-800 border-yellow-200',
+  sample_collected: 'bg-blue-100 text-blue-800 border-blue-200',
+  in_progress: 'bg-orange-100 text-orange-800 border-orange-200',
+  completed: 'bg-green-100 text-green-800 border-green-200',
+  cancelled: 'bg-red-100 text-red-800 border-red-200',
+  draft: NEUTRAL_BADGE,
+  verified: 'bg-emerald-100 text-emerald-800 border-emerald-200',
+  final: 'bg-green-600 text-white',
 }
 
-const getStatusBadgeColor = (status) => {
-  switch (status) {
-    case 'pending': return 'bg-yellow-100 text-yellow-800 border-yellow-200'
-    case 'sample_collected': return 'bg-blue-100 text-blue-800 border-blue-200'
-    case 'in_progress': return 'bg-orange-100 text-orange-800 border-orange-200'
-    case 'completed': return 'bg-green-100 text-green-800 border-green-200'
-    case 'cancelled': return 'bg-red-100 text-red-800 border-red-200'
-    case 'draft': return 'bg-gray-100 text-gray-800 border-gray-200'
-    case 'verified': return 'bg-emerald-100 text-emerald-800 border-emerald-200'
-    case 'final': return 'bg-green-600 text-white'
-    default: return 'bg-gray-100 text-gray-800 border-gray-200'
-  }
+const PRIORITY_BADGE = {
+  stat: 'bg-red-500 text-white animate-pulse',
+  urgent: 'bg-orange-500 text-white',
+  routine: 'bg-green-100 text-green-800',
 }
 
-const getPriorityBadgeColor = (priority) => {
-  switch (priority) {
-    case 'stat': return 'bg-red-500 text-white animate-pulse'
-    case 'urgent': return 'bg-orange-500 text-white'
-    case 'routine': return 'bg-green-100 text-green-800'
-    default: return 'bg-gray-100 text-gray-800'
-  }
+// Icon + colour per sample type. Stored as data (component + className) rather
+// than as ready-made JSX so the table holds no markup and the element is built
+// once, at the single place that renders it.
+const SAMPLE_TYPE_ICON = {
+  Blood: { Icon: Droplet, className: 'text-red-500' },
+  Urine: { Icon: Beaker, className: 'text-yellow-500' },
+  Stool: { Icon: TestTube, className: 'text-amber-700' },
+  Sputum: { Icon: TestTube, className: 'text-green-500' },
+  CSF: { Icon: Droplet, className: 'text-blue-500' },
 }
+const DEFAULT_SAMPLE_ICON = { Icon: FlaskConical, className: 'text-gray-500' }
+
+const getCategoryBadgeColor = (category) => CATEGORY_BADGE[category] ?? NEUTRAL_BADGE
+const getStatusBadgeColor = (status) => STATUS_BADGE[status] ?? NEUTRAL_BADGE
+const getPriorityBadgeColor = (priority) => PRIORITY_BADGE[priority] ?? 'bg-gray-100 text-gray-800'
 
 const getSampleTypeIcon = (type) => {
-  switch (type) {
-    case 'Blood': return <Droplet className="h-4 w-4 text-red-500" />
-    case 'Urine': return <Beaker className="h-4 w-4 text-yellow-500" />
-    case 'Stool': return <TestTube className="h-4 w-4 text-amber-700" />
-    case 'Sputum': return <TestTube className="h-4 w-4 text-green-500" />
-    case 'CSF': return <Droplet className="h-4 w-4 text-blue-500" />
-    default: return <FlaskConical className="h-4 w-4 text-gray-500" />
-  }
-}
-
-const generateAccessionNumber = () => {
-  const year = new Date().getFullYear()
-  const random = Math.floor(Math.random() * 10000).toString().padStart(4, '0')
-  return `ACC-${year}-${random}`
+  const { Icon, className } = SAMPLE_TYPE_ICON[type] ?? DEFAULT_SAMPLE_ICON
+  return <Icon className={`h-4 w-4 ${className}`} />
 }
 
 const formatStatus = (status) => {
@@ -281,7 +267,6 @@ export default function LaboratoryModule() {
   const [results, setResults] = useState([])
   const [selectedTest, setSelectedTest] = useState(null)
   const [selectedOrder, setSelectedOrder] = useState(null)
-  const [selectedResult, setSelectedResult] = useState(null)
   const [searchQuery, setSearchQuery] = useState('')
   const [categoryFilter, setCategoryFilter] = useState('all')
   const [statusFilter, setStatusFilter] = useState('all')
@@ -298,7 +283,6 @@ export default function LaboratoryModule() {
   const [showResultDialog, setShowResultDialog] = useState(false)
   const [showViewOrderDialog, setShowViewOrderDialog] = useState(false)
   const [showReportDialog, setShowReportDialog] = useState(false)
-  const [invoiceOrder, setInvoiceOrder] = useState(null)
   const [isLoading, setIsLoading] = useState(false)
   const [testsLoading, setTestsLoading] = useState(true)
   const [ordersLoading, setOrdersLoading] = useState(true)
@@ -318,7 +302,7 @@ export default function LaboratoryModule() {
   // The Orders TABLE pages on the server (search/status/priority filter in the DB).
   // The overview dashboard keeps its own capped `orders` fetch for its aggregates,
   // so this only drives the table — the two don't interfere.
-  const ordersTable = useServerPagination('/laboratory', {
+  const ordersTable = useServerPagination(LAB_ENDPOINT, {
     perPage: LAB_ITEMS_PER_PAGE,
     params: {
       resource: 'orders',
@@ -330,7 +314,7 @@ export default function LaboratoryModule() {
 
   // The Tests CATALOG table pages on the server too. The full `tests` state (capped)
   // is still loaded separately for the order-creation picker and print lookups.
-  const testsTable = useServerPagination('/laboratory', {
+  const testsTable = useServerPagination(LAB_ENDPOINT, {
     perPage: LAB_ITEMS_PER_PAGE,
     params: {
       resource: 'tests',
@@ -393,7 +377,7 @@ export default function LaboratoryModule() {
   const fetchTests = useCallback(async () => {
     try {
       setTestsLoading(true)
-      const data = await fetchApi('/laboratory?resource=tests&limit=2000')
+      const data = await labApi.getTests({ limit: 2000 })
       const testsArray = Array.isArray(data) ? data : (data?.data || [])
       setTests(testsArray.map(transformApiTest))
     } catch (error) {
@@ -408,7 +392,7 @@ export default function LaboratoryModule() {
   const fetchOrders = useCallback(async () => {
     try {
       setOrdersLoading(true)
-      const data = await fetchApi('/laboratory?resource=orders&limit=2000')
+      const data = await labApi.getOrders({ limit: 2000 })
       const ordersArray = Array.isArray(data) ? data : (data?.data || [])
       setOrders(ordersArray.map(transformApiOrder))
     } catch (error) {
@@ -423,7 +407,7 @@ export default function LaboratoryModule() {
   const fetchStats = useCallback(async () => {
     try {
       setStatsLoading(true)
-      const data = await fetchApi('/laboratory?resource=stats')
+      const data = await labApi.getStats()
       setStats({
         pendingOrders: data.pending,
         sampleCollected: data.sampleCollected,
@@ -443,7 +427,7 @@ export default function LaboratoryModule() {
   // Fetch results
   const fetchResults = useCallback(async () => {
     try {
-      const data = await fetchApi('/laboratory?resource=results&limit=2000')
+      const data = await labApi.getResults({ limit: 2000 })
       const resultsArray = Array.isArray(data) ? data : (data?.data || [])
       setResults(resultsArray.map(transformApiResult))
     } catch (error) {
@@ -465,6 +449,30 @@ export default function LaboratoryModule() {
   // Filtered data
   // Orders now filter + page on the server (see ordersTable above).
 
+  // The four slices of the order/result lists the screens actually work with.
+  // Each was previously written out in full at every use — 19 places in all,
+  // the "in progress or collected" one alone appearing six times inside the
+  // Results tab. Naming them once means a status can be added to a group in one
+  // edit instead of six, and the definitions can be read side by side rather
+  // than reconstructed from whichever copy you happen to be looking at.
+  //
+  // useMemo because `orders` is the capped 2,000-row fetch: without it every one
+  // of those 19 expressions walked the whole array again on every keystroke in
+  // the search box.
+  const activeOrders = useMemo(
+    () => orders.filter(o => o.status !== 'completed' && o.status !== 'cancelled'),
+    [orders]
+  )
+  const completedOrders = useMemo(
+    () => orders.filter(o => o.status === 'completed'),
+    [orders]
+  )
+  const awaitingResults = useMemo(
+    () => orders.filter(o => o.status === 'in_progress' || o.status === 'sample_collected'),
+    [orders]
+  )
+  const criticalResults = useMemo(() => results.filter(r => r.isCritical), [results])
+
   // Recent orders requiring attention
   const recentOrdersAttention = orders.filter(o =>
     o.status === 'pending' || o.status === 'sample_collected' || o.priority === 'stat'
@@ -474,14 +482,10 @@ export default function LaboratoryModule() {
   const handleCreateTest = async (data) => {
     try {
       setIsLoading(true)
-      const newTest = await fetchApi('/laboratory', {
-        method: 'POST',
-        body: JSON.stringify({
-          resource: 'test',
-          ...data,
-          price: Number(data.price),
-          turnaroundTime: Number(data.turnaroundTime)
-        }),
+      const newTest = await labApi.createTest({
+        ...data,
+        price: Number(data.price),
+        turnaroundTime: Number(data.turnaroundTime),
       })
       setTests(prev => [transformApiTest(newTest), ...prev])
       toast.success('Test added to catalog successfully')
@@ -502,22 +506,18 @@ export default function LaboratoryModule() {
       const selectedTests = tests.filter(t => data.tests.includes(t.id))
       const hcc = Number(orderHcc) || 0
 
-      const newOrder = await fetchApi('/laboratory', {
-        method: 'POST',
-        body: JSON.stringify({
-          resource: 'order',
-          patientId: data.patientId,
-          tests: selectedTests.map(t => ({
-            testId: t.id,
-            testName: t.testName,
-            urgency: data.priority
-          })),
-          clinicalIndication: data.clinicalIndication,
-          provisionalDiagnosis: data.provisionalDiagnosis,
-          priority: data.priority,
-          // Home-collection charge is tagged into notes so the receipt can show it.
-          notes: `${data.notes || ''}${hcc > 0 ? ` [HCC:${hcc}]` : ''}`.trim()
-        }),
+      const newOrder = await labApi.createOrder({
+        patientId: data.patientId,
+        tests: selectedTests.map(t => ({
+          testId: t.id,
+          testName: t.testName,
+          urgency: data.priority
+        })),
+        clinicalIndication: data.clinicalIndication,
+        provisionalDiagnosis: data.provisionalDiagnosis,
+        priority: data.priority,
+        // Home-collection charge is tagged into notes so the receipt can show it.
+        notes: `${data.notes || ''}${hcc > 0 ? ` [HCC:${hcc}]` : ''}`.trim(),
       })
 
       setOrders(prev => [transformApiOrder(newOrder), ...prev])
@@ -570,15 +570,15 @@ export default function LaboratoryModule() {
 
   const handleCollectSample = async (orderId) => {
     try {
-      await fetchApi('/laboratory', {
-        method: 'PATCH',
-        body: JSON.stringify({
-          resource: 'order',
-          id: orderId,
-          status: 'sample_collected',
-          sampleCollectedAt: new Date().toISOString(),
-          accessionNumber: generateAccessionNumber()
-        }),
+      // The accession number comes back from the server, which mints it from the
+      // per-hospital counter inside the same transaction as the status change.
+      // This used to call a local `ACC-${Math.random()}` generator TWICE — once
+      // for the request and once for the row below — so the number shown on
+      // screen (and written on the tube) was a different number from the one
+      // saved against the order, every single time.
+      const updated = await labApi.updateOrder(orderId, {
+        status: 'sample_collected',
+        sampleCollectedAt: new Date().toISOString(),
       })
 
       setOrders(prev => prev.map(order =>
@@ -587,7 +587,7 @@ export default function LaboratoryModule() {
             ...order,
             status: 'sample_collected',
             sampleCollectedAt: new Date(),
-            accessionNumber: generateAccessionNumber(),
+            accessionNumber: updated.accessionNumber,
             tests: order.tests.map(t => ({ ...t, status: 'collected' }))
           }
           : order
@@ -603,14 +603,7 @@ export default function LaboratoryModule() {
 
   const handleStartProcessing = async (orderId) => {
     try {
-      await fetchApi('/laboratory', {
-        method: 'PATCH',
-        body: JSON.stringify({
-          resource: 'order',
-          id: orderId,
-          status: 'in_progress'
-        }),
-      })
+      await labApi.updateOrder(orderId, { status: 'in_progress' })
 
       setOrders(prev => prev.map(order =>
         order.id === orderId
@@ -635,19 +628,15 @@ export default function LaboratoryModule() {
 
     try {
       setIsLoading(true)
-      const newResult = await fetchApi('/laboratory', {
-        method: 'POST',
-        body: JSON.stringify({
-          resource: 'result',
-          orderId: selectedOrder.id,
-          testId: selectedTest.id,
-          resultValue: data.resultValue,
-          resultUnit: selectedTest.unit,
-          isAbnormal: data.isAbnormal,
-          isCritical: data.isCritical,
-          flag: data.isCritical ? 'A' : data.isAbnormal ? 'H' : 'N',
-          comment: data.comment
-        }),
+      const newResult = await labApi.createResult({
+        orderId: selectedOrder.id,
+        testId: selectedTest.id,
+        resultValue: data.resultValue,
+        resultUnit: selectedTest.unit,
+        isAbnormal: data.isAbnormal,
+        isCritical: data.isCritical,
+        flag: data.isCritical ? 'A' : data.isAbnormal ? 'H' : 'N',
+        comment: data.comment,
       })
 
       setResults(prev => [transformApiResult(newResult), ...prev])
@@ -666,14 +655,7 @@ export default function LaboratoryModule() {
 
   const handleVerifyResult = async (resultId) => {
     try {
-      await fetchApi('/laboratory', {
-        method: 'PATCH',
-        body: JSON.stringify({
-          resource: 'result',
-          id: resultId,
-          verifiedAt: new Date().toISOString()
-        }),
-      })
+      await labApi.updateResult(resultId, { verifiedAt: new Date().toISOString() })
 
       setResults(prev => prev.map(result =>
         result.id === resultId
@@ -709,14 +691,7 @@ export default function LaboratoryModule() {
 
   const handleCompleteOrder = async (orderId) => {
     try {
-      await fetchApi('/laboratory', {
-        method: 'PATCH',
-        body: JSON.stringify({
-          resource: 'order',
-          id: orderId,
-          status: 'completed'
-        }),
-      })
+      await labApi.updateOrder(orderId, { status: 'completed' })
 
       setOrders(prev => prev.map(order =>
         order.id === orderId
@@ -735,173 +710,16 @@ export default function LaboratoryModule() {
     }
   }
 
-  const handlePrintLabReport = (order) => {
-    const win = window.open('', '_blank', 'width=900,height=780')
-    if (!win) { toast.error('Please allow pop-ups to print'); return }
-    const printDate = format(new Date(), 'dd MMM yyyy HH:mm')
-    const orderDate = format(new Date(order.orderDate), 'dd MMM yyyy HH:mm')
-    const collectedDate = order.sampleCollectedAt ? format(new Date(order.sampleCollectedAt), 'dd MMM yyyy HH:mm') : '—'
-    const orderResults = results.filter(r => r.orderId === order.id)
-    const hasResults = orderResults.length > 0
-    const hasAbnormal = orderResults.some(r => r.isAbnormal || r.isCritical)
-
-    const resultRows = hasResults
-      ? orderResults.map(r => {
-          const refRange = r.referenceRangeText || (r.referenceRangeMin !== null && r.referenceRangeMax !== null ? `${r.referenceRangeMin} – ${r.referenceRangeMax}` : '—')
-          const rowClass = r.isCritical ? 'result-critical' : r.isAbnormal ? 'result-abnormal' : ''
-          const flagStyle = r.flag === 'H' ? 'color:#b45309;font-weight:bold' : r.flag === 'L' ? 'color:#1d4ed8;font-weight:bold' : r.isCritical ? 'color:#dc2626;font-weight:bold' : ''
-          const valStyle = r.isAbnormal || r.isCritical ? 'font-weight:bold;color:' + (r.isCritical ? '#dc2626' : '#b45309') : 'font-weight:bold'
-          return `<tr class="${rowClass}">
-            <td>${r.testName}</td>
-            <td style="${valStyle}">${r.resultValue}</td>
-            <td>${r.resultUnit || '—'}</td>
-            <td>${refRange}</td>
-            <td style="${flagStyle}">${r.isCritical ? '⚠ CRITICAL' : r.flag || 'N'}</td>
-            <td>${r.status === 'verified' ? '✓ Verified' : r.status === 'final' ? '✓ Final' : 'Reported'}</td>
-          </tr>`
-        }).join('')
-      : order.tests.map(t => `<tr>
-            <td>${t.testName}</td>
-            <td colspan="4" style="color:#888;font-style:italic">Result pending</td>
-            <td>—</td>
-          </tr>`).join('')
-
-    const verifiedResults = orderResults.filter(r => r.verifiedBy)
-    const verifiedBy = verifiedResults.length > 0 ? verifiedResults[0].verifiedBy : null
-    const verifiedAt = verifiedResults.length > 0 && verifiedResults[0].verifiedAt ? format(new Date(verifiedResults[0].verifiedAt), 'dd MMM yyyy HH:mm') : null
-    const enteredBy = orderResults.length > 0 ? orderResults[0].enteredBy : null
-
-    const html = `<!DOCTYPE html><html><head><title>Laboratory Report — ${order.orderNumber}</title>
-<style>
-*{box-sizing:border-box;margin:0;padding:0}
-body{font-family:Arial,Helvetica,sans-serif;font-size:10pt;color:#000;background:#fff}
-.page{max-width:210mm;margin:0 auto;padding:12mm 14mm 10mm 14mm}
-.hosp-header{display:flex;align-items:flex-start;justify-content:space-between;border-bottom:3px solid #1e3a5f;padding-bottom:10px;margin-bottom:10px}
-.hosp-name{font-size:19pt;font-weight:bold;color:#1e3a5f;line-height:1}
-.hosp-sub{font-size:9pt;color:#555;margin-top:2px}
-.hosp-contact{font-size:8.5pt;color:#555;text-align:right;line-height:1.6}
-.report-banner{background:#1e3a5f;color:#fff;text-align:center;padding:5px 0;font-size:13pt;font-weight:bold;letter-spacing:3px;margin-bottom:10px}
-.info-box{border:1px solid #333;margin-bottom:10px}
-.info-box-hdr{background:#1e3a5f;color:#fff;padding:3px 10px;font-size:9pt;font-weight:bold;letter-spacing:1px;text-transform:uppercase}
-.info-box-hdr2{background:#4a7099;color:#fff;padding:3px 10px;font-size:9pt;font-weight:bold}
-.info-grid{display:grid;grid-template-columns:repeat(4,1fr)}
-.info-cell{padding:5px 10px;border-right:1px solid #ccc;border-bottom:1px solid #ccc}
-.info-cell:last-child{border-right:none}
-.info-label{font-size:7.5pt;color:#555;font-weight:bold;text-transform:uppercase;letter-spacing:0.3px}
-.info-value{font-size:10pt;margin-top:1px}
-.clinical-bar{padding:7px 12px;background:#f0f4f8;border-left:4px solid #1e3a5f;margin-bottom:10px;font-size:10pt}
-table{width:100%;border-collapse:collapse;margin-bottom:10px;font-size:9.5pt}
-thead th{background:#1e3a5f;color:#fff;padding:6px 8px;text-align:left;font-size:9pt;font-weight:600}
-td{padding:5px 8px;border-bottom:1px solid #e8e8e8;vertical-align:middle}
-tr:nth-child(even) td{background:#f9f9f9}
-.result-abnormal td{background:#fffbeb!important}
-.result-critical td{background:#fef2f2!important}
-.abnormal-legend{font-size:8.5pt;color:#666;padding:5px 8px;background:#f8f9fa;border:1px solid #e0e0e0;margin-bottom:10px;border-radius:3px}
-.critical-note{background:#fef2f2;border:1px solid #dc2626;padding:8px 12px;margin-bottom:10px;font-size:9.5pt;color:#991b1b;border-radius:3px}
-.sig-section{display:grid;grid-template-columns:1fr 1fr;gap:30px;margin-top:16px;padding-top:10px;border-top:2px solid #000}
-.sig-line{border-bottom:1px solid #000;height:40px;margin-bottom:5px}
-.sig-label{font-size:9pt;color:#444;line-height:1.6}
-.footer{margin-top:12px;border-top:1px solid #ccc;padding-top:5px;font-size:8pt;color:#888;text-align:center}
-@media print{body{padding:0}.page{padding:8mm}}
-</style></head><body>
-<div class="page">
-  <div class="hosp-header">
-    <div>
-      ${orgInfo.logoUrl ? `<img src="${orgInfo.logoUrl}" alt="" style="height:46px;max-width:170px;object-fit:contain;margin-bottom:4px"/>` : ''}
-      <div class="hosp-name">${orgInfo.name}</div>
-      <div class="hosp-sub">Laboratory &amp; Pathology Department</div>
-      <div class="hosp-sub">Accredited Clinical Laboratory Services</div>
-    </div>
-    <div class="hosp-contact">
-      Order #: <strong>${order.orderNumber}</strong><br/>
-      ${order.accessionNumber ? `Accession #: <strong>${order.accessionNumber}</strong><br/>` : ''}
-      Printed: ${printDate}
-    </div>
-  </div>
-
-  <div class="report-banner">LABORATORY REPORT</div>
-
-  <div class="info-box">
-    <div class="info-box-hdr">Patient Information</div>
-    <div class="info-grid">
-     <div class="info-cell"><div class="info-label">UHID</div><div class="info-value">${order.patientMrn}</div></div>
-    
-      <div class="info-cell"><div class="info-label">Patient Name</div><div class="info-value"><strong>${order.patientName}</strong></div></div>
-       <div class="info-cell"><div class="info-label">Age / Sex</div><div class="info-value">${order.patientAge} yrs / ${order.patientGender.charAt(0).toUpperCase() + order.patientGender.slice(1)}</div></div>
-      <div class="info-cell"><div class="info-label">Requesting Physician</div><div class="info-value">${order.requestingDoctor ? drName(order.requestingDoctor) : '—'}</div></div>
-    </div>
-    <div class="info-box-hdr2">Order Details</div>
-    <div class="info-grid">
-      <div class="info-cell"><div class="info-label">Order Date</div><div class="info-value">${orderDate}</div></div>
-      <div class="info-cell"><div class="info-label">Collection Date</div><div class="info-value">${collectedDate}</div></div>
-      <div class="info-cell"><div class="info-label">Priority</div><div class="info-value" style="text-transform:uppercase;color:${order.priority==='stat'?'#dc2626':order.priority==='urgent'?'#d97706':'#333'};font-weight:bold">${order.priority}</div></div>
-      <div class="info-cell"><div class="info-label">Report Status</div><div class="info-value" style="color:#065f46;font-weight:bold">COMPLETED</div></div>
-    </div>
-  </div>
-
-  ${order.clinicalIndication ? `<div class="clinical-bar"><strong>Clinical Indication:</strong> ${order.clinicalIndication}</div>` : ''}
-  ${order.provisionalDiagnosis ? `<div class="clinical-bar"><strong>Provisional Diagnosis:</strong> ${order.provisionalDiagnosis}</div>` : ''}
-
-  ${hasAbnormal ? `<div class="critical-note">⚠ This report contains abnormal/critical values. Please review highlighted results and contact the laboratory for clarification if needed.</div>` : ''}
-
-  <table>
-    <thead>
-      <tr>
-        <th style="width:28%">TEST NAME</th>
-        <th style="width:13%">RESULT</th>
-        <th style="width:10%">UNIT</th>
-        <th style="width:22%">REFERENCE RANGE</th>
-        <th style="width:12%">FLAG</th>
-        <th style="width:15%">STATUS</th>
-      </tr>
-    </thead>
-    <tbody>${resultRows}</tbody>
-  </table>
-
-  ${hasAbnormal ? `<div class="abnormal-legend"><strong>Flag Legend:</strong> &nbsp; H = High &nbsp; L = Low &nbsp; N = Normal &nbsp; A = Abnormal &nbsp; ⚠ CRITICAL = Requires immediate attention</div>` : ''}
-
-  ${order.notes ? `<div class="clinical-bar" style="margin-bottom:10px"><strong>Notes:</strong> ${order.notes}</div>` : ''}
-
-  <div class="sig-section">
-    <div>
-      <div class="sig-line"></div>
-      <div class="sig-label">
-        <strong>Reported By:</strong> ${enteredBy || 'Lab Technologist'}<br/>
-        Report Date: ${printDate}
-      </div>
-    </div>
-    <div>
-      <div class="sig-line"></div>
-      <div class="sig-label">
-        <strong>Verified By:</strong> ${verifiedBy || '—'}<br/>
-        ${verifiedAt ? `Verification Date: ${verifiedAt}` : 'Not yet verified'}
-      </div>
-    </div>
-  </div>
-
-  <div class="footer">
-    ${orgInfo.name} — Laboratory &amp; Pathology Department &nbsp;|&nbsp;
-    This report is confidential and intended solely for the requesting physician &nbsp;|&nbsp;
-    Printed: ${printDate}
-  </div>
-</div>
-</body></html>`
-    win.document.write(html)
-    win.document.close()
-    win.focus()
-    setTimeout(() => { win.print(); win.close() }, 600)
-  }
+  // The lab report markup lives in ONE place — printLabReport.js — which the
+  // patient profile already prints from. This module used to carry its own
+  // 156-line copy of the same HTML, so any change to the report (a logo, a
+  // column, the hospital name) would have landed in one of them and quietly
+  // left the other printing the old design.
+  const handlePrintLabReport = (order) => printLabReport(order, results, orgInfo, drName)
 
   const handleDeleteTest = async (testId) => {
     try {
-      await fetchApi('/laboratory', {
-        method: 'PATCH',
-        body: JSON.stringify({
-          resource: 'test',
-          id: testId,
-          isActive: false
-        }),
-      })
+      await labApi.updateTest(testId, { isActive: false })
 
       setTests(prev => prev.filter(t => t.id !== testId))
       toast.success('Test removed from catalog')
@@ -1205,14 +1023,14 @@ tr:nth-child(even) td{background:#f9f9f9}
                 </div>
                 <div className="text-right">
                   <p className="text-2xl font-bold text-green-600">
-                    {orders.length > 0 ? Math.round((orders.filter(o => o.status === 'completed').length / orders.length) * 100) : 0}%
+                    {orders.length > 0 ? Math.round((completedOrders.length / orders.length) * 100) : 0}%
                   </p>
                   <p className="text-xs text-gray-500">Completion Rate</p>
                 </div>
               </div>
               <div className="mt-2">
                 <Progress
-                  value={orders.length > 0 ? (orders.filter(o => o.status === 'completed').length / orders.length) * 100 : 0}
+                  value={orders.length > 0 ? (completedOrders.length / orders.length) * 100 : 0}
                   className="h-2"
                 />
               </div>
@@ -1225,20 +1043,20 @@ tr:nth-child(even) td{background:#f9f9f9}
                     <div className="w-3 h-3 rounded-full bg-yellow-400" />
                     <span className="font-semibold text-sm text-gray-700">Pending / In Progress</span>
                     <span className="ml-auto text-xs font-bold bg-yellow-100 text-yellow-700 px-2 py-0.5 rounded-full">
-                      {orders.filter(o => o.status !== 'completed' && o.status !== 'cancelled').length}
+                      {activeOrders.length}
                     </span>
                   </div>
                   <ScrollArea className="h-[260px]">
                     {ordersLoading ? (
                       <div className="flex items-center justify-center py-8"><Loader2 className="h-5 w-5 animate-spin text-[#2E4168]" /></div>
-                    ) : orders.filter(o => o.status !== 'completed' && o.status !== 'cancelled').length === 0 ? (
+                    ) : activeOrders.length === 0 ? (
                       <div className="text-center py-8 text-gray-400">
                         <CheckCircle className="h-10 w-10 mx-auto mb-2 text-green-400" />
                         <p className="text-sm">All orders completed!</p>
                       </div>
                     ) : (
                       <div className="space-y-2">
-                        {orders.filter(o => o.status !== 'completed' && o.status !== 'cancelled').map(order => (
+                        {activeOrders.map(order => (
                           <div key={order.id} className="flex items-start gap-3 p-3 rounded-lg border border-yellow-100 bg-yellow-50 hover:bg-yellow-100 cursor-pointer transition" onClick={() => { setSelectedOrder(order); setShowViewOrderDialog(true) }}>
                             <div className={`mt-1 w-2 h-2 rounded-full flex-shrink-0 ${order.priority === 'stat' ? 'bg-red-500 animate-pulse' : order.priority === 'urgent' ? 'bg-orange-500' : 'bg-yellow-400'}`} />
                             <div className="flex-1 min-w-0">
@@ -1264,20 +1082,20 @@ tr:nth-child(even) td{background:#f9f9f9}
                     <div className="w-3 h-3 rounded-full bg-green-500" />
                     <span className="font-semibold text-sm text-gray-700">Completed</span>
                     <span className="ml-auto text-xs font-bold bg-green-100 text-green-700 px-2 py-0.5 rounded-full">
-                      {orders.filter(o => o.status === 'completed').length}
+                      {completedOrders.length}
                     </span>
                   </div>
                   <ScrollArea className="h-[260px]">
                     {ordersLoading ? (
                       <div className="flex items-center justify-center py-8"><Loader2 className="h-5 w-5 animate-spin text-[#2E4168]" /></div>
-                    ) : orders.filter(o => o.status === 'completed').length === 0 ? (
+                    ) : completedOrders.length === 0 ? (
                       <div className="text-center py-8 text-gray-400">
                         <FlaskConical className="h-10 w-10 mx-auto mb-2 opacity-40" />
                         <p className="text-sm">No completed orders yet</p>
                       </div>
                     ) : (
                       <div className="space-y-2">
-                        {orders.filter(o => o.status === 'completed').map(order => (
+                        {completedOrders.map(order => (
                           <div key={order.id} className="flex items-start gap-3 p-3 rounded-lg border border-green-100 bg-green-50 hover:bg-green-100 cursor-pointer transition" onClick={() => { setSelectedOrder(order); setShowViewOrderDialog(true) }}>
                             <CheckCircle className="mt-1 h-4 w-4 text-green-500 flex-shrink-0" />
                             <div className="flex-1 min-w-0">
@@ -1620,14 +1438,14 @@ tr:nth-child(even) td{background:#f9f9f9}
         {/* Results Entry Tab */}
         <TabsContent value="results" className="space-y-4">
           {/* Critical results alert banner */}
-          {results.filter(r => r.isCritical).length > 0 && (
+          {criticalResults.length > 0 && (
             <Alert className="border-red-500 bg-red-50">
               <AlertTriangle className="h-5 w-5 text-red-600" />
               <AlertTitle className="text-red-700 font-bold">
-                {results.filter(r => r.isCritical).length} Critical Result{results.filter(r => r.isCritical).length > 1 ? 's' : ''} &mdash; Immediate Attention Required
+                {criticalResults.length} Critical Result{criticalResults.length > 1 ? 's' : ''} &mdash; Immediate Attention Required
               </AlertTitle>
               <AlertDescription className="text-red-600">
-                {results.filter(r => r.isCritical).map(r => (
+                {criticalResults.map(r => (
                   <span key={r.id} className="inline-block mr-3 font-semibold">
                     &#9888; {r.testName}: {r.resultValue} {r.resultUnit}
                   </span>
@@ -1648,11 +1466,11 @@ tr:nth-child(even) td{background:#f9f9f9}
                     <div className="flex items-center justify-center py-8">
                       <Loader2 className="h-6 w-6 animate-spin text-[#2E4168]" />
                     </div>
-                  ) : orders.filter(o => o.status === 'in_progress' || o.status === 'sample_collected').length === 0 ? (
+                  ) : awaitingResults.length === 0 ? (
                     <p className="text-center text-gray-500 py-8">No orders ready for results</p>
                   ) : (
                     <div className="space-y-2">
-                      {orders.filter(o => o.status === 'in_progress' || o.status === 'sample_collected').slice((resultsPage - 1) * LAB_ITEMS_PER_PAGE, resultsPage * LAB_ITEMS_PER_PAGE).map(order => (
+                      {awaitingResults.slice((resultsPage - 1) * LAB_ITEMS_PER_PAGE, resultsPage * LAB_ITEMS_PER_PAGE).map(order => (
                         <div
                           key={order.id}
                           className={`p-3 rounded-lg border cursor-pointer transition ${selectedOrder?.id === order.id ? 'border-blue-500 bg-blue-50' : 'hover:bg-gray-50'
@@ -1674,7 +1492,7 @@ tr:nth-child(even) td{background:#f9f9f9}
                 </ScrollArea>
 
                 {/* Pagination for results orders selection */}
-                {orders.filter(o => o.status === 'in_progress' || o.status === 'sample_collected').length > LAB_ITEMS_PER_PAGE && (
+                {awaitingResults.length > LAB_ITEMS_PER_PAGE && (
                   <div className="flex items-center justify-end gap-2">
                     <Button
                       variant="outline"
@@ -1685,13 +1503,13 @@ tr:nth-child(even) td{background:#f9f9f9}
                       Previous
                     </Button>
                     <span className="text-xs text-gray-600">
-                      Page {resultsPage} of {Math.ceil(orders.filter(o => o.status === 'in_progress' || o.status === 'sample_collected').length / LAB_ITEMS_PER_PAGE)}
+                      Page {resultsPage} of {Math.ceil(awaitingResults.length / LAB_ITEMS_PER_PAGE)}
                     </span>
                     <Button
                       variant="outline"
                       size="sm"
-                      onClick={() => setResultsPage(prev => Math.min(Math.ceil(orders.filter(o => o.status === 'in_progress' || o.status === 'sample_collected').length / LAB_ITEMS_PER_PAGE), prev + 1))}
-                      disabled={resultsPage === Math.ceil(orders.filter(o => o.status === 'in_progress' || o.status === 'sample_collected').length / LAB_ITEMS_PER_PAGE)}
+                      onClick={() => setResultsPage(prev => Math.min(Math.ceil(awaitingResults.length / LAB_ITEMS_PER_PAGE), prev + 1))}
+                      disabled={resultsPage === Math.ceil(awaitingResults.length / LAB_ITEMS_PER_PAGE)}
                     >
                       Next
                     </Button>
@@ -1770,7 +1588,6 @@ tr:nth-child(even) td{background:#f9f9f9}
                                     </Button>
                                     <Button size="sm" variant="outline" onClick={() => {
                                       setSelectedTest(tests.find(t => t.id === test.testId) || null)
-                                      setSelectedResult(existingResult)
                                       resultForm.setValue('resultValue', existingResult.resultValue)
                                       resultForm.setValue('isAbnormal', existingResult.isAbnormal)
                                       resultForm.setValue('isCritical', existingResult.isCritical)
@@ -1864,14 +1681,14 @@ tr:nth-child(even) td{background:#f9f9f9}
                     <div className="flex items-center justify-center py-12">
                       <Loader2 className="h-8 w-8 animate-spin text-[#2E4168]" />
                     </div>
-                  ) : orders.filter(o => o.status === 'completed').length === 0 ? (
+                  ) : completedOrders.length === 0 ? (
                     <div className="text-center py-12 text-gray-500">
                       <FileBarChart className="h-12 w-12 mx-auto mb-4 opacity-50" />
                       <p>No completed orders to report</p>
                     </div>
                   ) : (
                     <div className="space-y-3">
-                      {orders.filter(o => o.status === 'completed').map(order => (
+                      {completedOrders.map(order => (
                         <Card key={order.id}>
                           <CardContent className="p-4">
                             <div className="flex items-center justify-between">
