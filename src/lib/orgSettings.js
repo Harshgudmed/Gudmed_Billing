@@ -4,6 +4,12 @@ import client from '@/api/client'
 // Call clearOrgCache() from SettingsModule after saving org details.
 let _cache = null
 let _pending = null
+// The untouched /settings response. `_cache` is the print-shaped view of it and
+// deliberately drops the branding columns (navbarColor, modulesEnabled,
+// primaryColor…), so the app shell used to fetch /settings a SECOND time to get
+// them — which is why every one of the 17 modules issued two identical calls on
+// every page load. Keeping the raw row here lets both readers share one fetch.
+let _raw = null
 
 const FALLBACK = { name: 'Hospital', address: '', city: '', phone: '', email: '', logoUrl: '' }
 
@@ -17,6 +23,7 @@ export async function getOrgSettings() {
       // in production instead of always hitting a same-origin relative path.
       const res = await client.get('/settings')
       const org = res?.data || {}
+      _raw = org
       const settings = typeof org.settings === 'string'
         ? (() => { try { return JSON.parse(org.settings) } catch { return {} } })()
         : (org.settings || {})
@@ -50,10 +57,22 @@ export async function getOrgSettings() {
   return _pending
 }
 
+/**
+ * The organisation row exactly as /settings returned it — branding columns and
+ * all. Shares the single cached fetch with getOrgSettings(), so asking for both
+ * costs one request, not two.
+ */
+export async function getOrgRaw() {
+  if (_raw) return _raw
+  await getOrgSettings()
+  return _raw || {}
+}
+
 /** Call after saving organisation settings so next print picks up new values */
 export function clearOrgCache() {
   _cache = null
   _pending = null
+  _raw = null
 }
 
 /** Sync helper — returns cache if loaded, otherwise the fallback. Use only when async is impossible. */

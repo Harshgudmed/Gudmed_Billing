@@ -14,9 +14,18 @@ export async function getAll(req, res, next) {
     if (status === 'issued') where.issuedAt = { not: null }
     else if (status === 'pending') where.issuedAt = null
     else if (status === 'maternal') where.isMaternalDeath = true
+    // The cause of death is a CHAIN of four columns, not one — the statutory form
+    // records what killed the patient in (a) and the underlying condition in (b),
+    // (c) or (d). There has never been a `causeOfDeath` column, so searching it
+    // made every request 400 from the first keystroke, taking the row list and all
+    // four stat cards with it. Searching only (a) would restore the screen but
+    // still miss the disease, which is usually recorded further down the chain.
     const searchWhere = patientSearchWhere(search, 'patient', (term) => [
       { certificateNumber: { contains: term, mode: 'insensitive' } },
-      { causeOfDeath: { contains: term, mode: 'insensitive' } },
+      { immediateCause: { contains: term, mode: 'insensitive' } },
+      { antecedentCauseB: { contains: term, mode: 'insensitive' } },
+      { antecedentCauseC: { contains: term, mode: 'insensitive' } },
+      { antecedentCauseD: { contains: term, mode: 'insensitive' } },
     ])
     if (searchWhere) Object.assign(where, searchWhere)
     const include = {

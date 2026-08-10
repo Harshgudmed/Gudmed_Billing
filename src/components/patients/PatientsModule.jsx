@@ -87,6 +87,13 @@ export default function PatientsModule() {
 
   // Form setup for editing
   const form = useForm({
+    // Validate when the user LEAVES a field, not only when they press Save.
+    // react-hook-form defaults to mode: 'onSubmit', so every one of these forms was
+    // silent until submit — a receptionist filled the whole thing, pressed Save and
+    // only then learned which field was wrong, with nothing marked until that
+    // moment. CLAUDE.md's validation section asks for the message under the field
+    // the moment focus leaves it; this is the one line that turns that on.
+    mode: 'onBlur',
     resolver: zodResolver(patientSchema),
     defaultValues: {
       firstName: '', middleName: '', lastName: '', dateOfBirth: '',
@@ -100,9 +107,12 @@ export default function PatientsModule() {
   const openPatient = useCallback((patient, tab = 'overview') => {
     setSelectedPatient(patient);
     setViewTab(tab);
+    // No fetch here: usePatientRecords is passed (selectedPatient, showViewDialog)
+    // and its effect polls immediately when both become truthy — which is this
+    // same line. Fetching here as well made every patient open request the
+    // records twice.
     setShowViewDialog(true);
-    fetchRecords(patient.id);
-  }, [fetchRecords]);
+  }, []);
 
   const openEdit = (patient) => {
     setSelectedPatient(patient);

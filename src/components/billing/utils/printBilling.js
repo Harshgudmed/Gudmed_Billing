@@ -21,6 +21,48 @@ const titleCase = (s) =>
 // EVERY receipt (Pharmacy, Lab, Radiology, Payment table) so amounts look the same.
 import { formatMoney as inr } from "@/lib/format";
 
+/**
+ * The hospital's own details, as they appear at the top of every printed document.
+ *
+ * There were four headers in this file and they did not agree. Two read
+ * `clinic.address` / `clinic.phone` / `clinic.email` — localStorage only — so on a
+ * machine whose saved clinic profile has no email, the invoice printed NO email at
+ * all while the lab receipt printed it correctly from the API. The same two dumped
+ * the raw address string, which wraps mid-sentence, instead of building one clean
+ * line the way the other two did.
+ *
+ * A hospital's name and address are the one thing every document must state
+ * identically, so this is the single place that decides them: localStorage first
+ * (a per-machine override the front desk can set), then the organisation record.
+ */
+export function hospitalHeaderLines(orgInfo = {}, clinic = {}) {
+  // The Address field usually already contains the city and state, so only append
+  // them when they are not already in there — otherwise it reads
+  // "…Gurugram, Haryana, Gurugram, Haryana".
+  // A clinic address is an explicit, complete override -- a branch typed in by the
+  // front desk -- so it is used verbatim. Appending the ORGANISATION's city and
+  // state to it produced "Branch Road, Delhi, Gurugram, Haryana": a Delhi branch's
+  // bill carrying the head office's city. Only the organisation's own address gets
+  // them appended, and only when it does not already end with them.
+  let address = clinic.address || "";
+  if (!address) {
+    const base = orgInfo.address || "";
+    const lower = base.toLowerCase();
+    const parts = [base];
+    if (orgInfo.city && !lower.includes(String(orgInfo.city).toLowerCase())) parts.push(orgInfo.city);
+    if (orgInfo.region && !lower.includes(String(orgInfo.region).toLowerCase())) parts.push(orgInfo.region);
+    address = parts.filter(Boolean).join(", ");
+  }
+
+  return [
+    ["Address", address],
+    ["Phone", clinic.phone || orgInfo.phone],
+    ["Email", clinic.email || orgInfo.email],
+  ].filter(([, v]) => v && String(v).trim() !== "");
+}
+
+
+
 // ── SHARED multi-payment "Payment" table (Pharmacy / Lab / Radiology / Billing) ──
 // One bill can be settled across several receipts and methods (e.g. ₹3000 Cash +
 // ₹2000 UPI). This renders the DRLOGY-style Payment ledger block used by EVERY
@@ -164,7 +206,7 @@ export function printInvoice(bill, orgInfo, clinic, options = {}) {
 .top{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px}
 .brand-box { display:flex; align-items:center; gap: 12px; }
 .brand{font-size:16pt;font-weight:bold;color:#1a3e6f}
-.reg{font-size:7.5pt;color:#333;line-height:1.6;margin-top:4px}.reg b{display:inline-block;min-width:70px}
+.reg{display:grid;grid-template-columns:auto auto 1fr;column-gap:6px;row-gap:3px;font-size:7.5pt;color:#333;line-height:1.45;margin-top:4px;max-width:520px}.reg .k{font-weight:700;color:#334155;white-space:nowrap}.reg .c{color:#334155}.reg .v{color:#64748b}
 .labnum{font-size:13pt;font-weight:bold;letter-spacing:3px;text-align:right;margin-top:2px}
 .title{text-align:center;font-weight:bold;font-size:12pt;margin:8px 0 1px;background:#f0f4f8;padding:8px;border:1px solid #d0e0f0;border-radius:4px;color:#1a3e6f;}
 .subtitle{text-align:center;font-size:8pt;color:#666;margin-bottom:8px}
@@ -185,9 +227,7 @@ ${PAYMENT_TABLE_CSS}
     <div>
       <div class="brand">${esc(orgInfo.name || clinic.clinicName)}</div>
       <div class="reg">
-        <div><b>Address</b> ${esc(clinic.address || "")}</div>
-        <div><b>Phone</b> ${esc(clinic.phone || "")}</div>
-        ${clinic.email ? `<div><b>Email</b> ${esc(clinic.email)}</div>` : ""}
+        ${hospitalHeaderLines(orgInfo, clinic).map(([k, v]) => `<span class="k">${k}</span><span class="c">:</span><span class="v">${esc(v)}</span>`).join("")}
       </div>
     </div>
   </div>
@@ -199,7 +239,7 @@ ${PAYMENT_TABLE_CSS}
 <div class="cell"><span class="l">Invoice Number</span><span class="v">${esc(bill.invoiceNo)}</span></div><div class="cell"><span class="l">Patient ID / UHID</span><span class="v">${esc(mrn)}</span></div>
 <div class="cell"><span class="l">Date &amp; Time</span><span class="v">${esc(bill.date)}</span></div><div class="cell"><span class="l">Patient Name</span><span class="v">${esc(bill.patientName)}</span></div>
 <div class="cell"><span class="l">Reference Doctor</span><span class="v">${esc(bill.doctorName || "self")}</span></div><div class="cell"><span class="l">Contact Number</span><span class="v">${esc(bill.phone || "NA")}</span></div>
-<div class="cell"><span class="l">Mode of Payment</span><span class="v">${esc(bill.mode || "Cash")}</span></div><div class="cell"><span class="l">GST No</span><span class="v">${esc(clinic.gstNo || "NA")}</span></div>
+<div class="cell"><span class="l">Mode of Payment</span><span class="v">${esc(bill.mode || "Cash")}</span></div><div class="cell"><span class="l">GST No</span><span class="v">${esc(clinic.gstNo || orgInfo.gstNo || "NA")}</span></div>
 </div>
 <table><thead><tr><th style="width:34px">S.NO.</th><th style="width:110px">ITEM CODE</th><th>DESCRIPTION</th><th style="width:60px;text-align:center">QTY</th><th style="width:80px;text-align:right">RATE</th><th style="width:90px;text-align:right">AMOUNT</th></tr></thead>
 <tbody>${itemRows}</tbody></table>
@@ -297,7 +337,7 @@ export function printReceipt(p, orgInfo, clinic) {
 .top{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px}
 .brand-box { display:flex; align-items:center; gap: 12px; }
 .brand{font-size:16pt;font-weight:bold;color:#1a3e6f}
-.reg{font-size:7.5pt;color:#333;line-height:1.6;margin-top:4px}.reg b{display:inline-block;min-width:70px}
+.reg{display:grid;grid-template-columns:auto auto 1fr;column-gap:6px;row-gap:3px;font-size:7.5pt;color:#333;line-height:1.45;margin-top:4px;max-width:520px}.reg .k{font-weight:700;color:#334155;white-space:nowrap}.reg .c{color:#334155}.reg .v{color:#64748b}
 .labnum{font-size:13pt;font-weight:bold;letter-spacing:3px;text-align:right;margin-top:2px}
 .title{text-align:center;font-weight:bold;font-size:12pt;margin:8px 0 1px;background:#f0f4f8;padding:8px;border:1px solid #d0e0f0;border-radius:4px;color:#1a3e6f;text-transform:uppercase}
 .grid{border:1px solid #d0e0f0;background:#f8fafc;display:grid;grid-template-columns:1fr 1fr;margin-bottom:12px;border-radius:4px;overflow:hidden;}
@@ -313,9 +353,7 @@ export function printReceipt(p, orgInfo, clinic) {
     <div>
       <div class="brand">${esc(orgInfo.name || clinic.clinicName)}</div>
       <div class="reg">
-        <div><b>Address</b> ${esc(clinic.address || "")}</div>
-        <div><b>Phone</b> ${esc(clinic.phone || "")}</div>
-        ${clinic.email ? `<div><b>Email</b> ${esc(clinic.email)}</div>` : ""}
+        ${hospitalHeaderLines(orgInfo, clinic).map(([k, v]) => `<span class="k">${k}</span><span class="c">:</span><span class="v">${esc(v)}</span>`).join("")}
       </div>
     </div>
   </div>
@@ -547,20 +585,13 @@ function printDiagnosticReceipt(
   // Build ONE clean address line. The Address field often already contains the
   // city/state, so only append city/region if they aren't already present
   // (prevents "…Gurugram, Haryana … Gurugram, Haryana" duplication).
-  const baseAddr = clinic.address || orgInfo.address || "";
-  const lower = baseAddr.toLowerCase();
-  const addrParts = [baseAddr];
-  if (orgInfo.city && !lower.includes(orgInfo.city.toLowerCase()))
-    addrParts.push(orgInfo.city);
-  if (orgInfo.region && !lower.includes(orgInfo.region.toLowerCase()))
-    addrParts.push(orgInfo.region);
-  const fullAddr = addrParts.filter(Boolean).join(", ");
+  // Header lines come from hospitalHeaderLines so all four printed documents state
+  // the hospital identically. This block used to build them itself, and the two
+  // that did not were the ones that lost the email.
   // 3-column grid rows: [label] [:] [value]. Colon aligns; long value wraps
   // under the value column (not under the label). Label column = widest label.
   const regLines = [
-    ["Address", fullAddr],
-    ["Phone", orgInfo.phone],
-    ["Email", orgInfo.email],
+    ...hospitalHeaderLines(orgInfo, clinic),
     ["Website", val("website")],
   ]
     .filter(([, v]) => v && String(v).trim() !== "")
@@ -684,13 +715,13 @@ ${PAYMENT_TABLE_CSS}
     formatOpt === "invoice"
       ? `
   <div class="words">
-    <div style="margin-bottom:8px">Amount Paid In Words : <b>${amountInWords(paid || net)} Rupee(s) Only</b></div>
+    <div style="margin-bottom:8px">Amount Paid In Words : <b>${amountInWords(Number(paid) || 0)} Rupee(s) Only</b></div>
     <div style="font-size:9.5pt">Payment Mode : <b>${esc(paymentList[paymentList.length - 1]?.method || paymentList[0]?.method || "Cash")}</b></div>
     <div style="font-size:9.5pt;margin-top:4px">Status : <b>${bal <= 0 ? "Paid" : "Unpaid"}</b></div>
   </div>
   `
       : `
-  <div class="words">Amount Paid In Words : <b>${amountInWords(paid || net)} Rupee(s) Only</b></div>
+  <div class="words">Amount Paid In Words : <b>${amountInWords(Number(paid) || 0)} Rupee(s) Only</b></div>
   `
   }
   <div class="totals">
@@ -722,6 +753,22 @@ ${formatOpt === "detailed" ? renderPaymentTable(paymentList, { force: true }) : 
   setTimeout(() => win.print(), 400);
 }
 
+// The amount in words is what was PAID -- never what is owed.
+//
+// This and its two siblings read `amountInWords(paid || net)`, and `paid` is 0 on
+// an unpaid bill. 0 is falsy, so `0 || 961` is 961: a real lab receipt printed
+//
+//     Amount Paid In Words : Nine Hundred Sixty One Rupee(s) Only
+//     Paid Amount                                          Rs 0.00
+//     Status : Unpaid
+//
+// Three lines on one document, two of them contradicting the third. On an Indian
+// financial document the amount in words is the authoritative figure, so that
+// receipt declared an unpaid bill settled.
+//
+// `Number(paid) || 0` is the correct form: it collapses null, undefined, '' and
+// NaN to zero without letting a genuine 0 turn into the total. printReceipt in
+// this same file already did it that way -- the three functions had drifted.
 export function printLabReceipt(r, orgInfo = {}, clinic = {}, options = {}) {
   return printDiagnosticReceipt(r, orgInfo, clinic, LAB_DEPT, options);
 }
@@ -849,18 +896,11 @@ export function printPharmacyReceipt(
   const fileName = `${(patientName || "Patient").replace(/\s+/g, "_")}_${invoiceNo}`;
 
   // ── Header address / registration lines (identical build to Lab/Radiology) ──
-  const baseAddr = clinic.address || orgInfo.address || "";
-  const lower = baseAddr.toLowerCase();
-  const addrParts = [baseAddr];
-  if (orgInfo.city && !lower.includes(orgInfo.city.toLowerCase()))
-    addrParts.push(orgInfo.city);
-  if (orgInfo.region && !lower.includes(orgInfo.region.toLowerCase()))
-    addrParts.push(orgInfo.region);
-  const fullAddr = addrParts.filter(Boolean).join(", ");
+  // Header lines come from hospitalHeaderLines so all four printed documents state
+  // the hospital identically. This block used to build them itself, and the two
+  // that did not were the ones that lost the email.
   const regLines = [
-    ["Address", fullAddr],
-    ["Phone", orgInfo.phone || clinic.phone],
-    ["Email", orgInfo.email],
+    ...hospitalHeaderLines(orgInfo, clinic),
     ["Website", val("website")],
   ]
     .filter(([, v]) => v && String(v).trim() !== "")
@@ -971,13 +1011,13 @@ ${PAYMENT_TABLE_CSS}
     formatOpt === "invoice"
       ? `
   <div class="words">
-    <div style="margin-bottom:8px">Amount Paid In Words : <b>${amountInWords(paid || netPayable)} Rupee(s) Only</b></div>
+    <div style="margin-bottom:8px">Amount Paid In Words : <b>${amountInWords(Number(paid) || 0)} Rupee(s) Only</b></div>
     <div style="font-size:9.5pt">Payment Mode : <b>${esc(sale?.paymentMethod || "Cash")}</b></div>
     <div style="font-size:9.5pt;margin-top:4px">Status : <b>${balance <= 0 ? "Paid" : "Unpaid"}</b></div>
   </div>
   `
       : `
-  <div class="words">Amount Paid In Words : <b>${amountInWords(paid || netPayable)} Rupee(s) Only</b></div>
+  <div class="words">Amount Paid In Words : <b>${amountInWords(Number(paid) || 0)} Rupee(s) Only</b></div>
   `
   }
   <div class="totals">

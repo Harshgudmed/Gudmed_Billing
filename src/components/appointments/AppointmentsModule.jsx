@@ -205,6 +205,13 @@ export default function AppointmentsModule() {
   }, [dates.selected, filters.status, filters.doctor, filters.department, filters.search]);
 
   const form = useForm({
+    // Validate when the user LEAVES a field, not only when they press Save.
+    // react-hook-form defaults to mode: 'onSubmit', so every one of these forms was
+    // silent until submit — a receptionist filled the whole thing, pressed Save and
+    // only then learned which field was wrong, with nothing marked until that
+    // moment. CLAUDE.md's validation section asks for the message under the field
+    // the moment focus leaves it; this is the one line that turns that on.
+    mode: 'onBlur',
     resolver: zodResolver(appointmentSchema),
     defaultValues: {
       patientId: "",
@@ -220,6 +227,13 @@ export default function AppointmentsModule() {
   });
 
   const editForm = useForm({
+    // Validate when the user LEAVES a field, not only when they press Save.
+    // react-hook-form defaults to mode: 'onSubmit', so every one of these forms was
+    // silent until submit — a receptionist filled the whole thing, pressed Save and
+    // only then learned which field was wrong, with nothing marked until that
+    // moment. CLAUDE.md's validation section asks for the message under the field
+    // the moment focus leaves it; this is the one line that turns that on.
+    mode: 'onBlur',
     resolver: zodResolver(editAppointmentSchema),
     defaultValues: {
       doctorId: "",

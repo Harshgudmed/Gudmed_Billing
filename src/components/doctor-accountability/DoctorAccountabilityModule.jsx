@@ -77,14 +77,14 @@ function DoctorsTab() {
 
   const load = useCallback(async () => {
     setLoading(true)
-    const [dRes, sRes] = await Promise.all([
-      client.get('/doctor-accountability?resource=doctors'),
-      client.get('/fee-slabs'),
-    ])
-    if (dRes.success) setDoctors(dRes.data)
-    if (sRes.success) {
+    // The slab count comes back with each doctor. It used to be a second request
+    // that downloaded every slab in the organisation (3,384 rows, 1.1 MB) just to
+    // add them up in the browser — a count the database does for free.
+    const dRes = await client.get('/doctor-accountability?resource=doctors')
+    if (dRes.success) {
+      setDoctors(dRes.data)
       const counts = {}
-      sRes.data.forEach(s => { counts[s.doctorId] = (counts[s.doctorId] || 0) + 1 })
+      dRes.data.forEach(d => { counts[d.id] = d._count?.feeSlabs ?? 0 })
       setSlabCounts(counts)
     }
     setLoading(false)
