@@ -626,7 +626,21 @@ export default function BillingModule({ onBack }) {
     fetchClaims()
   }, [fetchBills, fetchServices, fetchStats, fetchClaims])
 
-  useEffect(() => { fetchAll() }, [fetchAll])
+  // The invoice list is the only one of the four that reads what the user types.
+  // Bundled with the other three in one effect, its changing identity — it closes
+  // over page, search, status, type and date — re-ran all four, so a single
+  // keystroke in the invoice search also re-pulled the service catalogue, the stat
+  // cards and the insurance claims. Measured: four requests, one of them wanted,
+  // on every keystroke, every filter change and every page turn.
+  useEffect(() => { fetchBills() }, [fetchBills])
+
+  // These three read nothing the user types. They are the module's opening state;
+  // Refresh and every write path still call fetchAll, which re-reads all four.
+  useEffect(() => {
+    fetchServices()
+    fetchStats()
+    fetchClaims()
+  }, [fetchServices, fetchStats, fetchClaims])
 
   const { orgInfo: hookOrgInfo } = useOrgSettings()
 
