@@ -219,7 +219,9 @@ export default function OpdModule() {
   const [guidanceLoading, setGuidanceLoading] = useState(false)
   const [guidanceOpen, setGuidanceOpen] = useState(false)
 
-  const [patients, setPatients] = useState([])
+  // One patient, not a list. PatientLookup already searches the server as the
+  // doctor types, so nothing here needs the catalogue of everybody.
+  const [selectedPatientRecord, setSelectedPatientRecord] = useState(null)
   const [doctors, setDoctors] = useState([])
   const drugPicker = useCatalogueSearch(searchDrugs)
   const labTestPicker = useCatalogueSearch(searchLabTests)
@@ -249,19 +251,23 @@ export default function OpdModule() {
   const wFollow = clinicalForm.watch('followUpDate')
   const vw = vitalsForm.watch()
 
-  const selectedPatient = patients.find(p => p.id === selectedPatientId)
+  // The chosen patient is held as a whole record, not looked up in a downloaded
+  // list. It used to be `patients.find(...)` over the first 500 active patients —
+  // 667 KB fetched so one name could be read out of it, and the hospital has
+  // 200,555. Re-opening a consultation for anyone outside that first 500 found
+  // nothing, so the header rendered blank while the form still held their id: the
+  // doctor saw no name above notes they were about to save against that patient.
+  const selectedPatient = selectedPatientRecord
   const selectedDoctor = doctors.find(d => d.id === selectedDoctorId)
 
   const fetchAll = useCallback(async () => {
     setLoading(true)
     // The drug / lab-test / radiology-exam catalogues are NOT fetched here — they
     // are searched on the server as the doctor types (see useCatalogueSearch).
-    const [pRes, uRes, sRes] = await Promise.allSettled([
-      client.get('/patients?status=active&limit=500'),
+    const [uRes, sRes] = await Promise.allSettled([
       client.get('/settings?resource=users'),
       client.get('/clinical-kb/specialties'),
     ])
-    if (pRes.status === 'fulfilled') setPatients(pRes.value?.data ?? [])
     if (uRes.status === 'fulfilled') setDoctors((uRes.value?.data ?? []).filter(u => u.role === 'doctor' && u.isActive))
     if (sRes.status === 'fulfilled') setSpecialties(sRes.value?.data ?? [])
     setLoading(false)
@@ -377,13 +383,16 @@ export default function OpdModule() {
     setPrescriptionItems([]); setLabOrderItems([]); setRadiologyOrderItems([])
     setSelectedDrug(''); setSelectedLabTest(''); setSelectedRadExam('')
     drugPicker.clear(); labTestPicker.clear(); radExamPicker.clear()
-    setSelectedPatientId(''); setSelectedDoctorId(''); setEditingId(null)
+    setSelectedPatientId(''); setSelectedPatientRecord(null); setSelectedDoctorId(''); setEditingId(null)
     setDepartment(''); setProblem(''); setConditions([]); setGuidance(null)
   }
 
   const openEdit = (c) => {
     setEditingId(c.id)
     setSelectedPatientId(c.patientId)
+    // The consultation row already embeds its patient, so re-opening one shows the
+    // right name whether or not that patient was ever in any list this screen held.
+    setSelectedPatientRecord(c.patient ?? null)
     setSelectedDoctorId(c.doctorId)
     setDepartment(''); setProblem(''); setConditions([]); setGuidance(null)
 
@@ -1103,7 +1112,7 @@ export default function OpdModule() {
       <Dialog open={showPatientDialog} onOpenChange={setShowPatientDialog}>
         <DialogContent className="max-w-2xl">
           <DialogHeader><DialogTitle>Select Patient</DialogTitle><DialogDescription>Search and select a patient</DialogDescription></DialogHeader>
-          <PatientLookup showHint={false} selectedPatient={null} onSelect={(p) => { setPatients(prev => prev.some(x => x.id === p.id) ? prev : [p, ...prev]); setSelectedPatientId(p.id); setShowPatientDialog(false) }} />
+          <PatientLookup showHint={false} selectedPatient={null} onSelect={(p) => { setSelectedPatientRecord(p); setSelectedPatientId(p.id); setShowPatientDialog(false) }} />
         </DialogContent>
       </Dialog>
 
