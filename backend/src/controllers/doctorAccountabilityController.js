@@ -47,9 +47,21 @@ export async function handleGet(req, res, next) {
       const [doctors, total] = await Promise.all([
         db.user.findMany({
           where,
-          include: {
+          // An explicit select, never `include`. `include` returns every column
+          // of User — which sent 1,128 doctors' passwordHash and invitationToken
+          // to the browser on every load of this screen. An invitation token is
+          // live credential material: it is @unique and redeems into an account.
+          // _count.feeSlabs replaces a second request that pulled all 3,384 slab
+          // rows (1.1 MB) purely to count them per doctor.
+          select: {
+            id: true,
+            fullName: true,
+            specialization: true,
+            isActive: true,
+            consultationFee: true,
             department: { select: { id: true, name: true } },
             commissionConfig: true,
+            _count: { select: { feeSlabs: true } },
           },
           orderBy: { fullName: 'asc' },
           ...pageArgs,
