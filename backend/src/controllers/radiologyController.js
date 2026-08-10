@@ -1,6 +1,7 @@
 import { db } from '../config/db.js'
 import { getOrgId, getActor } from "../lib/reqContext.js";
 import { nextSeriesNumber } from "../lib/counters.js";
+import { stripIdentity } from '../lib/stripIdentity.js'
 import { resolveRequestedById } from '../lib/requestedBy.js'
 import { todayRange, dayRange } from '../lib/dates.js'
 import { z } from 'zod'
@@ -415,9 +416,9 @@ export const update = async (req, res, next) => {
         return res.status(400).json({ success: false, error: 'Validation error', details: parsed.error.issues })
       }
       const { id, resource: _r, ...fields } = parsed.data
-      // Never let a client rewrite tenant/identity via mass-assignment (.passthrough()).
-      delete fields.organizationId
-      delete fields.id
+      // .passthrough() keeps every unnamed key and they are spread straight into
+      // update({ data }) — one shared list decides what a client may never move.
+      stripIdentity(fields, 'radiologyOrder')
 
       if (fields.scheduledDate) fields.scheduledDate = new Date(fields.scheduledDate)
 
@@ -443,9 +444,9 @@ export const update = async (req, res, next) => {
         return res.status(400).json({ success: false, error: 'Validation error', details: parsed.error.issues })
       }
       const { id, resource: _r, ...fields } = parsed.data
-      // Never let a client rewrite tenant/identity via mass-assignment (.passthrough()).
-      delete fields.organizationId
-      delete fields.id
+      // .passthrough() keeps every unnamed key and they are spread straight into
+      // update({ data }) — one shared list decides what a client may never move.
+      stripIdentity(fields, 'radiologyReport')
 
       if (fields.verifiedAt) fields.verifiedAt = new Date(fields.verifiedAt)
 
@@ -470,9 +471,9 @@ export const update = async (req, res, next) => {
         return res.status(400).json({ success: false, error: 'Validation error', details: parsed.error.issues })
       }
       const { id, resource: _r, ...fields } = parsed.data
-      // Never let a client rewrite tenant/identity via mass-assignment (.passthrough()).
-      delete fields.organizationId
-      delete fields.id
+      // .passthrough() keeps every unnamed key and they are spread straight into
+      // update({ data }) — one shared list decides what a client may never move.
+      stripIdentity(fields, 'radiologyExam')
 
       // Tenant guard: only touch an exam catalog entry that belongs to this org.
       const owned = await db.radiologyExam.findFirst({ where: { id, organizationId: ORGANIZATION_ID }, select: { id: true } })

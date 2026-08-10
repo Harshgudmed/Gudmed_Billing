@@ -223,6 +223,18 @@ const PRIORITY_BADGE = {
   routine: 'bg-green-100 text-green-800',
 }
 
+// The bare colour block that marks priority next to an order in the dashboard
+// lists — no text, so it is a different thing from PRIORITY_BADGE above.
+// It was written out as a nested ternary at both of its two uses, and the two
+// copies had already drifted: routine was bg-yellow-500 in one list and
+// bg-yellow-400 in the other, so the same order showed two different yellows on
+// one screen.
+const PRIORITY_DOT = {
+  stat: 'bg-red-500 animate-pulse',
+  urgent: 'bg-orange-500',
+  routine: 'bg-yellow-500',
+}
+
 // Icon + colour per sample type. Stored as data (component + className) rather
 // than as ready-made JSX so the table holds no markup and the element is built
 // once, at the single place that renders it.
@@ -238,6 +250,7 @@ const DEFAULT_SAMPLE_ICON = { Icon: FlaskConical, className: 'text-gray-500' }
 const getCategoryBadgeColor = (category) => CATEGORY_BADGE[category] ?? NEUTRAL_BADGE
 const getStatusBadgeColor = (status) => STATUS_BADGE[status] ?? NEUTRAL_BADGE
 const getPriorityBadgeColor = (priority) => PRIORITY_BADGE[priority] ?? 'bg-gray-100 text-gray-800'
+const getPriorityDotColor = (priority) => PRIORITY_DOT[priority] ?? PRIORITY_DOT.routine
 
 const getSampleTypeIcon = (type) => {
   const { Icon, className } = SAMPLE_TYPE_ICON[type] ?? DEFAULT_SAMPLE_ICON
@@ -446,19 +459,7 @@ export default function LaboratoryModule() {
   const { orgInfo: hookOrgInfo } = useOrgSettings()
   useEffect(() => { setOrgInfo(hookOrgInfo) }, [hookOrgInfo])
 
-  // Filtered data
-  // Orders now filter + page on the server (see ordersTable above).
-
-  // The four slices of the order/result lists the screens actually work with.
-  // Each was previously written out in full at every use — 19 places in all,
-  // the "in progress or collected" one alone appearing six times inside the
-  // Results tab. Naming them once means a status can be added to a group in one
-  // edit instead of six, and the definitions can be read side by side rather
-  // than reconstructed from whichever copy you happen to be looking at.
-  //
-  // useMemo because `orders` is the capped 2,000-row fetch: without it every one
-  // of those 19 expressions walked the whole array again on every keystroke in
-  // the search box.
+ 
   const activeOrders = useMemo(
     () => orders.filter(o => o.status !== 'completed' && o.status !== 'cancelled'),
     [orders]
@@ -570,12 +571,7 @@ export default function LaboratoryModule() {
 
   const handleCollectSample = async (orderId) => {
     try {
-      // The accession number comes back from the server, which mints it from the
-      // per-hospital counter inside the same transaction as the status change.
-      // This used to call a local `ACC-${Math.random()}` generator TWICE — once
-      // for the request and once for the row below — so the number shown on
-      // screen (and written on the tube) was a different number from the one
-      // saved against the order, every single time.
+     
       const updated = await labApi.updateOrder(orderId, {
         status: 'sample_collected',
         sampleCollectedAt: new Date().toISOString(),
@@ -704,6 +700,11 @@ export default function LaboratoryModule() {
       ))
       toast.success('Order completed')
       fetchStats()
+      // The Orders tab pages on the server, so the row it is showing is a stale
+      // copy until this refetches. Collect and Process already do it; completing
+      // did not, so an order finished from the Results tab still read
+      // "In Progress" on the Orders tab until someone hit Refresh by hand.
+      ordersTable.refresh()
     } catch (error) {
       console.error('Failed to complete order:', error)
       toast.error('Failed to complete order')
@@ -987,9 +988,7 @@ export default function LaboratoryModule() {
                           }}
                         >
                           <div className="flex items-center gap-3">
-                            <div className={`w-2 h-10 rounded-full ${order.priority === 'stat' ? 'bg-red-500 animate-pulse' :
-                              order.priority === 'urgent' ? 'bg-orange-500' : 'bg-yellow-500'
-                              }`} />
+                            <div className={`w-2 h-10 rounded-full ${getPriorityDotColor(order.priority)}`} />
                             <div>
                               <div className="flex items-center gap-2">
                                 <span className="font-mono text-sm">{order.orderNumber}</span>
@@ -1058,7 +1057,7 @@ export default function LaboratoryModule() {
                       <div className="space-y-2">
                         {activeOrders.map(order => (
                           <div key={order.id} className="flex items-start gap-3 p-3 rounded-lg border border-yellow-100 bg-yellow-50 hover:bg-yellow-100 cursor-pointer transition" onClick={() => { setSelectedOrder(order); setShowViewOrderDialog(true) }}>
-                            <div className={`mt-1 w-2 h-2 rounded-full flex-shrink-0 ${order.priority === 'stat' ? 'bg-red-500 animate-pulse' : order.priority === 'urgent' ? 'bg-orange-500' : 'bg-yellow-400'}`} />
+                            <div className={`mt-1 w-2 h-2 rounded-full flex-shrink-0 ${getPriorityDotColor(order.priority)}`} />
                             <div className="flex-1 min-w-0">
                               <div className="flex items-center gap-2">
                                 <span className="font-mono text-xs text-gray-500">{order.orderNumber}</span>
@@ -1147,7 +1146,7 @@ export default function LaboratoryModule() {
                   <Select value={categoryFilter} onValueChange={setCategoryFilter}>
                     <SelectTrigger className="w-40">
                       <SelectValue placeholder="Category" />
-                    </SelectTrigger>
+                    </SelectTrigger>3
                     <SelectContent>
                       <SelectItem value="all">All Categories</SelectItem>
                       <SelectItem value="hematology">Hematology</SelectItem>

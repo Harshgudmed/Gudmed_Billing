@@ -1,5 +1,6 @@
 import { db } from '../config/db.js'
 import { patientFullName } from '../lib/patientName.js'
+import { round2 } from '../lib/money.js'
 
 // All endpoints here serve the logged-in patient ONLY, using the patientId baked
 // into their JWT. A patient can never see another patient's data.
@@ -65,9 +66,12 @@ export async function getMyDashboard(req, res, next) {
     ])
 
     const billable = invoices.filter(i => i.status !== 'cancelled' && i.paymentStatus !== 'cancelled')
-    const totalBilled = billable.reduce((s, i) => s + (i.totalAmount || 0), 0)
-    const totalPaid = billable.reduce((s, i) => s + (i.amountPaid || 0), 0)
-    const balanceDue = billable.reduce((s, i) => s + (i.balanceDue != null ? i.balanceDue : (i.totalAmount || 0) - (i.amountPaid || 0)), 0)
+    // Money columns are Float, so adding 25 of them accumulates binary error —
+    // the patient's own portal would show ₹12,345.67000000001 as their balance.
+    // Round the sum, not each term: rounding first would move the total.
+    const totalBilled = round2(billable.reduce((s, i) => s + (i.totalAmount || 0), 0))
+    const totalPaid = round2(billable.reduce((s, i) => s + (i.amountPaid || 0), 0))
+    const balanceDue = round2(billable.reduce((s, i) => s + (i.balanceDue != null ? i.balanceDue : (i.totalAmount || 0) - (i.amountPaid || 0)), 0))
 
     const now = new Date()
     const upcomingAppointments = appointments.filter(

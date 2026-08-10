@@ -21,10 +21,21 @@ export async function getAll(req, res, next) {
     // baseWhere = everything EXCEPT the status filter, so the summary counts show
     // the full status distribution no matter which status tab is active.
     const baseWhere = { organizationId: ORG_ID }
-    const searchWhere = patientSearchWhere(search, null, (term) => [
+    // `relation: null` told the shared helper that Patient's five searchable columns
+    // live on THIS model. Three of them do not: a PreTriage row is a walk-in who is
+    // not a patient yet, so it carries firstName, lastName and phone — never
+    // middleName, mrn or phonePrimary. Prisma refused the query outright, so every
+    // keystroke returned 400 and took the list and all four stat cards with it.
+    //
+    // Passing 'patient' points those five at the joined Patient table, where they
+    // really exist, and PreTriage's own columns go in as extras. Both kinds of row
+    // are now findable: a walk-in by the name typed at the desk, and a registered
+    // patient by their UHID or the name on their record.
+    const searchWhere = patientSearchWhere(search, 'patient', (term) => [
       { screeningNumber: { contains: term, mode: 'insensitive' } },
       { phone: { contains: term } },
-      { patient: { is: { mrn: { contains: term, mode: 'insensitive' } } } },
+      { firstName: { contains: term, mode: 'insensitive' } },
+      { lastName: { contains: term, mode: 'insensitive' } },
     ])
     if (searchWhere) Object.assign(baseWhere, searchWhere)
     // Hospital-timezone day boundaries (see lib/dates.js).

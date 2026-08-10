@@ -1,6 +1,7 @@
 import { db } from '../config/db.js'
 import { getOrgId, getActor, safeMoney } from "../lib/reqContext.js";
 import { isOwned } from '../lib/tenant.js'
+import { stripIdentity } from '../lib/stripIdentity.js'
 import { patientSearchWhere } from '../lib/patientSearch.js'
 import { nextSeriesNumber } from "../lib/counters.js";
 import { resolveRequestedById } from '../lib/requestedBy.js'
@@ -313,11 +314,7 @@ export const update = async (req, res, next) => {
 
       // Strip identity/tenant fields so a passthrough body can't relocate this
       // order to another org or corrupt its identity via the `...updates` spread.
-      delete updates.organizationId
-      delete updates.id
-      delete updates.patientId
-      delete updates.orderNumber
-      delete updates.requestedById
+      stripIdentity(updates, 'labOrder')
       // The accession number labels the physical tube, so it is minted HERE and
       // never accepted from the client. The UI used to build it as
       // `ACC-${Math.floor(Math.random() * 10000)}` — 10,000 possible values
@@ -326,7 +323,6 @@ export const update = async (req, res, next) => {
       // technician holding the tube. Worse, it called that twice per collection,
       // once for this request and once for the on-screen copy, so the number
       // printed on the tube was never the number stored against the order.
-      delete updates.accessionNumber
 
       // Tenant guard: only touch an order that belongs to this org.
       const owned = await db.labOrder.findFirst({ where: { id, organizationId: ORGANIZATION_ID }, select: { id: true } })
@@ -361,9 +357,7 @@ export const update = async (req, res, next) => {
 
       // Strip identity/tenant fields so a passthrough body can't reattach this
       // result to another org's order or corrupt its identity via `...updates`.
-      delete updates.organizationId
-      delete updates.id
-      delete updates.orderId
+      stripIdentity(updates, 'labResult')
 
       // Tenant guard via the parent order's org (LabResult.organizationId is nullable,
       // so verify ownership through the order it belongs to). Blocks cross-tenant
@@ -391,8 +385,7 @@ export const update = async (req, res, next) => {
 
       // Strip identity/tenant fields so a passthrough body can't relocate this
       // test catalog entry to another org via the `...updates` spread.
-      delete updates.organizationId
-      delete updates.id
+      stripIdentity(updates, 'labTest')
 
       // Reject a negative/non-numeric price on update too (passthrough schema
       // doesn't type-check it), so it can't slip back in via edit.

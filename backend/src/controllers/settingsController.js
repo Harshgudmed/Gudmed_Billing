@@ -49,7 +49,7 @@ export async function updateOrganization(req, res, next) {
 export async function getUsers(req, res, next) {
   try {
     const ORG_ID = getOrgId(req)
-    const { search } = req.query
+    const { search, role, departmentId, lean } = req.query
 
     const where = { organizationId: ORG_ID }
     if (search) {
@@ -58,15 +58,73 @@ export async function getUsers(req, res, next) {
         { email: { contains: search, mode: 'insensitive' } },
       ]
     }
+    // Narrow SERVER-SIDE, and only when asked. Every existing caller sends
+    // neither param, so its `where` and its payload are byte-identical to before.
+    //
+    // These are filters, not a limit. A `limit=` here would be the rule 5 mistake:
+    // it caps the list and the rows past it vanish without saying so, which is how
+    // 97% of the pharmacy catalogue once became unsearchable. A filter narrows
+    // honestly — every doctor in the chosen department is returned, and no other.
+    //
+    // `role` alone barely helps and it was measured before being written: 1,128 of
+    // this hospital's 1,132 users ARE doctors, so `role=doctor` saves four rows.
+    // `departmentId` is what earns its place, because the booking form picks a
+    // department first and only then shows doctors:
+    //     all doctors, full select   336.0 KB · 1,128 rows
+    //     one department, lean       18.0 KB ·   116 rows
+    if (role) where.role = role
+    if (departmentId) where.departmentId = departmentId
 
-    const include = { department: { select: { id: true, name: true } } }
+    // Only the columns the callers actually read. Every screen that hits this
+    // endpoint does so to fill a doctor/staff dropdown — it needs a name, a role
+    // and a department, not the whole row. Selecting explicitly (rather than
+    // taking everything and deleting the two worst fields afterwards) is what
+    // stops the next column added to User from silently joining the payload.
+    const select = lean
+      // The booking form reads exactly these five. `consultationFee` lives ONLY
+      // here, not in the default shape, so the five screens that already call this
+      // endpoint do not each grow by 25 KB for a field none of them reads.
+      //
+      // AppointmentFormDialog.jsx:137 renders `Dr. Name (₹fee)` and has always
+      // shown just `Dr. Name`, because the field it reads was never sent. Asking
+      // for it explicitly is what makes that label true.
+      ? {
+          id: true,
+          fullName: true,
+          specialization: true,
+          departmentId: true,
+          consultationFee: true,
+        }
+      : {
+          id: true,
+          fullName: true,
+          email: true,
+          role: true,
+          phone: true,
+          specialization: true,
+          isActive: true,
+          departmentId: true,
+          department: { select: { id: true, name: true } },
+        }
     // This endpoint also populates doctor dropdowns app-wide (register-patient,
     // OPD, IPD, day-care…), which need EVERY row — so fullListTake:null keeps the
     // non-paginated branch uncapped. It only paginates when the Settings table
     // passes page/limit.
-    const body = await listResponse(db.user, { where, include, orderBy: { fullName: 'asc' }, req, fullListTake: null })
-    // Never expose password hashes to the client.
-    body.data = body.data.map(({ passwordHash, ...u }) => u)
+    // The whitelist above is what keeps `passwordHash` and `preferences` out.
+    //
+    // `preferences` holds each doctor's whole weekly timetable as JSON; across
+    // 1,132 staff it made this response 1,698 KB instead of the ~90 KB the
+    // dropdowns actually need — on eight screens that call this endpoint only to
+    // list doctors (appointments, register-patient, OPD, IPD, ward notes,
+    // day-care, rooms, settings).
+    //
+    // Nothing in the browser reads it from here: the frontend has no reference
+    // to `preferences` at all. The three places that genuinely need a timetable
+    // select it themselves server-side (appointmentController,
+    // doctorAccountabilityController, roomController), and the hook that shows
+    // one (useDoctorTimetable) fetches it per doctor from
+    // /doctor-accountability?resource=timetable.
+    const body = await listResponse(db.user, { where, select, orderBy: { fullName: 'asc' }, req, fullListTake: null })
     res.json(body)
   } catch (err) { next(err) }
 }

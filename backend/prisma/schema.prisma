@@ -349,6 +349,7 @@ model Patient {
   pharmacySales       PharmacySale[]
   labOrders           LabOrder[]
   radiologyOrders     RadiologyOrder[]
+  clinicalOrders      ClinicalOrder[]
   invoices            Invoice[]
   payments            Payment[]
   admissions          Admission[]
@@ -2108,6 +2109,11 @@ model ClinicalOrder {
 
   organization Organization         @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   admission    Admission            @relation(fields: [admissionId], references: [id], onDelete: Restrict)
+  // patientId was a bare column with no relation declared, so Prisma never asked
+  // the database for a foreign key — the one Patient reference still unenforced
+  // after the other 17 were restored. Cascade matches LabOrder and RadiologyOrder:
+  // an order belongs to the patient, it does not merely sit beside them.
+  patient      Patient              @relation(fields: [patientId], references: [id], onDelete: Cascade)
   events       ClinicalOrderEvent[]
   tasks        OrderTask[]
 

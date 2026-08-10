@@ -1,9 +1,10 @@
 // Deployment: 2026-06-05 19:45:00 - Secrets configured
-import { useState, useEffect, lazy, Suspense } from 'react'
+import { useState, useEffect, lazy, Suspense, memo, useMemo, useCallback } from 'react'
 import { Routes, Route, NavLink, Navigate, useParams, Link } from 'react-router-dom'
 import { Toaster } from 'sonner'
 import { LogOut, ShieldCheck, Stethoscope, ConciergeBell, HeartPulse, ChevronRight, ClipboardList } from 'lucide-react'
 import client from '@/api/client'
+import { getOrgRaw } from '@/lib/orgSettings'
 import Logo from '@/components/Logo'
 // The app's one spinner — see components/ui/spinner.jsx for the
 // button-vs-standalone colour rule.
@@ -132,12 +133,16 @@ function useBranding() {
   useEffect(() => {
     const loadSettings = async () => {
       try {
-        const res = await client.get('/settings')
-        const s = res.data?.settings || {}
-        const orgName = res.data?.name || s.hospitalName
+        // Shares the cached /settings fetch with getOrgSettings() rather than
+        // issuing its own — this was the second of the two identical calls every
+        // module made on every page load.
+        const org = await getOrgRaw()
+        const res = { data: org }
+        const s = org?.settings || {}
+        const orgName = org?.name || s.hospitalName
         if (s.navbarColor)   setNavbarColor(s.navbarColor)
         if (orgName)         setHospitalName(orgName)
-        if (res.data?.modulesEnabled) setModulesEnabled(res.data.modulesEnabled)
+        if (org?.modulesEnabled) setModulesEnabled(org.modulesEnabled)
         // primaryColor/secondaryColor are their own columns on Organization
         // (Settings → Organization → colour picker) — NOT inside the nested
         // `settings` JSON blob (`s`, which only holds currency/timezone/etc).
@@ -168,11 +173,22 @@ function useBranding() {
     }
   }, [])
 
-  return { navbarColor, hospitalName, modulesEnabled }
+  // A fresh object here would be a new reference on every render of the caller,
+  // so any consumer that passes the whole thing down as a prop would defeat
+  // memoisation below it. Both callers destructure today; keep the contract
+  // stable so the next one cannot reintroduce that.
+  return useMemo(
+    () => ({ navbarColor, hospitalName, modulesEnabled }),
+    [navbarColor, hospitalName, modulesEnabled],
+  )
 }
 
 // Sidebar shell shared by both modes. `navItems` is a list of { to, label, end }.
-function Shell({ navItems, navbarColor, hospitalName, homeTo = '/', footer, children }) {
+// memo'd because it renders one NavLink per module: without it, any state change
+// anywhere above it (a dialog tab, a dropdown, a keystroke in a module's search
+// box) re-rendered all 17 sidebar links. Every prop passed in must be a stable
+// reference or this bail-out never fires — see the useMemo calls in both callers.
+const Shell = memo(function Shell({ navItems, navbarColor, hospitalName, homeTo = '/', footer, children }) {
   const light = isLightColor(navbarColor)
   const colored = navbarColor !== '#ffffff' && navbarColor !== '#fff'
 
@@ -220,40 +236,50 @@ function Shell({ navItems, navbarColor, hospitalName, homeTo = '/', footer, chil
       <main className="ml-56 p-6">{children}</main>
     </div>
   )
-}
+})
 
 // ── Legacy mode (AUTH_ENFORCED off): original behaviour, no login ───────────────
 function LegacyApp() {
   const { navbarColor, hospitalName, modulesEnabled } = useBranding()
-  const navItems = LEGACY_NAV.filter(({ to }) => {
-    const mod = MODULE_BY_PATH[to]
-    return !mod || modulesEnabled[mod] !== false
-  }).map(item => ({ ...item, end: item.to === '/' }))
+  const navItems = useMemo(
+    () => LEGACY_NAV.filter(({ to }) => {
+      const mod = MODULE_BY_PATH[to]
+      return !mod || modulesEnabled[mod] !== false
+    }).map(item => ({ ...item, end: item.to === '/' })),
+    [modulesEnabled],
+  )
+
+  // Shell's `children` is a prop like any other: a fresh element here on every
+  // render would fail memo's comparison and re-render the whole sidebar anyway.
+  // The route table is static, so it never needs rebuilding.
+  const pages = useMemo(() => (
+    <Suspense fallback={<PageLoader />}>
+      <Routes>
+        <Route path="/" element={<DashboardPage />} />
+        <Route path="/appointments"          element={<AppointmentsPage />} />
+        <Route path="/pre-triage"            element={<PreTriagePage />} />
+        <Route path="/queue"                 element={<QueuePage />} />
+        <Route path="/opd"                   element={<OpdPage />} />
+        <Route path="/patients"              element={<PatientsPage />} />
+        <Route path="/laboratory"            element={<LaboratoryPage />} />
+        <Route path="/radiology"             element={<RadiologyPage />} />
+        <Route path="/day-care"              element={<DayCarePage />} />
+        <Route path="/ambulance"             element={<AmbulancePage />} />
+        <Route path="/insurance"             element={<InsurancePage />} />
+        <Route path="/death-certificates"    element={<DeathCertificatePage />} />
+        <Route path="/inpatient"             element={<InpatientPage />} />
+        <Route path="/pharmacy"              element={<PharmacyPage />} />
+        <Route path="/billing"               element={<BillingPage />} />
+        <Route path="/doctor-accountability" element={<DoctorAccountabilityPage />} />
+        <Route path="/settings"              element={<SettingsPage />} />
+        <Route path="*"                      element={<NotFoundPage />} />
+      </Routes>
+    </Suspense>
+  ), [])
 
   return (
     <Shell navItems={navItems} navbarColor={navbarColor} hospitalName={hospitalName} homeTo="/">
-      <Suspense fallback={<PageLoader />}>
-        <Routes>
-          <Route path="/" element={<DashboardPage />} />
-          <Route path="/appointments"          element={<AppointmentsPage />} />
-          <Route path="/pre-triage"            element={<PreTriagePage />} />
-          <Route path="/queue"                 element={<QueuePage />} />
-          <Route path="/opd"                   element={<OpdPage />} />
-          <Route path="/patients"              element={<PatientsPage />} />
-          <Route path="/laboratory"            element={<LaboratoryPage />} />
-          <Route path="/radiology"             element={<RadiologyPage />} />
-          <Route path="/day-care"              element={<DayCarePage />} />
-          <Route path="/ambulance"             element={<AmbulancePage />} />
-          <Route path="/insurance"             element={<InsurancePage />} />
-          <Route path="/death-certificates"    element={<DeathCertificatePage />} />
-          <Route path="/inpatient"             element={<InpatientPage />} />
-          <Route path="/pharmacy"              element={<PharmacyPage />} />
-          <Route path="/billing"               element={<BillingPage />} />
-          <Route path="/doctor-accountability" element={<DoctorAccountabilityPage />} />
-          <Route path="/settings"              element={<SettingsPage />} />
-          <Route path="*"                      element={<NotFoundPage />} />
-        </Routes>
-      </Suspense>
+      {pages}
     </Shell>
   )
 }
@@ -265,21 +291,33 @@ function RoleLayout() {
   const { navbarColor, hospitalName, modulesEnabled } = useBranding()
 
   const cfg = ROLES[role]
-  if (!cfg) return <Navigate to={user ? homePathFor(user.role) : '/'} replace />
+
+  // Every hook below must stay ABOVE the `!cfg` early return — React counts
+  // hooks per render, and an unknown role would otherwise run fewer of them and
+  // crash the whole app rather than redirecting.
 
   // Modules this role may see, minus any disabled via Settings → Modules.
-  const allowed = cfg.modules.filter((key) => {
-    const toggle = MODULES[key]?.toggle
-    return !toggle || modulesEnabled[toggle] !== false
-  })
+  // ROLES is a module-level table, so `cfg` is a stable reference per role.
+  const allowed = useMemo(
+    () => (cfg?.modules || []).filter((key) => {
+      const toggle = MODULES[key]?.toggle
+      return !toggle || modulesEnabled[toggle] !== false
+    }),
+    [cfg, modulesEnabled],
+  )
 
-  const navItems = allowed.map((key) => {
-    const m = MODULES[key]
-    const to = m.path ? `/${role}/${m.path}` : `/${role}`
-    return { to, label: m.label, end: !m.path }
-  })
+  const navItems = useMemo(
+    () => allowed.map((key) => {
+      const m = MODULES[key]
+      const to = m.path ? `/${role}/${m.path}` : `/${role}`
+      return { to, label: m.label, end: !m.path }
+    }),
+    [allowed, role],
+  )
 
-  const footer = (
+  // `logout` is already stable (useCallback in AuthProvider), so this element is
+  // built once — a fresh one each render would break Shell's memo comparison.
+  const footer = useMemo(() => (
     <div className="border-t border-white/15 p-3">
       <button
         onClick={logout}
@@ -289,24 +327,32 @@ function RoleLayout() {
         Sign out
       </button>
     </div>
-  )
+  ), [logout])
+
+  // Same reason as `footer`: `children` is a prop, and a new element every
+  // render would re-render the sidebar even with everything else memoised.
+  const pages = useMemo(() => (
+    <Suspense fallback={<PageLoader />}>
+      <Routes>
+        {allowed.map((key) => {
+          const m = MODULES[key]
+          const Page = PAGE_BY_MODULE[key]
+          if (!Page) return null
+          return m.path
+            ? <Route key={key} path={m.path} element={<Page />} />
+            : <Route key={key} index element={<Page />} />
+        })}
+        {/* Any path not allowed for this role → role home */}
+        <Route path="*" element={<Navigate to={homePathFor(role)} replace />} />
+      </Routes>
+    </Suspense>
+  ), [allowed, role])
+
+  if (!cfg) return <Navigate to={user ? homePathFor(user.role) : '/'} replace />
 
   return (
     <Shell navItems={navItems} navbarColor={navbarColor} hospitalName={hospitalName} homeTo={homePathFor(role)} footer={footer}>
-      <Suspense fallback={<PageLoader />}>
-        <Routes>
-          {allowed.map((key) => {
-            const m = MODULES[key]
-            const Page = PAGE_BY_MODULE[key]
-            if (!Page) return null
-            return m.path
-              ? <Route key={key} path={m.path} element={<Page />} />
-              : <Route key={key} index element={<Page />} />
-          })}
-          {/* Any path not allowed for this role → role home */}
-          <Route path="*" element={<Navigate to={homePathFor(role)} replace />} />
-        </Routes>
-      </Suspense>
+      {pages}
     </Shell>
   )
 }

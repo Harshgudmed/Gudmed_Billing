@@ -9,7 +9,7 @@
 // 4-digit space (10,000 values) collides constantly once a single org+day
 // carries hundreds of entries (birthday paradox). See lib/counters.js for the
 // same problem already solved once for Invoice/LabOrder/RadiologyOrder numbers.
-import { financialYear } from '../lib/money.js'
+import { ymdInZone } from '../lib/dates.js'
 
 /**
  * Draw the next queue number for an org+service-area+day, atomically.
@@ -31,7 +31,16 @@ import { financialYear } from '../lib/money.js'
  * @returns e.g. "OPD20260716-000123"
  */
 export async function nextQueueNumber(client, organizationId, serviceArea) {
-  const ymd = new Date().toISOString().slice(0, 10).replace(/-/g, '')
+  // The hospital's day, not UTC's. `toISOString()` is UTC, so between 00:00 and
+  // 05:29 IST it still reports yesterday — a token minted then was stamped with
+  // yesterday's date AND kept incrementing yesterday's counter, because the date is
+  // half of the counter key. Emergency runs around the clock, so this was live
+  // every single night: 2,674 existing tokens carry a date that does not match the
+  // day they were created.
+  //
+  // The same mistake was found and fixed once before, for the dashboard's "today".
+  // ymdInZone is the helper that exists so it does not have to be found a third time.
+  const ymd = ymdInZone().replace(/-/g, '')
   const prefix = (serviceArea || 'gen').substring(0, 3).toUpperCase()
   const series = `QUEUE_${prefix}_${ymd}`
   const counter = await client.billCounter.upsert({
@@ -41,8 +50,3 @@ export async function nextQueueNumber(client, organizationId, serviceArea) {
   })
   return `${prefix}${ymd}-${String(counter.value).padStart(6, '0')}`
 }
-
-// financialYear import kept unused-free: not needed here, this module only
-// needs the calendar day. (Left out intentionally — see nextSeriesNumber for
-// the financial-year-keyed sibling used by billing documents.)
-void financialYear

@@ -2,6 +2,8 @@ import { db } from '../config/db.js'
 import whatsapp from '../services/whatsappService.js'
 import { getSession, setSession, clearSession } from '../services/botStateService.js'
 import { formatRupee as rupee } from '../lib/money.js'
+import { nextSeriesNumber, invoiceProbe } from '../lib/counters.js'
+import { consumeFromBatches, recordStockChange } from '../pharmacy/stockService.js'
 
 const ORG_ID = process.env.ORGANIZATION_ID || 'org-demo' // used in non-req helpers (bot callbacks)
 
@@ -81,8 +83,15 @@ async function handlePaymentChoice(phone, reply, session) {
   }
 }
 
+// A failed checkout must NOT be confirmed and must NOT clear the session —
+// the patient's cart is the only record left of what they were buying.
+const CHECKOUT_FAILED =
+  `Sorry — we could not complete that order just now. Nothing has been charged.\n` +
+  `Please show this message at the pharmacy counter and our staff will finish it for you.`
+
 async function handleUpiRef(phone, ref, session) {
   const invoice = await createSaleAndInvoice(session, 'UPI', ref)
+  if (!invoice) return whatsapp.sendMessage(phone, CHECKOUT_FAILED)
   clearSession(phone)
   await whatsapp.sendMessage(phone, receiptMsg(session, invoice, 'UPI', ref))
 }
@@ -90,6 +99,7 @@ async function handleUpiRef(phone, ref, session) {
 async function handleCashConfirm(phone, reply, session) {
   if (['DONE', 'YES', 'Y', '1', 'PAID', 'OK'].includes(reply)) {
     const invoice = await createSaleAndInvoice(session, 'Cash', 'Cash at counter')
+    if (!invoice) return whatsapp.sendMessage(phone, CHECKOUT_FAILED)
     clearSession(phone)
     await whatsapp.sendMessage(phone, receiptMsg(session, invoice, 'Cash', 'Paid at counter'))
   } else {
@@ -101,6 +111,7 @@ async function handleCashConfirm(phone, reply, session) {
 async function handleCardConfirm(phone, reply, session) {
   if (['DONE', 'YES', 'Y', '1', 'PAID', 'OK'].includes(reply)) {
     const invoice = await createSaleAndInvoice(session, 'Card', 'Card at counter')
+    if (!invoice) return whatsapp.sendMessage(phone, CHECKOUT_FAILED)
     clearSession(phone)
     await whatsapp.sendMessage(phone, receiptMsg(session, invoice, 'Card', 'Paid at counter'))
   } else {
@@ -155,61 +166,120 @@ function receiptMsg(session, invoice, method, ref) {
 // ── DB helpers ───────────────────────────────────────────────────────────────
 
 async function createSaleAndInvoice(session, paymentMethod, reference) {
-  const ts = Date.now()
   try {
-    // Create pharmacy sale
-    const saleItems = session.items.map(m => ({
-      drugId:      m.drugId || null,
-      drugName:    m.drugName,
-      quantity:    m.quantity,
-      unitPrice:   m.unitPrice || 0,
-      total:       (m.unitPrice || 0) * m.quantity,
-    }))
-    const subtotal = saleItems.reduce((s, it) => s + it.total, 0)
+    return await db.$transaction(async (tx) => {
+      // Create pharmacy sale
+      const saleItems = session.items.map(m => ({
+        drugId:      m.drugId || null,
+        drugName:    m.drugName,
+        quantity:    m.quantity,
+        unitPrice:   m.unitPrice || 0,
+        total:       (m.unitPrice || 0) * m.quantity,
+      }))
+      const subtotal = saleItems.reduce((s, it) => s + it.total, 0)
 
-    await db.pharmacySale.create({
-      data: {
-        organizationId: ORG_ID,
-        patientId:      session.patientId || null,
-        prescriptionId: session.prescriptionId || null,
-        servedById:     null,
-        saleType:       'prescription',
-        items:          JSON.stringify(saleItems),
-        subtotal,
-        totalAmount:    session.total,
-        paymentStatus:  'paid',
-        paymentMethod,
-        amountPaid:     session.total,
-        amountDue:      0,
-        receiptNumber:  `RCP-${ts}`,
-      },
-    })
-
-    // Create invoice (only patients with a real patientId — patientId is required)
-    let invoice = { invoiceNumber: `INV-${ts}` }
-    if (session.patientId) {
-      invoice = await db.invoice.create({
+      // Payment.receiptNumber is globally @unique, so every path that writes one
+      // must draw from the SAME counter. A separate 'PHARMACY_RECEIPT' series
+      // would restart at 1 and walk straight back through numbers OPD already
+      // issued (its counter is well past 800).
+      const receiptNumber = await nextSeriesNumber(tx, ORG_ID, 'OPD_RCP', 'RCP')
+      const sale = await tx.pharmacySale.create({
         data: {
           organizationId: ORG_ID,
-          patientId:      session.patientId,
-          consultationId: session.consultationId || null,
-          invoiceNumber:  `INV-${ts}`,
+          patientId:      session.patientId || null,
+          prescriptionId: session.prescriptionId || null,
+          servedById:     null,
+          saleType:       'prescription',
           items:          JSON.stringify(saleItems),
           subtotal,
           totalAmount:    session.total,
           paymentStatus:  'paid',
+          paymentMethod,
           amountPaid:     session.total,
-          balanceDue:     0,
-          status:         'paid',
-          notes:          `WhatsApp ${paymentMethod} payment — ref: ${reference}`,
+          amountDue:      0,
+          receiptNumber,
         },
       })
-    }
 
-    return invoice
+      // Draw down pharmacy stock. consumeFromBatches only moves the BATCH rows;
+      // `PharmacyDrug.quantityInStock` and the StockLedger are the invariant the
+      // rest of the system reads, so recordStockChange has to run too — exactly
+      // as sale.controller.js and prescription.controller.js do. Without it the
+      // same box stayed sellable at the counter and every later ledger
+      // balanceAfter was wrong.
+      //
+      // The create above already returns the row, so its id is used directly. The
+      // previous version re-read it with findUnique({ where: { receiptNumber } }),
+      // which threw on EVERY WhatsApp checkout: `receiptNumber` is not a standalone
+      // unique — the constraint is @@unique([organizationId, receiptNumber]), because
+      // each hospital runs its own receipt series and two hospitals will legitimately
+      // both hold RCP-2026-27-000001. Prisma rejects a findUnique on a non-unique
+      // field outright, so the transaction rolled back and no sale was ever recorded.
+      for (const item of session.items) {
+        if (item.drugId && item.quantity > 0) {
+          await consumeFromBatches(tx, { drugId: item.drugId, quantity: item.quantity })
+          await recordStockChange(tx, {
+            organizationId: ORG_ID,
+            drugId: item.drugId,
+            changeType: 'sale',
+            quantityDelta: -item.quantity,
+            reference: sale?.id ?? receiptNumber,
+            note: `WhatsApp sale ${receiptNumber}`,
+            createdById: null,
+          })
+        }
+      }
+
+      // Create invoice (only patients with a real patientId — patientId is required)
+      let invoice = null
+      if (session.patientId) {
+        // Series key MUST match billingController's ('INV'). A separate key would
+        // be a separate BillCounter row starting at 1, minting INV-<FY>-000001 —
+        // a number the billing counter issued long ago — and the @unique on
+        // (organizationId, invoiceNumber) would roll this whole checkout back
+        // after the customer had already paid.
+        const invoiceNumber = await nextSeriesNumber(tx, ORG_ID, 'INV', 'INV', invoiceProbe(tx, ORG_ID))
+        invoice = await tx.invoice.create({
+          data: {
+            organizationId: ORG_ID,
+            patientId:      session.patientId,
+            consultationId: session.consultationId || null,
+            invoiceNumber,
+            items:          JSON.stringify(saleItems),
+            subtotal,
+            totalAmount:    session.total,
+            paymentStatus:  'paid',
+            amountPaid:     session.total,
+            balanceDue:     0,
+            status:         'paid',
+            notes:          `WhatsApp ${paymentMethod} payment — ref: ${reference}`,
+          },
+        })
+
+        await tx.payment.create({
+          data: {
+            organizationId: ORG_ID,
+            patientId:      session.patientId,
+            invoiceId:      invoice.id,
+            receiptNumber,
+            amount:         session.total,
+            paymentMethod,
+            paymentDate:    new Date(),
+            notes:          `WhatsApp payment ref: ${reference}`,
+          }
+        })
+      }
+
+      return invoice
+    })
   } catch (err) {
+    // The whole $transaction rolled back: no sale, no stock movement, no
+    // invoice, no payment. Returning a fake receipt here made every caller
+    // send "Payment Confirmed!" for money that was never recorded, and then
+    // clear the session — leaving nothing to recover from. Signal failure so
+    // the caller can tell the patient to go to the counter instead.
     console.error('[Bot] createSaleAndInvoice error:', err.message)
-    return { invoiceNumber: `INV-${ts}` }
+    return null
   }
 }
 

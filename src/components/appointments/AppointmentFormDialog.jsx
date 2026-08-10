@@ -32,6 +32,11 @@ export default function AppointmentFormDialog({
   isSubmitting,
   onCancel,
   getPatient,
+  // Whether this dialog also renders its own "New Appointment" button. True keeps
+  // Appointments exactly as it was — the button IS how the module opens the form.
+  // Billing opens it from the Consultation category instead, and rendering the
+  // button there put a stray "New Appointment" on the New Invoice tab.
+  showTrigger = true,
 }) {
   // Bookable times come from the DOCTOR'S timetable (Doctor Accountability), not a
   // fixed list — the same source RegisterPatientForm books against. The old static
@@ -51,7 +56,7 @@ export default function AppointmentFormDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      {!isEdit && (
+      {!isEdit && showTrigger && (
         <DialogTrigger asChild>
           <Button>
             <Plus className="h-4 w-4 mr-2" />
