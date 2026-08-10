@@ -154,12 +154,14 @@ Lighthouse performance 55 · accessibility 89 (localhost — optimistic)
   <p>Two attempts produced numbers that could not be true. The first summed V8's nested ranges and reported more bytes used than loaded — impossible, and the giveaway. That is fixed. The second ran against the production build and reported 0% waste for every module, which is an artefact of minification: the whole file collapses into a few large functions, and V8 marks a function used the moment it runs once.<br><br>So the JS figures in this report are from the dev server and are <strong>comparative only</strong>. Getting an honest absolute needs source maps applied to the built bundle. Recorded here rather than left as a number nobody should trust.</p>
   <p class="tag">both attempts retracted — see the reasoning above</p>
 </div>
-<h2><span class="n">Fixed</span>1 item</h2>
-<p class="lede">Verified after the change, not just edited.</p>
+<details style="margin-top:3.5rem;border-top:1px solid var(--rule);padding-top:1.25rem">
+  <summary style="cursor:pointer;font-family:var(--serif);font-size:1.35rem">Fixed — 1 item, already dealt with</summary>
+<p class="lede" style="margin-top:.75rem">Verified after the change with a before and an after, not just edited.</p>
 <div class="item good">
   <h4>10.3 MB of generated audit output was about to be committed <span class="chip fixed">REPO-GITIGNORE · fixed</span></h4>
   <p><code>git add .</code> staged <strong>223 files</strong>, of which 90 were produced by the audit rather than written for it: <code>e2e/audit-report/</code> (51 Lighthouse screenshots, 19 JSON reports, 16 run logs — 7.9 MB) and <code>docs/images/</code> (2.4 MB). Committed once, they live in the history forever, conflict on every parallel run, and bury the twenty files that are the actual change.</p>
   <p class="tag">FIXED: .gitignore now excludes the produced artefacts and keeps the tools and the report. git add . went from 223 files to 133. Every product asset — public/login, src/assets, all source — verified still tracked.</p>
 </div>
+</details>
 <p class="meta" style="margin-top:4rem"><a href="index.html" style="color:inherit">← all modules</a></p>
 </div>

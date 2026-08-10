@@ -63,7 +63,7 @@
       "id": "PH3",
       "severity": "medium",
       "title": "/api/pharmacy/stats takes 574–1,204 ms to return 375 bytes",
-      "detail": "A tiny answer that takes that long is a query problem, not a payload one — whatever it aggregates has no index.",
+      "detail": "A tiny answer that takes that long is a query problem, not a payload one — whatever it aggregates has no index.<br><br><strong>Re-verified 10 August.</strong> Re-measured 226 ms (runs 211/226/228). See PERF-REVERIFY.",
       "proof": "measured from the live API log"
     },
     {
@@ -380,7 +380,7 @@
       "id": "QU7",
       "severity": "critical",
       "title": "A month date-range takes 3.8 seconds to return ten rows",
-      "detail": "<code>/queue?startDate=2026-08-01&amp;endDate=2026-08-31&amp;page=1&amp;limit=10</code> — <strong>3,793 ms for 9.5 KB and ten rows</strong>. A week takes 1,280 ms. A tiny answer that takes that long is a query problem, not a payload one: the date range is being scanned rather than indexed. On Render, with real network latency and a cold connection, this is the difference between a counter working and a counter waiting.",
+      "detail": "<code>/queue?startDate=2026-08-01&amp;endDate=2026-08-31&amp;page=1&amp;limit=10</code> — <strong>3,793 ms for 9.5 KB and ten rows</strong>. A week takes 1,280 ms. A tiny answer that takes that long is a query problem, not a payload one: the date range is being scanned rather than indexed. On Render, with real network latency and a cold connection, this is the difference between a counter working and a counter waiting.<br><br><strong>Re-verified 10 August.</strong> Queue, month range: re-measured as a median of 163 ms (runs 78/163/3,501). The original was a single cold-pool sample. See PERF-REVERIFY.",
       "proof": "measured — 3793 ms (month), 1280 ms (week), 905 ms (unfiltered). e2e/audit-report/live/f-queue.log"
     },
     {
@@ -1459,6 +1459,27 @@
       "title": "The profiler was counting components that had not re-rendered",
       "detail": "Recorded as a finding against the tooling, because it is the reason a number in this report was wrong and every render count in it was inflated. <code>e2e/profiler.mjs</code> counted any fiber with <code>actualDuration &gt; 0</code>; React leaves that value in place after a render, so untouched components were counted on every commit. It now filters on <code>actualStartTime</code> against the previous commit and reports <code>selfMs</code> with children subtracted — without that second part a router wrapping a slow module is reported as the slow thing.",
       "proof": "e2e/profiler.mjs, 10 August. Same action before and after the tool fix: NavLink ×306 → 0, worst self time 6,742 ms → 44 ms."
+    },
+    {
+      "module": "queue",
+      "id": "PERF-REVERIFY",
+      "severity": "high",
+      "ok": true,
+      "kind": "tooling",
+      "title": "Re-verified — 9 numbers from the performance page, re-taken from scratch",
+      "detail": "Every figure on <code>docs/modules/performance.html</code> was re-measured against the running app on 10 August (<code>e2e/reverify-performance.mjs</code>). Four improved, three were artefacts of the profiler bug, and two could not be reached and are recorded as unmeasured rather than as passing.<br><br><strong>API timings — all four far lower than the page claims</strong><br><code>/pharmacy/stats</code> 1,204 ms → <strong>226 ms</strong> (runs 211/226/228)<br>Queue, a month-wide range 2,396 ms → <strong>163 ms</strong> (runs 78/163/<strong>3,501</strong>)<br><code>/pharmacy/drugs</code> 435 ms → <strong>58 ms</strong> (runs 57/58/60)<br>Doctor Slots payload 1,064 KB → <strong>552 KB</strong>, 1,128 rows (a real fix, commit f0751ee)<br><br><strong>Why they were high:</strong> taken as single samples against a cold connection pool. The Queue spread above is the proof — the same query in the same minute returned in 78 ms and in 3,501 ms. The original number was observed; it was not the steady state, and the page presented it as one. Timings here are now medians of three with the spread shown.<br><br><strong>Render counts — three were the measuring tool</strong><br>Queue, <code>Primitive.div</code> on a filter change: 808× → <strong>196×</strong>, 5.9 ms self<br>Queue, <code>Primitive.div</code> while typing: 517× → <strong>341×</strong>, 8 ms self<br>Pharmacy, <code>Primitive.div</code>: 2,254 ms → <strong>6.5 ms</strong> (worst is now <code>PharmacyModule</code> at 100 ms, which is a real and separate thing to look at)<br><br><strong>Not measured — stated as such, not as clean</strong><br>Appointments' two numbers (NavLink ×99, module 1,209 ms) could not be re-taken: the search box was not on any tab the run opened, so nothing was typed. Zero renders from a control nobody touched is a broken test, and reading it as a pass is the exact error this entry exists to correct.",
+      "proof": "e2e/reverify-performance.mjs, 10 August — 4 improved, 3 artefacts, 2 not measured. Each API figure is the median of three runs with the full spread recorded."
+    },
+    {
+      "module": "pharmacy",
+      "id": "PHARM-XLSX",
+      "severity": "medium",
+      "fixed": true,
+      "kind": "bundle",
+      "rule": 10,
+      "title": "FIXED — Pharmacy loaded the spreadsheet parser for every shift",
+      "detail": "<code>ImportMedicinesDialog</code> pulls in SheetJS and was imported statically, so every pharmacist paid for it on page load to run an import that happens when a new price list arrives. Now <code>lazy()</code> and gated on <code>showImport</code>, matching Laboratory and Radiology.<br><br>Found by <code>scripts/lazy-scan.mjs</code>, which reads the source and reports every candidate rather than however far somebody got by hand. After its own false positives were removed — seventeen <code>src/pages/*Page.jsx</code> files importing their own module, all already behind <code>lazy()</code> in App.jsx, and one library already inside a lazy component — this was the only real candidate left in the application.",
+      "proof": "measured 10 August — Pharmacy page load carries 0 KB of xlsx; ImportMedicinesDialog is its own 6.97 KB chunk; clicking Import still opens the dialog with no console error"
     }
   ]
 }

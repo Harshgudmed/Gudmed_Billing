@@ -25,7 +25,10 @@ import {
   Download,
   Upload,
 } from "lucide-react";
-import ImportMedicinesDialog from "./ImportMedicinesDialog";
+// lazy, for the same reason BarcodeScanner above already is: this dialog pulls in
+// SheetJS to read a spreadsheet of medicines, and a pharmacist opens it when a new
+// price list arrives, not on every shift.
+const ImportMedicinesDialog = lazy(() => import("./ImportMedicinesDialog"));
 import MedicineNameAutocomplete from "./MedicineNameAutocomplete";
 import PosDrugCombo from './PosDrugCombo';
 import { printPharmacyReceipt } from "@/components/billing/utils/printBilling";
@@ -630,11 +633,18 @@ ${rx.notes ? `<div class="note-bar"><strong>Notes:</strong> ${escapeHtml(rx.note
           <TabsTrigger value="purchase-orders">Purchase Orders</TabsTrigger>
           <TabsTrigger value="sales">Sales & Reports</TabsTrigger>
         </TabsList>
-        <ImportMedicinesDialog
-          open={showImport}
-          onClose={() => setShowImport(false)}
-          onImported={() => drugPage.refresh()}
-        />
+        {/* Gated on `open`, not merely hidden by it. A lazy component fetches its
+            chunk the moment it renders, so a mounted-but-closed dialog would pull
+            SheetJS on every page load and the lazy() above would buy nothing. */}
+        {showImport && (
+          <Suspense fallback={null}>
+            <ImportMedicinesDialog
+              open={showImport}
+              onClose={() => setShowImport(false)}
+              onImported={() => drugPage.refresh()}
+            />
+          </Suspense>
+        )}
 
         <DashboardTab
           stats={stats}

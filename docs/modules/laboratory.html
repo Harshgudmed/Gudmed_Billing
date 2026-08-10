@@ -155,13 +155,15 @@ Lighthouse performance 55 · accessibility 89 (localhost — optimistic)
   <p><code>labImport.controller.js:38-48</code> and <code>radiologyImport.controller.js:34-44</code> return the identical shape from identical code. Import is one behaviour with two catalogues behind it — the shape rule 9 describes.</p>
   <p class="tag">scripts/duplication-scan.mjs</p>
 </div>
-<h2><span class="n">Fixed</span>1 item</h2>
-<p class="lede">Verified after the change, not just edited.</p>
+<details style="margin-top:3.5rem;border-top:1px solid var(--rule);padding-top:1.25rem">
+  <summary style="cursor:pointer;font-family:var(--serif);font-size:1.35rem">Fixed — 1 item, already dealt with</summary>
+<p class="lede" style="margin-top:.75rem">Verified after the change with a before and an after, not just edited.</p>
 <div class="item good">
   <h4>FIXED — the 429 KB spreadsheet parser loaded for everyone who opened Laboratory <span class="chip fixed">LAB-XLSX · fixed</span></h4>
   <p><code>BulkImportDialog</code> pulls in <code>xlsx</code>, the heaviest dependency in the application, and it exists so an administrator can occasionally import a catalogue. It was imported statically by both Laboratory and Radiology, so every visitor paid for it on page load.<br><br>It is now <code>lazy()</code> <em>and gated on <code>showImport</code></em>. The gate is the part that matters: a lazy component fetches its chunk the moment it renders, and this dialog was rendered on every page with <code>open={false}</code> — so <code>lazy()</code> alone would have changed nothing while appearing to fix it.</p>
   <p class="note">10</p>
   <p class="tag">measured 10 August — Laboratory route JS 1,519 KB → 1,203 KB, of which xlsx 850 KB → 0 KB. Verified the dialog still opens with its content in both modules (e2e/smoke-lazy.mjs).</p>
 </div>
+</details>
 <p class="meta" style="margin-top:4rem"><a href="index.html" style="color:inherit">← all modules</a></p>
 </div>

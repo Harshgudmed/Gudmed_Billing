@@ -149,12 +149,14 @@ Lighthouse performance 25 · accessibility 89 (localhost — optimistic)
   <p><strong>Correction to an earlier claim in this report:</strong> profiler counted fibers that did not re-render</p>
   <p class="tag">measured: Wards & Beds: NavLink re-rendered 85× (12 ms) — the app shell should n</p>
 </div>
-<h2><span class="n">Checked and correct</span>1 item</h2>
-<p class="lede">A report that only lists failures cannot be told apart from one that only looked for them.</p>
+<details style="margin-top:3.5rem;border-top:1px solid var(--rule);padding-top:1.25rem">
+  <summary style="cursor:pointer;font-family:var(--serif);font-size:1.35rem">Checked and correct — 1 item, already dealt with</summary>
+<p class="lede" style="margin-top:.75rem">A report that only lists failures cannot be told apart from one that only looked for them.</p>
 <div class="item good">
   <h4>The bed race holds — two admissions, one bed, one wins <span class="chip fixed">IP1 · correct</span></h4>
   <p>Compare-and-set is correct: the bed's expected status is part of the where clause, so the second writer matches zero rows and gets a 409. Recorded because the equivalent check in Queue DID fail and had to be rewritten.</p>
   <p class="tag">backend/scripts/ipd-bed-race.mjs — call A 201, call B 409 IPD_BED_UNAVAILABLE</p>
 </div>
+</details>
 <p class="meta" style="margin-top:4rem"><a href="index.html" style="color:inherit">← all modules</a></p>
 </div>

@@ -145,8 +145,9 @@
   <p>12 filter selections caused no network call. That is correct for a client-side filter and for a reset that changes nothing — but it is also exactly what an unwired filter looks like, and the two cannot be told apart from outside. Each needs a look at the code to decide which it is.</p>
   <p class="tag">measured: filter "All → All" fired no request — client-side, or the filter is no</p>
 </div>
-<h2><span class="n">Fixed</span>3 items</h2>
-<p class="lede">Verified after the change, not just edited.</p>
+<details style="margin-top:3.5rem;border-top:1px solid var(--rule);padding-top:1.25rem">
+  <summary style="cursor:pointer;font-family:var(--serif);font-size:1.35rem">Fixed — 3 items, already dealt with</summary>
+<p class="lede" style="margin-top:.75rem">Verified after the change with a before and an after, not just edited.</p>
 <div class="item good">
   <h4>There was no way to ask what was billed today <span class="chip fixed">BI5 · fixed</span></h4>
   <p>Invoices could be narrowed by search, status and type — never by date. The one question a counter asks every evening had no control at all, and the backend did not read <code>startDate</code>/<code>endDate</code> either.<br><br>It now reuses <code>useDateFilter</code>, the control Patients, Pre-Triage and Queue already share, and filters in the DATABASE: a page-local filter would only ever search the ten rows on screen and would report "no invoices in March" while March sat on page four.<br><br>Two details that decide whether it is right: <code>dayRange</code> resolves the day in the hospital's timezone, so a bill raised after 18:30 IST does not fall into tomorrow; and an empty range is not assigned at all, because <code>invoiceDate: {}</code> matches <em>nothing</em> in Prisma and a blank filter would have returned zero invoices instead of all.</p>
@@ -162,8 +163,10 @@
   <p>An outstanding item said a consultation raised from the Billing counter used a fixed ₹500 OPD fee with no department, doctor, slot or fee mapping. Re-checked against the running app: choosing <em>OPD / Consultation</em> no longer adds a cart line at all. Its handler returns early and opens the real booking dialog (<code>BillingModule.jsx:1369</code>), which carries the department picker and the doctor's slots, and the fee is resolved server-side from that doctor's slab.<br><br>Fixed in commit <code>d8d6c58</code>. Recorded here because the item was still circulating as open.</p>
   <p class="tag">measured 10 August — clicking the Consultation radio does not select it (the early return runs) and the booking dialog opens with a department picker and slot/timing fields</p>
 </div>
-<h2><span class="n">Checked and correct</span>6 items</h2>
-<p class="lede">A report that only lists failures cannot be told apart from one that only looked for them.</p>
+</details>
+<details style="margin-top:3.5rem;border-top:1px solid var(--rule);padding-top:1.25rem">
+  <summary style="cursor:pointer;font-family:var(--serif);font-size:1.35rem">Checked and correct — 6 items, already dealt with</summary>
+<p class="lede" style="margin-top:.75rem">A report that only lists failures cannot be told apart from one that only looked for them.</p>
 <div class="item good">
   <h4>Catalogue pricing is correct — the server prices every line <span class="chip fixed">BI1 · correct</span></h4>
   <p>A request carrying its own unitPrice is ignored; <code>lib/catalogPrice.js</code> looks the price up server-side. Recorded because the counter multiplying a client-supplied price is a bug this repo has already paid for.</p>
@@ -196,5 +199,6 @@
   <p>An outstanding item said a consultation raised from the Billing counter used a fixed ₹500 OPD fee with no department, doctor, slot or fee mapping. Re-checked against the running app: choosing <em>OPD / Consultation</em> no longer adds a cart line at all. Its handler returns early and opens the real booking dialog (<code>BillingModule.jsx:1369</code>), which carries the department picker and the doctor's slots, and the fee is resolved server-side from that doctor's slab.<br><br>Fixed in commit <code>d8d6c58</code>. Recorded here because the item was still circulating as open.</p>
   <p class="tag">measured 10 August — clicking the Consultation radio does not select it (the early return runs) and the booking dialog opens with a department picker and slot/timing fields</p>
 </div>
+</details>
 <p class="meta" style="margin-top:4rem"><a href="index.html" style="color:inherit">← all modules</a></p>
 </div>
