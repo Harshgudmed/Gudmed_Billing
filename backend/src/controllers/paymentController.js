@@ -2,6 +2,7 @@ import { db } from '../config/db.js'
 import { getOrgId } from '../lib/reqContext.js'
 import { nextSeriesNumber } from '../lib/counters.js'
 import { recalcInvoice } from '../lib/invoiceLedger.js'
+import { round2 } from '../lib/money.js'
 import {
   createOrder,
   createPaymentLink,
@@ -177,7 +178,9 @@ export async function createLink(req, res, next) {
       success:  true,
       linkId:   link.id,
       shortUrl: link.short_url,
-      amount:   link.amount / 100,
+      // Razorpay speaks paise. 12345/100 is 123.45000000000000284 in binary
+      // float, and this value is shown to the payer next to the pay button.
+      amount:   round2(link.amount / 100),
       status:   link.status,
     })
   } catch (err) {
