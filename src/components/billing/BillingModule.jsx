@@ -19,6 +19,11 @@ import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Checkbox } from '@/components/ui/checkbox'
 import { printInvoice, printReceipt, printLabReceipt, printRadiologyReceipt, printPharmacyReceipt } from './utils/printBilling'
+import { useForm } from 'react-hook-form'
+import { zodResolver } from '@hookform/resolvers/zod'
+import { appointmentSchema } from '@/components/appointments/appointmentSchema'
+import AppointmentFormDialog from '@/components/appointments/AppointmentFormDialog'
+import { useBookingSource } from '@/components/common/hooks/useBookingSource'
 
 // ── Catalogue ─────────────────────────────────────────────────────────────────
 const CATALOGUE = {
@@ -261,6 +266,81 @@ export default function BillingModule({ onBack }) {
   // Department drives the whole New Bill form — no department chosen = nothing shown.
   const [department, setDepartment] = useState('')
   const [activeCat, setActiveCat] = useState('')
+
+  // ── Booking a consultation from the counter ─────────────────────────────────
+  // Choosing "Consultation" used to add a line from a hardcoded list — OPD ₹500,
+  // Follow-up ₹300 — with no department, no doctor, no slot and no appointment
+  // behind it. The counter took money and the doctor never learned a patient was
+  // coming: no queue token, no commission, and a fee that had nothing to do with
+  // the doctor's slab.
+  //
+  // So it opens the real booking form instead, and books through
+  // POST /appointments — which writes appointment, queue entry, invoice (number
+  // from the atomic counter) and doctorCommission in ONE transaction. Billing must
+  // NOT also create an invoice here: that would produce two bills for one visit,
+  // and leave the queue and the commission out entirely.
+  const [showBooking, setShowBooking] = useState(false)
+  const [bookingPatient, setBookingPatient] = useState(null)
+  const [bookingSubmitting, setBookingSubmitting] = useState(false)
+
+  const bookingForm = useForm({
+    resolver: zodResolver(appointmentSchema),
+    mode: 'onBlur',
+    defaultValues: {
+      patientId: '', departmentId: '', doctorId: '',
+      appointmentDate: new Date(), appointmentTime: '',
+      appointmentType: 'new_patient', priority: 'normal',
+      consultationFee: '', notes: '',
+    },
+  })
+
+  const bookingDeptId = bookingForm.watch('departmentId')
+  const bookingDoctorId = bookingForm.watch('doctorId')
+  const bookingPatientId = bookingForm.watch('patientId')
+  const bookingDate = bookingForm.watch('appointmentDate')
+
+  // Departments, the doctors IN that department, that doctor's slabs, and what
+  // this patient is actually charged — the same source Appointments books from.
+  const booking = useBookingSource({
+    departmentId: bookingDeptId,
+    doctorId: bookingDoctorId,
+    patientId: bookingPatientId,
+    date: bookingDate instanceof Date ? bookingDate.toISOString() : bookingDate,
+  })
+
+  const submitBooking = async (data) => {
+    setBookingSubmitting(true)
+    try {
+      // The server resolves the fee from the doctor's slab and REFUSES a
+      // client-supplied one (appointmentController.js:401), so the number shown in
+      // the form is for the user, never for the request.
+      const { consultationFee, ...payload } = data
+      const res = await client.post('/appointments', {
+        ...payload,
+        appointmentDate: payload.appointmentDate instanceof Date
+          ? payload.appointmentDate.toISOString()
+          : payload.appointmentDate,
+      })
+      const appt = res?.data ?? res
+      toast.success(
+        appt?.invoice?.invoiceNumber
+          ? `Appointment booked · invoice ${appt.invoice.invoiceNumber}`
+          : 'Appointment booked',
+      )
+      setShowBooking(false)
+      setBookingPatient(null)
+      bookingForm.reset()
+      // The booking created an invoice inside its own transaction, so the list and
+      // the stat cards are stale until this refetches — the same gap that left a
+      // completed lab order still reading "In Progress" on the Orders tab.
+      // `fetchAll` is declared further down; this only runs on submit, long after.
+      fetchAll()
+    } catch (e) {
+      toast.error(e?.response?.data?.error || e?.message || 'Could not book the appointment')
+    } finally {
+      setBookingSubmitting(false)
+    }
+  }
   const [catSearch, setCatSearch] = useState('')
   const [saving, setSaving] = useState(false)
 
@@ -1236,6 +1316,11 @@ export default function BillingModule({ onBack }) {
                             value={cat}
                             checked={department === cat}
                             onChange={() => {
+                              // A consultation is not a catalogue line — it is an
+                              // appointment with a doctor, a slot and a fee that
+                              // comes from that doctor's slab. Book it properly
+                              // instead of adding ₹500 to a cart.
+                              if (cat === 'Consultation') { setShowBooking(true); return }
                               // Switching department = a fresh, department-specific bill.
                               if (department && cat !== department && form.items.length > 0) {
                                 if (!window.confirm('Switching department will clear the current cart. Continue?')) return
@@ -1981,6 +2066,29 @@ export default function BillingModule({ onBack }) {
           </div>
         </DialogContent>
       </Dialog>
+
+      {/* Booking a consultation from the counter. Same dialog Appointments uses —
+          same department list, same doctor slots from the doctor's timetable, same
+          slab-derived fee — so a bill raised here is the bill the doctor's slab
+          says, not a hardcoded ₹500. */}
+      <AppointmentFormDialog
+        open={showBooking}
+        onOpenChange={setShowBooking}
+        form={bookingForm}
+        onSubmit={submitBooking}
+        selectedPatient={bookingPatient}
+        setSelectedPatient={setBookingPatient}
+        setPatients={() => {}}
+        uniqueDepartments={booking.departments}
+        availableDoctors={booking.doctors}
+        doctors={booking.doctors}
+        feeCalculation={booking.fee}
+        feeCalculationLoading={booking.loading.fee}
+        isSubmitting={bookingSubmitting}
+        onCancel={() => { setShowBooking(false); setBookingPatient(null); bookingForm.reset() }}
+        getPatient={() => bookingPatient}
+        showTrigger={false}
+      />
     </div>
   )
 }
