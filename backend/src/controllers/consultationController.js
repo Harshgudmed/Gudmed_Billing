@@ -141,7 +141,7 @@ export async function create(req, res, next) {
           notes: consultationData.notes,
         },
         include: {
-          patient: { select: { ...PATIENT_NAME_SELECT, } },
+          patient: { select: { ...PATIENT_NAME_SELECT, dateOfBirth: true, gender: true } },
           doctor: { select: { id: true, fullName: true } },
         },
       })
@@ -212,7 +212,7 @@ export async function create(req, res, next) {
       const fullConsultation = await tx.consultation.findFirst({
         where: { id: newConsultation.id, organizationId },
         include: {
-          patient: { select: { ...PATIENT_NAME_SELECT, } },
+          patient: { select: { ...PATIENT_NAME_SELECT, dateOfBirth: true, gender: true } },
           doctor: { select: { id: true, fullName: true } },
           prescriptions: true,
           labOrders: {
@@ -372,7 +372,7 @@ export async function update(req, res, next) {
       return await tx.consultation.findFirst({
         where: { id, organizationId },
         include: {
-          patient: { select: { ...PATIENT_NAME_SELECT, } },
+          patient: { select: { ...PATIENT_NAME_SELECT, dateOfBirth: true, gender: true } },
           doctor: { select: { id: true, fullName: true } },
           prescriptions: true,
           labOrders: {
