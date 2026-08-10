@@ -27,6 +27,23 @@ const RETRYABLE = new Set([
   // Raised an exception on pre-existing double-bookings and blocked the deploy.
   // Now resolves them itself and uses CREATE UNIQUE INDEX IF NOT EXISTS.
   '20260716100500_appointment_slot_unique',
+
+  // Failed on its first deploy with
+  //     ERROR: constraint "PatientDocument_patientId_fkey" already exists
+  // because production HAS these keys — they went missing only from the
+  // development copy during a data trim, and the migration was written from that
+  // copy as if they were gone everywhere.
+  //
+  // Every ALTER is now wrapped in
+  //     DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = …)
+  // so it adds what is absent and leaves what is present. Verified by running
+  // both against a database that already holds all eighteen: 18/18 blocks ran
+  // clean, and the constraint count was 18 before and 18 after.
+  //
+  // The second one never ran — the deploy stopped at the first — but it carries
+  // the same guard, so it is listed for the same reason.
+  '20260808120000_restore_patient_foreign_keys',
+  '20260808130000_clinical_order_patient_fk',
 ])
 
 if (!process.env.DATABASE_URL) {
