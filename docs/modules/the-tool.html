@@ -1,0 +1,173 @@
+<meta charset="utf-8">
+<title>GudMed — The audit tool</title>
+<style>
+  :root{
+    --ink:#16233B; --ink-2:#3B4A66; --ink-3:#6B7891;
+    --paper:#FBFAF7; --card:#FFFFFF; --rule:#E3E0D8;
+    --crit:#B4553A; --warn:#B8862F; --good:#2F6F6B; --idle:#8A8578;
+    --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+    --serif:"Iowan Old Style","Palatino Linotype",Palatino,Georgia,serif;
+    --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+  }
+  @media (prefers-color-scheme:dark){
+    :root{ --ink:#E8E4DA; --ink-2:#B6BCC9; --ink-3:#8892A5;
+      --paper:#12161F; --card:#181D28; --rule:#2A313F;
+      --crit:#E08063; --warn:#DCAE55; --good:#68AFA8; --idle:#7E8798; }
+  }
+  :root[data-theme="light"]{ --ink:#16233B; --ink-2:#3B4A66; --ink-3:#6B7891;
+    --paper:#FBFAF7; --card:#FFFFFF; --rule:#E3E0D8;
+    --crit:#B4553A; --warn:#B8862F; --good:#2F6F6B; --idle:#8A8578; }
+  :root[data-theme="dark"]{ --ink:#E8E4DA; --ink-2:#B6BCC9; --ink-3:#8892A5;
+    --paper:#12161F; --card:#181D28; --rule:#2A313F;
+    --crit:#E08063; --warn:#DCAE55; --good:#68AFA8; --idle:#7E8798; }
+
+  body{ background:var(--paper); color:var(--ink); font-family:var(--sans);
+        line-height:1.6; margin:0; padding:0 1.25rem 5rem; }
+  .wrap{ max-width:62rem; margin:0 auto; }
+
+  header.top{ padding:3.5rem 0 2rem; border-bottom:2px solid var(--ink); margin-bottom:2.5rem; }
+  h1{ font-family:var(--serif); font-size:clamp(2rem,4.5vw,3rem); line-height:1.1;
+      margin:0 0 .5rem; letter-spacing:-.01em; text-wrap:balance; }
+  .sub{ color:var(--ink-2); font-size:1.05rem; max-width:44rem; margin:0 0 1.25rem; }
+  .meta{ font-family:var(--mono); font-size:.75rem; color:var(--ink-3);
+         text-transform:uppercase; letter-spacing:.08em; }
+
+  h2{ font-family:var(--serif); font-size:1.65rem; margin:3.5rem 0 .35rem;
+      padding-top:1.25rem; border-top:1px solid var(--rule); text-wrap:balance; }
+  h2 .n{ font-family:var(--mono); font-size:.7rem; color:var(--ink-3);
+         display:block; letter-spacing:.12em; margin-bottom:.4rem; text-transform:uppercase; }
+  h3{ font-size:1.05rem; margin:2rem 0 .5rem; letter-spacing:-.005em; }
+  p{ max-width:46rem; }
+  .lede{ color:var(--ink-2); margin:.25rem 0 1.5rem; max-width:46rem; }
+
+  .scores{ display:grid; grid-template-columns:repeat(auto-fit,minmax(9rem,1fr));
+           gap:1px; background:var(--rule); border:1px solid var(--rule); margin:2rem 0; }
+  .score{ background:var(--card); padding:1.1rem 1rem; }
+  .score b{ display:block; font-family:var(--mono); font-size:1.9rem;
+            line-height:1; font-weight:600; letter-spacing:-.02em; }
+  .score span{ display:block; font-size:.74rem; color:var(--ink-3); margin-top:.45rem;
+               text-transform:uppercase; letter-spacing:.06em; }
+  .score.crit b{ color:var(--crit); } .score.good b{ color:var(--good); }
+  .score.warn b{ color:var(--warn); } .score.idle b{ color:var(--idle); }
+
+  .item{ background:var(--card); border:1px solid var(--rule);
+         border-left:3px solid var(--rule); padding:1.1rem 1.25rem; margin:1rem 0; }
+  .item.crit{ border-left-color:var(--crit); }
+  .item.warn{ border-left-color:var(--warn); }
+  .item.good{ border-left-color:var(--good); }
+  .item h4{ margin:0 0 .5rem; font-size:1rem; display:flex; gap:.6rem;
+            align-items:baseline; flex-wrap:wrap; }
+  .item p{ margin:.4rem 0; font-size:.93rem; color:var(--ink-2); }
+  .item p.why{ color:var(--ink); }
+  .item p:last-child{ margin-bottom:0; }
+
+  .chip{ font-family:var(--mono); font-size:.66rem; text-transform:uppercase;
+         letter-spacing:.07em; padding:.16rem .5rem; border:1px solid currentColor;
+         border-radius:2px; white-space:nowrap; }
+  .chip.fixed{ color:var(--good); } .chip.open{ color:var(--crit); }
+  .chip.part{ color:var(--warn); } .chip.wait{ color:var(--idle); }
+
+  .tag{ font-family:var(--mono); font-size:.68rem; color:var(--ink-3); }
+
+  table{ width:100%; border-collapse:collapse; margin:1.25rem 0; font-size:.88rem; }
+  .scroll{ overflow-x:auto; }
+  th{ text-align:left; font-size:.7rem; text-transform:uppercase; letter-spacing:.07em;
+      color:var(--ink-3); border-bottom:1.5px solid var(--ink-3); padding:.5rem .6rem; font-weight:600; }
+  td{ padding:.5rem .6rem; border-bottom:1px solid var(--rule); vertical-align:top; }
+  td.num,th.num{ text-align:right; font-family:var(--mono); font-variant-numeric:tabular-nums; }
+  tbody tr:hover{ background:color-mix(in srgb, var(--rule) 35%, transparent); }
+
+  code{ font-family:var(--mono); font-size:.86em;
+        background:color-mix(in srgb, var(--rule) 55%, transparent);
+        padding:.08em .34em; border-radius:2px; }
+  pre{ font-family:var(--mono); font-size:.79rem; background:var(--card);
+       border:1px solid var(--rule); border-left:3px solid var(--ink-3);
+       padding:.85rem 1rem; overflow-x:auto; line-height:1.5; margin:.9rem 0; }
+
+  .arrow{ font-family:var(--mono); color:var(--good); font-weight:600; }
+  .was{ color:var(--ink-3); text-decoration:line-through; }
+
+  ul{ max-width:46rem; padding-left:1.15rem; }
+  li{ margin:.35rem 0; }
+
+  .note{ font-size:.85rem; color:var(--ink-3); font-style:italic; max-width:44rem; }
+
+  @media print{
+    body{ background:#fff; color:#000; font-size:10.5pt; padding:0; }
+    .item,.score,pre,table{ break-inside:avoid; }
+    h2{ break-after:avoid; }
+    a{ text-decoration:none; color:#000; }
+  }
+</style>
+<div class="wrap">
+<p class="meta" style="padding-top:2rem"><a href="index.html" style="color:inherit">← all modules</a></p>
+<h2><span class="n">Section 04</span>The audit tool — why the old reports were wrong</h2>
+<p class="lede">The harness drove each module from a <em>hand-written</em> list of button and tab
+names. That list is always shorter than the module, and it goes stale silently.</p>
+
+<div class="item crit">
+  <h4>Appointments was “audited” having touched about a sixth of it</h4>
+  <p>Its entry was two fields — a search placeholder and four tab names. The module actually has
+  five tabs, nine icon-only buttons, five filters, five dialogs, two tables, three different
+  pagination mechanisms and 99 controls. The tool even counted icon-only buttons and then never
+  clicked them, because its only icon clicker required a <code>title</code> attribute those
+  buttons do not have.</p>
+  <p>Three further defects would have corrupted this report exactly as they corrupted the Patients
+  one: no date-filter handling at all; a false “fires per keystroke” verdict caused by waiting
+  1,200 ms between characters and thereby defeating every debounce; and wrong profile sub-tab
+  labels.</p>
+</div>
+
+<div class="item good">
+  <h4>Rebuilt around discovery and a coverage ledger <span class="chip fixed">done</span></h4>
+  <p>A module is now three fields — a key, a URL, a name. Everything else is read from the live
+  DOM on every run, so the same command works on all 14+ modules without being told anything
+  about them, and a button added next month is covered without editing anything.</p>
+  <p><strong>Naming was the hard part.</strong> A bare <code>&lt;Button&gt;&lt;ChevronLeft/&gt;&lt;/Button&gt;</code>
+  has no text, no <code>aria-label</code> and no <code>title</code> — Appointments has six.
+  lucide stamps its class on the svg, so <code>lucide-chevron-left</code> is a real name hiding in
+  the markup. That is what makes them clickable <em>and</em> reportable when missed.</p>
+  <p>Every run now ends with <code>found N · clicked M · skipped-write · skipped-destructive ·
+  unreachable · NOT CLICKED</code> — and lists the unclicked ones <strong>by name</strong>. A run
+  that claims everything passed without naming what it left out is the failure this replaces.</p>
+  <pre>node e2e/audit.mjs --deep --module &lt;key&gt; --lighthouse --json e2e/audit-report/&lt;key&gt;.json</pre>
+  <p><strong>It found five bugs in itself</strong>, which is the strongest evidence it works:
+  unnamed buttons named after the discovery counter (so one button consumed a whole category's
+  budget while 31 calendar-day buttons beside it were never touched); unreachable controls retried
+  forever; the final sweep overwriting deliberate skips with “NOT CLICKED”; a recursive profiler
+  walk that made the app itself the bottleneck; and a Lighthouse login that scored the login page.</p>
+  <p class="tag">e2e/discover.mjs · netwatch.mjs · profiler.mjs · lighthouse.mjs ·
+  fixtures/appointmentLifecycle.mjs</p>
+</div>
+
+<h3>The check that was missing: did the response answer the question?</h3>
+<p>Everything above measures how big a response was and how long it took. None of it asks whether
+the response is the answer to the request. A call can be fast, small, 200 OK — and wrong:</p>
+<pre>?status=pending   → rows come back that are not pending
+?limit=15         → sixteen rows arrive
+?doctorId=X       → another doctor's rows are in the list
+?date=2026-08-01  → rows from other days
+meta.total = 500  → but the first page is empty</pre>
+<p>None of that surfaces as an error. The screen renders, the numbers look plausible, and a filter
+that quietly does not filter is how one doctor ends up reading another's list. Size and timing are
+blind to all of it.</p>
+<p><code>e2e/contract.mjs</code> now compares every request's query string against the rows that
+came back, on every call the harness records. It is deliberately conservative — it judges a
+parameter only where it maps unambiguously to a field on the returned rows, because a check that
+guesses produces noise, and noisy findings are how real ones get ignored.</p>
+<p class="note">This check is new, which means the four modules audited before it existed were
+never subjected to it. All five are being re-run rather than assumed clean — an audit that skipped
+a check is not an audit that passed it.</p>
+
+<h3>What it checks that a code review cannot</h3>
+<ul>
+  <li>The same URL fetched twice in one action — two components, one need</li>
+  <li>Two different URLs returning byte-identical bodies — a cache being bypassed</li>
+  <li>A query refetched with <em>nothing changed</em> since the last action — a bad <code>useEffect</code> dependency array</li>
+  <li>Responses over 100 KB, calls over 200 ms, any 4xx/5xx, <code>limit=</code> with three or more digits</li>
+  <li>A <code>cursor-pointer</code> element with no React <code>onClick</code> — looks clickable, does nothing</li>
+  <li><strong>Which components re-rendered, by name</strong> — not just how many commits</li>
+  <li>Per API call: status · method · path · KB · ms · <strong>row count</strong> · query string · payload</li>
+</ul>
+<p class="meta" style="margin-top:4rem"><a href="index.html" style="color:inherit">← all modules</a></p>
+</div>

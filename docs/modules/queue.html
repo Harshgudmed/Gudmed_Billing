@@ -1,0 +1,219 @@
+<meta charset="utf-8">
+<title>GudMed — Queue</title>
+<style>
+  :root{
+    --ink:#16233B; --ink-2:#3B4A66; --ink-3:#6B7891;
+    --paper:#FBFAF7; --card:#FFFFFF; --rule:#E3E0D8;
+    --crit:#B4553A; --warn:#B8862F; --good:#2F6F6B; --idle:#8A8578;
+    --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+    --serif:"Iowan Old Style","Palatino Linotype",Palatino,Georgia,serif;
+    --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+  }
+  @media (prefers-color-scheme:dark){
+    :root{ --ink:#E8E4DA; --ink-2:#B6BCC9; --ink-3:#8892A5;
+      --paper:#12161F; --card:#181D28; --rule:#2A313F;
+      --crit:#E08063; --warn:#DCAE55; --good:#68AFA8; --idle:#7E8798; }
+  }
+  :root[data-theme="light"]{ --ink:#16233B; --ink-2:#3B4A66; --ink-3:#6B7891;
+    --paper:#FBFAF7; --card:#FFFFFF; --rule:#E3E0D8;
+    --crit:#B4553A; --warn:#B8862F; --good:#2F6F6B; --idle:#8A8578; }
+  :root[data-theme="dark"]{ --ink:#E8E4DA; --ink-2:#B6BCC9; --ink-3:#8892A5;
+    --paper:#12161F; --card:#181D28; --rule:#2A313F;
+    --crit:#E08063; --warn:#DCAE55; --good:#68AFA8; --idle:#7E8798; }
+
+  body{ background:var(--paper); color:var(--ink); font-family:var(--sans);
+        line-height:1.6; margin:0; padding:0 1.25rem 5rem; }
+  .wrap{ max-width:62rem; margin:0 auto; }
+
+  header.top{ padding:3.5rem 0 2rem; border-bottom:2px solid var(--ink); margin-bottom:2.5rem; }
+  h1{ font-family:var(--serif); font-size:clamp(2rem,4.5vw,3rem); line-height:1.1;
+      margin:0 0 .5rem; letter-spacing:-.01em; text-wrap:balance; }
+  .sub{ color:var(--ink-2); font-size:1.05rem; max-width:44rem; margin:0 0 1.25rem; }
+  .meta{ font-family:var(--mono); font-size:.75rem; color:var(--ink-3);
+         text-transform:uppercase; letter-spacing:.08em; }
+
+  h2{ font-family:var(--serif); font-size:1.65rem; margin:3.5rem 0 .35rem;
+      padding-top:1.25rem; border-top:1px solid var(--rule); text-wrap:balance; }
+  h2 .n{ font-family:var(--mono); font-size:.7rem; color:var(--ink-3);
+         display:block; letter-spacing:.12em; margin-bottom:.4rem; text-transform:uppercase; }
+  h3{ font-size:1.05rem; margin:2rem 0 .5rem; letter-spacing:-.005em; }
+  p{ max-width:46rem; }
+  .lede{ color:var(--ink-2); margin:.25rem 0 1.5rem; max-width:46rem; }
+
+  .scores{ display:grid; grid-template-columns:repeat(auto-fit,minmax(9rem,1fr));
+           gap:1px; background:var(--rule); border:1px solid var(--rule); margin:2rem 0; }
+  .score{ background:var(--card); padding:1.1rem 1rem; }
+  .score b{ display:block; font-family:var(--mono); font-size:1.9rem;
+            line-height:1; font-weight:600; letter-spacing:-.02em; }
+  .score span{ display:block; font-size:.74rem; color:var(--ink-3); margin-top:.45rem;
+               text-transform:uppercase; letter-spacing:.06em; }
+  .score.crit b{ color:var(--crit); } .score.good b{ color:var(--good); }
+  .score.warn b{ color:var(--warn); } .score.idle b{ color:var(--idle); }
+
+  .item{ background:var(--card); border:1px solid var(--rule);
+         border-left:3px solid var(--rule); padding:1.1rem 1.25rem; margin:1rem 0; }
+  .item.crit{ border-left-color:var(--crit); }
+  .item.warn{ border-left-color:var(--warn); }
+  .item.good{ border-left-color:var(--good); }
+  .item h4{ margin:0 0 .5rem; font-size:1rem; display:flex; gap:.6rem;
+            align-items:baseline; flex-wrap:wrap; }
+  .item p{ margin:.4rem 0; font-size:.93rem; color:var(--ink-2); }
+  .item p.why{ color:var(--ink); }
+  .item p:last-child{ margin-bottom:0; }
+
+  .chip{ font-family:var(--mono); font-size:.66rem; text-transform:uppercase;
+         letter-spacing:.07em; padding:.16rem .5rem; border:1px solid currentColor;
+         border-radius:2px; white-space:nowrap; }
+  .chip.fixed{ color:var(--good); } .chip.open{ color:var(--crit); }
+  .chip.part{ color:var(--warn); } .chip.wait{ color:var(--idle); }
+
+  .tag{ font-family:var(--mono); font-size:.68rem; color:var(--ink-3); }
+
+  table{ width:100%; border-collapse:collapse; margin:1.25rem 0; font-size:.88rem; }
+  .scroll{ overflow-x:auto; }
+  th{ text-align:left; font-size:.7rem; text-transform:uppercase; letter-spacing:.07em;
+      color:var(--ink-3); border-bottom:1.5px solid var(--ink-3); padding:.5rem .6rem; font-weight:600; }
+  td{ padding:.5rem .6rem; border-bottom:1px solid var(--rule); vertical-align:top; }
+  td.num,th.num{ text-align:right; font-family:var(--mono); font-variant-numeric:tabular-nums; }
+  tbody tr:hover{ background:color-mix(in srgb, var(--rule) 35%, transparent); }
+
+  code{ font-family:var(--mono); font-size:.86em;
+        background:color-mix(in srgb, var(--rule) 55%, transparent);
+        padding:.08em .34em; border-radius:2px; }
+  pre{ font-family:var(--mono); font-size:.79rem; background:var(--card);
+       border:1px solid var(--rule); border-left:3px solid var(--ink-3);
+       padding:.85rem 1rem; overflow-x:auto; line-height:1.5; margin:.9rem 0; }
+
+  .arrow{ font-family:var(--mono); color:var(--good); font-weight:600; }
+  .was{ color:var(--ink-3); text-decoration:line-through; }
+
+  ul{ max-width:46rem; padding-left:1.15rem; }
+  li{ margin:.35rem 0; }
+
+  .note{ font-size:.85rem; color:var(--ink-3); font-style:italic; max-width:44rem; }
+
+  @media print{
+    body{ background:#fff; color:#000; font-size:10.5pt; padding:0; }
+    .item,.score,pre,table{ break-inside:avoid; }
+    h2{ break-after:avoid; }
+    a{ text-decoration:none; color:#000; }
+  }
+</style>
+<div class="wrap">
+<p class="meta" style="padding-top:2rem"><a href="index.html" style="color:inherit">← all modules</a></p>
+<header class="top">
+  <h1>Queue</h1>
+  <p class="sub">12 open · 4 fixed · 3 checked and correct. Every row says how it was proved.</p>
+  <p class="meta">generated from docs/findings.json — this module's findings only</p>
+</header>
+<h2><span class="n">Measured</span>What the walk reached</h2>
+<pre>reachable 123 · clicked 105 · 85% of what the walk was allowed to press
+NOT CLICKED 13
+page load  4 requests · 16.0 KB · slowest 114 ms
+Lighthouse performance 55 · accessibility 89 (localhost — optimistic)
+</pre>
+<h2><span class="n">Open</span>12 items</h2>
+<div class="item crit">
+  <h4>A month date-range takes 3.8 seconds to return ten rows <span class="chip open">QU7 · critical</span></h4>
+  <p><code>/queue?startDate=2026-08-01&amp;endDate=2026-08-31&amp;page=1&amp;limit=10</code> — <strong>3,793 ms for 9.5 KB and ten rows</strong>. A week takes 1,280 ms. A tiny answer that takes that long is a query problem, not a payload one: the date range is being scanned rather than indexed. On Render, with real network latency and a cold connection, this is the difference between a counter working and a counter waiting.</p>
+  <p class="tag">measured — 3793 ms (month), 1280 ms (week), 905 ms (unfiltered). e2e/audit-report/live/f-queue.log</p>
+</div>
+<div class="item crit">
+  <h4>Opening a row refetches the whole list AND loses the date filter <span class="chip open">QU3 · high</span></h4>
+  <p>Page load asks for today: <code>/queue?startDate=2026-08-09&amp;endDate=2026-08-09&amp;page=1&amp;limit=10</code>. Clicking a row to expand it fires <code>/queue?page=1&amp;limit=10</code> — 9.6 KB, ten rows, and <strong>no date range at all</strong>. The list silently stops being today's queue and becomes every queue entry ever, without the user touching the filter. Expanding a row should not refetch the list; refetching it without the filter that produced it is the part that changes what the counter is looking at.</p>
+  <p class="tag">measured — page load carried startDate/endDate, every row click did not. e2e/audit-report/live/f-queue.log</p>
+</div>
+<div class="item crit">
+  <h4>99 refetches of /queue in one walk <span class="chip open">QU9 · high</span></h4>
+  <p>The same <code>/queue?page=1&amp;limit=10</code> request fired 99 times while walking the module — on row expansions, on tab switches, and on actions with nothing to do with the queue list. At 9.6 KB each that is roughly 950 KB of repeated payload for one session.</p>
+  <p class="tag">counted from the run log</p>
+</div>
+<div class="item crit">
+  <h4>The Queue module imports the whole Billing module <span class="chip open">QU10 · high</span></h4>
+  <p><code>QueueModule.jsx:14</code> imports <code>BillingModule</code> directly and renders it inside a tab (<code>:269</code>). Billing is 1,986 lines. Every user who opens Queue downloads and mounts Billing whether they touch that tab or not — and the walk correctly found seven tabs under Queue, four of which are Billing's own. CLAUDE.md rule 10 asks for exactly the opposite: a module should arrive as its own chunk behind <code>React.lazy</code>.</p>
+  <p class="tag">read from the source, and confirmed by the walk discovering Billing's tabs and invoice rows under Queue</p>
+</div>
+<div class="item crit">
+  <h4>Slow calls — the worst is 3,793 ms on localhost <span class="chip open">QUEU-SLOW · high</span></h4>
+  <p>6 calls took long enough locally to become seconds on Render, where there is real network latency and a cold connection. Localhost has neither, so these numbers are a floor, not the user's experience.</p>
+  <p class="tag">measured: 3793 ms locally — seconds on Render — /api/queue</p>
+</div>
+<div class="item crit">
+  <h4>Queue loads 950 KB more JavaScript than Billing does — because it contains Billing <span class="chip open">QUEU-BUNDLE · high</span></h4>
+  <p>Coverage, measured per module: <code>queue 3,071 KB · billing 2,121 KB · laboratory 2,369 KB · dashboard 1,464 KB</code>. Queue is the heaviest module in the application and carries roughly 950 KB more than Billing itself. The cause was found by reading the code — <code>QueueModule.jsx:14</code> imports <code>BillingModule</code> directly and renders it in a tab — and this is the measurement that confirms it. A receptionist who only ever watches the queue still downloads and mounts the entire billing module.<br><br><strong>Read this as a comparison between modules, not as what a user downloads.</strong> It was taken against the dev server, where each file is served separately with its HMR wrapper, because the production build is minified and V8 then reports almost everything as used. Dev gives an honest ranking; only the CSS figure above is an honest absolute.</p>
+  <p class="tag">node e2e/devtools-extra.mjs — JS coverage per module, plus QueueModule.jsx:14 and :269</p>
+</div>
+<div class="item warn">
+  <h4>Every other row click costs 110–175 ms and a 9.6 KB refetch <span class="chip open">QU4 · medium</span></h4>
+  <p>Rows alternate 1 request / 0 requests — expanding fetches, collapsing does not. Eight expansions in the walk cost eight full list fetches. On a ward counter opening rows to read details, that is a 9.6 KB round trip per glance.</p>
+  <p class="tag">measured: 158 ms, 110 ms, 115 ms, 175 ms, 150 ms across consecutive row clicks</p>
+</div>
+<div class="item warn">
+  <h4>One row click re-renders 340 elements for 622 ms <span class="chip open">QU5 · medium</span></h4>
+  <p><code>Primitive.div 622.7ms ×340</code> on a single row expansion — higher than any other module measured so far (Pre-Triage's worst was 177). The whole table re-renders to open one row.</p>
+  <p class="tag">React profiler during the walk</p>
+</div>
+<div class="item warn">
+  <h4>Queries refetch when nothing about them has changed <span class="chip open">QUEU-REFETCH · medium</span></h4>
+  <p>5 actions refetched data that no user input had touched — the signature of a <code>useEffect</code> whose dependency array is wider than what the query actually depends on. Each one is a round trip the user waits for and a payload nobody asked for.</p>
+  <p class="tag">measured: Queue: refetched with nothing changed since "page load" — check the us</p>
+</div>
+<div class="item warn">
+  <h4>The same URL is fetched twice in one action <span class="chip open">QUEU-DUPE · medium</span></h4>
+  <p>1 action issued the identical request twice — two components asking for the same thing independently. It should be lifted into one hook and shared.</p>
+  <p class="tag">measured: same URL 2× in one action — two components fetching one thing — GET ht  (×4)</p>
+</div>
+<div class="item good">
+  <h4>PARTLY WITHDRAWN — The app shell repaints for things that happen inside the module <span class="chip open">QUEU-SHELL · low</span></h4>
+  <p>28 actions caused <code>App</code>, <code>Navigation</code> or <code>NavLink</code> to re-render. The worst is <strong>286×</strong> in a single action. The sidebar is not part of this module and has no reason to repaint when a table pages or a filter changes — this is one memoisation gap in <code>src/App.jsx</code>, and every module pays for it.<br><br><strong>Retracted 10 August — measuring error.</strong> This count came from <code>e2e/profiler.mjs</code>, which counted every fiber whose <code>actualDuration</code> was above zero. React leaves that value on a fiber after its last render, so a component that bailed out of a commit still carried the cost of whenever it did render, and the walk counted it again on every commit. The tool now compares <code>actualStartTime</code> against the end of the previous commit and reports self time with children subtracted. Re-measured on Queue — the module with the largest number here — three keystrokes produce <strong>App ×16 and Navigation ×16</strong>, and no NavLink renders at all: the memoisation in <code>src/App.jsx</code> (commit 15c804d) is working. The shell does still re-render once per commit, which is worth its own look, but it is not the hundreds this row claimed.</p>
+  <p><strong>Correction to an earlier claim in this report:</strong> profiler counted fibers that did not re-render</p>
+  <p class="tag">measured: NavLink re-rendered 286× (39.6 ms) — the app shell should not repaint </p>
+</div>
+<div class="item good">
+  <h4>Some filter options fire no request at all <span class="chip open">QUEU-DEADFILTER · low</span></h4>
+  <p>9 filter selections caused no network call. That is correct for a client-side filter and for a reset that changes nothing — but it is also exactly what an unwired filter looks like, and the two cannot be told apart from outside. Each needs a look at the code to decide which it is.</p>
+  <p class="tag">measured: filter "Today → This Month" fired no request — client-side, or the fil</p>
+</div>
+<h2><span class="n">Fixed</span>4 items</h2>
+<p class="lede">Verified after the change, not just edited.</p>
+<div class="item good">
+  <h4>Two counters pressing Call Next got the same patient <span class="chip fixed">QU1 · fixed</span></h4>
+  <p>The read-then-write was not atomic. Now a compare-and-set claims the row, retries up to five times, and returns a 409 the counter can act on rather than a silent double-call.</p>
+  <p class="tag">backend/scripts/queue-race.mjs — reproduced before, refused after</p>
+</div>
+<div class="item good">
+  <h4>The queue token used the server's date, not the hospital's <span class="chip fixed">QU2 · fixed</span></h4>
+  <p>After 6:30 pm IST the token carried tomorrow's date, so the first patient of the evening got a number from the next day's series.</p>
+  <p class="tag">backend/src/utils/queueNumber.js now uses ymdInZone</p>
+</div>
+<div class="item good">
+  <h4>FIXED — Queue downloaded Billing and Appointments for a receptionist who opened neither <span class="chip fixed">QUEUE-LAZY · fixed</span></h4>
+  <p><code>QueueModule.jsx</code> imported <code>BillingModule</code> and <code>AppointmentsModule</code> statically to render them in two of its tabs. Radix unmounts an inactive <code>TabsContent</code>, so neither ever mounted — the bytes were downloaded and parsed for nothing, on the one screen a hospital leaves open all day.<br><br>Both are now behind <code>lazy()</code> with a named <code>&lt;Suspense&gt;</code> fallback, so the tab says "Loading Billing…" rather than nothing while the chunk arrives.</p>
+  <p class="note">10</p>
+  <p class="tag">measured 10 August, e2e/measure-routes.mjs — Queue route JS 2,080 KB → 184 KB (91% less), 126 → 80 files; Billing 833 KB → 0, Appointments 690 KB → 0. Verified in a browser by e2e/smoke-lazy.mjs: both tabs still load and render.</p>
+</div>
+<div class="item good">
+  <h4>FIXED — every queue row rebuilt a five-option Select on each keystroke <span class="chip fixed">QUEUE-ROWMEMO · fixed</span></h4>
+  <p>Each <code>QueueRow</code> carries its own priority <code>&lt;Select&gt;</code>. The row was not memoised and the module's three row handlers were rebuilt on every render, so typing one character into the queue search — which the rows do not read — re-rendered all ten rows and all fifty options.<br><br><code>QueueRow</code> is now <code>memo</code>'d and <code>callNext</code>, <code>setStatus</code> and <code>changePriority</code> are <code>useCallback</code>'d. The second half is what makes the first half work: <code>memo</code> compares props by reference, so a handler rebuilt each render would have defeated it silently while looking like it had been fixed.</p>
+  <p class="tag">measured 10 August — typing "ram": SelectItem renders 722 → 356 (51% fewer), QueueRow renders 97 → 47 (52% fewer)</p>
+</div>
+<h2><span class="n">Checked and correct</span>3 items</h2>
+<p class="lede">A report that only lists failures cannot be told apart from one that only looked for them.</p>
+<div class="item good">
+  <h4>Page load is light — 4 requests, 16 KB, and the date filter IS applied <span class="chip fixed">QU6 · correct</span></h4>
+  <p><code>/auth/me</code>, <code>/settings</code> and one <code>/queue</code> call scoped to today. 64 controls discovered — 39 buttons, 11 filters, 3 tabs, 10 rows, and no icon-only buttons at all, which is why this module has no accessible-name findings. The slowest thing on load is React, not the network: <code>Routes 441.9ms ×36</code>.</p>
+  <p class="tag">measured 9 August</p>
+</div>
+<div class="item good">
+  <h4>WITHDRAWN — "one action re-renders 1,009 elements for 6.7 seconds" <span class="chip fixed">QU8 · correct</span></h4>
+  <p>This was reported as the worst single render in the application. It was the worst single measurement error instead.<br><br><strong>Retracted 10 August — measuring error.</strong> This count came from <code>e2e/profiler.mjs</code>, which counted every fiber whose <code>actualDuration</code> was above zero. React leaves that value on a fiber after its last render, so a component that bailed out of a commit still carried the cost of whenever it did render, and the walk counted it again on every commit. The tool now compares <code>actualStartTime</code> against the end of the previous commit and reports self time with children subtracted. Re-measured on Queue — the module with the largest number here — three keystrokes produce <strong>App ×16 and Navigation ×16</strong>, and no NavLink renders at all: the memoisation in <code>src/App.jsx</code> (commit 15c804d) is working. The shell does still re-render once per commit, which is worth its own look, but it is not the hundreds this row claimed.<br><br>Re-measured on the same action — typing three characters into the queue search — the heaviest component was <code>SelectItem</code> at <strong>44&nbsp;ms of self time</strong>, not 6,742. The real defect underneath it was genuine and is recorded as QUEUE-ROWMEMO below: every row rebuilt its five-option priority <code>&lt;Select&gt;</code> on each keystroke.</p>
+  <p><strong>Correction to an earlier claim in this report:</strong> the number was the measuring tool, not the application</p>
+  <p class="tag">retracted 10 August after fixing e2e/profiler.mjs; re-measured worst self time 44 ms</p>
+</div>
+<div class="item good">
+  <h4>The profiler was counting components that had not re-rendered <span class="chip fixed">QUEUE-TOOLFIX · correct</span></h4>
+  <p>Recorded as a finding against the tooling, because it is the reason a number in this report was wrong and every render count in it was inflated. <code>e2e/profiler.mjs</code> counted any fiber with <code>actualDuration &gt; 0</code>; React leaves that value in place after a render, so untouched components were counted on every commit. It now filters on <code>actualStartTime</code> against the previous commit and reports <code>selfMs</code> with children subtracted — without that second part a router wrapping a slow module is reported as the slow thing.</p>
+  <p class="tag">e2e/profiler.mjs, 10 August. Same action before and after the tool fix: NavLink ×306 → 0, worst self time 6,742 ms → 44 ms.</p>
+</div>
+<p class="meta" style="margin-top:4rem"><a href="index.html" style="color:inherit">← all modules</a></p>
+</div>

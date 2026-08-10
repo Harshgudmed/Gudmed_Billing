@@ -1,0 +1,380 @@
+<meta charset="utf-8">
+<title>GudMed — Performance</title>
+<style>
+  :root{
+    --ink:#16233B; --ink-2:#3B4A66; --ink-3:#6B7891;
+    --paper:#FBFAF7; --card:#FFFFFF; --rule:#E3E0D8;
+    --crit:#B4553A; --warn:#B8862F; --good:#2F6F6B; --idle:#8A8578;
+    --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+    --serif:"Iowan Old Style","Palatino Linotype",Palatino,Georgia,serif;
+    --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+  }
+  @media (prefers-color-scheme:dark){
+    :root{ --ink:#E8E4DA; --ink-2:#B6BCC9; --ink-3:#8892A5;
+      --paper:#12161F; --card:#181D28; --rule:#2A313F;
+      --crit:#E08063; --warn:#DCAE55; --good:#68AFA8; --idle:#7E8798; }
+  }
+  :root[data-theme="light"]{ --ink:#16233B; --ink-2:#3B4A66; --ink-3:#6B7891;
+    --paper:#FBFAF7; --card:#FFFFFF; --rule:#E3E0D8;
+    --crit:#B4553A; --warn:#B8862F; --good:#2F6F6B; --idle:#8A8578; }
+  :root[data-theme="dark"]{ --ink:#E8E4DA; --ink-2:#B6BCC9; --ink-3:#8892A5;
+    --paper:#12161F; --card:#181D28; --rule:#2A313F;
+    --crit:#E08063; --warn:#DCAE55; --good:#68AFA8; --idle:#7E8798; }
+
+  body{ background:var(--paper); color:var(--ink); font-family:var(--sans);
+        line-height:1.6; margin:0; padding:0 1.25rem 5rem; }
+  .wrap{ max-width:62rem; margin:0 auto; }
+
+  header.top{ padding:3.5rem 0 2rem; border-bottom:2px solid var(--ink); margin-bottom:2.5rem; }
+  h1{ font-family:var(--serif); font-size:clamp(2rem,4.5vw,3rem); line-height:1.1;
+      margin:0 0 .5rem; letter-spacing:-.01em; text-wrap:balance; }
+  .sub{ color:var(--ink-2); font-size:1.05rem; max-width:44rem; margin:0 0 1.25rem; }
+  .meta{ font-family:var(--mono); font-size:.75rem; color:var(--ink-3);
+         text-transform:uppercase; letter-spacing:.08em; }
+
+  h2{ font-family:var(--serif); font-size:1.65rem; margin:3.5rem 0 .35rem;
+      padding-top:1.25rem; border-top:1px solid var(--rule); text-wrap:balance; }
+  h2 .n{ font-family:var(--mono); font-size:.7rem; color:var(--ink-3);
+         display:block; letter-spacing:.12em; margin-bottom:.4rem; text-transform:uppercase; }
+  h3{ font-size:1.05rem; margin:2rem 0 .5rem; letter-spacing:-.005em; }
+  p{ max-width:46rem; }
+  .lede{ color:var(--ink-2); margin:.25rem 0 1.5rem; max-width:46rem; }
+
+  .scores{ display:grid; grid-template-columns:repeat(auto-fit,minmax(9rem,1fr));
+           gap:1px; background:var(--rule); border:1px solid var(--rule); margin:2rem 0; }
+  .score{ background:var(--card); padding:1.1rem 1rem; }
+  .score b{ display:block; font-family:var(--mono); font-size:1.9rem;
+            line-height:1; font-weight:600; letter-spacing:-.02em; }
+  .score span{ display:block; font-size:.74rem; color:var(--ink-3); margin-top:.45rem;
+               text-transform:uppercase; letter-spacing:.06em; }
+  .score.crit b{ color:var(--crit); } .score.good b{ color:var(--good); }
+  .score.warn b{ color:var(--warn); } .score.idle b{ color:var(--idle); }
+
+  .item{ background:var(--card); border:1px solid var(--rule);
+         border-left:3px solid var(--rule); padding:1.1rem 1.25rem; margin:1rem 0; }
+  .item.crit{ border-left-color:var(--crit); }
+  .item.warn{ border-left-color:var(--warn); }
+  .item.good{ border-left-color:var(--good); }
+  .item h4{ margin:0 0 .5rem; font-size:1rem; display:flex; gap:.6rem;
+            align-items:baseline; flex-wrap:wrap; }
+  .item p{ margin:.4rem 0; font-size:.93rem; color:var(--ink-2); }
+  .item p.why{ color:var(--ink); }
+  .item p:last-child{ margin-bottom:0; }
+
+  .chip{ font-family:var(--mono); font-size:.66rem; text-transform:uppercase;
+         letter-spacing:.07em; padding:.16rem .5rem; border:1px solid currentColor;
+         border-radius:2px; white-space:nowrap; }
+  .chip.fixed{ color:var(--good); } .chip.open{ color:var(--crit); }
+  .chip.part{ color:var(--warn); } .chip.wait{ color:var(--idle); }
+
+  .tag{ font-family:var(--mono); font-size:.68rem; color:var(--ink-3); }
+
+  table{ width:100%; border-collapse:collapse; margin:1.25rem 0; font-size:.88rem; }
+  .scroll{ overflow-x:auto; }
+  th{ text-align:left; font-size:.7rem; text-transform:uppercase; letter-spacing:.07em;
+      color:var(--ink-3); border-bottom:1.5px solid var(--ink-3); padding:.5rem .6rem; font-weight:600; }
+  td{ padding:.5rem .6rem; border-bottom:1px solid var(--rule); vertical-align:top; }
+  td.num,th.num{ text-align:right; font-family:var(--mono); font-variant-numeric:tabular-nums; }
+  tbody tr:hover{ background:color-mix(in srgb, var(--rule) 35%, transparent); }
+
+  code{ font-family:var(--mono); font-size:.86em;
+        background:color-mix(in srgb, var(--rule) 55%, transparent);
+        padding:.08em .34em; border-radius:2px; }
+  pre{ font-family:var(--mono); font-size:.79rem; background:var(--card);
+       border:1px solid var(--rule); border-left:3px solid var(--ink-3);
+       padding:.85rem 1rem; overflow-x:auto; line-height:1.5; margin:.9rem 0; }
+
+  .arrow{ font-family:var(--mono); color:var(--good); font-weight:600; }
+  .was{ color:var(--ink-3); text-decoration:line-through; }
+
+  ul{ max-width:46rem; padding-left:1.15rem; }
+  li{ margin:.35rem 0; }
+
+  .note{ font-size:.85rem; color:var(--ink-3); font-style:italic; max-width:44rem; }
+
+  @media print{
+    body{ background:#fff; color:#000; font-size:10.5pt; padding:0; }
+    .item,.score,pre,table{ break-inside:avoid; }
+    h2{ break-after:avoid; }
+    a{ text-decoration:none; color:#000; }
+  }
+</style>
+<div class="wrap">
+<p class="meta" style="padding-top:2rem"><a href="index.html" style="color:inherit">← all modules</a></p>
+<h2><span class="n">Section 13</span>Performance — measured, and not good</h2>
+<p class="lede">Every number below was taken on <strong>localhost</strong>: the same machine, no
+network, no latency, the database next door. This is the best case the app will ever see. On Render
+behind Vercel it is worse — how much worse has not been measured yet.</p>
+
+<h3>Page load</h3>
+<div class="scroll"><table>
+  <tr><th>Module</th><th class="num">Requests</th><th class="num">Size</th><th>Slowest call</th><th class="num">React commits</th></tr>
+  <tr><td>Appointments</td><td class="num">8</td><td class="num">338 KB</td><td>227 ms <code>calendar-counts</code></td><td class="num">14</td></tr>
+  <tr><td>Pharmacy</td><td class="num">9</td><td class="num">42 KB</td><td style="color:var(--crit)"><strong>1,204 ms</strong> <code>/pharmacy/stats</code></td><td class="num">12</td></tr>
+  <tr><td>Queue</td><td class="num">4</td><td class="num">15.9 KB</td><td>334 ms <code>/queue</code></td><td class="num">14</td></tr>
+  <tr><td>Settings</td><td class="num">—</td><td class="num">141.8 KB <span class="tag">(TV Boards tab)</span></td><td>468 ms <code>Screen Health</code></td><td class="num">—</td></tr>
+</table></div>
+
+<h3>The slowest calls, and what each one means</h3>
+<p>The diagnosis is in the shape, not the number. <strong>A small response that takes a long time
+is a bad query. A large response that arrives quickly is a bad payload.</strong> They need
+different fixes, and this app has both.</p>
+<div class="scroll"><table>
+  <tr><th>Call</th><th class="num">Time</th><th class="num">Size</th><th class="num">Rows</th><th>Diagnosis</th></tr>
+  <tr><td>a Queue filter change</td><td class="num" style="color:var(--crit)">2,396 ms</td><td class="num">9.5 KB</td><td class="num">10</td><td><strong>bad query</strong> — ten rows should not cost two seconds</td></tr>
+  <tr><td><code>/pharmacy/stats</code></td><td class="num" style="color:var(--crit)">1,204 ms</td><td class="num">0.4 KB</td><td class="num">—</td><td><strong>bad query</strong> — 400 bytes, aggregating 196,744 drugs without the index for it</td></tr>
+  <tr><td>Queue Billing tab</td><td class="num">724 ms</td><td class="num">9.7 KB</td><td class="num">10</td><td>bad query</td></tr>
+  <tr><td><code>/pharmacy/drugs</code></td><td class="num">435 ms</td><td class="num">18 KB</td><td class="num">15</td><td>bad query</td></tr>
+  <tr><td>Appointments Weekly × 7</td><td class="num">385–414 ms <em>each</em></td><td class="num">53 KB each</td><td class="num">50 each</td><td><strong>bad payload</strong> — 7 calls, 373 KB, paid again on every week change</td></tr>
+  <tr><td>Doctor Slots</td><td class="num">108 ms</td><td class="num" style="color:var(--crit)">1,064 KB</td><td class="num">1,000</td><td><strong>bad payload</strong> — a megabyte in one call</td></tr>
+</table></div>
+
+<h3>How long the browser cannot respond</h3>
+<p>Total blocking time is the part of load where the main thread is busy and a click does nothing —
+the button depresses and the screen sits still.</p>
+<div class="scroll"><table>
+  <tr><th>Module</th><th class="num">TBT</th><th>Context</th></tr>
+  <tr><td>Queue</td><td class="num" style="color:var(--crit)">1,410 ms</td><td>the worst of the three, <em>and</em> the screen reception keeps open all day</td></tr>
+  <tr><td>Pharmacy</td><td class="num" style="color:var(--crit)">1,110 ms</td><td>&nbsp;</td></tr>
+  <tr><td>Appointments</td><td class="num" style="color:var(--warn)">420 ms</td><td>&nbsp;</td></tr>
+  <tr><td>Settings</td><td class="num" style="color:var(--good)">60 ms</td><td>by far the best of the four</td></tr>
+</table></div>
+
+<h3>What React does when you type a single word</h3>
+<div class="scroll"><table>
+  <tr><th>Module</th><th>What re-renders</th></tr>
+  <tr><td>Appointments</td><td><code>App</code>, <code>Navigation</code>, <code>AppointmentsModule</code> <strong>12× · 1,209 ms</strong> · <code>NavLink</code> <strong>99×</strong> · <strong>and both closed dialogs</strong></td></tr>
+  <tr><td>Queue</td><td><code>Primitive.div</code> <strong>808×</strong> on one filter change, <strong>517×</strong> while typing</td></tr>
+  <tr><td>Pharmacy</td><td><code>Primitive.div</code> <strong>2,254 ms</strong> in a single action</td></tr>
+</table></div>
+<p><strong>Nothing in <code>src/</code> is memoised.</strong> That single fact is the root of all
+three rows: every keystroke re-renders the whole tree, including the sidebar and dialogs that are
+not even open.</p>
+
+<h3>Lighthouse</h3>
+<pre>                 Queue   Pharmacy   Appointments
+performance         25         26             36     ← dev server; not the real number
+accessibility       89         89             89     ← this one transfers
+best practices      96         96             96
+TBT             1,410ms    1,110ms         420ms     ← real
+CLS                  0          0              0     ← real, and genuinely good</pre>
+
+<h3>What is genuinely fine</h3>
+<ul>
+  <li><strong>CLS 0 everywhere</strong> — nothing jumps as the page loads. That is real and worth keeping.</li>
+  <li><strong>No response over 100 KB in Queue or Pharmacy</strong> — Queue's largest is 9.7 KB.</li>
+  <li><strong>Pharmacy's tab switching is free</strong> — five of six tabs fire zero requests.</li>
+  <li>Queue uses <code>limit=10</code> — no rule-5 violation.</li>
+  <li>No 4xx or 5xx anywhere, now that the Appointments 500 is fixed.</li>
+</ul>
+<p class="note">Those four are real, but they are not the picture. The picture is that all three
+modules are slow, on the most favourable machine they will ever run on.</p>
+
+<h3>Requests that should never have been made</h3>
+<p>These are not slow calls — they are calls with no reason to exist. Each one was caught by
+comparing a request against the same request in an earlier action: same URL, same bytes back,
+nothing about its inputs changed in between. That is the signature of a <code>useEffect</code>
+whose dependency array is wrong.</p>
+
+<div class="scroll"><table>
+  <tr><th>Module</th><th>Action</th><th>What happened</th></tr>
+  <tr><td rowspan="2">Appointments</td>
+      <td>clicking the “Today's Total” stat card</td>
+      <td>refetched a URL whose response was byte-identical to the one from page load</td></tr>
+  <tr><td>every page load</td><td><code>/api/settings</code> requested <strong>three separate times</strong></td></tr>
+
+  <tr><td rowspan="2">Pharmacy</td>
+      <td><strong>Refresh</strong></td>
+      <td><strong>five</strong> calls refetched with nothing changed since page load</td></tr>
+  <tr><td>clearing the search</td><td>refetched with nothing changed since Refresh</td></tr>
+
+  <tr><td rowspan="4">Queue</td>
+      <td>opening the Queue tab</td><td>refetched with nothing changed since page load</td></tr>
+  <tr><td>clearing the search</td><td>two calls — <strong>the first still carrying the old search term</strong>, and it took 704 ms</td></tr>
+  <tr><td>Billing tab → <strong>Next</strong></td>
+      <td>4 requests, <strong>1 of them needed</strong>: <code>services</code> and <code>stats</code> had not changed, and <code>/insurance</code> has nothing to do with paging a billing table</td></tr>
+  <tr><td>Billing tab → <strong>Previous</strong></td><td>5 requests — the same four, plus <code>/queue</code> refetched</td></tr>
+</table></div>
+
+<p><strong>The worst of these is Queue's Billing tab:</strong> one press of Next costs four
+requests and only one of them was asked for. On a hospital connection that is four round trips
+where one would do.</p>
+
+<h3>What the profiler shows — and it is not fine</h3>
+<p>The hook records which components actually rendered, by name, not just how many commits
+happened. Three things stand out, and none of them is acceptable:</p>
+<ul>
+  <li><strong>The sidebar repaints on every keystroke.</strong> Typing three characters into a
+  search box re-rendered <code>Navigation</code> and all its <code>NavLink</code> children
+  <strong>99 times</strong>. The sidebar has nothing to do with a search box.</li>
+  <li><strong>Closed dialogs re-render.</strong> <code>AppointmentFormDialog</code> rendered 10
+  times and <code>AppointmentPatientDialog</code> once while neither was open. Work done for
+  something nobody can see.</li>
+  <li><strong>One filter change costs 808 renders.</strong> In Queue, changing a single dropdown
+  re-rendered <code>Primitive.div</code> 808 times; Pharmacy spent 2,254 ms inside one action.</li>
+</ul>
+<p>The cause is one line long: <strong>nothing in <code>src/</code> is wrapped in
+<code>React.memo</code>, and no callback is wrapped in <code>useCallback</code></strong>, so every
+state change at the top re-renders everything below it. This is why the same symptom appears
+identically in all three modules — it is not three bugs, it is one.</p>
+<p class="note">Two honest caveats on these numbers. The profiler itself was slowing the page down
+until it was made cheaper mid-audit — the earlier figures in this document were inflated by the
+observer, and the ones quoted here were taken after that fix. And render counts vary between runs;
+what does not vary is <em>which</em> components appear, which is the part that matters.</p>
+
+<h3>Every performance fix, ranked by what it buys</h3>
+<p class="lede">Ordered by how many people feel it, not by how hard it is. Nothing in this table has
+been done — all of it is measured, none of it is fixed.</p>
+
+<div class="scroll"><table>
+  <tr><th class="num">#</th><th>Fix</th><th>Where</th><th>What it buys</th></tr>
+
+  <tr><td class="num" colspan="4"><strong>Tier 1 — one change, every module benefits</strong></td></tr>
+  <tr><td class="num">1</td>
+      <td><strong>Memoise the app shell.</strong> Wrap <code>Shell</code>, the sidebar and its
+      <code>NavLink</code> list in <code>React.memo</code>, and the handlers passed down in
+      <code>useCallback</code>. Nothing in <code>src/</code> is memoised today, which is why a
+      keystroke in a search box repaints the navigation.</td>
+      <td><code>src/App.jsx</code> (Shell, lines 180-228)</td>
+      <td><code>NavLink</code> 208× → 0 on a filter change; 99× → 0 on typing. <strong>All 14
+      modules</strong>, every interaction.</td></tr>
+
+  <tr><td class="num" colspan="4"><strong>Tier 2 — a small response taking a long time is a bad query</strong></td></tr>
+  <tr><td class="num">2</td><td><code>/api/pharmacy/stats</code> aggregates 196,744 drugs without an index for it</td><td>pharmacy stats handler</td><td><strong>1,204 ms → tens of ms</strong>, on every page load of the module</td></tr>
+  <tr><td class="num">3</td><td>The 2,396 ms Queue filter query — ten rows must not cost two seconds, least of all on the screen reception keeps open all day</td><td><code>queueController.getQueue</code></td><td>the worst single call measured anywhere</td></tr>
+  <tr><td class="num">4</td><td><code>/api/pharmacy/drugs</code> — 435 ms to return 15 rows</td><td>pharmacy drugs handler</td><td>felt on every search keystroke</td></tr>
+  <tr><td class="num">5</td><td>Settings <code>Add Room</code> — 460 ms to return 100 bytes</td><td><code>roomController</code></td><td>&nbsp;</td></tr>
+  <tr><td class="num">6</td><td><code>/api/settings</code> on page load — 579 ms</td><td><code>settingsController.getOrganization</code></td><td>every module pays it</td></tr>
+
+  <tr><td class="num" colspan="4"><strong>Tier 3 — a large response arriving quickly is a bad payload</strong></td></tr>
+  <tr><td class="num">7</td>
+      <td><strong><code>?resource=stats</code> — replace <code>include</code> with an explicit <code>select</code> and aggregate in SQL.</strong> This is the same fix already applied to <code>?resource=doctors</code>; doing it here also closes the <code>passwordHash</code> leak in Section 08.</td>
+      <td><code>doctorAccountabilityController.js:117</code></td>
+      <td><strong>2,065 KB → under 100 KB</strong>, and a credential leak closed</td></tr>
+  <tr><td class="num">8</td><td>Settings <code>Doctor's Timetable</code></td><td>timetable read</td><td><strong>655.9 KB</strong> per click</td></tr>
+  <tr><td class="num">9</td><td>Settings <strong>Rooms tab paginates nothing</strong> — one floor loads all 178 of its rooms, and the department filter then narrows what is already in the browser</td><td><code>RoomsManager.jsx</code> + <code>getRooms</code></td><td><strong>537 KB</strong> on open, <strong>438 KB</strong> per floor</td></tr>
+  <tr><td class="num">10</td><td>Appointments' three <code>limit=1000</code> call sites — a cap, not pagination (rule 5)</td><td><code>useAppointments.js:54</code>, <code>AppointmentsModule.jsx:432</code> and <code>:438</code></td><td><strong>1,064 KB</strong> (Doctor Slots) and <strong>505 KB</strong> (Today)</td></tr>
+  <tr><td class="num">11</td><td>Appointments Weekly makes <strong>seven</strong> requests, one per day, and pays again on every week change — one date-range call would do</td><td><code>AppointmentsModule.jsx:465-499</code></td><td>7 requests · <strong>373 KB</strong>, repeatedly</td></tr>
+  <tr><td class="num">12</td><td><code>?resource=users</code> returns all 1,132 users with no pagination, and five other modules plus Register request it too</td><td><code>settingsController.getUsers</code></td><td><strong>312 KB</strong> × 6 screens</td></tr>
+  <tr><td class="num">13</td><td>Settings TV Boards tab</td><td>display screens read</td><td>141.8 KB</td></tr>
+  <tr><td class="num">14</td><td><code>GET /appointments/:id</code> pulls <code>patient: true</code> and <code>consultations: true</code> with no bound</td><td><code>appointmentController.js:213</code></td><td>the biggest payload in that module</td></tr>
+
+  <tr><td class="num" colspan="4"><strong>Tier 4 — requests that should not exist at all</strong></td></tr>
+  <tr><td class="num">15</td><td>Queue's Billing tab: one <strong>Next</strong> costs 4 requests and one <strong>Previous</strong> costs 5, of which one is needed — <code>services</code>, <code>stats</code> and <code>/insurance</code> had not changed</td><td>Queue Billing tab effects</td><td>4 round trips where 1 would do</td></tr>
+  <tr><td class="num">16</td><td><code>/api/settings</code> requested <strong>three times</strong> in one page load</td><td>App shell + module mounts</td><td>&nbsp;</td></tr>
+  <tr><td class="num">17</td><td>Appointments' “Today's Total” card refetches a URL whose bytes are unchanged</td><td>stat-card handler <code>useEffect</code> deps</td><td>&nbsp;</td></tr>
+  <tr><td class="num">18</td><td>Pharmacy <strong>Refresh</strong> refetches five things that had not changed since page load</td><td>Pharmacy refresh handler</td><td>&nbsp;</td></tr>
+  <tr><td class="num">19</td><td>Clearing a search re-fires the <em>old</em> search first — in Queue that stale call took 704 ms</td><td>Queue + Appointments search effects</td><td>&nbsp;</td></tr>
+  <tr><td class="num">20</td><td>Search debounce leaks its first keystroke, and the 300 ms timer wraps the whole list effect so paging and filtering are delayed too</td><td><code>AppointmentsModule.jsx:543</code></td><td>&nbsp;</td></tr>
+</table></div>
+
+<h3>How the top three are actually done</h3>
+
+<h4>#1 — Stop the shell repainting on every keystroke</h4>
+<p>The sidebar re-renders because <code>Shell</code> receives a new <code>navItems</code> array and
+new callbacks on every parent render, and nothing below it is memoised. Three changes, one file:</p>
+<pre>// src/App.jsx
+
+// 1. The shell only depends on its props. Memo makes React skip it when they
+//    have not changed — which is every keystroke in every module.
+const Shell = memo(function Shell({ navItems, navbarColor, hospitalName, homeTo, footer, children }) {
+  …unchanged…
+})
+
+// 2. The nav list must be the SAME array between renders, or memo compares a new
+//    reference every time and skips nothing.
+const navItems = useMemo(() => [...], [role, modulesEnabled])
+
+// 3. Anything passed down as a prop gets the same treatment.
+const handleX = useCallback(…, [deps])</pre>
+<p><strong>Measured target:</strong> <code>NavLink</code> 208× → 0 on a filter change, 99× → 0
+while typing. Verify with the profiler in the audit, not by eye.</p>
+
+<h4>#2 — Make <code>?resource=stats</code> stop shipping 2 MB and a password hash</h4>
+<p>The same edit fixes both. Today it loads every column of every doctor plus every commission and
+adds them up in JavaScript:</p>
+<pre>// backend/src/controllers/doctorAccountabilityController.js  (~line 117)
+
+// BEFORE — 28 columns per doctor including passwordHash, plus every commission row
+const doctors = await db.user.findMany({
+  where: { organizationId, role: 'doctor' },
+  include: { commissionConfig: true, commissions: true },
+})
+const stats = doctors.map(d => ({ pendingAmount: d.commissions.filter(…).reduce(…) , … }))
+
+// AFTER — the database does the arithmetic, and only named columns come back
+const [doctors, totals] = await Promise.all([
+  db.user.findMany({
+    where: { organizationId, role: 'doctor' },
+    select: { id: true, fullName: true, commissionConfig: { select: { commissionRate: true, commissionType: true, isActive: true } } },
+  }),
+  db.doctorCommission.groupBy({
+    by: ['doctorId', 'status'],
+    where: { organizationId },
+    _sum: { commissionAmount: true, invoiceAmount: true },
+    _count: true,
+  }),
+])
+// then join the two in memory — a few hundred rows, not every commission ever written</pre>
+<p><strong>Measured target:</strong> 2,065 KB → under 100 KB, and <code>passwordHash</code> /
+<code>invitationToken</code> gone. The identical change was already made to
+<code>?resource=doctors</code> earlier today, which is how this one was found.</p>
+
+<h4>#3 — Make <code>/pharmacy/stats</code> stop taking 1.2 seconds for 400 bytes</h4>
+<p>A tiny response with a long time is an index problem, never a payload problem. The route
+aggregates across 196,744 drugs. Two steps, in this order:</p>
+<pre>-- 1. find out what it is actually doing before changing anything
+EXPLAIN ANALYZE &lt;the query the stats route runs&gt;;
+--    a Seq Scan on PharmacyDrug is the expected answer
+
+-- 2. index the columns it filters and groups on, e.g.
+CREATE INDEX CONCURRENTLY "PharmacyDrug_org_stock_idx"
+  ON "PharmacyDrug" ("organizationId", "quantityInStock");
+CREATE INDEX CONCURRENTLY "PharmacyBatch_org_expiry_idx"
+  ON "PharmacyBatch" ("organizationId", "expiryDate") WHERE status = 'active';</pre>
+<p><code>CONCURRENTLY</code> matters — it builds without locking the table, and this one has
+196,744 rows. Confirm with <code>EXPLAIN ANALYZE</code> afterwards that the scan is gone; a
+created index that the planner ignores has changed nothing.</p>
+<p><strong>Measured target:</strong> 1,204 ms → tens of milliseconds, on every page load of the
+module.</p>
+
+<h3>If only three get done</h3>
+<ol>
+  <li><strong>#1 — memoise the app shell.</strong> It is the root cause in every module measured,
+  and it is one file.</li>
+  <li><strong>#7 — the <code>stats</code> select.</strong> It removes 2 MB <em>and</em> closes a
+  credential leak in the same edit.</li>
+  <li><strong>#2 — index <code>/pharmacy/stats</code>.</strong> 1.2 seconds off every page load of
+  that module.</li>
+</ol>
+<p class="note">None of the twenty has been done. They are measured, not fixed — and that gap is
+the honest summary of the work so far: 60-plus findings, six repairs.</p>
+
+<h3>The order to do them in, and how to know each one worked</h3>
+<p>Not in numeric order. In the order that stops the most people waiting, and with a number to
+check afterwards — a fix nobody re-measured is a fix nobody knows about.</p>
+
+<div class="scroll"><table>
+  <tr><th>Step</th><th>Do</th><th>Then re-measure</th><th>Pass when</th></tr>
+  <tr><td class="num">1</td><td>#1 memoise the shell</td><td><code>--deep --module queue</code>, read the profiler line</td><td><code>NavLink</code> renders drop from 208 to single digits</td></tr>
+  <tr><td class="num">2</td><td>#7 the <code>stats</code> select</td><td><code>node backend/scripts/doctor-acct-probe.mjs</code> and the audit's payload column</td><td>under 100 KB, and no <code>passwordHash</code> in the response</td></tr>
+  <tr><td class="num">3</td><td>#2 index <code>/pharmacy/stats</code></td><td><code>EXPLAIN ANALYZE</code>, then <code>--deep --module pharmacy</code></td><td>no Seq Scan; the call drops below 100 ms</td></tr>
+  <tr><td class="num">4</td><td>#15–19, the wasted requests</td><td>any deep run — the harness flags “refetched with nothing changed”</td><td>that finding disappears from the run</td></tr>
+  <tr><td class="num">5</td><td>#10, #11 Appointments' <code>limit=1000</code> and the seven Weekly calls</td><td><code>--deep --module appointments</code></td><td>no <code>limit=</code> with three digits; Weekly makes one request, not seven</td></tr>
+  <tr><td class="num">6</td><td>#9, #8, #12, #13 the Settings payloads</td><td><code>--deep --module settings</code></td><td>nothing over 100 KB in the run</td></tr>
+  <tr><td class="num">7</td><td>#3–6 the remaining slow queries</td><td>the audit's slowest-call column per module</td><td>nothing over 200 ms locally</td></tr>
+  <tr><td class="num">8</td><td>Re-measure Lighthouse against <code>npm run build</code>, not the dev server</td><td><code>--lighthouse</code> against the built app</td><td>a performance number that means something — the 25/26/36 recorded here do not</td></tr>
+</table></div>
+
+<p><strong>Two rules for this whole list.</strong> Do one step at a time and re-measure before
+starting the next, or you will not know which change did what. And re-run the <em>whole</em> deep
+audit after each one — several of these fixes touch shared code, and the fastest way to learn that
+memoising the shell broke a module is for the harness to say so.</p>
+
+<p class="note">The eighth row is not optional. Every performance score in this document was taken
+against the Vite dev server, which does not minify and is far slower than what a hospital loads.
+Those numbers are useful for comparing modules against each other and useless as an absolute. The
+TBT, the render counts, the payload sizes and the query timings are all real; the Lighthouse
+performance score is not.</p>
+<p class="meta" style="margin-top:4rem"><a href="index.html" style="color:inherit">← all modules</a></p>
+</div>
