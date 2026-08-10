@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback, useRef, lazy, Suspense } from 'react'
 import { useDebounce } from '@/lib/useDebounce'
 import { dateRangeFor } from '@/components/common/DateFilter'
 import { getOrgSettings } from '@/lib/orgSettings'
@@ -24,7 +24,11 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Textarea } from '@/components/ui/textarea'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import PatientLookup from '@/components/common/PatientLookup'
-import BulkImportDialog from '@/components/common/BulkImportDialog'
+// lazy, because this dialog pulls in the xlsx parser — 429 KB, the single
+// heaviest dependency in the application — and it exists to import a spreadsheet
+// of catalogue rows, which most users never do. Statically imported, every visitor
+// to this module paid for it on page load.
+const BulkImportDialog = lazy(() => import('@/components/common/BulkImportDialog'))
 import client from '@/api/client'
 import { getFullName, calcAge } from "@/lib/patient";
 
@@ -1394,21 +1398,29 @@ ${order.clinicalIndication ? `<div class="section"><div class="section-header">C
         </DialogContent>
       </Dialog>
 
-      <BulkImportDialog
-        open={showImport}
-        onClose={() => setShowImport(false)}
-        onImported={fetchAll}
-        title="Import Radiology Exams from Excel / CSV"
-        description="Upload your radiology exam list — each row becomes an exam in the catalog. No manual typing per exam."
-        endpoint="/radiology/import"
-        itemNoun="exams"
-        templateFileName="radiology-exams-template.xlsx"
-        templateColumns={["Exam Name", "Code", "Category", "Body Part", "Modality", "Price", "Duration (min)", "Contrast", "Preparation", "Description"]}
-        sampleRows={[
-          { "Exam Name": "Chest X-Ray PA View", Code: "CXR-PA", Category: "x-ray", "Body Part": "chest", Modality: "CR", Price: 400, "Duration (min)": 10, Contrast: "No", Preparation: "Remove metal objects", Description: "Routine chest radiograph" },
-          { "Exam Name": "MRI Brain", Code: "MRI-BR", Category: "mri", "Body Part": "brain", Modality: "MRI", Price: 5000, "Duration (min)": 30, Contrast: "Yes", Preparation: "No metal implants", Description: "Brain MRI with contrast" },
-        ]}
-      />
+      {/* Gated on `open`, not merely hidden by it. A lazy component still fetches
+          its chunk the moment it renders, so leaving this mounted-but-closed
+          would download the 429 KB xlsx parser on every page load and the lazy()
+          above would buy nothing. */}
+      {showImport && (
+        <Suspense fallback={null}>
+          <BulkImportDialog
+            open={showImport}
+            onClose={() => setShowImport(false)}
+            onImported={fetchAll}
+            title="Import Radiology Exams from Excel / CSV"
+            description="Upload your radiology exam list — each row becomes an exam in the catalog. No manual typing per exam."
+            endpoint="/radiology/import"
+            itemNoun="exams"
+            templateFileName="radiology-exams-template.xlsx"
+            templateColumns={["Exam Name", "Code", "Category", "Body Part", "Modality", "Price", "Duration (min)", "Contrast", "Preparation", "Description"]}
+            sampleRows={[
+              { "Exam Name": "Chest X-Ray PA View", Code: "CXR-PA", Category: "x-ray", "Body Part": "chest", Modality: "CR", Price: 400, "Duration (min)": 10, Contrast: "No", Preparation: "Remove metal objects", Description: "Routine chest radiograph" },
+              { "Exam Name": "MRI Brain", Code: "MRI-BR", Category: "mri", "Body Part": "brain", Modality: "MRI", Price: 5000, "Duration (min)": 30, Contrast: "Yes", Preparation: "No metal implants", Description: "Brain MRI with contrast" },
+            ]}
+          />
+        </Suspense>
+      )}
 
       {/* ── Add/Edit Exam Dialog ── */}
       <Dialog open={showExamDialog} onOpenChange={setShowExamDialog}>

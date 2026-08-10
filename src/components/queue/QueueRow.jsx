@@ -1,3 +1,4 @@
+import { memo } from 'react'
 import { Clock, CheckCircle, DoorOpen, Bell } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { TableCell, TableRow } from '@/components/ui/table'
@@ -20,7 +21,15 @@ function fmtWait(minutes) {
   return `${Math.floor(minutes / 60)}h ${minutes % 60}m`
 }
 
-export function QueueRow({
+// memo, because every row carries its own priority <Select> and that Select
+// rebuilds all five options each time the row renders. Without this, typing one
+// character into the queue search re-rendered all ten rows and produced 722
+// SelectItem renders for a search box the rows do not read.
+//
+// This only bails out while the props stay referentially equal, so the four
+// shared tables and the three handlers in QueueModule are hoisted / useCallback'd.
+// A fresh object or arrow function passed here defeats the whole thing silently.
+export const QueueRow = memo(function QueueRow({
   entry,
   rowNumber,
   updatingId,
@@ -145,4 +154,4 @@ export function QueueRow({
       </TableCell>
     </TableRow>
   )
-}
+})
