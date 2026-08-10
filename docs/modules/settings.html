@@ -153,13 +153,15 @@ Lighthouse performance 35 · accessibility 89 (localhost — optimistic)
   <p>11 filter selections caused no network call. That is correct for a client-side filter and for a reset that changes nothing — but it is also exactly what an unwired filter looks like, and the two cannot be told apart from outside. Each needs a look at the code to decide which it is.</p>
   <p class="tag">measured: filter "Haryana → Andhra Pradesh" fired no request — client-side, or t</p>
 </div>
-<h2><span class="n">Fixed</span>1 item</h2>
-<p class="lede">Verified after the change, not just edited.</p>
+<details style="margin-top:3.5rem;border-top:1px solid var(--rule);padding-top:1.25rem">
+  <summary style="cursor:pointer;font-family:var(--serif);font-size:1.35rem">Fixed — 1 item, already dealt with</summary>
+<p class="lede" style="margin-top:.75rem">Verified after the change with a before and an after, not just edited.</p>
 <div class="item good">
   <h4>FIXED — the display-board manager loaded for anyone opening Settings <span class="chip fixed">SET-BOARDS · fixed</span></h4>
   <p><code>DisplayBoardsModule</code> is a module in its own right sitting in one Settings tab, and it was imported statically — so it was downloaded by everyone who opened Settings to change a phone number. Now <code>lazy()</code> behind a <code>&lt;Suspense&gt;</code>.</p>
   <p class="note">10</p>
   <p class="tag">measured 10 August — Settings route JS 807 KB → 495 KB (39% less); DisplayBoardsModule is now its own 24.02 KB chunk. Tab verified to still load.</p>
 </div>
+</details>
 <p class="meta" style="margin-top:4rem"><a href="index.html" style="color:inherit">← all modules</a></p>
 </div>

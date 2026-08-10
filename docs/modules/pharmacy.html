@@ -103,7 +103,7 @@
 <p class="meta" style="padding-top:2rem"><a href="index.html" style="color:inherit">← all modules</a></p>
 <header class="top">
   <h1>Pharmacy</h1>
-  <p class="sub">8 open · 0 fixed · 0 checked and correct. Every row says how it was proved.</p>
+  <p class="sub">8 open · 1 fixed · 0 checked and correct. Every row says how it was proved.</p>
   <p class="meta">generated from docs/findings.json — this module's findings only</p>
 </header>
 <h2><span class="n">Measured</span>What the walk reached</h2>
@@ -130,7 +130,7 @@ Lighthouse performance 55 · accessibility 89 (localhost — optimistic)
 </div>
 <div class="item warn">
   <h4>/api/pharmacy/stats takes 574–1,204 ms to return 375 bytes <span class="chip open">PH3 · medium</span></h4>
-  <p>A tiny answer that takes that long is a query problem, not a payload one — whatever it aggregates has no index.</p>
+  <p>A tiny answer that takes that long is a query problem, not a payload one — whatever it aggregates has no index.<br><br><strong>Re-verified 10 August.</strong> Re-measured 226 ms (runs 211/226/228). See PERF-REVERIFY.</p>
   <p class="tag">measured from the live API log</p>
 </div>
 <div class="item warn">
@@ -155,5 +155,15 @@ Lighthouse performance 55 · accessibility 89 (localhost — optimistic)
   <p class="note">CLAUDE.md rule 9 — one shared function plus a small table of per-module differences</p>
   <p class="tag">scripts/duplication-scan.mjs: BulkImportDialog.jsx:58-70 ⟷ ImportMedicinesDialog.jsx:63-76, and three more blocks</p>
 </div>
+<details style="margin-top:3.5rem;border-top:1px solid var(--rule);padding-top:1.25rem">
+  <summary style="cursor:pointer;font-family:var(--serif);font-size:1.35rem">Fixed — 1 item, already dealt with</summary>
+<p class="lede" style="margin-top:.75rem">Verified after the change with a before and an after, not just edited.</p>
+<div class="item good">
+  <h4>FIXED — Pharmacy loaded the spreadsheet parser for every shift <span class="chip fixed">PHARM-XLSX · fixed</span></h4>
+  <p><code>ImportMedicinesDialog</code> pulls in SheetJS and was imported statically, so every pharmacist paid for it on page load to run an import that happens when a new price list arrives. Now <code>lazy()</code> and gated on <code>showImport</code>, matching Laboratory and Radiology.<br><br>Found by <code>scripts/lazy-scan.mjs</code>, which reads the source and reports every candidate rather than however far somebody got by hand. After its own false positives were removed — seventeen <code>src/pages/*Page.jsx</code> files importing their own module, all already behind <code>lazy()</code> in App.jsx, and one library already inside a lazy component — this was the only real candidate left in the application.</p>
+  <p class="note">10</p>
+  <p class="tag">measured 10 August — Pharmacy page load carries 0 KB of xlsx; ImportMedicinesDialog is its own 6.97 KB chunk; clicking Import still opens the dialog with no console error</p>
+</div>
+</details>
 <p class="meta" style="margin-top:4rem"><a href="index.html" style="color:inherit">← all modules</a></p>
 </div>

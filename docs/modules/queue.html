@@ -103,7 +103,7 @@
 <p class="meta" style="padding-top:2rem"><a href="index.html" style="color:inherit">← all modules</a></p>
 <header class="top">
   <h1>Queue</h1>
-  <p class="sub">12 open · 4 fixed · 3 checked and correct. Every row says how it was proved.</p>
+  <p class="sub">12 open · 4 fixed · 4 checked and correct. Every row says how it was proved.</p>
   <p class="meta">generated from docs/findings.json — this module's findings only</p>
 </header>
 <h2><span class="n">Measured</span>What the walk reached</h2>
@@ -115,7 +115,7 @@ Lighthouse performance 55 · accessibility 89 (localhost — optimistic)
 <h2><span class="n">Open</span>12 items</h2>
 <div class="item crit">
   <h4>A month date-range takes 3.8 seconds to return ten rows <span class="chip open">QU7 · critical</span></h4>
-  <p><code>/queue?startDate=2026-08-01&amp;endDate=2026-08-31&amp;page=1&amp;limit=10</code> — <strong>3,793 ms for 9.5 KB and ten rows</strong>. A week takes 1,280 ms. A tiny answer that takes that long is a query problem, not a payload one: the date range is being scanned rather than indexed. On Render, with real network latency and a cold connection, this is the difference between a counter working and a counter waiting.</p>
+  <p><code>/queue?startDate=2026-08-01&amp;endDate=2026-08-31&amp;page=1&amp;limit=10</code> — <strong>3,793 ms for 9.5 KB and ten rows</strong>. A week takes 1,280 ms. A tiny answer that takes that long is a query problem, not a payload one: the date range is being scanned rather than indexed. On Render, with real network latency and a cold connection, this is the difference between a counter working and a counter waiting.<br><br><strong>Re-verified 10 August.</strong> Queue, month range: re-measured as a median of 163 ms (runs 78/163/3,501). The original was a single cold-pool sample. See PERF-REVERIFY.</p>
   <p class="tag">measured — 3793 ms (month), 1280 ms (week), 905 ms (unfiltered). e2e/audit-report/live/f-queue.log</p>
 </div>
 <div class="item crit">
@@ -174,8 +174,9 @@ Lighthouse performance 55 · accessibility 89 (localhost — optimistic)
   <p>9 filter selections caused no network call. That is correct for a client-side filter and for a reset that changes nothing — but it is also exactly what an unwired filter looks like, and the two cannot be told apart from outside. Each needs a look at the code to decide which it is.</p>
   <p class="tag">measured: filter "Today → This Month" fired no request — client-side, or the fil</p>
 </div>
-<h2><span class="n">Fixed</span>4 items</h2>
-<p class="lede">Verified after the change, not just edited.</p>
+<details style="margin-top:3.5rem;border-top:1px solid var(--rule);padding-top:1.25rem">
+  <summary style="cursor:pointer;font-family:var(--serif);font-size:1.35rem">Fixed — 4 items, already dealt with</summary>
+<p class="lede" style="margin-top:.75rem">Verified after the change with a before and an after, not just edited.</p>
 <div class="item good">
   <h4>Two counters pressing Call Next got the same patient <span class="chip fixed">QU1 · fixed</span></h4>
   <p>The read-then-write was not atomic. Now a compare-and-set claims the row, retries up to five times, and returns a 409 the counter can act on rather than a silent double-call.</p>
@@ -197,8 +198,15 @@ Lighthouse performance 55 · accessibility 89 (localhost — optimistic)
   <p>Each <code>QueueRow</code> carries its own priority <code>&lt;Select&gt;</code>. The row was not memoised and the module's three row handlers were rebuilt on every render, so typing one character into the queue search — which the rows do not read — re-rendered all ten rows and all fifty options.<br><br><code>QueueRow</code> is now <code>memo</code>'d and <code>callNext</code>, <code>setStatus</code> and <code>changePriority</code> are <code>useCallback</code>'d. The second half is what makes the first half work: <code>memo</code> compares props by reference, so a handler rebuilt each render would have defeated it silently while looking like it had been fixed.</p>
   <p class="tag">measured 10 August — typing "ram": SelectItem renders 722 → 356 (51% fewer), QueueRow renders 97 → 47 (52% fewer)</p>
 </div>
-<h2><span class="n">Checked and correct</span>3 items</h2>
-<p class="lede">A report that only lists failures cannot be told apart from one that only looked for them.</p>
+</details>
+<details style="margin-top:3.5rem;border-top:1px solid var(--rule);padding-top:1.25rem">
+  <summary style="cursor:pointer;font-family:var(--serif);font-size:1.35rem">Checked and correct — 4 items, already dealt with</summary>
+<p class="lede" style="margin-top:.75rem">A report that only lists failures cannot be told apart from one that only looked for them.</p>
+<div class="item good">
+  <h4>Re-verified — 9 numbers from the performance page, re-taken from scratch <span class="chip fixed">PERF-REVERIFY · correct</span></h4>
+  <p>Every figure on <code>docs/modules/performance.html</code> was re-measured against the running app on 10 August (<code>e2e/reverify-performance.mjs</code>). Four improved, three were artefacts of the profiler bug, and two could not be reached and are recorded as unmeasured rather than as passing.<br><br><strong>API timings — all four far lower than the page claims</strong><br><code>/pharmacy/stats</code> 1,204 ms → <strong>226 ms</strong> (runs 211/226/228)<br>Queue, a month-wide range 2,396 ms → <strong>163 ms</strong> (runs 78/163/<strong>3,501</strong>)<br><code>/pharmacy/drugs</code> 435 ms → <strong>58 ms</strong> (runs 57/58/60)<br>Doctor Slots payload 1,064 KB → <strong>552 KB</strong>, 1,128 rows (a real fix, commit f0751ee)<br><br><strong>Why they were high:</strong> taken as single samples against a cold connection pool. The Queue spread above is the proof — the same query in the same minute returned in 78 ms and in 3,501 ms. The original number was observed; it was not the steady state, and the page presented it as one. Timings here are now medians of three with the spread shown.<br><br><strong>Render counts — three were the measuring tool</strong><br>Queue, <code>Primitive.div</code> on a filter change: 808× → <strong>196×</strong>, 5.9 ms self<br>Queue, <code>Primitive.div</code> while typing: 517× → <strong>341×</strong>, 8 ms self<br>Pharmacy, <code>Primitive.div</code>: 2,254 ms → <strong>6.5 ms</strong> (worst is now <code>PharmacyModule</code> at 100 ms, which is a real and separate thing to look at)<br><br><strong>Not measured — stated as such, not as clean</strong><br>Appointments' two numbers (NavLink ×99, module 1,209 ms) could not be re-taken: the search box was not on any tab the run opened, so nothing was typed. Zero renders from a control nobody touched is a broken test, and reading it as a pass is the exact error this entry exists to correct.</p>
+  <p class="tag">e2e/reverify-performance.mjs, 10 August — 4 improved, 3 artefacts, 2 not measured. Each API figure is the median of three runs with the full spread recorded.</p>
+</div>
 <div class="item good">
   <h4>Page load is light — 4 requests, 16 KB, and the date filter IS applied <span class="chip fixed">QU6 · correct</span></h4>
   <p><code>/auth/me</code>, <code>/settings</code> and one <code>/queue</code> call scoped to today. 64 controls discovered — 39 buttons, 11 filters, 3 tabs, 10 rows, and no icon-only buttons at all, which is why this module has no accessible-name findings. The slowest thing on load is React, not the network: <code>Routes 441.9ms ×36</code>.</p>
@@ -215,5 +223,6 @@ Lighthouse performance 55 · accessibility 89 (localhost — optimistic)
   <p>Recorded as a finding against the tooling, because it is the reason a number in this report was wrong and every render count in it was inflated. <code>e2e/profiler.mjs</code> counted any fiber with <code>actualDuration &gt; 0</code>; React leaves that value in place after a render, so untouched components were counted on every commit. It now filters on <code>actualStartTime</code> against the previous commit and reports <code>selfMs</code> with children subtracted — without that second part a router wrapping a slow module is reported as the slow thing.</p>
   <p class="tag">e2e/profiler.mjs, 10 August. Same action before and after the tool fix: NavLink ×306 → 0, worst self time 6,742 ms → 44 ms.</p>
 </div>
+</details>
 <p class="meta" style="margin-top:4rem"><a href="index.html" style="color:inherit">← all modules</a></p>
 </div>

@@ -154,15 +154,18 @@ Lighthouse performance 25 · accessibility 89 (localhost — optimistic)
   <p>2 filter selections caused no network call. That is correct for a client-side filter and for a reset that changes nothing — but it is also exactly what an unwired filter looks like, and the two cannot be told apart from outside. Each needs a look at the code to decide which it is.</p>
   <p class="tag">measured: filter "All Dates → All Dates" fired no request — client-side, or the </p>
 </div>
-<h2><span class="n">Fixed</span>1 item</h2>
-<p class="lede">Verified after the change, not just edited.</p>
+<details style="margin-top:3.5rem;border-top:1px solid var(--rule);padding-top:1.25rem">
+  <summary style="cursor:pointer;font-family:var(--serif);font-size:1.35rem">Fixed — 1 item, already dealt with</summary>
+<p class="lede" style="margin-top:.75rem">Verified after the change with a before and an after, not just edited.</p>
 <div class="item good">
   <h4>Every search returned 400 — three columns did not exist <span class="chip fixed">PT1 · fixed</span></h4>
   <p>The shared helper was called with <code>relation: null</code>, injecting Patient's five searchable columns onto PreTriage itself. A PreTriage row is a walk-in who is not a patient yet: it has firstName, lastName and phone, never middleName, mrn or phonePrimary. Both the count and the findMany failed, so the list and all four stat cards went together. Live since 5 August, from commit d09c061.</p>
   <p class="tag">FIXED and verified: /pre-triage?search=r now 200 with 10 rows; combined with status=routed also 200</p>
 </div>
-<h2><span class="n">Checked and correct</span>2 items</h2>
-<p class="lede">A report that only lists failures cannot be told apart from one that only looked for them.</p>
+</details>
+<details style="margin-top:3.5rem;border-top:1px solid var(--rule);padding-top:1.25rem">
+  <summary style="cursor:pointer;font-family:var(--serif);font-size:1.35rem">Checked and correct — 2 items, already dealt with</summary>
+<p class="lede" style="margin-top:.75rem">A report that only lists failures cannot be told apart from one that only looked for them.</p>
 <div class="item good">
   <h4>The date filter is correct — all six options carry the range <span class="chip fixed">PT6 · correct</span></h4>
   <p>Today, This Week, This Month, Specific Date, Custom Range and the All Dates reset were each exercised. The query string carries <code>startDate</code> and <code>endDate</code> every time, in hospital-timezone form. The three that returned zero rows returned zero honestly — the seeded screenings are June and July records, not August.</p>
@@ -173,5 +176,6 @@ Lighthouse performance 25 · accessibility 89 (localhost — optimistic)
   <p><code>/auth/me</code> 0.1 KB, <code>/settings</code> 6.4 KB, <code>/pre-triage?page=1&amp;limit=10</code> 8.5 KB. No rule 5 violation, no duplicate call, zero console errors and zero 4xx/5xx across the whole walk.</p>
   <p class="tag">measured 9 August after the search fix — previously this module produced 19 critical events, all of them the 400</p>
 </div>
+</details>
 <p class="meta" style="margin-top:4rem"><a href="index.html" style="color:inherit">← all modules</a></p>
 </div>

@@ -143,12 +143,14 @@ Lighthouse performance 25 · accessibility 89 (localhost — optimistic)
   <p>1 filter selection caused no network call. That is correct for a client-side filter and for a reset that changes nothing — but it is also exactly what an unwired filter looks like, and the two cannot be told apart from outside. Each needs a look at the code to decide which it is.</p>
   <p class="tag">measured: filter "All Locations → All Locations" fired no request — client-side,</p>
 </div>
-<h2><span class="n">Fixed</span>1 item</h2>
-<p class="lede">Verified after the change, not just edited.</p>
+<details style="margin-top:3.5rem;border-top:1px solid var(--rule);padding-top:1.25rem">
+  <summary style="cursor:pointer;font-family:var(--serif);font-size:1.35rem">Fixed — 1 item, already dealt with</summary>
+<p class="lede" style="margin-top:.75rem">Verified after the change with a before and an after, not just edited.</p>
 <div class="item good">
   <h4>Every search returned 400 — causeOfDeath is not a column <span class="chip fixed">DC1 · fixed</span></h4>
   <p>The statutory form stores the cause as a chain of four: <code>immediateCause</code> (a), <code>antecedentCauseB</code>, <code>C</code>, <code>D</code>. Searching a non-existent <code>causeOfDeath</code> made both the count and the findMany fail from the first keystroke. Live since 5 August, from commit d09c061.</p>
   <p class="tag">FIXED and verified: /death-certificates?search=ra now 200 with 3 rows; with place=inpatient, 200 with 2 rows</p>
 </div>
+</details>
 <p class="meta" style="margin-top:4rem"><a href="index.html" style="color:inherit">← all modules</a></p>
 </div>

@@ -85,10 +85,22 @@ function page(mod, list) {
       'the controller, the schema or the API log — none of them needs a browser.</p>')
   }
 
-  const section = (title, rows, note) => {
+  // `collapsed` folds a section behind a <details>. Anything already dealt with is
+  // filed rather than deleted: the page opens on the work that is left, and the
+  // work that is finished is one click away instead of scrolled past. Deleting it
+  // outright would lose the before/after numbers that are the only evidence a fix
+  // was real, and would let the same bug be found again next month at full price.
+  const section = (title, rows, note, collapsed = false) => {
     if (!rows.length) return
-    o.push(`<h2><span class="n">${title}</span>${rows.length} item${rows.length > 1 ? 's' : ''}</h2>`)
-    if (note) o.push(`<p class="lede">${note}</p>`)
+    if (collapsed) {
+      o.push(`<details style="margin-top:3.5rem;border-top:1px solid var(--rule);padding-top:1.25rem">`)
+      o.push(`  <summary style="cursor:pointer;font-family:var(--serif);font-size:1.35rem">` +
+        `${title} — ${rows.length} item${rows.length > 1 ? 's' : ''}, already dealt with</summary>`)
+      if (note) o.push(`<p class="lede" style="margin-top:.75rem">${note}</p>`)
+    } else {
+      o.push(`<h2><span class="n">${title}</span>${rows.length} item${rows.length > 1 ? 's' : ''}</h2>`)
+      if (note) o.push(`<p class="lede">${note}</p>`)
+    }
     for (const f of rows.sort((a, b) => RANK[a.severity] - RANK[b.severity])) {
       o.push(`<div class="item ${f.ok || f.fixed ? 'good' : CLASS[f.severity]}">`)
       o.push(`  <h4>${f.title} <span class="chip ${f.fixed || f.ok ? 'fixed' : 'open'}">${f.id} · ${f.fixed ? 'fixed' : f.ok ? 'correct' : f.severity}</span></h4>`)
@@ -98,12 +110,13 @@ function page(mod, list) {
       o.push(`  <p class="tag">${f.proof}</p>`)
       o.push('</div>')
     }
+    if (collapsed) o.push('</details>')
   }
 
   section('Open', open)
-  section('Fixed', fixed, 'Verified after the change, not just edited.')
+  section('Fixed', fixed, 'Verified after the change with a before and an after, not just edited.', true)
   section('Checked and correct', ok,
-    'A report that only lists failures cannot be told apart from one that only looked for them.')
+    'A report that only lists failures cannot be told apart from one that only looked for them.', true)
 
   o.push('<p class="meta" style="margin-top:4rem"><a href="index.html" style="color:inherit">← all modules</a></p>')
   o.push('</div>')
