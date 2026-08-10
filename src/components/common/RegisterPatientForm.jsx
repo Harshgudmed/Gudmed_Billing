@@ -16,6 +16,8 @@ import { cn, drName } from '@/lib/utils'
 import { useDoctorTimetable } from './hooks/useDoctorTimetable'
 import { useCreatePatient } from '@/lib/useCreatePatient'
 import { patientFormSchema, issuesToFieldErrors } from '@/lib/schemas/patientFormSchema'
+import { PhoneInput } from './PhoneInput'
+import { sanitizeTextInput, sanitizeMultilineInput, sanitizeNameInput } from './textFieldUtils'
 
 const INDIAN_STATES = [
   'Andhra Pradesh', 'Arunachal Pradesh', 'Assam', 'Bihar', 'Chhattisgarh',
@@ -135,6 +137,15 @@ export default function RegisterPatientForm({ onSuccess, onCancel }) {
     setFieldErrors(prev => (prev[field] ? { ...prev, [field]: undefined } : prev))
   }
 
+  // Free-text fields go through sanitizeTextInput live (strips HTML tags and
+  // invisible/zero-width characters) — trimming stays the Zod schema's job at
+  // submit time so a trailing space doesn't get eaten mid-typing.
+  const setTextField = (field, raw) => setField(field, sanitizeTextInput(raw))
+
+  // Name-type fields (person/place names) are further restricted to letters,
+  // spaces, and name punctuation — no digits or symbols can land in them at all.
+  const setNameField = (field, raw) => setField(field, sanitizeNameInput(raw))
+
   // Departments for booking = real consultation departments only.
   // Exclude operational / service departments (you don't book a consult with them).
   const NON_CONSULTATION = new Set([
@@ -235,16 +246,16 @@ export default function RegisterPatientForm({ onSuccess, onCancel }) {
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <div>
               <Label className="text-xs text-gray-600">First Name <span className="text-red-500">*</span></Label>
-              <Input className={cn('mt-1', fieldErrors.firstName && 'border-red-500')} value={patientForm.firstName} onChange={e => setField('firstName', e.target.value)} required placeholder="First name" />
+              <Input className={cn('mt-1', fieldErrors.firstName && 'border-red-500')} value={patientForm.firstName} onChange={e => setNameField('firstName', e.target.value)} required placeholder="First name" />
               <FieldError message={fieldErrors.firstName} />
             </div>
             <div>
               <Label className="text-xs text-gray-600">Middle Name</Label>
-              <Input className="mt-1" value={patientForm.middleName} onChange={e => setField('middleName', e.target.value)} placeholder="Middle name" />
+              <Input className="mt-1" value={patientForm.middleName} onChange={e => setNameField('middleName', e.target.value)} placeholder="Middle name" />
             </div>
             <div>
               <Label className="text-xs text-gray-600">Last Name <span className="text-red-500">*</span></Label>
-              <Input className={cn('mt-1', fieldErrors.lastName && 'border-red-500')} value={patientForm.lastName} onChange={e => setField('lastName', e.target.value)} required placeholder="Last name" />
+              <Input className={cn('mt-1', fieldErrors.lastName && 'border-red-500')} value={patientForm.lastName} onChange={e => setNameField('lastName', e.target.value)} required placeholder="Last name" />
               <FieldError message={fieldErrors.lastName} />
             </div>
           </div>
@@ -289,11 +300,11 @@ export default function RegisterPatientForm({ onSuccess, onCancel }) {
             </div>
             <div>
               <Label className="text-xs text-gray-600">Referred By</Label>
-              <Input className="mt-1" value={patientForm.referredBy} onChange={e => setField('referredBy', e.target.value)} placeholder="Doctor / clinic / person" />
+              <Input className="mt-1" value={patientForm.referredBy} onChange={e => setNameField('referredBy', e.target.value)} placeholder="Doctor / clinic / person" />
             </div>
             <div>
               <Label className="text-xs text-gray-600">MLC Number</Label>
-              <Input className="mt-1" value={patientForm.mlcNumber} onChange={e => setField('mlcNumber', e.target.value)} placeholder="Medico-legal case no. (if any)" />
+              <Input className="mt-1" spellCheck={false} autoCorrect="off" value={patientForm.mlcNumber} onChange={e => setTextField('mlcNumber', e.target.value)} placeholder="Medico-legal case no. (if any)" />
             </div>
           </div>
         </section>
@@ -306,12 +317,12 @@ export default function RegisterPatientForm({ onSuccess, onCancel }) {
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <Label className="text-xs text-gray-600">Primary Phone <span className="text-red-500">*</span></Label>
-              <Input className={cn('mt-1', fieldErrors.phonePrimary && 'border-red-500')} value={patientForm.phonePrimary} onChange={e => setField('phonePrimary', e.target.value)} placeholder="+91 XXXXX XXXXX" required />
+              <PhoneInput className={cn('mt-1', fieldErrors.phonePrimary && 'border-red-500')} value={patientForm.phonePrimary} onChange={v => setField('phonePrimary', v)} placeholder="Enter mobile number" required />
               <FieldError message={fieldErrors.phonePrimary} />
             </div>
             <div>
               <Label className="text-xs text-gray-600">Email</Label>
-              <Input className={cn('mt-1', fieldErrors.email && 'border-red-500')} type="email" value={patientForm.email} onChange={e => setField('email', e.target.value)} placeholder="patient@email.com" />
+              <Input className={cn('mt-1', fieldErrors.email && 'border-red-500')} type="email" value={patientForm.email} onChange={e => setField('email', sanitizeTextInput(e.target.value))} placeholder="patient@email.com" />
               <FieldError message={fieldErrors.email} />
             </div>
           </div>
@@ -325,28 +336,28 @@ export default function RegisterPatientForm({ onSuccess, onCancel }) {
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <Label className="text-xs text-gray-600">House / Flat / Building No.</Label>
-              <Input className="mt-1" value={patientForm.houseNumber} onChange={e => setField('houseNumber', e.target.value)} placeholder="e.g. Flat 12B" />
+              <Input className="mt-1" value={patientForm.houseNumber} onChange={e => setTextField('houseNumber', e.target.value)} placeholder="e.g. Flat 12B" />
             </div>
             <div>
               <Label className="text-xs text-gray-600">Street / Block</Label>
-              <Input className="mt-1" value={patientForm.street} onChange={e => setField('street', e.target.value)} placeholder="e.g. Block G, MG Road" />
+              <Input className="mt-1" value={patientForm.street} onChange={e => setTextField('street', e.target.value)} placeholder="e.g. Block G, MG Road" />
             </div>
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <Label className="text-xs text-gray-600">Locality / Area</Label>
-              <Input className="mt-1" value={patientForm.locality} onChange={e => setField('locality', e.target.value)} placeholder="e.g. Andheri West" />
+              <Input className="mt-1" value={patientForm.locality} onChange={e => setNameField('locality', e.target.value)} placeholder="e.g. Andheri West" />
             </div>
             <div>
               <Label className="text-xs text-gray-600">Village / Town / City <span className="text-red-500">*</span></Label>
-              <Input className={cn('mt-1', fieldErrors.city && 'border-red-500')} value={patientForm.city} onChange={e => setField('city', e.target.value)} placeholder="e.g. Mumbai" required />
+              <Input className={cn('mt-1', fieldErrors.city && 'border-red-500')} value={patientForm.city} onChange={e => setNameField('city', e.target.value)} placeholder="e.g. Mumbai" required />
               <FieldError message={fieldErrors.city} />
             </div>
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <div>
               <Label className="text-xs text-gray-600">District</Label>
-              <Input className="mt-1" value={patientForm.district} onChange={e => setField('district', e.target.value)} placeholder="e.g. Mumbai Suburban" />
+              <Input className="mt-1" value={patientForm.district} onChange={e => setNameField('district', e.target.value)} placeholder="e.g. Mumbai Suburban" />
             </div>
             <div>
               <Label className="text-xs text-gray-600">State <span className="text-red-500">*</span></Label>
@@ -374,16 +385,16 @@ export default function RegisterPatientForm({ onSuccess, onCancel }) {
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <div>
               <Label className="text-xs text-gray-600">Contact Name</Label>
-              <Input className="mt-1" value={patientForm.emergencyContactName} onChange={e => setField('emergencyContactName', e.target.value)} placeholder="Contact name" />
+              <Input className="mt-1" value={patientForm.emergencyContactName} onChange={e => setNameField('emergencyContactName', e.target.value)} placeholder="Contact name" />
             </div>
             <div>
               <Label className="text-xs text-gray-600">Contact Phone</Label>
-              <Input className={cn('mt-1', fieldErrors.emergencyContactPhone && 'border-red-500')} value={patientForm.emergencyContactPhone} onChange={e => setField('emergencyContactPhone', e.target.value)} placeholder="+91 XXXXX XXXXX" />
+              <PhoneInput className={cn('mt-1', fieldErrors.emergencyContactPhone && 'border-red-500')} value={patientForm.emergencyContactPhone} onChange={v => setField('emergencyContactPhone', v)} placeholder="Enter mobile number" />
               <FieldError message={fieldErrors.emergencyContactPhone} />
             </div>
             <div>
               <Label className="text-xs text-gray-600">Relationship</Label>
-              <Input className="mt-1" value={patientForm.emergencyContactRelationship} onChange={e => setField('emergencyContactRelationship', e.target.value)} placeholder="e.g. Spouse" />
+              <Input className="mt-1" value={patientForm.emergencyContactRelationship} onChange={e => setNameField('emergencyContactRelationship', e.target.value)} placeholder="e.g. Spouse" />
             </div>
           </div>
         </section>
@@ -415,7 +426,7 @@ export default function RegisterPatientForm({ onSuccess, onCancel }) {
               </div>
               <div>
                 <Label className="text-xs text-gray-600">Insurance ID</Label>
-                <Input className="mt-1" value={patientForm.insuranceId} onChange={e => setField('insuranceId', e.target.value)} placeholder="Policy / Member ID" />
+                <Input className="mt-1" spellCheck={false} autoCorrect="off" value={patientForm.insuranceId} onChange={e => setTextField('insuranceId', e.target.value)} placeholder="Policy / Member ID" />
               </div>
             </div>
           )}
@@ -548,7 +559,7 @@ export default function RegisterPatientForm({ onSuccess, onCancel }) {
           <Textarea
             rows={3}
             value={patientForm.notes}
-            onChange={e => setField('notes', e.target.value)}
+            onChange={e => setField('notes', sanitizeMultilineInput(e.target.value))}
             placeholder="Any additional notes (reason for visit, special instructions, referral details...)"
           />
         </section>

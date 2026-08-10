@@ -1,17 +1,18 @@
 import { z } from 'zod'
+import { sanitizePhoneInput, detectFraudPattern } from '@/components/common/phoneValidation'
+import { NAME_PATTERN } from '@/components/common/textFieldUtils'
 
-// ── Frontend mirror of backend/src/lib/phone.js normalizeIndianMobile ────────
-// Kept as a plain-JS copy (not imported) because this file must stay usable
-// in the browser bundle. The backend remains the source of truth — if the
-// backend rule changes, update both.
+// Cleans a raw phone value the same way sanitizePhoneInput does (strips
+// country code / leading zero / formatting noise), then rejects it if it's
+// too short, doesn't start 6-9, or is a repeated/sequential fake pattern —
+// same fraud check PhoneInput blocks live, applied again here as the final
+// gate before submit. Mirrors backend/src/lib/phone.js normalizeIndianMobile
+// for the length/prefix rule; the backend remains the storage-side source of
+// truth — if that rule changes, update both.
 function normalizeIndianMobile(value) {
-  let d = String(value ?? '').replace(/\D/g, '')
-  if (!d) return null
-  if (d.length === 12 && d.startsWith('91')) d = d.slice(2)
-  else if (d.length === 13 && d.startsWith('091')) d = d.slice(3)
-  else if (d.length === 14 && d.startsWith('0091')) d = d.slice(4)
-  else if (d.length === 11 && d.startsWith('0')) d = d.slice(1)
-  return /^[6-9]\d{9}$/.test(d) ? d : null
+  const d = sanitizePhoneInput(value)
+  if (!d || d.length !== 10 || !/^[6-9]/.test(d) || detectFraudPattern(d)) return null
+  return d
 }
 
 const isBlank = (v) => v == null || String(v).trim() === ''
@@ -21,8 +22,26 @@ const isBlank = (v) => v == null || String(v).trim() === ''
 // collects the same kind of field (name, mobile, email...) can share one
 // definition instead of re-typing the rule.
 
+// NAME_PATTERN (letters + spaces + ' . -) is the same allow-list the live
+// input already enforces via sanitizeNameInput — this is the submit-time
+// backstop for values that never went through that input (e.g. browser
+// autofill, which bypasses onChange).
 export const requiredNameSchema = (label) =>
-  z.string().trim().min(2, `${label} must be at least 2 characters`)
+  z
+    .string()
+    .trim()
+    .min(2, `${label} must be at least 2 characters`)
+    .regex(NAME_PATTERN, `${label} can only contain letters`)
+
+export const optionalNameSchema = (label) =>
+  z
+    .string()
+    .trim()
+    .optional()
+    .or(z.literal(''))
+    .refine((v) => isBlank(v) || NAME_PATTERN.test(v), {
+      message: `${label} can only contain letters`,
+    })
 
 export const optionalTextSchema = z.string().trim().optional().or(z.literal(''))
 
@@ -59,7 +78,11 @@ export const pincodeSchema = z
   .regex(/^\d{6}$/, 'PIN code must be 6 digits')
 
 export const requiredCitySchema = (label = 'City') =>
-  z.string().trim().min(2, `${label} must be at least 2 characters`)
+  z
+    .string()
+    .trim()
+    .min(2, `${label} must be at least 2 characters`)
+    .regex(NAME_PATTERN, `${label} can only contain letters`)
 
 export const requiredStateSchema = (label = 'State') =>
   z.string().trim().min(1, `${label} is required`)
@@ -84,12 +107,12 @@ function toLocalDateTime(dateStr, timeStr) {
 // this only stops obviously-bad input before it makes a round trip.
 export const patientFormSchema = z.object({
   firstName: requiredNameSchema('First name'),
-  middleName: optionalTextSchema,
+  middleName: optionalNameSchema('Middle name'),
   lastName: requiredNameSchema('Last name'),
   dateOfBirth: requiredDateSchema('Date of birth'),
   gender: z.enum(['male', 'female', 'other']),
   maritalStatus: optionalTextSchema,
-  referredBy: optionalTextSchema,
+  referredBy: optionalNameSchema('Referred by'),
   mlcNumber: optionalTextSchema,
 
   phonePrimary: requiredMobileSchema('Primary phone'),
@@ -98,15 +121,15 @@ export const patientFormSchema = z.object({
 
   houseNumber: optionalTextSchema,
   street: optionalTextSchema,
-  locality: optionalTextSchema,
+  locality: optionalNameSchema('Locality'),
   city: requiredCitySchema('City'),
-  district: optionalTextSchema,
+  district: optionalNameSchema('District'),
   state: requiredStateSchema('State'),
   pincode: pincodeSchema,
 
-  emergencyContactName: optionalTextSchema,
+  emergencyContactName: optionalNameSchema('Emergency contact name'),
   emergencyContactPhone: optionalMobileSchema('Emergency contact phone'),
-  emergencyContactRelationship: optionalTextSchema,
+  emergencyContactRelationship: optionalNameSchema('Relationship'),
 
   bloodGroup: optionalTextSchema,
   hasInsurance: z.boolean().default(false),
