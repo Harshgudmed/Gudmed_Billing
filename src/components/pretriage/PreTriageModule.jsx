@@ -348,6 +348,13 @@ export default function PreTriageModule() {
   const [selectedPatient, setSelectedPatient] = useState(null)
 
   const form = useForm({
+    // Validate when the user LEAVES a field, not only when they press Save.
+    // react-hook-form defaults to mode: 'onSubmit', so every one of these forms was
+    // silent until submit — a receptionist filled the whole thing, pressed Save and
+    // only then learned which field was wrong, with nothing marked until that
+    // moment. CLAUDE.md's validation section asks for the message under the field
+    // the moment focus leaves it; this is the one line that turns that on.
+    mode: 'onBlur',
     resolver: zodResolver(screeningSchema),
     defaultValues: {
       patientId: '', firstName: '', lastName: '', age: null, gender: 'male', phone: '',
