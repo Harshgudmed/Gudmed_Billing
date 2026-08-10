@@ -684,13 +684,13 @@ ${PAYMENT_TABLE_CSS}
     formatOpt === "invoice"
       ? `
   <div class="words">
-    <div style="margin-bottom:8px">Amount Paid In Words : <b>${amountInWords(paid || net)} Rupee(s) Only</b></div>
+    <div style="margin-bottom:8px">Amount Paid In Words : <b>${amountInWords(Number(paid) || 0)} Rupee(s) Only</b></div>
     <div style="font-size:9.5pt">Payment Mode : <b>${esc(paymentList[paymentList.length - 1]?.method || paymentList[0]?.method || "Cash")}</b></div>
     <div style="font-size:9.5pt;margin-top:4px">Status : <b>${bal <= 0 ? "Paid" : "Unpaid"}</b></div>
   </div>
   `
       : `
-  <div class="words">Amount Paid In Words : <b>${amountInWords(paid || net)} Rupee(s) Only</b></div>
+  <div class="words">Amount Paid In Words : <b>${amountInWords(Number(paid) || 0)} Rupee(s) Only</b></div>
   `
   }
   <div class="totals">
@@ -722,6 +722,22 @@ ${formatOpt === "detailed" ? renderPaymentTable(paymentList, { force: true }) : 
   setTimeout(() => win.print(), 400);
 }
 
+// The amount in words is what was PAID -- never what is owed.
+//
+// This and its two siblings read `amountInWords(paid || net)`, and `paid` is 0 on
+// an unpaid bill. 0 is falsy, so `0 || 961` is 961: a real lab receipt printed
+//
+//     Amount Paid In Words : Nine Hundred Sixty One Rupee(s) Only
+//     Paid Amount                                          Rs 0.00
+//     Status : Unpaid
+//
+// Three lines on one document, two of them contradicting the third. On an Indian
+// financial document the amount in words is the authoritative figure, so that
+// receipt declared an unpaid bill settled.
+//
+// `Number(paid) || 0` is the correct form: it collapses null, undefined, '' and
+// NaN to zero without letting a genuine 0 turn into the total. printReceipt in
+// this same file already did it that way -- the three functions had drifted.
 export function printLabReceipt(r, orgInfo = {}, clinic = {}, options = {}) {
   return printDiagnosticReceipt(r, orgInfo, clinic, LAB_DEPT, options);
 }
@@ -971,13 +987,13 @@ ${PAYMENT_TABLE_CSS}
     formatOpt === "invoice"
       ? `
   <div class="words">
-    <div style="margin-bottom:8px">Amount Paid In Words : <b>${amountInWords(paid || netPayable)} Rupee(s) Only</b></div>
+    <div style="margin-bottom:8px">Amount Paid In Words : <b>${amountInWords(Number(paid) || 0)} Rupee(s) Only</b></div>
     <div style="font-size:9.5pt">Payment Mode : <b>${esc(sale?.paymentMethod || "Cash")}</b></div>
     <div style="font-size:9.5pt;margin-top:4px">Status : <b>${balance <= 0 ? "Paid" : "Unpaid"}</b></div>
   </div>
   `
       : `
-  <div class="words">Amount Paid In Words : <b>${amountInWords(paid || netPayable)} Rupee(s) Only</b></div>
+  <div class="words">Amount Paid In Words : <b>${amountInWords(Number(paid) || 0)} Rupee(s) Only</b></div>
   `
   }
   <div class="totals">
