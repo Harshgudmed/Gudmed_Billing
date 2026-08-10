@@ -59,8 +59,18 @@ export function dateRangeFor({ mode, specificDate, customStart, customEnd }) {
   if (mode === "month") {
     return { startDate: toYMD(new Date(now.getFullYear(), now.getMonth(), 1)), endDate: toYMD(new Date(now.getFullYear(), now.getMonth() + 1, 0)) };
   }
-  if (mode === "specific") return { startDate: specificDate, endDate: specificDate };
-  if (mode === "custom") return { startDate: customStart, endDate: customEnd };
+  // A half-filled range is not a filter yet. Picking "Specific Date" or "Custom
+  // Range" switches the mode BEFORE any date is typed, and typing the start date
+  // lands a render before the end date exists — so returning the partial values
+  // sent the server two throwaway queries per use, one of them an open-ended
+  // range over the whole Patient table. Hold the previous (unfiltered) result
+  // until the user has actually finished choosing.
+  if (mode === "specific") {
+    return specificDate ? { startDate: specificDate, endDate: specificDate } : { startDate: "", endDate: "" };
+  }
+  if (mode === "custom") {
+    return customStart && customEnd ? { startDate: customStart, endDate: customEnd } : { startDate: "", endDate: "" };
+  }
   return { startDate: "", endDate: "" };
 }
 

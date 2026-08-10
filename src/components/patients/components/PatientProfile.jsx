@@ -1,5 +1,6 @@
 import { format } from 'date-fns';
 import { drName } from '@/lib/utils';
+import { printLabReport } from '../../laboratory/printLabReport';
 import { formatMoney as fmtMoney } from '@/lib/format';
 import { escapeHtml } from '@/lib/printTemplate';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
@@ -27,109 +28,19 @@ export default function PatientProfile({
   orgInfo
 }) {
   const handlePrintLabReport = (order) => {
-    const p = selectedPatient;
-    if (!p) return;
-    const win = window.open('', '_blank', 'width=900,height=780');
-    if (!win) { toast.error('Please allow pop-ups to open the report'); return; }
-    // Everything interpolated into this document.write is HTML-escaped: patient,
-    // order and result fields are user-controlled and would otherwise allow
-    // stored XSS to fire on print.
-    const name = escapeHtml(getFullName(p));
-    const mrn = escapeHtml(p.mrn);
-    const age = escapeHtml(p.dateOfBirth ? `${calculateAge(p.dateOfBirth)} yrs` : '—');
-    const gender = escapeHtml(p.gender ? p.gender.charAt(0).toUpperCase() + p.gender.slice(1) : '—');
-    const orgName = escapeHtml(orgInfo.name || 'Hospital');
-    const orderNumber = escapeHtml(order.orderNumber);
-    const accessionNumber = order.accessionNumber ? escapeHtml(order.accessionNumber) : '';
-    const clinicalIndication = order.clinicalIndication ? escapeHtml(order.clinicalIndication) : '';
-    const notes = order.notes ? escapeHtml(order.notes) : '';
-    const printDate = format(new Date(), 'dd MMM yyyy HH:mm');
-    const orderDate = order.orderDate ? format(new Date(order.orderDate), 'dd MMM yyyy HH:mm') : format(new Date(order.createdAt), 'dd MMM yyyy HH:mm');
     const results = order.results || [];
-    const hasResults = results.length > 0;
-    const hasAbnormal = results.some(r => r.isAbnormal || r.isCritical);
-    const orgAddr = escapeHtml([orgInfo.address, orgInfo.city].filter(Boolean).join(', '));
-
-    const rows = hasResults
-      ? results.map(r => {
-          const refRange = escapeHtml(r.referenceRangeText || (r.referenceRangeMin != null && r.referenceRangeMax != null ? `${r.referenceRangeMin} – ${r.referenceRangeMax}` : '—'));
-          const rowClass = r.isCritical ? 'result-critical' : r.isAbnormal ? 'result-abnormal' : '';
-          const valStyle = r.isAbnormal || r.isCritical ? `font-weight:bold;color:${r.isCritical ? '#dc2626' : '#b45309'}` : 'font-weight:bold';
-          const flag = escapeHtml(r.isCritical ? '⚠ CRITICAL' : (r.flag || 'N'));
-          return `<tr class="${rowClass}">
-            <td>${escapeHtml(r.test?.testName || '—')}</td>
-            <td style="${valStyle}">${escapeHtml(r.resultValue ?? '—')}</td>
-            <td>${escapeHtml(r.resultUnit || r.test?.unit || '—')}</td>
-            <td>${refRange}</td>
-            <td>${flag}</td>
-          </tr>`;
-        }).join('')
-      : `<tr><td colspan="5" style="color:#888;font-style:italic;text-align:center;padding:14px">Results pending</td></tr>`;
-
-    win.document.write(`<!DOCTYPE html><html><head><title>Laboratory Report — ${orderNumber}</title>
-<style>
-*{box-sizing:border-box;margin:0;padding:0}
-body{font-family:Arial,Helvetica,sans-serif;font-size:10pt;color:#000;background:#fff}
-.page{max-width:210mm;margin:0 auto;padding:12mm 14mm}
-.hosp-header{display:flex;justify-content:space-between;border-bottom:3px solid #1e3a5f;padding-bottom:10px;margin-bottom:10px}
-.hosp-name{font-size:19pt;font-weight:bold;color:#1e3a5f}
-.hosp-sub{font-size:9pt;color:#555;margin-top:2px}
-.hosp-contact{font-size:8.5pt;color:#555;text-align:right;line-height:1.6}
-.report-banner{background:#1e3a5f;color:#fff;text-align:center;padding:5px 0;font-size:13pt;font-weight:bold;letter-spacing:3px;margin-bottom:10px}
-.info-box{border:1px solid #333;margin-bottom:10px}
-.info-box-hdr{background:#1e3a5f;color:#fff;padding:3px 10px;font-size:9pt;font-weight:bold;text-transform:uppercase}
-.info-grid{display:grid;grid-template-columns:repeat(4,1fr)}
-.info-cell{padding:5px 10px;border-right:1px solid #ccc;border-bottom:1px solid #ccc}
-.info-cell:last-child{border-right:none}
-.info-label{font-size:7.5pt;color:#555;font-weight:bold;text-transform:uppercase}
-.info-value{font-size:10pt;margin-top:1px}
-.clinical-bar{padding:7px 12px;background:#f0f4f8;border-left:4px solid #1e3a5f;margin-bottom:10px;font-size:10pt}
-table{width:100%;border-collapse:collapse;margin-bottom:10px;font-size:9.5pt}
-thead th{background:#1e3a5f;color:#fff;padding:6px 8px;text-align:left;font-size:9pt}
-td{padding:5px 8px;border-bottom:1px solid #e8e8e8}
-tr:nth-child(even) td{background:#f9f9f9}
-.result-abnormal td{background:#fffbeb!important}
-.result-critical td{background:#fef2f2!important}
-.critical-note{background:#fef2f2;border:1px solid #dc2626;padding:8px 12px;margin-bottom:10px;font-size:9.5pt;color:#991b1b;border-radius:3px}
-.footer{margin-top:12px;border-top:1px solid #ccc;padding-top:5px;font-size:8pt;color:#888;text-align:center}
-.print-btn{display:block;margin:16px auto 0;background:#1e3a5f;color:#fff;border:none;padding:9px 28px;font-size:13px;font-weight:600;border-radius:6px;cursor:pointer}
-@media print{.print-btn{display:none}body{padding:0}.page{padding:8mm}}
-</style></head><body>
-<div class="page">
-  <div class="hosp-header">
-    <div>
-      <div class="hosp-name">${orgName}</div>
-      <div class="hosp-sub">Laboratory &amp; Pathology Department</div>
-      <div class="hosp-sub">${orgAddr}</div>
-    </div>
-    <div class="hosp-contact">
-      Order #: <strong>${orderNumber}</strong><br/>
-      ${accessionNumber ? `Accession #: <strong>${accessionNumber}</strong><br/>` : ''}
-      Printed: ${printDate}
-    </div>
-  </div>
-  <div class="report-banner">LABORATORY REPORT</div>
-  <div class="info-box">
-    <div class="info-box-hdr">Patient Information</div>
-    <div class="info-grid">
-      <div class="info-cell"><div class="info-label">Patient Name</div><div class="info-value"><strong>${name}</strong></div></div>
-      <div class="info-cell"><div class="info-label">UHID</div><div class="info-value">${mrn}</div></div>
-      <div class="info-cell"><div class="info-label">Age / Sex</div><div class="info-value">${age} / ${gender}</div></div>
-      <div class="info-cell"><div class="info-label">Order Date</div><div class="info-value">${orderDate}</div></div>
-    </div>
-  </div>
-  ${clinicalIndication ? `<div class="clinical-bar"><strong>Clinical Indication:</strong> ${clinicalIndication}</div>` : ''}
-  ${hasAbnormal ? `<div class="critical-note">⚠ This report contains abnormal/critical values. Please review highlighted results.</div>` : ''}
-  <table>
-    <thead><tr><th style="width:32%">TEST NAME</th><th style="width:16%">RESULT</th><th style="width:14%">UNIT</th><th style="width:24%">REFERENCE RANGE</th><th style="width:14%">FLAG</th></tr></thead>
-    <tbody>${rows}</tbody>
-  </table>
-  ${notes ? `<div class="clinical-bar"><strong>Notes:</strong> ${notes}</div>` : ''}
-  <div class="footer">${orgName} — Laboratory &amp; Pathology Department &nbsp;|&nbsp; Confidential &nbsp;|&nbsp; Printed: ${printDate}</div>
-  <button class="print-btn" onclick="window.print()">Print / Save as PDF</button>
-</div>
-</body></html>`);
-    win.document.close();
+    
+    // We need to shape `order` to have the necessary patient fields since the new util expects it.
+    const p = selectedPatient;
+    const enrichedOrder = {
+      ...order,
+      patientMrn: p.mrn,
+      patientName: getFullName(p),
+      patientAge: p.dateOfBirth ? calculateAge(p.dateOfBirth) : '',
+      patientGender: p.gender || ''
+    };
+    
+    printLabReport(enrichedOrder, results, orgInfo, drName);
   };
 
   const handlePrintRadReport = (order) => {
