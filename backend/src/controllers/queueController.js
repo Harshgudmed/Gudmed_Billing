@@ -428,22 +428,48 @@ export async function callNextPatient(req, res, next) {
       // Same QUEUE_ORDER_BY the board and the queue list sort by, so the
       // patient the SCREEN shows at the top of the orange highlights is
       // exactly the one who gets called.
-      const upNext = pinned
-        ?? await tx.queueManagement.findFirst({
-          where: { ...scope, status: 'called' },
-          orderBy: QUEUE_ORDER_BY,
-          select: { id: true },
-        })
-        ?? await tx.queueManagement.findFirst({
-          where: { ...scope, status: 'waiting' },
-          orderBy: QUEUE_ORDER_BY,
-          select: { id: true },
-        })
-      if (!upNext) return { completedId: current?.id ?? null, nowServing: null }
+      // Claiming the next patient is a compare-and-set, not a read followed by a
+      // write. Two doctors pressing "Call in" for the same room in the same moment
+      // both ran `findFirst` before either ran `update`: Postgres' default READ
+      // COMMITTED isolation lets both read the same row, so both updated it and
+      // both were told "Now serving <the same patient>". One person was called into
+      // two rooms and the person behind them was skipped with nothing on the board
+      // to show it — worse still because "Alert next" had already promised them
+      // they were next.
+      //
+      // `updateMany` carrying the expected status in its WHERE makes the database
+      // arbitrate: the first writer matches, the second matches zero rows and
+      // re-reads. Reproduced on the first attempt before this change; see
+      // backend/scripts/queue-race.mjs.
+      const claim = async (fromStatus) => {
+        for (let attempt = 0; attempt < 5; attempt++) {
+          const candidate = pinned ?? await tx.queueManagement.findFirst({
+            where: { ...scope, status: fromStatus },
+            orderBy: QUEUE_ORDER_BY,
+            select: { id: true },
+          })
+          if (!candidate) return null
 
-      const nowServing = await tx.queueManagement.update({
-        where: { id: upNext.id },
-        data: { status: 'in_progress', serviceStartedAt: new Date(), calledAt: new Date() },
+          const claimed = await tx.queueManagement.updateMany({
+            // status is the guard: if another call took this row a microsecond ago
+            // it is no longer `fromStatus`, so count comes back 0 and we look again.
+            where: { id: candidate.id, status: pinned ? undefined : fromStatus },
+            data: { status: 'in_progress', serviceStartedAt: new Date(), calledAt: new Date() },
+          })
+          if (claimed.count === 1) return candidate.id
+          if (pinned) return null   // a pinned patient someone else already took
+        }
+        // Five losses in a row means a queue busy enough that the caller should
+        // simply try again rather than silently serve nobody.
+        throw Object.assign(new Error('Another counter called a patient at the same moment. Please press again.'),
+          { status: 409, code: 'QUEUE_CONTENDED' })
+      }
+
+      const claimedId = (await claim('called')) ?? (await claim('waiting'))
+      if (!claimedId) return { completedId: current?.id ?? null, nowServing: null }
+
+      const nowServing = await tx.queueManagement.findUnique({
+        where: { id: claimedId },
         include: { patient: { select: PATIENT_NAME_SELECT } },
       })
       return { completedId: current?.id ?? null, nowServing }
