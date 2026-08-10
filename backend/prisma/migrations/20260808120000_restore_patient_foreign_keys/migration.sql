@@ -55,20 +55,100 @@
 --        ALTER TABLE "Appointment" VALIDATE CONSTRAINT "Appointment_patientId_fkey";
 --      VALIDATE takes only a SHARE UPDATE EXCLUSIVE lock — reads and writes continue.
 
-ALTER TABLE "PatientDocument"      ADD CONSTRAINT "PatientDocument_patientId_fkey"           FOREIGN KEY ("patientId")        REFERENCES "Patient"("id") ON DELETE CASCADE  ON UPDATE CASCADE NOT VALID;
-ALTER TABLE "Appointment"          ADD CONSTRAINT "Appointment_patientId_fkey"               FOREIGN KEY ("patientId")        REFERENCES "Patient"("id") ON DELETE CASCADE  ON UPDATE CASCADE NOT VALID;
-ALTER TABLE "Consultation"         ADD CONSTRAINT "Consultation_patientId_fkey"              FOREIGN KEY ("patientId")        REFERENCES "Patient"("id") ON DELETE CASCADE  ON UPDATE CASCADE NOT VALID;
-ALTER TABLE "Admission"            ADD CONSTRAINT "Admission_patientId_fkey"                 FOREIGN KEY ("patientId")        REFERENCES "Patient"("id") ON DELETE RESTRICT ON UPDATE CASCADE NOT VALID;
-ALTER TABLE "Prescription"         ADD CONSTRAINT "Prescription_patientId_fkey"              FOREIGN KEY ("patientId")        REFERENCES "Patient"("id") ON DELETE CASCADE  ON UPDATE CASCADE NOT VALID;
-ALTER TABLE "PharmacySale"         ADD CONSTRAINT "PharmacySale_patientId_fkey"              FOREIGN KEY ("patientId")        REFERENCES "Patient"("id") ON DELETE SET NULL ON UPDATE CASCADE NOT VALID;
-ALTER TABLE "Invoice"              ADD CONSTRAINT "Invoice_patientId_fkey"                   FOREIGN KEY ("patientId")        REFERENCES "Patient"("id") ON DELETE CASCADE  ON UPDATE CASCADE NOT VALID;
-ALTER TABLE "Payment"              ADD CONSTRAINT "Payment_patientId_fkey"                   FOREIGN KEY ("patientId")        REFERENCES "Patient"("id") ON DELETE SET NULL ON UPDATE CASCADE NOT VALID;
-ALTER TABLE "MachineResultsQueue"  ADD CONSTRAINT "MachineResultsQueue_matchedPatientId_fkey" FOREIGN KEY ("matchedPatientId") REFERENCES "Patient"("id") ON DELETE SET NULL ON UPDATE CASCADE NOT VALID;
-ALTER TABLE "LabOrder"             ADD CONSTRAINT "LabOrder_patientId_fkey"                  FOREIGN KEY ("patientId")        REFERENCES "Patient"("id") ON DELETE CASCADE  ON UPDATE CASCADE NOT VALID;
-ALTER TABLE "RadiologyOrder"       ADD CONSTRAINT "RadiologyOrder_patientId_fkey"            FOREIGN KEY ("patientId")        REFERENCES "Patient"("id") ON DELETE CASCADE  ON UPDATE CASCADE NOT VALID;
-ALTER TABLE "PreTriage"            ADD CONSTRAINT "PreTriage_patientId_fkey"                 FOREIGN KEY ("patientId")        REFERENCES "Patient"("id") ON DELETE SET NULL ON UPDATE CASCADE NOT VALID;
-ALTER TABLE "QueueManagement"      ADD CONSTRAINT "QueueManagement_patientId_fkey"           FOREIGN KEY ("patientId")        REFERENCES "Patient"("id") ON DELETE SET NULL ON UPDATE CASCADE NOT VALID;
-ALTER TABLE "DayCareCase"          ADD CONSTRAINT "DayCareCase_patientId_fkey"               FOREIGN KEY ("patientId")        REFERENCES "Patient"("id") ON DELETE RESTRICT ON UPDATE CASCADE NOT VALID;
-ALTER TABLE "AmbulanceTrip"        ADD CONSTRAINT "AmbulanceTrip_patientId_fkey"             FOREIGN KEY ("patientId")        REFERENCES "Patient"("id") ON DELETE SET NULL ON UPDATE CASCADE NOT VALID;
-ALTER TABLE "InsuranceCase"        ADD CONSTRAINT "InsuranceCase_patientId_fkey"             FOREIGN KEY ("patientId")        REFERENCES "Patient"("id") ON DELETE RESTRICT ON UPDATE CASCADE NOT VALID;
-ALTER TABLE "DeathCertificate"     ADD CONSTRAINT "DeathCertificate_patientId_fkey"          FOREIGN KEY ("patientId")        REFERENCES "Patient"("id") ON DELETE CASCADE  ON UPDATE CASCADE NOT VALID;
+-- WHY EACH ONE IS GUARDED
+-- This migration failed on its first deploy with
+--     ERROR: constraint "PatientDocument_patientId_fkey" already exists
+-- because production HAS these keys. They went missing only from the development
+-- copy, during the data trim described above — and that copy is where the bug was
+-- found, so the migration was written as if the keys were gone everywhere.
+--
+-- The guard makes it true in both places: add the constraint where it is absent,
+-- leave it alone where it is not. Dropping and re-adding would be worse than
+-- doing nothing, because production's existing constraints are VALIDATED and the
+-- replacement would be NOT VALID — a silent downgrade of a live database.
+
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'PatientDocument_patientId_fkey') THEN
+    ALTER TABLE "PatientDocument"      ADD CONSTRAINT "PatientDocument_patientId_fkey"           FOREIGN KEY ("patientId")        REFERENCES "Patient"("id") ON DELETE CASCADE  ON UPDATE CASCADE NOT VALID;
+  END IF;
+END $$;
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'Appointment_patientId_fkey') THEN
+    ALTER TABLE "Appointment"          ADD CONSTRAINT "Appointment_patientId_fkey"               FOREIGN KEY ("patientId")        REFERENCES "Patient"("id") ON DELETE CASCADE  ON UPDATE CASCADE NOT VALID;
+  END IF;
+END $$;
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'Consultation_patientId_fkey') THEN
+    ALTER TABLE "Consultation"         ADD CONSTRAINT "Consultation_patientId_fkey"              FOREIGN KEY ("patientId")        REFERENCES "Patient"("id") ON DELETE CASCADE  ON UPDATE CASCADE NOT VALID;
+  END IF;
+END $$;
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'Admission_patientId_fkey') THEN
+    ALTER TABLE "Admission"            ADD CONSTRAINT "Admission_patientId_fkey"                 FOREIGN KEY ("patientId")        REFERENCES "Patient"("id") ON DELETE RESTRICT ON UPDATE CASCADE NOT VALID;
+  END IF;
+END $$;
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'Prescription_patientId_fkey') THEN
+    ALTER TABLE "Prescription"         ADD CONSTRAINT "Prescription_patientId_fkey"              FOREIGN KEY ("patientId")        REFERENCES "Patient"("id") ON DELETE CASCADE  ON UPDATE CASCADE NOT VALID;
+  END IF;
+END $$;
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'PharmacySale_patientId_fkey') THEN
+    ALTER TABLE "PharmacySale"         ADD CONSTRAINT "PharmacySale_patientId_fkey"              FOREIGN KEY ("patientId")        REFERENCES "Patient"("id") ON DELETE SET NULL ON UPDATE CASCADE NOT VALID;
+  END IF;
+END $$;
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'Invoice_patientId_fkey') THEN
+    ALTER TABLE "Invoice"              ADD CONSTRAINT "Invoice_patientId_fkey"                   FOREIGN KEY ("patientId")        REFERENCES "Patient"("id") ON DELETE CASCADE  ON UPDATE CASCADE NOT VALID;
+  END IF;
+END $$;
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'Payment_patientId_fkey') THEN
+    ALTER TABLE "Payment"              ADD CONSTRAINT "Payment_patientId_fkey"                   FOREIGN KEY ("patientId")        REFERENCES "Patient"("id") ON DELETE SET NULL ON UPDATE CASCADE NOT VALID;
+  END IF;
+END $$;
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'MachineResultsQueue_matchedPatientId_fkey') THEN
+    ALTER TABLE "MachineResultsQueue"  ADD CONSTRAINT "MachineResultsQueue_matchedPatientId_fkey" FOREIGN KEY ("matchedPatientId") REFERENCES "Patient"("id") ON DELETE SET NULL ON UPDATE CASCADE NOT VALID;
+  END IF;
+END $$;
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'LabOrder_patientId_fkey') THEN
+    ALTER TABLE "LabOrder"             ADD CONSTRAINT "LabOrder_patientId_fkey"                  FOREIGN KEY ("patientId")        REFERENCES "Patient"("id") ON DELETE CASCADE  ON UPDATE CASCADE NOT VALID;
+  END IF;
+END $$;
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'RadiologyOrder_patientId_fkey') THEN
+    ALTER TABLE "RadiologyOrder"       ADD CONSTRAINT "RadiologyOrder_patientId_fkey"            FOREIGN KEY ("patientId")        REFERENCES "Patient"("id") ON DELETE CASCADE  ON UPDATE CASCADE NOT VALID;
+  END IF;
+END $$;
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'PreTriage_patientId_fkey') THEN
+    ALTER TABLE "PreTriage"            ADD CONSTRAINT "PreTriage_patientId_fkey"                 FOREIGN KEY ("patientId")        REFERENCES "Patient"("id") ON DELETE SET NULL ON UPDATE CASCADE NOT VALID;
+  END IF;
+END $$;
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'QueueManagement_patientId_fkey') THEN
+    ALTER TABLE "QueueManagement"      ADD CONSTRAINT "QueueManagement_patientId_fkey"           FOREIGN KEY ("patientId")        REFERENCES "Patient"("id") ON DELETE SET NULL ON UPDATE CASCADE NOT VALID;
+  END IF;
+END $$;
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'DayCareCase_patientId_fkey') THEN
+    ALTER TABLE "DayCareCase"          ADD CONSTRAINT "DayCareCase_patientId_fkey"               FOREIGN KEY ("patientId")        REFERENCES "Patient"("id") ON DELETE RESTRICT ON UPDATE CASCADE NOT VALID;
+  END IF;
+END $$;
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'AmbulanceTrip_patientId_fkey') THEN
+    ALTER TABLE "AmbulanceTrip"        ADD CONSTRAINT "AmbulanceTrip_patientId_fkey"             FOREIGN KEY ("patientId")        REFERENCES "Patient"("id") ON DELETE SET NULL ON UPDATE CASCADE NOT VALID;
+  END IF;
+END $$;
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'InsuranceCase_patientId_fkey') THEN
+    ALTER TABLE "InsuranceCase"        ADD CONSTRAINT "InsuranceCase_patientId_fkey"             FOREIGN KEY ("patientId")        REFERENCES "Patient"("id") ON DELETE RESTRICT ON UPDATE CASCADE NOT VALID;
+  END IF;
+END $$;
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'DeathCertificate_patientId_fkey') THEN
+    ALTER TABLE "DeathCertificate"     ADD CONSTRAINT "DeathCertificate_patientId_fkey"          FOREIGN KEY ("patientId")        REFERENCES "Patient"("id") ON DELETE CASCADE  ON UPDATE CASCADE NOT VALID;
+  END IF;
+END $$;
