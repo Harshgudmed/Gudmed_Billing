@@ -175,45 +175,72 @@ export default function RadiologyModule() {
 
   // ── Data fetching ─────────────────────────────────────────────────────────
 
-  const fetchAll = useCallback(async () => {
-    setLoading(true)
+  // Three lists, three fetchers, three dependency arrays.
+  //
+  // These used to be one `fetchAll` in a Promise.all, keyed on all eight pieces of
+  // state between them. Because a useCallback's identity changes when any dependency
+  // does, changing the modality filter — which only the orders list reads — refetched
+  // the exam catalogue and the reports as well: three requests where one was wanted,
+  // on every keystroke, every filter and every page turn on any of the three tabs.
+  //
+  // Split, each list refetches only when something it actually sends has changed.
+  // Reports takes no filters at all, so it now moves only when its own page does.
+  const fetchExams = useCallback(async () => {
     try {
-      const examsOffset = (examsPage - 1) * RADIOLOGY_ITEMS_PER_PAGE
-      const ordersOffset = (ordersPage - 1) * RADIOLOGY_ITEMS_PER_PAGE
-      const reportsOffset = (reportsPage - 1) * RADIOLOGY_ITEMS_PER_PAGE
-
-      const [eRes, oRes, rRes] = await Promise.all([
-        client.get('/radiology', { params: {
-          resource: 'exams', limit: RADIOLOGY_ITEMS_PER_PAGE, offset: examsOffset,
-          search: debouncedSearch || undefined,
-          examCategory: categoryFilter === 'all' ? undefined : categoryFilter,
-        } }),
-        client.get('/radiology', { params: {
-          resource: 'orders', limit: RADIOLOGY_ITEMS_PER_PAGE, offset: ordersOffset,
-          search: debouncedSearch || undefined,
-          status: statusFilter === 'all' ? undefined : statusFilter,
-          examCategory: modalityFilter === 'all' ? undefined : modalityFilter,
-          ...dateRangeFor({ mode: dateFilter }),
-        } }),
-        client.get('/radiology', { params: {
-          resource: 'reports', limit: RADIOLOGY_ITEMS_PER_PAGE, offset: reportsOffset,
-        } }),
-      ])
-      if (eRes.success) {
-        setExams(eRes.data || [])
-        if (eRes.meta) setExamsMeta(eRes.meta)
-      }
-      if (oRes.success) {
-        setOrders(oRes.data || [])
-        if (oRes.meta) setOrdersMeta(oRes.meta)
-      }
-      if (rRes.success) {
-        setReports(rRes.data || [])
-        if (rRes.meta) setReportsMeta(rRes.meta)
+      const res = await client.get('/radiology', { params: {
+        resource: 'exams',
+        limit: RADIOLOGY_ITEMS_PER_PAGE,
+        offset: (examsPage - 1) * RADIOLOGY_ITEMS_PER_PAGE,
+        search: debouncedSearch || undefined,
+        examCategory: categoryFilter === 'all' ? undefined : categoryFilter,
+      } })
+      if (res.success) {
+        setExams(res.data || [])
+        if (res.meta) setExamsMeta(res.meta)
       }
     } catch { /* silent */ }
+  }, [examsPage, debouncedSearch, categoryFilter])
+
+  const fetchOrders = useCallback(async () => {
+    try {
+      const res = await client.get('/radiology', { params: {
+        resource: 'orders',
+        limit: RADIOLOGY_ITEMS_PER_PAGE,
+        offset: (ordersPage - 1) * RADIOLOGY_ITEMS_PER_PAGE,
+        search: debouncedSearch || undefined,
+        status: statusFilter === 'all' ? undefined : statusFilter,
+        examCategory: modalityFilter === 'all' ? undefined : modalityFilter,
+        ...dateRangeFor({ mode: dateFilter }),
+      } })
+      if (res.success) {
+        setOrders(res.data || [])
+        if (res.meta) setOrdersMeta(res.meta)
+      }
+    } catch { /* silent */ }
+  }, [ordersPage, debouncedSearch, statusFilter, modalityFilter, dateFilter])
+
+  const fetchReports = useCallback(async () => {
+    try {
+      const res = await client.get('/radiology', { params: {
+        resource: 'reports',
+        limit: RADIOLOGY_ITEMS_PER_PAGE,
+        offset: (reportsPage - 1) * RADIOLOGY_ITEMS_PER_PAGE,
+      } })
+      if (res.success) {
+        setReports(res.data || [])
+        if (res.meta) setReportsMeta(res.meta)
+      }
+    } catch { /* silent */ }
+  }, [reportsPage])
+
+  // Still one call for the paths that genuinely change all three — saving an exam
+  // can create an order, and reporting on an order moves it between two of the
+  // lists — so a write refreshes everything rather than guessing what it touched.
+  const fetchAll = useCallback(async () => {
+    setLoading(true)
+    await Promise.all([fetchExams(), fetchOrders(), fetchReports()])
     setLoading(false)
-  }, [examsPage, ordersPage, reportsPage, debouncedSearch, statusFilter, modalityFilter, categoryFilter, dateFilter])
+  }, [fetchExams, fetchOrders, fetchReports])
 
   const fetchStats = useCallback(async () => {
     try {
@@ -222,7 +249,9 @@ export default function RadiologyModule() {
     } catch { /* silent */ }
   }, [])
 
-  useEffect(() => { fetchAll() }, [fetchAll])
+  useEffect(() => { fetchExams() }, [fetchExams])
+  useEffect(() => { fetchOrders() }, [fetchOrders])
+  useEffect(() => { fetchReports() }, [fetchReports])
   useEffect(() => { getOrgSettings().then(setOrgInfo) }, [])
   useEffect(() => { fetchStats() }, [fetchStats])
 

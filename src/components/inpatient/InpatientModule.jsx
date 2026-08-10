@@ -129,44 +129,64 @@ export default function InpatientModule() {
 
   const ADMISSIONS_PER_PAGE = 10
 
-  const fetchAll = useCallback(async () => {
-    setLoading(true)
+  // Only the Patient History page number belongs to this request, so only it
+  // belongs in the dependency array. All five loads used to sit in one callback
+  // keyed on `patientHistoryPage`, which meant turning to page 2 of the history
+  // re-read the wards, every admitted patient, the staff list and the departments
+  // — four requests, none of which page.
+  const fetchAdmissionsPage = useCallback(async () => {
     try {
-      const admissionsOffset = (patientHistoryPage - 1) * ADMISSIONS_PER_PAGE
-      // Fetch all admissions (admitted + discharged) so history tab works
-      // AND separately fetch only admitted to guarantee Discharge/Dashboard tabs stay clean
-      const [wardsResult, admittedResult, pageResult, hospitalStaffResult, departmentsResult] = await Promise.all([
+      const res = await inpatientApi.getAdmissions({
+        limit: ADMISSIONS_PER_PAGE,
+        offset: (patientHistoryPage - 1) * ADMISSIONS_PER_PAGE,
+      })
+      if (res.success) {
+        setAdmissions(res.data || [])
+        if (res.meta) setAdmissionsMeta(res.meta)
+      }
+    } catch (err) {
+      toast.error(err.message || 'Failed to load the admissions page')
+    }
+  }, [patientHistoryPage])
+
+  // Wards, the live admitted list, staff and departments. None of these paginate
+  // or filter — they change when somebody admits, discharges or transfers, which
+  // is exactly when a write path below calls fetchAll.
+  const fetchStandingData = useCallback(async () => {
+    try {
+      const [wardsResult, admittedResult, hospitalStaffResult, departmentsResult] = await Promise.all([
         inpatientApi.getWards(),
         // ALL currently-admitted patients — the live tabs (Nursing, Discharge,
         // Dashboard, Billing, Movement, bed map) must see every one.
         fetchAllAdmitted(),
-        // Paginated list of ALL statuses — only for the Admissions + Patient History tabs.
-        inpatientApi.getAdmissions({ limit: ADMISSIONS_PER_PAGE, offset: admissionsOffset }),
         client.get('/settings?resource=users'),
         client.get('/settings?resource=departments'),
       ])
-      if (wardsResult.success) {
-        setWards(wardsResult.data || [])
-      }
+      if (wardsResult.success) setWards(wardsResult.data || [])
       setAdmittedAll(admittedResult.rows)
       setAdmittedTotal(admittedResult.total)
       // A half-loaded list is worse than a visibly failed one: staff would read
       // the Discharge/Nursing tabs as complete and miss a patient.
       if (!admittedResult.complete) toast.error('Could not load every admitted patient — some may be missing from the live tabs')
-      if (pageResult.success) {
-        setAdmissions(pageResult.data || [])
-        if (pageResult.meta) setAdmissionsMeta(pageResult.meta)
-      }
       if (hospitalStaffResult.success) setDoctors((hospitalStaffResult.data || []).filter(user => user.role === 'doctor' && user.isActive !== false))
       if (departmentsResult.success) setDepartments(departmentsResult.data || [])
     } catch (err) {
       toast.error(err.message || 'Failed to load inpatient data')
-    } finally {
-      setLoading(false)
     }
-  }, [patientHistoryPage])
+  }, [])
 
-  useEffect(() => { fetchAll() }, [fetchAll])
+  // Every write here moves a patient between wards, beds and tabs at once, so the
+  // write paths and the 60-second poll below still refresh the lot. Only the two
+  // effects are split — the point was never to fetch less on a discharge, it was
+  // to stop paging a table from re-reading the whole ward.
+  const fetchAll = useCallback(async () => {
+    setLoading(true)
+    await Promise.all([fetchStandingData(), fetchAdmissionsPage()])
+    setLoading(false)
+  }, [fetchStandingData, fetchAdmissionsPage])
+
+  useEffect(() => { fetchStandingData() }, [fetchStandingData])
+  useEffect(() => { fetchAdmissionsPage() }, [fetchAdmissionsPage])
   useEffect(() => { getOrgSettings().then(setOrgInfo) }, [])
   useEffect(() => {
     const interval = setInterval(fetchAll, 60000)
