@@ -1,7 +1,7 @@
 import { db } from '../config/db.js'
 import { patientSearchWhere } from '../lib/patientSearch.js'
 import { getOrgId, getActor } from "../lib/reqContext.js";
-import { todayRange } from '../lib/dates.js'
+import { todayRange, dayRange } from '../lib/dates.js'
 import { nextSeriesNumber, invoiceProbe } from "../lib/counters.js";
 import { recalcInvoice, refundableAmount } from "../lib/invoiceLedger.js";
 import { fulfillInvoiceItems } from "../lib/invoiceFulfillment.js";
@@ -261,7 +261,7 @@ async function reverseInvoiceFulfillment(tx, { organizationId, invoice, actorId 
 export async function getAll(req, res) {
   try {
     const ORGANIZATION_ID = getOrgId(req)
-    const { resource, category, status, patientId, invoiceId, search, type } = req.query
+    const { resource, category, status, patientId, invoiceId, search, type, startDate, endDate } = req.query
     const limit = Math.min(Math.max(parseInt(req.query.limit) || 10, 1), 1000) // hard cap → no unbounded query DoS
     // Guard like `limit`: a bare parseInt let `offset=-5` (or `offset=abc` → NaN)
     // reach Prisma, which threw a 500. A bad page offset is a client mistake — it
@@ -317,6 +317,19 @@ export async function getAll(req, res) {
       const markers = INVOICE_TYPE_MATCH[type]
       if (markers) {
         where.AND = [...(where.AND ?? []), { OR: markers.map((m) => ({ items: { contains: m } })) }]
+      }
+      // Date range, in the HOSPITAL's timezone — not the server's. `dayRange`
+      // turns 2026-08-10 into that whole day in IST, which is 18:30 the previous
+      // day in UTC. Slicing an ISO string instead would put every bill raised
+      // after 18:30 into tomorrow, and the counter's day-end total would be wrong
+      // for the busiest hours of the evening.
+      //
+      // Only assigned when a bound is actually present: `dayRange('', '')` is `{}`,
+      // and `invoiceDate: {}` matches nothing in Prisma — an empty filter would
+      // silently return zero invoices instead of all of them.
+      if (startDate || endDate) {
+        const range = dayRange(startDate, endDate)
+        if (range.gte || range.lte) where.invoiceDate = range
       }
       // Single-invoice fetch (with its payments) — used to render a receipt.
       if (invoiceId) where.id = invoiceId

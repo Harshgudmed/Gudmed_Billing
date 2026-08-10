@@ -737,6 +737,11 @@ export default function LaboratoryModule() {
     fetchStats()
     fetchResults()
     ordersTable.refresh()
+    // testsTable is the Catalog tab's own paginated list, separate from the
+    // fetchTests() dashboard/picker copy above — without this, Refresh looked
+    // like it worked (toast + dashboard updated) but the Catalog table kept
+    // showing stale rows until the tab was left and reopened.
+    testsTable.refresh()
     toast.success('Data refreshed')
   }
 
