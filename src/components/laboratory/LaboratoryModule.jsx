@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from 'react'
+import { useState, useEffect, useCallback, useMemo, lazy, Suspense } from 'react'
 import { useOrgSettings } from '@/lib/useOrgSettings'
 import { sendLabResultNotification } from '@/lib/whatsapp'
 import { Button } from '@/components/ui/button'
@@ -22,7 +22,11 @@ import { zodResolver } from '@hookform/resolvers/zod'
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
-import BulkImportDialog from '@/components/common/BulkImportDialog'
+// lazy, because this dialog pulls in the xlsx parser — 429 KB, the single
+// heaviest dependency in the application — and it exists to import a spreadsheet
+// of catalogue rows, which most users never do. Statically imported, every visitor
+// to this module paid for it on page load.
+const BulkImportDialog = lazy(() => import('@/components/common/BulkImportDialog'))
 import { Progress } from '@/components/ui/progress'
 import { labApi, LAB_ENDPOINT } from '@/api/labApi'
 import { useServerPagination } from '@/lib/useServerPagination'
@@ -1737,21 +1741,29 @@ export default function LaboratoryModule() {
         </TabsContent>
       </Tabs>
 
-      <BulkImportDialog
-        open={showImport}
-        onClose={() => setShowImport(false)}
-        onImported={fetchTests}
-        title="Import Lab Tests from Excel / CSV"
-        description="Upload your pathology test list — each row becomes a test in the catalog. No manual typing per test."
-        endpoint="/laboratory/import"
-        itemNoun="tests"
-        templateFileName="lab-tests-template.xlsx"
-        templateColumns={["Test Name", "Code", "Category", "Test Type", "Sample Type", "Container", "Unit", "Reference Range", "Price", "TAT (hours)", "Department", "Preparation"]}
-        sampleRows={[
-          { "Test Name": "Complete Blood Count (CBC)", Code: "CBC", Category: "hematology", "Test Type": "quantitative", "Sample Type": "blood", Container: "EDTA", Unit: "cells/uL", "Reference Range": "4000-11000", Price: 300, "TAT (hours)": 24, Department: "Pathology", Preparation: "None" },
-          { "Test Name": "Lipid Profile", Code: "LIPID", Category: "biochemistry", "Test Type": "quantitative", "Sample Type": "blood", Container: "Plain", Unit: "mg/dL", "Reference Range": "Varies", Price: 600, "TAT (hours)": 12, Department: "Pathology", Preparation: "12 hr fasting" },
-        ]}
-      />
+      {/* Gated on `open`, not merely hidden by it. A lazy component still fetches
+          its chunk the moment it renders, so leaving this mounted-but-closed
+          would download the 429 KB xlsx parser on every page load and the lazy()
+          above would buy nothing. */}
+      {showImport && (
+        <Suspense fallback={null}>
+          <BulkImportDialog
+            open={showImport}
+            onClose={() => setShowImport(false)}
+            onImported={fetchTests}
+            title="Import Lab Tests from Excel / CSV"
+            description="Upload your pathology test list — each row becomes a test in the catalog. No manual typing per test."
+            endpoint="/laboratory/import"
+            itemNoun="tests"
+            templateFileName="lab-tests-template.xlsx"
+            templateColumns={["Test Name", "Code", "Category", "Test Type", "Sample Type", "Container", "Unit", "Reference Range", "Price", "TAT (hours)", "Department", "Preparation"]}
+            sampleRows={[
+              { "Test Name": "Complete Blood Count (CBC)", Code: "CBC", Category: "hematology", "Test Type": "quantitative", "Sample Type": "blood", Container: "EDTA", Unit: "cells/uL", "Reference Range": "4000-11000", Price: 300, "TAT (hours)": 24, Department: "Pathology", Preparation: "None" },
+              { "Test Name": "Lipid Profile", Code: "LIPID", Category: "biochemistry", "Test Type": "quantitative", "Sample Type": "blood", Container: "Plain", Unit: "mg/dL", "Reference Range": "Varies", Price: 600, "TAT (hours)": 12, Department: "Pathology", Preparation: "12 hr fasting" },
+            ]}
+          />
+        </Suspense>
+      )}
 
       {/* Add Test Dialog */}
       <Dialog open={showTestDialog} onOpenChange={setShowTestDialog}>

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, lazy, Suspense } from 'react'
 import { clearOrgCache } from '@/lib/orgSettings'
 import { drName } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
@@ -30,7 +30,10 @@ import { useServerPagination } from '@/lib/useServerPagination'
 import { Pagination } from '@/components/common/Pagination'
 import IntegrationsHub from './IntegrationsHub'
 import RoomsManager from './RoomsManager'
-import DisplayBoardsModule from '../display-boards/DisplayBoardsModule'
+// lazy: the display-board manager is a module in its own right, sitting in one
+// Settings tab. A static import put it in the Settings bundle for everyone who
+// opens Settings to change a phone number.
+const DisplayBoardsModule = lazy(() => import('../display-boards/DisplayBoardsModule'))
 
 const ORG_ID = 'org-demo'
 const ITEMS_PER_PAGE = 10
@@ -689,7 +692,9 @@ export default function SettingsModule() {
 
         {/* TV Boards Tab */}
         <TabsContent value="displayBoards" className="space-y-4">
-          <DisplayBoardsModule />
+          <Suspense fallback={null}>
+            <DisplayBoardsModule />
+          </Suspense>
         </TabsContent>
 
         {/* Modules Tab */}

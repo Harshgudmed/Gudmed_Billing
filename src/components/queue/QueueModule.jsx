@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useCallback, lazy, Suspense } from 'react'
 import { toast } from 'sonner'
 import { RefreshCw, Users, Search, MonitorPlay } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
@@ -10,10 +10,27 @@ import { useDateFilter } from '@/components/common/DateFilter'
 import { useDebounce } from '@/lib/useDebounce'
 import { useServerPagination } from '@/lib/useServerPagination'
 import client from '@/api/client'
-import AppointmentsModule from '@/components/appointments/AppointmentsModule'
-import BillingModule from '@/components/billing/BillingModule'
+// Both are behind lazy() because they are whole modules living in this module's
+// tabs, and a static import puts them in the Queue route's bundle whether or not
+// anyone opens the tab. Measured on the Queue route: 833 KB of Billing and 690 KB
+// of Appointments arrived for a receptionist who only watches the queue.
+// Radix unmounts an inactive TabsContent, so neither ever mounted — the bytes were
+// downloaded and parsed for nothing.
+const AppointmentsModule = lazy(() => import('@/components/appointments/AppointmentsModule'))
+const BillingModule = lazy(() => import('@/components/billing/BillingModule'))
 import { QueueRow } from '@/components/queue/QueueRow'
 import { QueueEmptyState } from '@/components/queue/QueueEmptyState'
+
+// Named, not a bare spinner: the tab loads a whole module on a hospital's
+// connection, and "Loading Billing…" tells the user the click registered.
+function TabLoading({ name }) {
+  return (
+    <div className="flex items-center justify-center gap-2 py-16 text-sm text-gray-500">
+      <RefreshCw className="h-4 w-4 animate-spin" />
+      Loading {name}…
+    </div>
+  )
+}
 
 const PRIORITY_COLORS = {
   urgent: 'bg-red-500 text-white',
@@ -103,7 +120,11 @@ export default function QueueModule() {
   // previously used a single component-wide `callingNext` boolean instead,
   // which disabled every row's "Call in" button at once while any one call
   // was in flight.
-  const act = async (key, fn, successMessage, failureMessage) => {
+  // The three row handlers below are useCallback'd, and this is why: QueueRow is
+  // memo'd, and memo compares props by reference. A handler rebuilt on every render
+  // makes every row re-render anyway, so the memo would cost a comparison and buy
+  // nothing — which is the failure mode that looks like "we already memoised it".
+  const act = useCallback(async (key, fn, successMessage, failureMessage) => {
     setUpdatingId(key)
     try {
       const res = await fn()
@@ -118,10 +139,11 @@ export default function QueueModule() {
     } finally {
       setUpdatingId(null)
     }
-  }
+  }, [refresh])
 
-  const setStatus = (entry, status, successMessage) =>
-    act(`${entry.id}_${status}`, () => client.patch(`/queue/${entry.id}`, { status }), successMessage, 'Failed to update patient')
+  const setStatus = useCallback((entry, status, successMessage) =>
+    act(`${entry.id}_${status}`, () => client.patch(`/queue/${entry.id}`, { status }), successMessage, 'Failed to update patient'),
+  [act])
 
   // The doctor's one button: finish whoever is in the room and wave the next
   // person in, as a single server-side transaction (POST /queue/call-next).
@@ -131,17 +153,18 @@ export default function QueueModule() {
   // did: `in_progress` stayed empty and the board could never say who was next.
   // One press now also produces the "you are next" warning for the person
   // behind, because that is derived from the queue moving.
-  const callNext = (entry) =>
-    act(`${entry.id}_call`, () => client.post('/queue/call-next', { queueEntryId: entry.id }), (res) => res.message || 'Next patient called', 'Could not call the next patient')
+  const callNext = useCallback((entry) =>
+    act(`${entry.id}_call`, () => client.post('/queue/call-next', { queueEntryId: entry.id }), (res) => res.message || 'Next patient called', 'Could not call the next patient'),
+  [act])
 
   // Changing priority re-ranks the row on the server (priority -> priorityRank),
   // so the queue must be re-read: the whole point is that the patient MOVES.
   // Mutating `entry.priority` in place did nothing — it is not React state, so
   // React never re-rendered and the row appeared stuck where it was.
-  const changePriority = (entry, priority) => {
+  const changePriority = useCallback((entry, priority) => {
     if (priority === entry.priority) return
     return act(`${entry.id}_priority`, () => client.patch(`/queue/${entry.id}`, { priority }), `Priority set to ${priority}`, 'Failed to change priority')
-  }
+  }, [act])
 
   return (
     <div className="space-y-4">
@@ -262,12 +285,16 @@ export default function QueueModule() {
 
         {/* ── Appointments Tab ── */}
         <TabsContent value="appointments">
-          <AppointmentsModule />
+          <Suspense fallback={<TabLoading name="Appointments" />}>
+            <AppointmentsModule />
+          </Suspense>
         </TabsContent>
 
         {/* ── Billing Tab ── */}
         <TabsContent value="billing">
-          <BillingModule />
+          <Suspense fallback={<TabLoading name="Billing" />}>
+            <BillingModule />
+          </Suspense>
         </TabsContent>
       </Tabs>
     </div>
