@@ -226,8 +226,17 @@ export default function OpdModule() {
   const radExamPicker = useCatalogueSearch(searchRadExams)
   const [loading, setLoading] = useState(true)
 
-  const vitalsForm = useForm({ resolver: zodResolver(vitalsSchema), defaultValues: DEFAULT_VITALS })
+  // onBlur here too — vitals are numbers with real bounds, and a nurse should see
+  // "temperature must be between 30 and 45" on leaving the box, not after Save.
+  const vitalsForm = useForm({ resolver: zodResolver(vitalsSchema), mode: 'onBlur', defaultValues: DEFAULT_VITALS })
   const clinicalForm = useForm({
+    // Validate when the user LEAVES a field, not only when they press Save.
+    // react-hook-form defaults to mode: 'onSubmit', so every one of these forms was
+    // silent until submit — a receptionist filled the whole thing, pressed Save and
+    // only then learned which field was wrong, with nothing marked until that
+    // moment. CLAUDE.md's validation section asks for the message under the field
+    // the moment focus leaves it; this is the one line that turns that on.
+    mode: 'onBlur',
     resolver: zodResolver(clinicalSchema),
     defaultValues: { chiefComplaint: '', diagnosis: '', icd10Code: '', advice: '', followUpDate: '' },
   })
