@@ -74,7 +74,20 @@ export function dateRangeFor({ mode, specificDate, customStart, customEnd }) {
   return { startDate: "", endDate: "" };
 }
 
-export function useDateFilter(initialMode = "all") {
+/**
+ * @param initialMode  which range to start on ("all", "today", …)
+ * @param showClear    whether this control renders its OWN Clear button.
+ *
+ * Billing sets it false because that screen has four filters and offers one
+ * "Clear all" that resets every one of them. With both rendered the toolbar
+ * showed "Clear" and "Clear all" side by side — two buttons a step apart, one
+ * of which silently does less than the other. A user who presses the wrong one
+ * thinks the list is unfiltered when the search box is still narrowing it.
+ *
+ * Defaults to true, so the modules with a date filter and nothing else keep the
+ * button that is their only way to reset it.
+ */
+export function useDateFilter(initialMode = "all", { showClear = true } = {}) {
   const [mode, setMode] = useState(initialMode);
   const [specificDate, setSpecificDate] = useState("");
   const [customStart, setCustomStart] = useState("");
@@ -124,7 +137,7 @@ export function useDateFilter(initialMode = "all") {
         </>
       )}
 
-      {active && (
+      {active && showClear && (
         <Button variant="ghost" size="sm" className="text-gray-500" onClick={reset}>
           <X className="h-4 w-4 mr-1" />Clear
         </Button>

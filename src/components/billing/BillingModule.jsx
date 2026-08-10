@@ -7,7 +7,7 @@ import { format } from 'date-fns'
 import client from '@/api/client'
 import PatientLookup from '@/components/common/PatientLookup'
 import RefundApprovalsTab from './RefundApprovalsTab'
-import { Receipt, RefreshCw, Plus, Search, Trash2, Shield, Eye, Printer, Download, TrendingUp, Clock, AlertCircle, Pencil } from 'lucide-react'
+import { Receipt, RefreshCw, Plus, Search, Trash2, Shield, Eye, Printer, Download, TrendingUp, Clock, AlertCircle, Pencil, X } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -24,6 +24,7 @@ import { zodResolver } from '@hookform/resolvers/zod'
 import { appointmentSchema } from '@/components/appointments/appointmentSchema'
 import AppointmentFormDialog from '@/components/appointments/AppointmentFormDialog'
 import { useBookingSource } from '@/components/common/hooks/useBookingSource'
+import { useDateFilter } from '@/components/common/DateFilter'
 
 // ── Catalogue ─────────────────────────────────────────────────────────────────
 const CATALOGUE = {
@@ -387,6 +388,34 @@ export default function BillingModule({ onBack }) {
   const [invoiceType, setInvoiceType] = useState('all')
   const [totalBills, setTotalBills] = useState(0)
 
+  // The shared date filter every other module already uses (Patients, Pre-Triage,
+  // Consultations). It owns the six modes, the two date inputs, its own Clear
+  // button, and `range` — the { startDate, endDate } the server understands.
+  //
+  // It also refuses to send a HALF-filled range: picking "Custom Range" switches
+  // the mode before either date is typed, and typing the start lands a render
+  // before the end exists. Sending those would have fired two throwaway queries
+  // per use, one an open-ended scan of every invoice ever raised.
+  // showClear: false — this tab has four filters and one "Clear all" below that
+  // resets every one of them. Letting the date control render its own Clear too
+  // put two buttons a step apart, the left one resetting only the date.
+  const dateFilter = useDateFilter('all', { showClear: false })
+
+  // One button that clears EVERY filter on this tab, not just the dates. The
+  // shared control has its own Clear for the date alone; this is the one a
+  // receptionist reaches for after narrowing by search, status, type AND date and
+  // wanting the full list back — otherwise that is four separate resets, and
+  // forgetting one is how "the invoice is missing" gets reported.
+  const invoiceFiltersActive =
+    invoiceSearch !== '' || invoiceFilter !== 'all' || invoiceType !== 'all' || dateFilter.active
+
+  const clearInvoiceFilters = () => {
+    setInvoiceSearch('')
+    setInvoiceFilter('all')
+    setInvoiceType('all')
+    dateFilter.reset()
+  }
+
   // Service catalog — mirrors the backend BillingService schema exactly
   // (serviceName/serviceCode/serviceCategory/department/unitPrice/isTaxable/
   // taxPercentage/isCoveredByInsurance/insuranceCopayPercentage/description).
@@ -411,9 +440,12 @@ export default function BillingModule({ onBack }) {
     return () => clearTimeout(handler)
   }, [invoiceSearch])
 
+  // Any filter change snaps back to page 1. Narrowing while on page 4 otherwise
+  // leaves the table blank: "Today" has two invoices, page 4 of two rows does not
+  // exist, and the screen shows nothing while the header claims a count.
   useEffect(() => {
     setInvoicesPage(1)
-  }, [debouncedInvoiceSearch, invoiceFilter, invoiceType])
+  }, [debouncedInvoiceSearch, invoiceFilter, invoiceType, dateFilter.key])
 
   // Derived cart totals
   const subtotal = form.items.reduce((a, i) => a + i.qty * i.amt, 0)
@@ -434,7 +466,12 @@ export default function BillingModule({ onBack }) {
           offset,
           search: debouncedInvoiceSearch || undefined,
           status: invoiceFilter === 'all' ? undefined : invoiceFilter,
-          type: invoiceType === 'all' ? undefined : invoiceType
+          type: invoiceType === 'all' ? undefined : invoiceType,
+          // Filtered in the DATABASE, not in the browser. A page-local filter
+          // would only ever search the ten rows already on screen and would
+          // report "no invoices in March" while March sat on page four.
+          startDate: dateFilter.range.startDate || undefined,
+          endDate: dateFilter.range.endDate || undefined,
         }
       })
       if (res.success) {
@@ -493,7 +530,10 @@ export default function BillingModule({ onBack }) {
       }
     } catch { /* silent */ }
     finally { setBillsLoading(false) }
-  }, [invoicesPage, debouncedInvoiceSearch, invoiceFilter, invoiceType])
+    // `dateFilter.key` and not the range object: a fresh { startDate, endDate } is
+    // built on every render, so depending on it would refetch forever. The key is
+    // a plain string that only changes when the user actually changes a date.
+  }, [invoicesPage, debouncedInvoiceSearch, invoiceFilter, invoiceType, dateFilter.key])
 
   const fetchStats = useCallback(async () => {
     try {
@@ -1201,6 +1241,12 @@ export default function BillingModule({ onBack }) {
                 <SelectItem value="vaccine">Vaccine</SelectItem>
               </SelectContent>
             </Select>
+            {dateFilter.control}
+            {invoiceFiltersActive && (
+              <Button variant="ghost" size="sm" className="text-gray-500" onClick={clearInvoiceFilters}>
+                <X className="h-4 w-4 mr-1" />Clear all
+              </Button>
+            )}
           </div>
           <Card>
             <CardContent className="p-0">
