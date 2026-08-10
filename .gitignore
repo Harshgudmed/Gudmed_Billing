@@ -62,3 +62,30 @@ docs/images/
 # Audit run state — meaningless outside the machine that is running it
 .audit.lock
 .audit-overnight.pid
+
+# ── Local working material, deliberately not in the repository ────────────────
+# Audit harnesses, probe scripts, the findings report and the working notes are
+# tools for building this application, not part of it. They were tracked for one
+# day and taken back out at the owner's instruction; they still live on the
+# machine that runs them.
+#
+# The ten exceptions below are NOT tooling — package.json or the Render build
+# runs each of them by name. Removing any one breaks a build or an npm script,
+# so they stay tracked. This list was derived by grepping every manifest in the
+# repo, not from memory: storage-report.mjs was dropped on the first attempt
+# because it was assumed to live in scripts/ when it lives in backend/scripts/.
+e2e/
+docs/
+CLAUDE.md
+scripts/
+backend/scripts/*
+!backend/scripts/build-clinical-kb.mjs
+!backend/scripts/check-drift.mjs
+!backend/scripts/ensure-ipd-indexes.mjs
+!backend/scripts/fix-prod-billcounter.mjs
+!backend/scripts/heal-migrations.mjs
+!backend/scripts/hl7-inject.js
+!backend/scripts/hl7-simulator.js
+!backend/scripts/queue-race.mjs
+!backend/scripts/seed-medicine-reference.mjs
+!backend/scripts/storage-report.mjs
