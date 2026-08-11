@@ -100,7 +100,7 @@ function transformApiOrder(apiOrder) {
     tests: parsedTests.map(t => ({
       testId: t.testId,
       testName: t.testName,
-      testCode: t.testName?.substring(0, 4).toUpperCase() || '',
+      testCode: testShortCode(t),
       testCategory: 'hematology',
       specimenType: 'Blood',
       urgency: t.urgency || 'routine',
@@ -146,6 +146,89 @@ function transformApiResult(apiResult) {
   }
 }
 
+// OPTION TABLES — one row per option; the zod enum, the colours and every
+// dropdown are derived from these, so a new option is one edit, not four.
+
+const TEST_CATEGORIES = [
+  { value: 'hematology',    label: 'Hematology',    badge: 'bg-red-100 text-red-800 border-red-200' },
+  { value: 'chemistry',     label: 'Chemistry',     badge: 'bg-blue-100 text-blue-800 border-blue-200' },
+  { value: 'urinalysis',    label: 'Urinalysis',    badge: 'bg-yellow-100 text-yellow-800 border-yellow-200' },
+  { value: 'microbiology',  label: 'Microbiology',  badge: 'bg-purple-100 text-purple-800 border-purple-200' },
+  { value: 'parasitology',  label: 'Parasitology',  badge: 'bg-green-100 text-green-800 border-green-200' },
+  { value: 'serology',      label: 'Serology',      badge: 'bg-orange-100 text-orange-800 border-orange-200' },
+  { value: 'immunology',    label: 'Immunology',    badge: 'bg-pink-100 text-pink-800 border-pink-200' },
+  { value: 'endocrinology', label: 'Endocrinology', badge: 'bg-indigo-100 text-indigo-800 border-indigo-200' },
+]
+
+// An ORDER's five states. A result's lifecycle (draft/verified/final) is
+// separate and must never show in this filter, so it is added below instead.
+const ORDER_STATUSES = [
+  { value: 'pending',          label: 'Pending',          badge: 'bg-yellow-100 text-yellow-800 border-yellow-200' },
+  { value: 'sample_collected', label: 'Sample Collected', badge: 'bg-blue-100 text-blue-800 border-blue-200' },
+  { value: 'in_progress',      label: 'In Progress',      badge: 'bg-orange-100 text-orange-800 border-orange-200' },
+  { value: 'completed',        label: 'Completed',        badge: 'bg-green-100 text-green-800 border-green-200' },
+  { value: 'cancelled',        label: 'Cancelled',        badge: 'bg-red-100 text-red-800 border-red-200' },
+]
+
+// `badge` = the pill with text; `dot` = the bare colour block, no text.
+const PRIORITIES = [
+  { value: 'routine', label: 'Routine', badge: 'bg-green-100 text-green-800',          dot: 'bg-yellow-500' },
+  { value: 'urgent',  label: 'Urgent',  badge: 'bg-orange-500 text-white',             dot: 'bg-orange-500' },
+  { value: 'stat',    label: 'STAT',    badge: 'bg-red-500 text-white animate-pulse',  dot: 'bg-red-500 animate-pulse' },
+]
+
+// Icon and colour per specimen. Swab, Tissue and Fluid were in the schema and the
+// form but not the icon map, so all three fell through to the grey default flask.
+const SAMPLE_TYPES = [
+  { value: 'Blood',  Icon: Droplet,      className: 'text-red-500' },
+  { value: 'Urine',  Icon: Beaker,       className: 'text-yellow-500' },
+  { value: 'Stool',  Icon: TestTube,     className: 'text-amber-700' },
+  { value: 'Sputum', Icon: TestTube,     className: 'text-green-500' },
+  { value: 'CSF',    Icon: Droplet,      className: 'text-blue-500' },
+  { value: 'Swab',   Icon: TestTube,     className: 'text-purple-500' },
+  { value: 'Tissue', Icon: Microscope,   className: 'text-pink-500' },
+  { value: 'Fluid',  Icon: FlaskConical, className: 'text-cyan-500' },
+]
+
+// The six dashboard tiles. Only the number, the label, the icon and the colour
+// ever differ, so the markup lives in one place and this table holds the rest.
+// Colours are written out in full, never built as `bg-${tone}-50` — Tailwind
+// scans the source for whole class names, and an interpolated one is never
+// found, so every tile would ship colourless.
+const STAT_TILES = [
+  { key: 'pendingOrders',   label: 'Pending Orders',   Icon: Clock,
+    card: 'bg-yellow-50 border-yellow-200', num: 'text-yellow-700', txt: 'text-yellow-600', icon: 'text-yellow-500' },
+  { key: 'sampleCollected', label: 'Sample Collected', Icon: TestTube,
+    card: 'bg-blue-50 border-blue-200',     num: 'text-blue-700',   txt: 'text-blue-600',   icon: 'text-blue-500' },
+  { key: 'inProgress',      label: 'In Progress',      Icon: Activity,
+    card: 'bg-orange-50 border-orange-200', num: 'text-orange-700', txt: 'text-orange-600', icon: 'text-orange-500' },
+  { key: 'completedToday',  label: 'Completed Today',  Icon: CheckCircle,
+    card: 'bg-green-50 border-green-200',   num: 'text-green-700',  txt: 'text-green-600',  icon: 'text-green-500' },
+  { key: 'criticalResults', label: 'Critical Results', Icon: AlertTriangle,
+    card: 'bg-red-50 border-red-200',       num: 'text-red-700',    txt: 'text-red-600',    icon: 'text-red-500' },
+  { key: 'totalTests',      label: 'Total Tests',      Icon: Microscope,
+    card: 'bg-purple-50 border-purple-200', num: 'text-purple-700', txt: 'text-purple-600', icon: 'text-purple-500' },
+]
+
+// The five report types. Never changed by anything at runtime, so it belongs
+// beside the other tables, not rebuilt inside JSX on every render.
+const REPORT_TYPES = [
+  { name: 'Patient Report',  icon: User,           desc: 'Individual lab report for patient' },
+  { name: 'Summary Report',  icon: FileBarChart,   desc: 'Daily/weekly summary' },
+  { name: 'Quality Control', icon: CheckSquare,    desc: 'QC and compliance reports' },
+  { name: 'Critical Values', icon: AlertTriangle,  desc: 'Critical results log' },
+  { name: 'Turnaround Time', icon: Clock,          desc: 'TAT analysis report' },
+]
+
+// The short chip on a test. Written twice, and the copies had drifted: one guarded
+// the missing testName that transformApiOrder itself allows for, the other did not
+// and threw, blanking the whole Results tab.
+const testShortCode = (test) =>
+  test.testCode || test.testName?.substring(0, 4).toUpperCase() || 'Test'
+
+const byValue = (rows, key) => Object.fromEntries(rows.map((r) => [r.value, r[key]]))
+const valuesOf = (rows) => rows.map((r) => r.value)
+
 // ============================================
 // FORM SCHEMAS
 // ============================================
@@ -153,9 +236,9 @@ function transformApiResult(apiResult) {
 const testSchema = z.object({
   testName: z.string().min(3, 'Test name is required'),
   testCode: z.string().min(2, 'Test code is required'),
-  testCategory: z.enum(['hematology', 'chemistry', 'urinalysis', 'microbiology', 'parasitology', 'serology', 'immunology', 'endocrinology']),
+  testCategory: z.enum(valuesOf(TEST_CATEGORIES)),
   testType: z.enum(['quantitative', 'qualitative']),
-  specimenType: z.enum(['Blood', 'Urine', 'Stool', 'Sputum', 'CSF', 'Swab', 'Tissue', 'Fluid']),
+  specimenType: z.enum(valuesOf(SAMPLE_TYPES)),
   specimenVolume: z.string().min(1, 'Specimen volume is required'),
   specimenContainer: z.string().min(1, 'Specimen container is required'),
   unit: z.string().optional(),
@@ -176,7 +259,7 @@ const orderSchema = z.object({
   tests: z.array(z.string()).min(1, 'At least one test is required'),
   clinicalIndication: z.string().min(5, 'Clinical indication is required'),
   provisionalDiagnosis: z.string().optional(),
-  priority: z.enum(['routine', 'urgent', 'stat']),
+  priority: z.enum(valuesOf(PRIORITIES)),
   notes: z.string().optional()
 })
 
@@ -198,63 +281,38 @@ const resultSchema = z.object({
 // function body. The fallbacks below keep an unknown value rendering a neutral
 // badge rather than an empty one.
 
-const CATEGORY_BADGE = {
-  hematology: 'bg-red-100 text-red-800 border-red-200',
-  chemistry: 'bg-blue-100 text-blue-800 border-blue-200',
-  urinalysis: 'bg-yellow-100 text-yellow-800 border-yellow-200',
-  microbiology: 'bg-purple-100 text-purple-800 border-purple-200',
-  parasitology: 'bg-green-100 text-green-800 border-green-200',
-  serology: 'bg-orange-100 text-orange-800 border-orange-200',
-  immunology: 'bg-pink-100 text-pink-800 border-pink-200',
-  endocrinology: 'bg-indigo-100 text-indigo-800 border-indigo-200',
-}
+const CATEGORY_BADGE = byValue(TEST_CATEGORIES, 'badge')
 const NEUTRAL_BADGE = 'bg-gray-100 text-gray-800 border-gray-200'
+// A test is active or retired — not an order status, so its own pair.
+const ACTIVE_BADGE = 'bg-green-100 text-green-800 border-green-200'
 
+// getStatusBadgeColor is asked for an order's status AND a result's, so this
+// covers both — but only ORDER_STATUSES is offered in the filter.
 const STATUS_BADGE = {
-  pending: 'bg-yellow-100 text-yellow-800 border-yellow-200',
-  sample_collected: 'bg-blue-100 text-blue-800 border-blue-200',
-  in_progress: 'bg-orange-100 text-orange-800 border-orange-200',
-  completed: 'bg-green-100 text-green-800 border-green-200',
-  cancelled: 'bg-red-100 text-red-800 border-red-200',
+  ...byValue(ORDER_STATUSES, 'badge'),
   draft: NEUTRAL_BADGE,
   verified: 'bg-emerald-100 text-emerald-800 border-emerald-200',
   final: 'bg-green-600 text-white',
 }
 
-const PRIORITY_BADGE = {
-  stat: 'bg-red-500 text-white animate-pulse',
-  urgent: 'bg-orange-500 text-white',
-  routine: 'bg-green-100 text-green-800',
-}
+const PRIORITY_BADGE = byValue(PRIORITIES, 'badge')
 
-// The bare colour block that marks priority next to an order in the dashboard
-// lists — no text, so it is a different thing from PRIORITY_BADGE above.
-// It was written out as a nested ternary at both of its two uses, and the two
-// copies had already drifted: routine was bg-yellow-500 in one list and
-// bg-yellow-400 in the other, so the same order showed two different yellows on
-// one screen.
-const PRIORITY_DOT = {
-  stat: 'bg-red-500 animate-pulse',
-  urgent: 'bg-orange-500',
-  routine: 'bg-yellow-500',
-}
+// The bare colour block in the dashboard lists — no text, so its own shade.
+const PRIORITY_DOT = byValue(PRIORITIES, 'dot')
 
 // Icon + colour per sample type. Stored as data (component + className) rather
 // than as ready-made JSX so the table holds no markup and the element is built
 // once, at the single place that renders it.
-const SAMPLE_TYPE_ICON = {
-  Blood: { Icon: Droplet, className: 'text-red-500' },
-  Urine: { Icon: Beaker, className: 'text-yellow-500' },
-  Stool: { Icon: TestTube, className: 'text-amber-700' },
-  Sputum: { Icon: TestTube, className: 'text-green-500' },
-  CSF: { Icon: Droplet, className: 'text-blue-500' },
-}
+const SAMPLE_TYPE_ICON = Object.fromEntries(
+  SAMPLE_TYPES.map((s) => [s.value, { Icon: s.Icon, className: s.className }]),
+)
 const DEFAULT_SAMPLE_ICON = { Icon: FlaskConical, className: 'text-gray-500' }
 
 const getCategoryBadgeColor = (category) => CATEGORY_BADGE[category] ?? NEUTRAL_BADGE
 const getStatusBadgeColor = (status) => STATUS_BADGE[status] ?? NEUTRAL_BADGE
 const getPriorityBadgeColor = (priority) => PRIORITY_BADGE[priority] ?? 'bg-gray-100 text-gray-800'
 const getPriorityDotColor = (priority) => PRIORITY_DOT[priority] ?? PRIORITY_DOT.routine
+const getActiveBadgeColor = (isActive) => (isActive ? ACTIVE_BADGE : NEUTRAL_BADGE)
 
 const getSampleTypeIcon = (type) => {
   const { Icon, className } = SAMPLE_TYPE_ICON[type] ?? DEFAULT_SAMPLE_ICON
@@ -478,12 +536,31 @@ export default function LaboratoryModule() {
   )
   const criticalResults = useMemo(() => results.filter(r => r.isCritical), [results])
 
-  // Recent orders requiring attention
-  const recentOrdersAttention = orders.filter(o =>
-    o.status === 'pending' || o.status === 'sample_collected' || o.priority === 'stat'
-  ).slice(0, 5)
+  // Memoised like its three siblings above — it was the one that rebuilt on
+  // every render, including every keystroke in a search box it does not read.
+  const recentOrdersAttention = useMemo(
+    () => orders
+      .filter(o => o.status === 'pending' || o.status === 'sample_collected' || o.priority === 'stat')
+      .slice(0, 5),
+    [orders],
+  )
 
   // Handlers
+  // transformApiTest returns exactly the schema's fields plus id/referenceRanges,
+  // so the form values ARE the row minus those two — no hand-written field list.
+  const openTestForEdit = (test) => {
+    const { id, referenceRanges, ...formValues } = test
+    setSelectedTest(test)
+    testForm.reset(formValues)
+    setShowTestDialog(true)
+  }
+
+  // Opening an order's detail dialog — five call sites wrote these two lines out.
+  const viewOrder = (order) => {
+    setSelectedOrder(order)
+    setShowViewOrderDialog(true)
+  }
+
   const handleCreateTest = async (data) => {
     try {
       setIsLoading(true)
@@ -851,77 +928,19 @@ export default function LaboratoryModule() {
             </div>
           ) : (
             <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
-              <Card className="bg-yellow-50 border-yellow-200">
-                <CardContent className="p-4">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="text-2xl font-bold text-yellow-700">{stats.pendingOrders}</p>
-                      <p className="text-xs text-yellow-600">Pending Orders</p>
+              {STAT_TILES.map(({ key, label, Icon, card, num, txt, icon }) => (
+                <Card key={key} className={card}>
+                  <CardContent className="p-4">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className={`text-2xl font-bold ${num}`}>{stats[key]}</p>
+                        <p className={`text-xs ${txt}`}>{label}</p>
+                      </div>
+                      <Icon className={`h-8 w-8 ${icon}`} />
                     </div>
-                    <Clock className="h-8 w-8 text-yellow-500" />
-                  </div>
-                </CardContent>
-              </Card>
-
-              <Card className="bg-blue-50 border-blue-200">
-                <CardContent className="p-4">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="text-2xl font-bold text-blue-700">{stats.sampleCollected}</p>
-                      <p className="text-xs text-blue-600">Sample Collected</p>
-                    </div>
-                    <TestTube className="h-8 w-8 text-blue-500" />
-                  </div>
-                </CardContent>
-              </Card>
-
-              <Card className="bg-orange-50 border-orange-200">
-                <CardContent className="p-4">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="text-2xl font-bold text-orange-700">{stats.inProgress}</p>
-                      <p className="text-xs text-orange-600">In Progress</p>
-                    </div>
-                    <Activity className="h-8 w-8 text-orange-500" />
-                  </div>
-                </CardContent>
-              </Card>
-
-              <Card className="bg-green-50 border-green-200">
-                <CardContent className="p-4">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="text-2xl font-bold text-green-700">{stats.completedToday}</p>
-                      <p className="text-xs text-green-600">Completed Today</p>
-                    </div>
-                    <CheckCircle className="h-8 w-8 text-green-500" />
-                  </div>
-                </CardContent>
-              </Card>
-
-              <Card className="bg-red-50 border-red-200">
-                <CardContent className="p-4">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="text-2xl font-bold text-red-700">{stats.criticalResults}</p>
-                      <p className="text-xs text-red-600">Critical Results</p>
-                    </div>
-                    <AlertTriangle className="h-8 w-8 text-red-500" />
-                  </div>
-                </CardContent>
-              </Card>
-
-              <Card className="bg-purple-50 border-purple-200">
-                <CardContent className="p-4">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="text-2xl font-bold text-purple-700">{stats.totalTests}</p>
-                      <p className="text-xs text-purple-600">Total Tests</p>
-                    </div>
-                    <Microscope className="h-8 w-8 text-purple-500" />
-                  </div>
-                </CardContent>
-              </Card>
+                  </CardContent>
+                </Card>
+              ))}
             </div>
           )}
 
@@ -991,10 +1010,7 @@ export default function LaboratoryModule() {
                         <div
                           key={order.id}
                           className="flex items-center justify-between p-3 rounded-lg border hover:bg-gray-50 cursor-pointer"
-                          onClick={() => {
-                            setSelectedOrder(order)
-                            setShowViewOrderDialog(true)
-                          }}
+                          onClick={() => viewOrder(order)}
                         >
                           <div className="flex items-center gap-3">
                             <div className={`w-2 h-10 rounded-full ${getPriorityDotColor(order.priority)}`} />
@@ -1065,7 +1081,7 @@ export default function LaboratoryModule() {
                     ) : (
                       <div className="space-y-2">
                         {activeOrders.map(order => (
-                          <div key={order.id} className="flex items-start gap-3 p-3 rounded-lg border border-yellow-100 bg-yellow-50 hover:bg-yellow-100 cursor-pointer transition" onClick={() => { setSelectedOrder(order); setShowViewOrderDialog(true) }}>
+                          <div key={order.id} className="flex items-start gap-3 p-3 rounded-lg border border-yellow-100 bg-yellow-50 hover:bg-yellow-100 cursor-pointer transition" onClick={() => viewOrder(order)}>
                             <div className={`mt-1 w-2 h-2 rounded-full flex-shrink-0 ${getPriorityDotColor(order.priority)}`} />
                             <div className="flex-1 min-w-0">
                               <div className="flex items-center gap-2">
@@ -1104,7 +1120,7 @@ export default function LaboratoryModule() {
                     ) : (
                       <div className="space-y-2">
                         {completedOrders.map(order => (
-                          <div key={order.id} className="flex items-start gap-3 p-3 rounded-lg border border-green-100 bg-green-50 hover:bg-green-100 cursor-pointer transition" onClick={() => { setSelectedOrder(order); setShowViewOrderDialog(true) }}>
+                          <div key={order.id} className="flex items-start gap-3 p-3 rounded-lg border border-green-100 bg-green-50 hover:bg-green-100 cursor-pointer transition" onClick={() => viewOrder(order)}>
                             <CheckCircle className="mt-1 h-4 w-4 text-green-500 flex-shrink-0" />
                             <div className="flex-1 min-w-0">
                               <div className="flex items-center gap-2">
@@ -1158,14 +1174,9 @@ export default function LaboratoryModule() {
                     </SelectTrigger>3
                     <SelectContent>
                       <SelectItem value="all">All Categories</SelectItem>
-                      <SelectItem value="hematology">Hematology</SelectItem>
-                      <SelectItem value="chemistry">Chemistry</SelectItem>
-                      <SelectItem value="urinalysis">Urinalysis</SelectItem>
-                      <SelectItem value="microbiology">Microbiology</SelectItem>
-                      <SelectItem value="parasitology">Parasitology</SelectItem>
-                      <SelectItem value="serology">Serology</SelectItem>
-                      <SelectItem value="immunology">Immunology</SelectItem>
-                      <SelectItem value="endocrinology">Endocrinology</SelectItem>
+                      {TEST_CATEGORIES.map((c) => (
+                        <SelectItem key={c.value} value={c.value}>{c.label}</SelectItem>
+                      ))}
                     </SelectContent>
                   </Select>
                 </div>
@@ -1188,78 +1199,48 @@ export default function LaboratoryModule() {
                     { header: 'Actions', className: 'w-24' },
                   ]}
                   renderRow={(test) => (
-                            <TableRow key={test.id} className="hover:bg-gray-50">
-                              <TableCell>
-                                <div className="flex items-center gap-2">
-                                  {getSampleTypeIcon(test.specimenType)}
-                                  <div>
-                                    <p className="font-medium">{test.testName}</p>
-                                    <p className="text-xs text-gray-500">{test.specimenContainer || 'No container specified'}</p>
-                                  </div>
-                                </div>
-                              </TableCell>
-                              <TableCell className="font-mono">{test.testCode}</TableCell>
-                              <TableCell>
-                                <Badge className={getCategoryBadgeColor(test.testCategory)} variant="outline">
-                                  {test.testCategory}
-                                </Badge>
-                              </TableCell>
-                              <TableCell>
-                                <div className="flex items-center gap-1">
-                                  {getSampleTypeIcon(test.specimenType)}
-                                  <span className="text-sm">{test.specimenType}</span>
-                                </div>
-                              </TableCell>
-                              <TableCell>{test.turnaroundTime}</TableCell>
-                              <TableCell className="font-medium">{test.price?.toLocaleString() || '0'}</TableCell>
-                              <TableCell>
-                                <Badge className={test.isActive ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'}>
-                                  {test.isActive ? 'Active' : 'Inactive'}
-                                </Badge>
-                              </TableCell>
-                              <TableCell>
-                                <div className="flex gap-1">
-                                  <Button
-                                    size="sm"
-                                    variant="ghost"
-                                    onClick={() => {
-                                      setSelectedTest(test)
-                                      testForm.reset({
-                                        testName: test.testName,
-                                        testCode: test.testCode,
-                                        testCategory: test.testCategory,
-                                        testType: test.testType,
-                                        specimenType: test.specimenType,
-                                        specimenVolume: test.specimenVolume,
-                                        specimenContainer: test.specimenContainer,
-                                        unit: test.unit,
-                                        referenceMin: test.referenceMin,
-                                        referenceMax: test.referenceMax,
-                                        criticalLow: test.criticalLow,
-                                        criticalHigh: test.criticalHigh,
-                                        price: test.price,
-                                        turnaroundTime: test.turnaroundTime,
-                                        department: test.department,
-                                        preparationInstructions: test.preparationInstructions,
-                                        clinicalSignificance: test.clinicalSignificance,
-                                        isActive: test.isActive
-                                      })
-                                      setShowTestDialog(true)
-                                    }}
-                                  >
-                                    <Eye className="h-4 w-4" />
-                                  </Button>
-                                  <Button
-                                    size="sm"
-                                    variant="ghost"
-                                    className="text-red-500 hover:text-red-700"
-                                    onClick={() => handleDeleteTest(test.id)}
-                                  >
-                                    <Trash2 className="h-4 w-4" />
-                                  </Button>
-                                </div>
-                              </TableCell>
-                            </TableRow>
+                    <TableRow key={test.id} className="hover:bg-gray-50">
+                      {/* Specimen icon lives in the Sample Type column; it was
+                          drawn here too, so every row showed it twice. */}
+                      <TableCell>
+                        <p className="font-medium">{test.testName}</p>
+                        <p className="text-xs text-gray-500">{test.specimenContainer || 'No container specified'}</p>
+                      </TableCell>
+                      <TableCell className="font-mono">{test.testCode}</TableCell>
+                      <TableCell>
+                        <Badge className={getCategoryBadgeColor(test.testCategory)} variant="outline">
+                          {test.testCategory}
+                        </Badge>
+                      </TableCell>
+                      <TableCell>
+                        <div className="flex items-center gap-1">
+                          {getSampleTypeIcon(test.specimenType)}
+                          <span className="text-sm">{test.specimenType}</span>
+                        </div>
+                      </TableCell>
+                      <TableCell>{test.turnaroundTime}</TableCell>
+                      <TableCell className="font-medium">{test.price?.toLocaleString() || '0'}</TableCell>
+                      <TableCell>
+                        <Badge className={getActiveBadgeColor(test.isActive)}>
+                          {test.isActive ? 'Active' : 'Inactive'}
+                        </Badge>
+                      </TableCell>
+                      <TableCell>
+                        <div className="flex gap-1">
+                          <Button size="sm" variant="ghost" onClick={() => openTestForEdit(test)}>
+                            <Eye className="h-4 w-4" />
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="text-red-500 hover:text-red-700"
+                            onClick={() => handleDeleteTest(test.id)}
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      </TableCell>
+                    </TableRow>
                   )}
                 />
               </div>
@@ -1288,11 +1269,9 @@ export default function LaboratoryModule() {
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="all">All Status</SelectItem>
-                      <SelectItem value="pending">Pending</SelectItem>
-                      <SelectItem value="sample_collected">Sample Collected</SelectItem>
-                      <SelectItem value="in_progress">In Progress</SelectItem>
-                      <SelectItem value="completed">Completed</SelectItem>
-                      <SelectItem value="cancelled">Cancelled</SelectItem>
+                      {ORDER_STATUSES.map((st) => (
+                        <SelectItem key={st.value} value={st.value}>{st.label}</SelectItem>
+                      ))}
                     </SelectContent>
                   </Select>
                   <Select value={priorityFilter} onValueChange={setPriorityFilter}>
@@ -1301,9 +1280,9 @@ export default function LaboratoryModule() {
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="all">All</SelectItem>
-                      <SelectItem value="routine">Routine</SelectItem>
-                      <SelectItem value="urgent">Urgent</SelectItem>
-                      <SelectItem value="stat">STAT</SelectItem>
+                      {PRIORITIES.map((pr) => (
+                        <SelectItem key={pr.value} value={pr.value}>{pr.label}</SelectItem>
+                      ))}
                     </SelectContent>
                   </Select>
                 </div>
@@ -1348,7 +1327,7 @@ export default function LaboratoryModule() {
                                 <div className="flex flex-wrap gap-1">
                                   {order.tests.slice(0, 2).map((test, idx) => (
                                     <Badge key={idx} className={getCategoryBadgeColor(test.testCategory)} variant="outline">
-                                      {test.testCode || test.testName?.substring(0, 4) || 'Test'}
+                                      {testShortCode(test)}
                                     </Badge>
                                   ))}
                                   {order.tests.length > 2 && (
@@ -1375,10 +1354,7 @@ export default function LaboratoryModule() {
                                   <Button
                                     size="sm"
                                     variant="ghost"
-                                    onClick={() => {
-                                      setSelectedOrder(order)
-                                      setShowViewOrderDialog(true)
-                                    }}
+                                    onClick={() => viewOrder(order)}
                                   >
                                     <Eye className="h-4 w-4" />
                                   </Button>
@@ -1550,7 +1526,7 @@ export default function LaboratoryModule() {
                             <div className="flex items-center justify-between mb-3">
                               <div className="flex items-center gap-2">
                                 <Badge className={getCategoryBadgeColor(test.testCategory)}>
-                                  {test.testCode || test.testName.substring(0, 4)}
+                                  {testShortCode(test)}
                                 </Badge>
                                 <span className="font-medium">{test.testName}</span>
                               </div>
@@ -1653,15 +1629,9 @@ export default function LaboratoryModule() {
                 <CardDescription>Select report type to generate</CardDescription>
               </CardHeader>
               <CardContent className="space-y-2">
-                {[
-                  { name: 'Patient Report', icon: User, desc: 'Individual lab report for patient' },
-                  { name: 'Summary Report', icon: FileBarChart, desc: 'Daily/weekly summary' },
-                  { name: 'Quality Control', icon: CheckSquare, desc: 'QC and compliance reports' },
-                  { name: 'Critical Values', icon: AlertTriangle, desc: 'Critical results log' },
-                  { name: 'Turnaround Time', icon: Clock, desc: 'TAT analysis report' }
-                ].map((report, idx) => (
+                {REPORT_TYPES.map((report) => (
                   <div
-                    key={idx}
+                    key={report.name}
                     className="p-3 rounded-lg border hover:bg-gray-50 cursor-pointer transition"
                     onClick={() => setShowReportDialog(true)}
                   >
@@ -1715,10 +1685,7 @@ export default function LaboratoryModule() {
                                 <Button
                                   variant="outline"
                                   size="sm"
-                                  onClick={() => {
-                                    setSelectedOrder(order)
-                                    setShowViewOrderDialog(true)
-                                  }}
+                                  onClick={() => viewOrder(order)}
                                 >
                                   <Eye className="h-4 w-4 mr-1" />
                                   View
@@ -1817,14 +1784,9 @@ export default function LaboratoryModule() {
                           </SelectTrigger>
                         </FormControl>
                         <SelectContent>
-                          <SelectItem value="hematology">Hematology</SelectItem>
-                          <SelectItem value="chemistry">Chemistry</SelectItem>
-                          <SelectItem value="urinalysis">Urinalysis</SelectItem>
-                          <SelectItem value="microbiology">Microbiology</SelectItem>
-                          <SelectItem value="parasitology">Parasitology</SelectItem>
-                          <SelectItem value="serology">Serology</SelectItem>
-                          <SelectItem value="immunology">Immunology</SelectItem>
-                          <SelectItem value="endocrinology">Endocrinology</SelectItem>
+                          {TEST_CATEGORIES.map((c) => (
+                            <SelectItem key={c.value} value={c.value}>{c.label}</SelectItem>
+                          ))}
                         </SelectContent>
                       </Select>
                       <FormMessage />
@@ -1868,14 +1830,9 @@ export default function LaboratoryModule() {
                           </SelectTrigger>
                         </FormControl>
                         <SelectContent>
-                          <SelectItem value="Blood">Blood</SelectItem>
-                          <SelectItem value="Urine">Urine</SelectItem>
-                          <SelectItem value="Stool">Stool</SelectItem>
-                          <SelectItem value="Sputum">Sputum</SelectItem>
-                          <SelectItem value="CSF">CSF</SelectItem>
-                          <SelectItem value="Swab">Swab</SelectItem>
-                          <SelectItem value="Tissue">Tissue</SelectItem>
-                          <SelectItem value="Fluid">Fluid</SelectItem>
+                          {SAMPLE_TYPES.map((sp) => (
+                            <SelectItem key={sp.value} value={sp.value}>{sp.value}</SelectItem>
+                          ))}
                         </SelectContent>
                       </Select>
                       <FormMessage />
@@ -2151,9 +2108,9 @@ export default function LaboratoryModule() {
                           </SelectTrigger>
                         </FormControl>
                         <SelectContent>
-                          <SelectItem value="routine">Routine</SelectItem>
-                          <SelectItem value="urgent">Urgent</SelectItem>
-                          <SelectItem value="stat">STAT</SelectItem>
+                          {PRIORITIES.map((pr) => (
+                            <SelectItem key={pr.value} value={pr.value}>{pr.label}</SelectItem>
+                          ))}
                         </SelectContent>
                       </Select>
                       <FormMessage />
