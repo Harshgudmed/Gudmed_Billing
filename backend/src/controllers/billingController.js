@@ -4,6 +4,7 @@ import { getOrgId, getActor } from "../lib/reqContext.js";
 import { todayRange, dayRange } from '../lib/dates.js'
 import { nextSeriesNumber, invoiceProbe } from "../lib/counters.js";
 import { recalcInvoice, refundableAmount } from "../lib/invoiceLedger.js";
+import { refundSettings, isInstantRefund } from "../lib/refundPolicy.js";
 import { fulfillInvoiceItems } from "../lib/invoiceFulfillment.js";
 import { recordStockChange } from "../pharmacy/stockService.js";
 import { round2 } from "../lib/money.js";
@@ -255,6 +256,169 @@ async function reverseInvoiceFulfillment(tx, { organizationId, invoice, actorId 
   }
 
   return reversed
+}
+
+
+/**
+ * Turn a raised refund into money that has actually left: lock the original
+ * invoice, issue its revision, move the payment ledger across and recalculate.
+ *
+ * Lifted out of approve_refund so the instant path -- a hospital whose Settings
+ * say refundMode 'instant' -- runs THIS code rather than a second copy. Every
+ * guard here was written for a bug already paid for once: the compare-and-swap
+ * that lets only one of two concurrent approvals through, the revision number
+ * counted over the whole chain, and the rule about which Payment rows move.
+ *
+ * Caller loads `payment` with its `invoice`, inside the transaction.
+ */
+async function applyApprovedRefund(tx, { organizationId, payment, actor }) {
+// APPROVE LOGIC: Lock old invoice, generate new revised invoice
+const oldInvoice = payment.invoice
+const refundedAmount = payment.amount
+
+// An invoice can only be revised ONCE. CLAIM IT ATOMICALLY: the conditional
+// update matches only while the invoice is still un-archived, so of two
+// refunds approved concurrently on the same invoice exactly one wins the
+// compare-and-swap and the loser sees count===0 and gets a clean 409.
+//
+// The previous guard read `oldInvoice.isArchived` from a snapshot taken
+// BEFORE this line (payment.invoice, loaded at the top of the tx), then set
+// isArchived in a separate unconditional update below — a check-then-act
+// race. Under concurrency both approvals read isArchived:false, both passed
+// the guard, and each derived a revised invoice from the SAME superseded
+// totals, refunding the money twice with no book entry for the second.
+// Folding the check and the set into one conditional write closes the race.
+// Mirrors the bed-claiming compare-and-swap in inpatientController.js (~1013).
+const claimed = await tx.invoice.updateMany({
+  where: { id: oldInvoice.id, organizationId: organizationId, isArchived: false },
+  data: {
+    paymentStatus: 'refunded',
+    isArchived: true, // lock it: immutable, kept as-is for the audit trail
+  },
+})
+if (claimed.count !== 1) {
+  const err = new Error('This invoice has already been revised by an approved refund. Re-raise this request against the revised invoice.')
+  err.status = 409; throw err
+}
+
+// 1. Update Payment (only the CAS winner reaches here)
+const approvedPayment = await tx.payment.update({
+  where: { id: payment.id, organizationId: organizationId },
+  data: {
+    status: 'APPROVED',
+    approvedByUserId: actor.id,
+    approvalDate: new Date()
+  }
+})
+
+// 3. Generate Revised Invoice
+let parsedItems = []
+try { parsedItems = JSON.parse(oldInvoice.items) } catch (e) { parsedItems = [] }
+
+const newTotalAmount = round2(oldInvoice.totalAmount - refundedAmount)
+
+// Keep line-item integrity: carry the original lines and append a negative
+// "Refund Adjustment" line so the items SUM equals the revised total (the old
+// code copied items unchanged while lowering the total → items ≠ total).
+const revisedItems = [
+  ...parsedItems,
+  {
+    serviceName: `Refund Adjustment (${payment.receiptNumber})`,
+    quantity: 1,
+    unitPrice: -refundedAmount,
+    total: -refundedAmount,
+    tax: 0,
+  },
+]
+
+// Sequential, collision-free revision number: base + -R<n> (was random(0-999)).
+// Counted over the whole chain, not this parent's direct children: revising
+// an already-revised invoice (the normal flow — a second refund is raised
+// against the revision) found zero children and reissued "-R1", which died
+// on the unique (organizationId, invoiceNumber) index as a 500 at approval.
+const baseNumber = oldInvoice.invoiceNumber.replace(/-R\d+$/, '')
+const revCount = await tx.invoice.count({
+  where: { organizationId: organizationId, invoiceNumber: { startsWith: `${baseNumber}-R` } },
+})
+const revisedNumber = `${baseNumber}-R${revCount + 1}`
+
+const revisedInvoice = await tx.invoice.create({
+  data: {
+    organizationId: organizationId,
+    patientId: oldInvoice.patientId,
+    consultationId: oldInvoice.consultationId,
+    parentInvoiceId: oldInvoice.id,
+    invoiceNumber: revisedNumber,
+    items: JSON.stringify(revisedItems),
+    subtotal: newTotalAmount,
+    taxAmount: oldInvoice.taxAmount,
+    taxPercentage: oldInvoice.taxPercentage,
+    discountAmount: oldInvoice.discountAmount,
+    discountPercentage: oldInvoice.discountPercentage,
+    totalAmount: newTotalAmount,
+    // Placeholders only — recalcInvoice below derives the real figures from
+    // the Payment rows once they have been moved across.
+    amountPaid: 0,
+    balanceDue: newTotalAmount,
+    paymentStatus: 'unpaid',
+    insuranceClaimAmount: oldInvoice.insuranceClaimAmount,
+    patientCopayAmount: oldInvoice.patientCopayAmount,
+    notes: 'Revised Invoice due to Refund ' + payment.receiptNumber,
+  }
+})
+
+// 4. Move the whole payment ledger onto the revised invoice.
+//
+// WHY: Payment rows are the source of truth — recalcInvoice derives
+// amountPaid from them and overwrites whatever is cached on the invoice.
+// The revised invoice used to be created with a hand-copied
+// `amountPaid = old.amountPaid - refund` while every Payment row stayed
+// attached to the archived original. The first later recalc (the patient
+// pays the balance, or a line is added) then saw ONLY that new payment and
+// reset amountPaid to it — ₹10,000 billed / ₹6,000 collected / ₹1,000
+// refunded became "₹4,000 paid, ₹5,000 due" and the counter re-billed money
+// it had already taken.
+//
+// Exactly the rows invoiceLedger() reads move across: every collection, plus
+// refunds that are APPROVED (recalc computes paid − approvedRefunds, so the
+// approved refund must sit alongside the collections it reduces). A refund
+// still PENDING_APPROVAL — or REJECTED — stays with the superseded document:
+// it belongs to a bill that no longer exists and must be re-raised against
+// the revision, which is exactly what the 409 above tells the approver.
+await tx.payment.updateMany({
+  where: {
+    invoiceId: oldInvoice.id,
+    organizationId: organizationId,
+    OR: [{ isRefund: false }, { isRefund: true, status: 'APPROVED' }],
+  },
+  data: { invoiceId: revisedInvoice.id },
+})
+await recalcInvoice(tx, revisedInvoice.id)
+
+// The archived original deliberately keeps its frozen amountPaid/balanceDue
+// as the historical document; it is paymentStatus 'refunded', so no
+// outstanding-balance report counts it twice.
+const revisedWithTotals = await tx.invoice.findUnique({ where: { id: revisedInvoice.id } })
+
+await tx.auditLog.create({
+  data: {
+    organizationId: organizationId,
+    action: 'REFUND_APPROVED',
+    entityType: 'Invoice',
+    entityId: oldInvoice.id,
+    metadata: JSON.stringify({
+      refundId: payment.id,
+      revisedInvoiceId: revisedInvoice.id,
+      // The figures the ledger derived, so the money trail is provable
+      // from the audit row alone.
+      revisedAmountPaid: revisedWithTotals.amountPaid,
+      revisedBalanceDue: revisedWithTotals.balanceDue,
+    }),
+    performedAt: new Date(),
+  }
+})
+
+return { payment: approvedPayment, revisedInvoice: revisedWithTotals }
 }
 
 
@@ -876,6 +1040,37 @@ export async function create(req, res) {
           },
         })
 
+        // A hospital whose Settings say refundMode 'instant' hands the money back
+        // at the counter, so the same refund is approved in this transaction —
+        // through applyApprovedRefund, the one path, so an instant refund locks
+        // the original invoice and issues its revision exactly as an approved one
+        // does. The row is still written as PENDING_APPROVAL first: the audit
+        // trail then shows both halves, and nothing can reach 'APPROVED' without
+        // having passed the caps checked above it.
+        //
+        // The setting is read from the organisation, never from the request — a
+        // client that sent refundMode:'instant' would otherwise be choosing
+        // whether its own refund needs approval.
+        const org = await tx.organization.findUnique({
+          where: { id: ORGANIZATION_ID },
+          select: { settings: true },
+        })
+        if (isInstantRefund(refundSettings(org))) {
+          // The guard above loaded three columns to answer three questions;
+          // applyApprovedRefund copies the whole document into its revision, so it
+          // needs the row itself. Re-read rather than widen that select: the guard
+          // runs on every refund and only this branch needs the rest.
+          const fullInvoice = await tx.invoice.findFirst({
+            where: { id: invoiceId, organizationId: ORGANIZATION_ID },
+          })
+          const applied = await applyApprovedRefund(tx, {
+            organizationId: ORGANIZATION_ID,
+            payment: { ...created, invoice: fullInvoice },
+            actor: getActor(req),
+          })
+          return { ...applied.payment, revisedInvoice: applied.revisedInvoice, instant: true }
+        }
+
         return created
       })
 
@@ -937,153 +1132,9 @@ export async function create(req, res) {
           return updatedPayment
         }
 
-        // APPROVE LOGIC: Lock old invoice, generate new revised invoice
-        const oldInvoice = payment.invoice
-        const refundedAmount = payment.amount
-
-        // An invoice can only be revised ONCE. CLAIM IT ATOMICALLY: the conditional
-        // update matches only while the invoice is still un-archived, so of two
-        // refunds approved concurrently on the same invoice exactly one wins the
-        // compare-and-swap and the loser sees count===0 and gets a clean 409.
-        //
-        // The previous guard read `oldInvoice.isArchived` from a snapshot taken
-        // BEFORE this line (payment.invoice, loaded at the top of the tx), then set
-        // isArchived in a separate unconditional update below — a check-then-act
-        // race. Under concurrency both approvals read isArchived:false, both passed
-        // the guard, and each derived a revised invoice from the SAME superseded
-        // totals, refunding the money twice with no book entry for the second.
-        // Folding the check and the set into one conditional write closes the race.
-        // Mirrors the bed-claiming compare-and-swap in inpatientController.js (~1013).
-        const claimed = await tx.invoice.updateMany({
-          where: { id: oldInvoice.id, organizationId: ORGANIZATION_ID, isArchived: false },
-          data: {
-            paymentStatus: 'refunded',
-            isArchived: true, // lock it: immutable, kept as-is for the audit trail
-          },
-        })
-        if (claimed.count !== 1) {
-          const err = new Error('This invoice has already been revised by an approved refund. Re-raise this request against the revised invoice.')
-          err.status = 409; throw err
-        }
-
-        // 1. Update Payment (only the CAS winner reaches here)
-        const approvedPayment = await tx.payment.update({
-          where: { id: paymentId, organizationId: ORGANIZATION_ID },
-          data: {
-            status: 'APPROVED',
-            approvedByUserId: actor.id,
-            approvalDate: new Date()
-          }
-        })
-
-        // 3. Generate Revised Invoice
-        let parsedItems = []
-        try { parsedItems = JSON.parse(oldInvoice.items) } catch (e) { parsedItems = [] }
-
-        const newTotalAmount = round2(oldInvoice.totalAmount - refundedAmount)
-
-        // Keep line-item integrity: carry the original lines and append a negative
-        // "Refund Adjustment" line so the items SUM equals the revised total (the old
-        // code copied items unchanged while lowering the total → items ≠ total).
-        const revisedItems = [
-          ...parsedItems,
-          {
-            serviceName: `Refund Adjustment (${payment.receiptNumber})`,
-            quantity: 1,
-            unitPrice: -refundedAmount,
-            total: -refundedAmount,
-            tax: 0,
-          },
-        ]
-
-        // Sequential, collision-free revision number: base + -R<n> (was random(0-999)).
-        // Counted over the whole chain, not this parent's direct children: revising
-        // an already-revised invoice (the normal flow — a second refund is raised
-        // against the revision) found zero children and reissued "-R1", which died
-        // on the unique (organizationId, invoiceNumber) index as a 500 at approval.
-        const baseNumber = oldInvoice.invoiceNumber.replace(/-R\d+$/, '')
-        const revCount = await tx.invoice.count({
-          where: { organizationId: ORGANIZATION_ID, invoiceNumber: { startsWith: `${baseNumber}-R` } },
-        })
-        const revisedNumber = `${baseNumber}-R${revCount + 1}`
-
-        const revisedInvoice = await tx.invoice.create({
-          data: {
-            organizationId: ORGANIZATION_ID,
-            patientId: oldInvoice.patientId,
-            consultationId: oldInvoice.consultationId,
-            parentInvoiceId: oldInvoice.id,
-            invoiceNumber: revisedNumber,
-            items: JSON.stringify(revisedItems),
-            subtotal: newTotalAmount,
-            taxAmount: oldInvoice.taxAmount,
-            taxPercentage: oldInvoice.taxPercentage,
-            discountAmount: oldInvoice.discountAmount,
-            discountPercentage: oldInvoice.discountPercentage,
-            totalAmount: newTotalAmount,
-            // Placeholders only — recalcInvoice below derives the real figures from
-            // the Payment rows once they have been moved across.
-            amountPaid: 0,
-            balanceDue: newTotalAmount,
-            paymentStatus: 'unpaid',
-            insuranceClaimAmount: oldInvoice.insuranceClaimAmount,
-            patientCopayAmount: oldInvoice.patientCopayAmount,
-            notes: 'Revised Invoice due to Refund ' + payment.receiptNumber,
-          }
-        })
-
-        // 4. Move the whole payment ledger onto the revised invoice.
-        //
-        // WHY: Payment rows are the source of truth — recalcInvoice derives
-        // amountPaid from them and overwrites whatever is cached on the invoice.
-        // The revised invoice used to be created with a hand-copied
-        // `amountPaid = old.amountPaid - refund` while every Payment row stayed
-        // attached to the archived original. The first later recalc (the patient
-        // pays the balance, or a line is added) then saw ONLY that new payment and
-        // reset amountPaid to it — ₹10,000 billed / ₹6,000 collected / ₹1,000
-        // refunded became "₹4,000 paid, ₹5,000 due" and the counter re-billed money
-        // it had already taken.
-        //
-        // Exactly the rows invoiceLedger() reads move across: every collection, plus
-        // refunds that are APPROVED (recalc computes paid − approvedRefunds, so the
-        // approved refund must sit alongside the collections it reduces). A refund
-        // still PENDING_APPROVAL — or REJECTED — stays with the superseded document:
-        // it belongs to a bill that no longer exists and must be re-raised against
-        // the revision, which is exactly what the 409 above tells the approver.
-        await tx.payment.updateMany({
-          where: {
-            invoiceId: oldInvoice.id,
-            organizationId: ORGANIZATION_ID,
-            OR: [{ isRefund: false }, { isRefund: true, status: 'APPROVED' }],
-          },
-          data: { invoiceId: revisedInvoice.id },
-        })
-        await recalcInvoice(tx, revisedInvoice.id)
-
-        // The archived original deliberately keeps its frozen amountPaid/balanceDue
-        // as the historical document; it is paymentStatus 'refunded', so no
-        // outstanding-balance report counts it twice.
-        const revisedWithTotals = await tx.invoice.findUnique({ where: { id: revisedInvoice.id } })
-
-        await tx.auditLog.create({
-          data: {
-            organizationId: ORGANIZATION_ID,
-            action: 'REFUND_APPROVED',
-            entityType: 'Invoice',
-            entityId: oldInvoice.id,
-            metadata: JSON.stringify({
-              refundId: paymentId,
-              revisedInvoiceId: revisedInvoice.id,
-              // The figures the ledger derived, so the money trail is provable
-              // from the audit row alone.
-              revisedAmountPaid: revisedWithTotals.amountPaid,
-              revisedBalanceDue: revisedWithTotals.balanceDue,
-            }),
-            performedAt: new Date(),
-          }
-        })
-
-        return { payment: approvedPayment, revisedInvoice: revisedWithTotals }
+        // The approve path lives in applyApprovedRefund so the instant-refund
+        // path runs exactly this code, not a second copy of it.
+        return applyApprovedRefund(tx, { organizationId: ORGANIZATION_ID, payment, actor })
       })
 
       return res.status(200).json({ success: true, data: result })
