@@ -180,12 +180,16 @@ export default function InpatientModule() {
   // effects are split — the point was never to fetch less on a discharge, it was
   // to stop paging a table from re-reading the whole ward.
   const fetchAll = useCallback(async () => {
-    setLoading(true)
     await Promise.all([fetchStandingData(), fetchAdmissionsPage()])
-    setLoading(false)
   }, [fetchStandingData, fetchAdmissionsPage])
 
-  useEffect(() => { fetchStandingData() }, [fetchStandingData])
+  // `loading` is cleared by the fetch it describes, not by fetchAll. Splitting the
+  // two apart left setLoading(false) inside a wrapper that nothing calls on mount,
+  // so the screen sat on its spinner for ever while the data had already arrived.
+  useEffect(() => {
+    setLoading(true)
+    fetchStandingData().finally(() => setLoading(false))
+  }, [fetchStandingData])
   useEffect(() => { fetchAdmissionsPage() }, [fetchAdmissionsPage])
   useEffect(() => { getOrgSettings().then(setOrgInfo) }, [])
   useEffect(() => {

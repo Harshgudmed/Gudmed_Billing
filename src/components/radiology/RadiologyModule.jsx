@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef, lazy, Suspense } from 'react'
+import CancelActionDialog from '@/components/common/CancelActionDialog'
 import { useDebounce } from '@/lib/useDebounce'
 import { dateRangeFor } from '@/components/common/DateFilter'
 import { getOrgSettings } from '@/lib/orgSettings'
@@ -156,7 +157,7 @@ export default function RadiologyModule() {
 
   const [showCancelDialog, setShowCancelDialog] = useState(false)
   const [cancellingOrder, setCancellingOrder] = useState(null)
-  const [cancelReason, setCancelReason] = useState('')
+  const [cancelSubmitting, setCancelSubmitting] = useState(false)
 
   // Report dialog
   const [showReportDialog, setShowReportDialog] = useState(false)
@@ -237,9 +238,7 @@ export default function RadiologyModule() {
   // can create an order, and reporting on an order moves it between two of the
   // lists — so a write refreshes everything rather than guessing what it touched.
   const fetchAll = useCallback(async () => {
-    setLoading(true)
     await Promise.all([fetchExams(), fetchOrders(), fetchReports()])
-    setLoading(false)
   }, [fetchExams, fetchOrders, fetchReports])
 
   const fetchStats = useCallback(async () => {
@@ -249,8 +248,16 @@ export default function RadiologyModule() {
     } catch { /* silent */ }
   }, [])
 
+  // `loading` is cleared by the ORDERS fetch, not by fetchAll. Splitting the three
+  // lists apart left setLoading(false) inside fetchAll, which nothing calls on
+  // mount any more — so every table on this screen sat on "Loading…" for ever
+  // while the data had already arrived. The flag belongs to the fetch it
+  // describes, not to a wrapper that may or may not run.
   useEffect(() => { fetchExams() }, [fetchExams])
-  useEffect(() => { fetchOrders() }, [fetchOrders])
+  useEffect(() => {
+    setLoading(true)
+    fetchOrders().finally(() => setLoading(false))
+  }, [fetchOrders])
   useEffect(() => { fetchReports() }, [fetchReports])
   useEffect(() => { getOrgSettings().then(setOrgInfo) }, [])
   useEffect(() => { fetchStats() }, [fetchStats])
@@ -368,14 +375,30 @@ export default function RadiologyModule() {
     setSavingEditOrder(false)
   }
 
-  const handleCancelOrder = async () => {
+  // Reschedule moves the booking; cancel settles the money. Both come from the
+  // one shared dialog, which has already worked out what the refund would be —
+  // but the amount is NOT sent, because the server recomputes it from this
+  // hospital's own settings. What the browser shows is a preview, not the figure.
+  const handleCancelAction = async (choice) => {
     if (!cancellingOrder) return
+    setCancelSubmitting(true)
     try {
-      await handleUpdateStatus(cancellingOrder.id, 'cancelled', cancelReason ? { cancellationReason: cancelReason } : {})
-    } catch { /* already toasted */ }
-    setShowCancelDialog(false)
-    setCancellingOrder(null)
-    setCancelReason('')
+      if (choice.action === 'reschedule') {
+        await handleUpdateStatus(cancellingOrder.id, cancellingOrder.status, {
+          scheduledDate: new Date(`${choice.date}T${choice.time}`).toISOString(),
+          notes: `Rescheduled: ${choice.reason}`,
+        })
+        toast.success(`Moved to ${choice.date} at ${choice.time}`)
+      } else {
+        await handleUpdateStatus(cancellingOrder.id, 'cancelled', { cancellationReason: choice.reason })
+        toast.success(choice.instant
+          ? 'Cancelled — refund issued at the counter'
+          : 'Cancelled — refund sent for approval')
+      }
+      setShowCancelDialog(false)
+      setCancellingOrder(null)
+    } catch { /* already toasted by handleUpdateStatus */ }
+    setCancelSubmitting(false)
   }
 
   // ── Report handlers ───────────────────────────────────────────────────────
@@ -1266,21 +1289,20 @@ ${order.clinicalIndication ? `<div class="section"><div class="section-header">C
         </DialogContent>
       </Dialog>
 
-      {/* ── Cancel Order Dialog ── */}
-      <Dialog open={showCancelDialog} onOpenChange={setShowCancelDialog}>
-        <DialogContent className="max-w-sm">
-          <DialogHeader><DialogTitle>Cancel Order?</DialogTitle></DialogHeader>
-          <p className="text-gray-600 text-sm">Cancel order <strong className="font-mono">{cancellingOrder?.orderNumber}</strong>?</p>
-          <div>
-            <Label>Reason (optional)</Label>
-            <Textarea value={cancelReason} onChange={e => setCancelReason(e.target.value)} rows={2} placeholder="Reason for cancellation..." />
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setShowCancelDialog(false)}>Keep Order</Button>
-            <Button variant="destructive" onClick={handleCancelOrder}>Cancel Order</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      {/* Cancel / reschedule — the shared dialog all four modules use. A
+          RadiologyOrder carries no price of its own; what the patient was charged
+          is the exam's price, which the orders query already includes. */}
+      <CancelActionDialog
+        open={showCancelDialog}
+        onOpenChange={setShowCancelDialog}
+        module="radiology"
+        record={cancellingOrder}
+        amount={cancellingOrder?.exam?.price ?? 0}
+        title={cancellingOrder?.orderNumber}
+        subtitle={cancellingOrder?.patientName}
+        onConfirm={handleCancelAction}
+        isSubmitting={cancelSubmitting}
+      />
 
       {/* ── Report Dialog ── */}
       <Dialog open={showReportDialog} onOpenChange={setShowReportDialog}>
