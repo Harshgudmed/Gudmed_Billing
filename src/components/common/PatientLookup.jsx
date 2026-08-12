@@ -16,6 +16,8 @@ import {
   optionalEmailSchema, pincodeSchema, requiredDateSchema, issuesToFieldErrors,
   requiredCitySchema, requiredStateSchema,
 } from '@/lib/schemas/patientFormSchema'
+import { PhoneInput } from './PhoneInput'
+import { sanitizeTextInput, sanitizeNameInput } from './textFieldUtils'
 
 // Same field rules as RegisterPatientForm's patientFormSchema, minus the
 // appointment-booking fields (this inline form only registers the patient).
@@ -159,6 +161,15 @@ export default function PatientLookup({
     setNewFormErrors(prev => (prev[field] ? { ...prev, [field]: undefined } : prev))
   }
 
+  // Free-text fields go through sanitizeTextInput live (strips HTML tags and
+  // invisible/zero-width characters) — trimming stays the Zod schema's job at
+  // submit time so a trailing space doesn't get eaten mid-typing.
+  const setTextField = (field, raw) => setNewField(field, sanitizeTextInput(raw))
+
+  // Name-type fields (person/place names) are further restricted to letters,
+  // spaces, and name punctuation — no digits or symbols can land in them at all.
+  const setNameField = (field, raw) => setNewField(field, sanitizeNameInput(raw))
+
   async function handleCreate() {
     setNewFormErrors({})
 
@@ -237,18 +248,18 @@ export default function PatientLookup({
             <div>
               <Label className="text-xs">First Name *</Label>
               <Input className={cn('mt-1', newFormErrors.firstName && 'border-red-500')} placeholder="e.g. Rahul"
-                value={newForm.firstName} onChange={(e) => setNewField('firstName', e.target.value)} />
+                value={newForm.firstName} onChange={(e) => setNameField('firstName', e.target.value)} />
               <FieldError message={newFormErrors.firstName} />
             </div>
             <div>
               <Label className="text-xs">Middle Name</Label>
               <Input className="mt-1" placeholder="Middle name"
-                value={newForm.middleName} onChange={(e) => setNewField('middleName', e.target.value)} />
+                value={newForm.middleName} onChange={(e) => setNameField('middleName', e.target.value)} />
             </div>
             <div>
               <Label className="text-xs">Last Name *</Label>
               <Input className={cn('mt-1', newFormErrors.lastName && 'border-red-500')} placeholder="e.g. Sharma"
-                value={newForm.lastName} onChange={(e) => setNewField('lastName', e.target.value)} />
+                value={newForm.lastName} onChange={(e) => setNameField('lastName', e.target.value)} />
               <FieldError message={newFormErrors.lastName} />
             </div>
             <div>
@@ -291,12 +302,12 @@ export default function PatientLookup({
             <div>
               <Label className="text-xs">Referred By</Label>
               <Input className="mt-1" placeholder="Doctor / clinic / person"
-                value={newForm.referredBy} onChange={(e) => setNewField('referredBy', e.target.value)} />
+                value={newForm.referredBy} onChange={(e) => setNameField('referredBy', e.target.value)} />
             </div>
             <div>
               <Label className="text-xs">MLC Number</Label>
-              <Input className="mt-1" placeholder="Medico-legal case no. (if any)"
-                value={newForm.mlcNumber} onChange={(e) => setNewField('mlcNumber', e.target.value)} />
+              <Input className="mt-1" spellCheck={false} autoCorrect="off" placeholder="Medico-legal case no. (if any)"
+                value={newForm.mlcNumber} onChange={(e) => setTextField('mlcNumber', e.target.value)} />
             </div>
           </div>
         </div>
@@ -309,14 +320,14 @@ export default function PatientLookup({
           <div className="grid grid-cols-2 gap-2">
             <div>
               <Label className="text-xs">Primary Phone *</Label>
-              <Input className={cn('mt-1', newFormErrors.phonePrimary && 'border-red-500')} placeholder="+91 XXXXX XXXXX"
-                value={newForm.phonePrimary} onChange={(e) => setNewField('phonePrimary', e.target.value)} />
+              <PhoneInput className={cn('mt-1', newFormErrors.phonePrimary && 'border-red-500')} placeholder="Enter mobile number"
+                value={newForm.phonePrimary} onChange={(v) => setNewField('phonePrimary', v)} />
               <FieldError message={newFormErrors.phonePrimary} />
             </div>
             <div>
               <Label className="text-xs">Email</Label>
               <Input className={cn('mt-1', newFormErrors.email && 'border-red-500')} type="email" placeholder="patient@email.com"
-                value={newForm.email} onChange={(e) => setNewField('email', e.target.value)} />
+                value={newForm.email} onChange={(e) => setNewField('email', sanitizeTextInput(e.target.value))} />
               <FieldError message={newFormErrors.email} />
             </div>
           </div>
@@ -331,36 +342,38 @@ export default function PatientLookup({
             <div>
               <Label className="text-xs">House / Flat / Building No.</Label>
               <Input className="mt-1" placeholder="e.g. 12-B"
-                value={newForm.houseNumber} onChange={(e) => setNewField('houseNumber', e.target.value)} />
+                value={newForm.houseNumber} onChange={(e) => setTextField('houseNumber', e.target.value)} />
             </div>
             <div>
               <Label className="text-xs">Street / Block</Label>
               <Input className="mt-1" placeholder="e.g. Block G, MG Road"
-                value={newForm.street} onChange={(e) => setNewField('street', e.target.value)} />
+                value={newForm.street} onChange={(e) => setTextField('street', e.target.value)} />
             </div>
             <div>
               <Label className="text-xs">Locality / Area</Label>
               <Input className="mt-1" placeholder="e.g. Andheri West"
-                value={newForm.locality} onChange={(e) => setNewField('locality', e.target.value)} />
+                value={newForm.locality} onChange={(e) => setNameField('locality', e.target.value)} />
             </div>
             <div>
               <Label className="text-xs">Village / Town / City</Label>
-              <Input className="mt-1" placeholder="e.g. Mumbai"
-                value={newForm.city} onChange={(e) => setNewField('city', e.target.value)} />
+              <Input className={cn('mt-1', newFormErrors.city && 'border-red-500')} placeholder="e.g. Mumbai"
+                value={newForm.city} onChange={(e) => setNameField('city', e.target.value)} />
+              <FieldError message={newFormErrors.city} />
             </div>
             <div>
               <Label className="text-xs">District</Label>
               <Input className="mt-1" placeholder="e.g. Mumbai Suburban"
-                value={newForm.district} onChange={(e) => setNewField('district', e.target.value)} />
+                value={newForm.district} onChange={(e) => setNameField('district', e.target.value)} />
             </div>
             <div>
               <Label className="text-xs">State</Label>
               <Select value={newForm.state} onValueChange={(v) => setNewField('state', v)}>
-                <SelectTrigger className="mt-1"><SelectValue placeholder="Select state" /></SelectTrigger>
+                <SelectTrigger className={cn('mt-1', newFormErrors.state && 'border-red-500')}><SelectValue placeholder="Select state" /></SelectTrigger>
                 <SelectContent>
                   {INDIAN_STATES.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}
                 </SelectContent>
               </Select>
+              <FieldError message={newFormErrors.state} />
             </div>
             <div>
               <Label className="text-xs">PIN Code</Label>
@@ -380,18 +393,18 @@ export default function PatientLookup({
             <div>
               <Label className="text-xs">Contact Name</Label>
               <Input className="mt-1" placeholder="Contact name"
-                value={newForm.emergencyContactName} onChange={(e) => setNewField('emergencyContactName', e.target.value)} />
+                value={newForm.emergencyContactName} onChange={(e) => setNameField('emergencyContactName', e.target.value)} />
             </div>
             <div>
               <Label className="text-xs">Contact Phone</Label>
-              <Input className={cn('mt-1', newFormErrors.emergencyContactPhone && 'border-red-500')} placeholder="+91 XXXXX XXXXX"
-                value={newForm.emergencyContactPhone} onChange={(e) => setNewField('emergencyContactPhone', e.target.value)} />
+              <PhoneInput className={cn('mt-1', newFormErrors.emergencyContactPhone && 'border-red-500')} placeholder="Enter mobile number"
+                value={newForm.emergencyContactPhone} onChange={(v) => setNewField('emergencyContactPhone', v)} />
               <FieldError message={newFormErrors.emergencyContactPhone} />
             </div>
             <div>
               <Label className="text-xs">Relationship</Label>
               <Input className="mt-1" placeholder="e.g. Spouse"
-                value={newForm.emergencyContactRelationship} onChange={(e) => setNewField('emergencyContactRelationship', e.target.value)} />
+                value={newForm.emergencyContactRelationship} onChange={(e) => setNameField('emergencyContactRelationship', e.target.value)} />
             </div>
           </div>
         </div>
@@ -423,8 +436,8 @@ export default function PatientLookup({
               </div>
               <div>
                 <Label className="text-xs">Insurance ID</Label>
-                <Input className="mt-1" placeholder="Policy / Member ID"
-                  value={newForm.insuranceId} onChange={(e) => setNewField('insuranceId', e.target.value)} />
+                <Input className="mt-1" spellCheck={false} autoCorrect="off" placeholder="Policy / Member ID"
+                  value={newForm.insuranceId} onChange={(e) => setTextField('insuranceId', e.target.value)} />
               </div>
             </div>
           )}
