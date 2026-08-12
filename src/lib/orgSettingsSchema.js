@@ -24,6 +24,21 @@ export const ORG_SETTING_FIELDS = [
   { key: 'homeCollectionCharge',   type: 'number', default: 0,     label: 'Home Collection Charge' },
   { key: 'showEmptyReceiptFields', type: 'bool',   default: true,  label: 'Show empty fields on receipts' },
   { key: 'receiptFooter',          type: 'text',   default: '',    label: 'Receipt Footer' },
+
+  // Cancellation & refund. Each hospital decides for itself: one wants the money
+  // back at the counter immediately, another wants finance to approve first.
+  //
+  // The two percentages are separate because a real hospital charges by WHEN the
+  // cancellation happens, not by a flat rate — a lab test cancelled before the
+  // sample is drawn costs the hospital nothing, and the same test cancelled after
+  // the tube is filled has already spent the reagent and the technician's time.
+  // A hospital that wants one flat rate simply puts the same number in both.
+  { key: 'refundMode',                type: 'text',   default: 'approval',
+    label: 'Refund mode', options: ['approval', 'instant'] },
+  { key: 'cancelChargeBeforeWorkPct', type: 'number', default: 0,
+    label: 'Cancellation charge % — before work started' },
+  { key: 'cancelChargeAfterWorkPct',  type: 'number', default: 100,
+    label: 'Cancellation charge % — after work started' },
 ]
 
 const BY_KEY = Object.fromEntries(ORG_SETTING_FIELDS.map((f) => [f.key, f]))

@@ -526,6 +526,56 @@ export default function SettingsModule() {
             </CardContent>
           </Card>
 
+          {/* Cancellation & refund — each hospital decides for itself. One takes
+              the money back at the counter, another sends it to finance first. */}
+          <Card>
+            <CardHeader>
+              <CardTitle>Cancellation &amp; Refund</CardTitle>
+              <CardDescription>
+                Applies to Billing, Pharmacy, Radiology and Laboratory cancellations.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="grid md:grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label>Refund mode</Label>
+                <Select
+                  value={orgForm.refundMode}
+                  onValueChange={v => setOrgForm(p => ({ ...p, refundMode: v }))}
+                >
+                  <SelectTrigger><SelectValue placeholder="Select" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="approval">Approval first &mdash; finance approves before money moves</SelectItem>
+                    <SelectItem value="instant">Instant &mdash; refunded at the counter</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div />
+              <div className="space-y-2">
+                <Label>Cancellation charge % &mdash; BEFORE work started</Label>
+                <Input
+                  type="number" min="0" max="100" placeholder="0"
+                  value={orgForm.cancelChargeBeforeWorkPct}
+                  onChange={e => setOrgForm(p => ({ ...p, cancelChargeBeforeWorkPct: e.target.value }))}
+                />
+                <p className="text-xs text-gray-500">
+                  Sample not drawn, scan not begun. 0 = full refund.
+                </p>
+              </div>
+              <div className="space-y-2">
+                <Label>Cancellation charge % &mdash; AFTER work started</Label>
+                <Input
+                  type="number" min="0" max="100" placeholder="100"
+                  value={orgForm.cancelChargeAfterWorkPct}
+                  onChange={e => setOrgForm(p => ({ ...p, cancelChargeAfterWorkPct: e.target.value }))}
+                />
+                <p className="text-xs text-gray-500">
+                  Reagent or contrast already spent. 100 = no refund. Put the same
+                  number in both boxes for one flat rate.
+                </p>
+              </div>
+            </CardContent>
+          </Card>
+
           <div className="flex justify-end">
             <Button onClick={saveOrganization} disabled={savingOrg}>
               {savingOrg ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Save className="h-4 w-4 mr-2" />}
