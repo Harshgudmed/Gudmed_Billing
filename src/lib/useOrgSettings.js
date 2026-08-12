@@ -1,12 +1,18 @@
 import { useState, useEffect } from 'react'
 import { getOrgSettings, clearOrgCache } from '@/lib/orgSettings'
+import { defaultOrgSettings } from '@/lib/orgSettingsSchema'
 
 /**
  * Hook that listens for org settings changes and refetches automatically
  * Components should use this instead of manually calling getOrgSettings
  */
 export function useOrgSettings() {
-  const [orgInfo, setOrgInfo] = useState({ name: 'Hospital', address: '', city: '', region: '', phone: '', email: '', logoUrl: '', website: '', gstNo: '', cin: '', sacCode: '', labCode: '', homeCollectionCharge: 0, showEmptyReceiptFields: true, receiptFooter: '' })
+  // The hospital-configurable half comes from orgSettingsSchema, so this default
+  // cannot drift from what the reader and the Settings form use.
+  const [orgInfo, setOrgInfo] = useState({
+    name: 'Hospital', address: '', city: '', region: '', phone: '', email: '', logoUrl: '',
+    ...defaultOrgSettings(),
+  })
   const [loading, setLoading] = useState(true)
 
   const fetchSettings = async () => {
