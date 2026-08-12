@@ -1,4 +1,5 @@
 import client from '@/api/client'
+import { readOrgSettings } from '@/lib/orgSettingsSchema'
 
 // Module-level cache — one fetch per session, shared across all print functions.
 // Call clearOrgCache() from SettingsModule after saving org details.
@@ -36,15 +37,10 @@ export async function getOrgSettings() {
         email:    org.email    || '',
         logoUrl:  settings.logoUrl || org.logoUrl || '',
         tagline:  settings.tagline || '',
-        // Hospital-configurable receipt fields (set in Settings → Lab / Receipt).
-        website:              settings.website || '',
-        gstNo:                settings.gstNo || '',
-        cin:                  settings.cin || '',
-        sacCode:              settings.sacCode || '',
-        labCode:              settings.labCode || '',
-        homeCollectionCharge: Number(settings.homeCollectionCharge || 0),
-        showEmptyReceiptFields: settings.showEmptyReceiptFields ?? true,
-        receiptFooter:        settings.receiptFooter || '',
+        // Hospital-configurable settings, from the one declaration in
+        // orgSettingsSchema.js — the reader, the hook and the Settings form all
+        // derive from it, so a new setting cannot reach one and miss another.
+        ...readOrgSettings(settings),
       }
       return _cache
     } catch (err) {

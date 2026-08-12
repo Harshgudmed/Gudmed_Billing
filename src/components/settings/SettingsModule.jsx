@@ -1,4 +1,5 @@
 import { useState, useEffect, lazy, Suspense } from 'react'
+import { toFormValues, fromFormValues } from '@/lib/orgSettingsSchema'
 import { clearOrgCache } from '@/lib/orgSettings'
 import { drName } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
@@ -108,9 +109,9 @@ export default function SettingsModule() {
     region: 'Maharashtra', openingTime: '08:00', closingTime: '17:00',
     appointmentDuration: '30', primaryColor: '#2563eb', secondaryColor: '#7c3aed',
     navbarColor: '#ffffff', moduleHeaderColor: '', logoUrl: '',
-    // Lab / receipt settings (hospital-controlled, shown on printed receipts)
-    website: '', gstNo: '', cin: '', sacCode: '', labCode: '',
-    homeCollectionCharge: '', showEmptyReceiptFields: false, receiptFooter: '',
+    // Hospital-configurable settings — declared once in orgSettingsSchema.js, so
+    // the defaults here, the loader below and the saver cannot fall out of step.
+    ...toFormValues({}),
   })
 
   const [modules, setModules] = useState(
@@ -155,14 +156,7 @@ export default function SettingsModule() {
           navbarColor: orgRes.data.settings?.navbarColor || '#ffffff',
           moduleHeaderColor: orgRes.data.settings?.moduleHeaderColor || '',
           logoUrl: orgRes.data.logoUrl || '',
-          website: orgRes.data.settings?.website || '',
-          gstNo: orgRes.data.settings?.gstNo || '',
-          cin: orgRes.data.settings?.cin || '',
-          sacCode: orgRes.data.settings?.sacCode || '',
-          labCode: orgRes.data.settings?.labCode || '',
-          homeCollectionCharge: String(orgRes.data.settings?.homeCollectionCharge || ''),
-          showEmptyReceiptFields: orgRes.data.settings?.showEmptyReceiptFields ?? false,
-          receiptFooter: orgRes.data.settings?.receiptFooter || '',
+          ...toFormValues(orgRes.data.settings || {}),
         })
         if (orgRes.data.modulesEnabled) setModules(prev => ({ ...prev, ...orgRes.data.modulesEnabled }))
       }
@@ -209,14 +203,7 @@ export default function SettingsModule() {
           navbarColor: orgForm.navbarColor,
           moduleHeaderColor: orgForm.moduleHeaderColor,
           // Lab / receipt settings — hospital controls what shows on receipts
-          website: orgForm.website,
-          gstNo: orgForm.gstNo,
-          cin: orgForm.cin,
-          sacCode: orgForm.sacCode,
-          labCode: orgForm.labCode,
-          homeCollectionCharge: Number(orgForm.homeCollectionCharge) || 0,
-          showEmptyReceiptFields: orgForm.showEmptyReceiptFields,
-          receiptFooter: orgForm.receiptFooter,
+          ...fromFormValues(orgForm),
         },
       })
       if (res.success) {
