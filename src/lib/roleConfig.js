@@ -132,7 +132,7 @@ export const LOGIN_HERO = {
   },
   patient: {
     color: '#0d9488',
-    img: '/login/patient.jpeg', // file at frontend/public/login/patient.jpeg
+    img: '/login/patient.png', // file at public/login/patient.png
     title: 'Patient Portal',
     subtitle: 'Your appointments, reports and bills — in real time.',
   },
