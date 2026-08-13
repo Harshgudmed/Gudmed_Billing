@@ -51,13 +51,34 @@ function ago(date) {
 }
 
 function StatCard({ icon: Icon, label, value, accent }) {
+  // Five of these tiles hold a single digit and the sixth holds a formatted
+  // amount — "₹3,650.00" is nine characters where the others have one — but the
+  // grid gives all six the same width. Two things were missing and both are the
+  // same classic flex bug: a flex child defaults to min-width:auto and so refuses
+  // to shrink below its content, and the icon had no flex-shrink-0, so the long
+  // value pushed the whole row wider than its card instead of fitting inside it.
+  const long = String(value).length > 6
+
   return (
     <Card>
       <CardContent className="flex items-center gap-3 p-4">
-        <div className="rounded-lg p-2" style={{ backgroundColor: `${accent}15`, color: accent }}><Icon className="h-5 w-5" /></div>
-        <div>
-          <div className="text-xl font-bold leading-none">{value}</div>
-          <div className="text-xs text-gray-500 mt-1">{label}</div>
+        <div
+          className="rounded-lg p-2 shrink-0"
+          style={{ backgroundColor: `${accent}15`, color: accent }}
+        >
+          <Icon className="h-5 w-5" />
+        </div>
+        {/* min-w-0 is what lets this shrink; without it `truncate` never fires. */}
+        <div className="min-w-0">
+          {/* title so a truncated amount is still readable on hover, and
+              tabular-nums so the digits line up with the tile beside it. */}
+          <div
+            title={String(value)}
+            className={`font-bold leading-none truncate tabular-nums ${long ? 'text-base' : 'text-xl'}`}
+          >
+            {value}
+          </div>
+          <div className="text-xs text-gray-500 mt-1 truncate">{label}</div>
         </div>
       </CardContent>
     </Card>
