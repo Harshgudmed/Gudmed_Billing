@@ -68,6 +68,22 @@ const updateTestSchema = z.object({
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
+/**
+ * Who signs a result — the acting user, but only once they are proved to be THIS
+ * hospital's user.
+ *
+ * Deliberately NOT resolveRequestedById: that falls back to the org's oldest
+ * active user so a system-raised order always has a requester. Doing the same
+ * here would print a real pathologist's name under a value they never saw. An
+ * unattributable result must stay blank instead.
+ */
+async function signerId(client, organizationId, req) {
+  const id = getActor(req).id
+  if (!id) return null
+  const user = await client.user.findFirst({ where: { id, organizationId }, select: { id: true } })
+  return user?.id ?? null
+}
+
 // ── Controllers ────────────────────────────────────────────────────────────────
 
 export const getAll = async (req, res, next) => {
@@ -121,7 +137,13 @@ export const getAll = async (req, res, next) => {
       if (searchWhere) Object.assign(where, searchWhere)
       const body = await listResponse(db.labOrder, {
         where,
-        include: { patient: { select: PATIENT_SNAPSHOT_SELECT }, results: { include: { test: true } } },
+        include: {
+          patient: { select: PATIENT_SNAPSHOT_SELECT },
+          results: { include: { test: true } },
+          // The referring doctor is stored but was never sent, so every printed
+          // lab report said "Ref Doctor: self" no matter who raised the order.
+          requestedBy: { select: { id: true, fullName: true } },
+        },
         orderBy: { createdAt: 'desc' },
         req,
         fullListTake: 2000,
@@ -137,6 +159,11 @@ export const getAll = async (req, res, next) => {
         include: {
           test: true,
           order: { include: { patient: { select: PATIENT_SNAPSHOT_SELECT } } },
+          // Who ran the test and who signed it off. Both ids were stored and
+          // neither was sent, so the report footer printed a placeholder and a
+          // dash — a signed-off pathology report with no pathologist on it.
+          enteredBy: { select: { fullName: true } },
+          verifiedBy: { select: { fullName: true } },
         },
         orderBy: { createdAt: 'desc' },
         req,
@@ -288,6 +315,10 @@ export const create = async (req, res, next) => {
           isCritical,
           flag,
           comment,
+          // Taken from the session, never from the body: a lab report is a signed
+          // clinical document, and until now nobody's name was recorded against
+          // the value at all, so the printout said "Lab Technologist".
+          enteredById: await signerId(db, getOrgId(req), req),
         },
       })
       return res.json({ success: true, data })
@@ -367,6 +398,9 @@ export const update = async (req, res, next) => {
         select: { id: true },
       })
       if (!owned) return res.status(404).json({ success: false, error: 'Lab result not found' })
+
+      // Whoever signs it off is the logged-in user, not whatever the body claims.
+      if (updates.verifiedAt) updates.verifiedById = await signerId(db, ORGANIZATION_ID, req)
 
       const data = await db.labResult.update({
         where: { id },
