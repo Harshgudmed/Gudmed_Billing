@@ -13,6 +13,21 @@ import { Loader2, RefreshCw, Users, CalendarDays, Microscope, ScanLine, BedDoubl
 import { getFullName, calculateAge, initials } from '../utils/patientUtils';
 import { toast } from 'sonner';
 
+// The strip was a 6-column grid, so every tab got the same 115px whatever its
+// label — and "Lab / Pathology" plus its icon and count needs ~160px at any font
+// size. Combined with TabsTrigger's own `whitespace-nowrap`, the label could
+// neither shrink nor wrap, so it overflowed its cell and printed on top of the
+// tab beside it. The strip now wraps and each tab takes the width it needs, which
+// fits on one row here and drops to a second row on a narrow screen instead of
+// colliding. `shrink-0` keeps the icon and the count whole either way.
+// `grow` and NOT `flex-1`: flex-1 sets the basis to 0, which makes all six tabs
+// equal again and puts the long label straight back into the collision. grow
+// leaves the basis at the label's own width and only shares out the LEFTOVER
+// space, so the strip fills the dialog without squeezing anything.
+const TAB_TRIGGER = 'flex grow items-center justify-center gap-1 px-2 py-2 data-[state=active]:shadow-sm';
+const TAB_ICON = 'h-4 w-4 shrink-0';
+const TAB_COUNT = 'ml-0.5 shrink-0 border-0 px-1.5 py-0 text-[10px]';
+
 export default function PatientProfile({
   selectedPatient,
   showViewDialog,
@@ -167,7 +182,7 @@ body{font-family:Arial,Helvetica,sans-serif;font-size:10.5pt;color:#000;backgrou
 
   return (
     <Dialog open={showViewDialog} onOpenChange={setShowViewDialog}>
-      <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
+      <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Patient Details</DialogTitle>
         </DialogHeader>
@@ -187,44 +202,44 @@ body{font-family:Arial,Helvetica,sans-serif;font-size:10.5pt;color:#000;backgrou
             </div>
 
             <Tabs value={viewTab} onValueChange={setViewTab}>
-              <TabsList className="grid w-full grid-cols-6 h-auto gap-1 p-1 bg-gray-100">
-                <TabsTrigger value="overview" className="flex items-center justify-center gap-1.5 py-2 data-[state=active]:shadow-sm data-[state=active]:text-blue-700">
-                  <Users className="h-4 w-4" />
+              <TabsList className="flex w-full flex-wrap items-center justify-start h-auto gap-1 p-1 bg-gray-100">
+                <TabsTrigger value="overview" className={`${TAB_TRIGGER} data-[state=active]:text-blue-700`}>
+                  <Users className={TAB_ICON} />
                   <span>Patient Details</span>
                 </TabsTrigger>
-                <TabsTrigger value="appointments" className="flex items-center justify-center gap-1.5 py-2 data-[state=active]:shadow-sm data-[state=active]:text-green-700">
-                  <CalendarDays className="h-4 w-4" />
+                <TabsTrigger value="appointments" className={`${TAB_TRIGGER} data-[state=active]:text-green-700`}>
+                  <CalendarDays className={TAB_ICON} />
                   <span>Appointments</span>
                   {records.appointments.length > 0 && (
-                    <Badge className="ml-0.5 bg-green-100 text-green-700 border-0 px-1.5 py-0 text-[10px]">{records.appointments.length}</Badge>
+                    <Badge className={`${TAB_COUNT} bg-green-100 text-green-700`}>{records.appointments.length}</Badge>
                   )}
                 </TabsTrigger>
-                <TabsTrigger value="lab" className="flex items-center justify-center gap-1.5 py-2 data-[state=active]:shadow-sm data-[state=active]:text-teal-700">
-                  <Microscope className="h-4 w-4" />
+                <TabsTrigger value="lab" className={`${TAB_TRIGGER} data-[state=active]:text-teal-700`}>
+                  <Microscope className={TAB_ICON} />
                   <span>Lab / Pathology</span>
                   {records.labOrders.length > 0 && (
-                    <Badge className="ml-0.5 bg-cyan-100 text-cyan-700 border-0 px-1.5 py-0 text-[10px]">{records.labOrders.length}</Badge>
+                    <Badge className={`${TAB_COUNT} bg-cyan-100 text-cyan-700`}>{records.labOrders.length}</Badge>
                   )}
                 </TabsTrigger>
-                <TabsTrigger value="radiology" className="flex items-center justify-center gap-1.5 py-2 data-[state=active]:shadow-sm data-[state=active]:text-indigo-700">
-                  <ScanLine className="h-4 w-4" />
+                <TabsTrigger value="radiology" className={`${TAB_TRIGGER} data-[state=active]:text-indigo-700`}>
+                  <ScanLine className={TAB_ICON} />
                   <span>Radiology</span>
                   {records.radiologyOrders.length > 0 && (
-                    <Badge className="ml-0.5 bg-indigo-100 text-indigo-700 border-0 px-1.5 py-0 text-[10px]">{records.radiologyOrders.length}</Badge>
+                    <Badge className={`${TAB_COUNT} bg-indigo-100 text-indigo-700`}>{records.radiologyOrders.length}</Badge>
                   )}
                 </TabsTrigger>
-                <TabsTrigger value="ipd" className="flex items-center justify-center gap-1.5 py-2 data-[state=active]:shadow-sm data-[state=active]:text-rose-700">
-                  <BedDouble className="h-4 w-4" />
+                <TabsTrigger value="ipd" className={`${TAB_TRIGGER} data-[state=active]:text-rose-700`}>
+                  <BedDouble className={TAB_ICON} />
                   <span>IPD</span>
                   {records.admissions.length > 0 && (
-                    <Badge className="ml-0.5 bg-rose-100 text-rose-700 border-0 px-1.5 py-0 text-[10px]">{records.admissions.length}</Badge>
+                    <Badge className={`${TAB_COUNT} bg-rose-100 text-rose-700`}>{records.admissions.length}</Badge>
                   )}
                 </TabsTrigger>
-                <TabsTrigger value="documents" className="flex items-center justify-center gap-1.5 py-2 data-[state=active]:shadow-sm data-[state=active]:text-sky-700">
-                  <FileText className="h-4 w-4" />
+                <TabsTrigger value="documents" className={`${TAB_TRIGGER} data-[state=active]:text-sky-700`}>
+                  <FileText className={TAB_ICON} />
                   <span>Documents</span>
                   {records.patientDocuments?.length > 0 && (
-                    <Badge className="ml-0.5 bg-sky-100 text-sky-700 border-0 px-1.5 py-0 text-[10px]">{records.patientDocuments.length}</Badge>
+                    <Badge className={`${TAB_COUNT} bg-sky-100 text-sky-700`}>{records.patientDocuments.length}</Badge>
                   )}
                 </TabsTrigger>
               </TabsList>
