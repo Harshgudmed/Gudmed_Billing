@@ -74,9 +74,20 @@ export async function getMyDashboard(req, res, next) {
     const balanceDue = round2(billable.reduce((s, i) => s + (i.balanceDue != null ? i.balanceDue : (i.totalAmount || 0) - (i.amountPaid || 0)), 0))
 
     const now = new Date()
-    const upcomingAppointments = appointments.filter(
-      a => ['scheduled', 'confirmed'].includes(a.status) && new Date(a.appointmentDate) >= new Date(now.toDateString())
-    )
+    // `appointments` is newest-first, which is what the history list wants. The
+    // UPCOMING list is the opposite question — "what is next?" — so it is sorted
+    // soonest-first here. Reusing the history order showed a patient their 20th
+    // above their 18th, which reads as the next visit being two days later than
+    // it is; the appointment they should be preparing for was the second row.
+    // Time breaks the tie, so two visits on one day still read in the order they
+    // will happen.
+    const upcomingAppointments = appointments
+      .filter(a => ['scheduled', 'confirmed'].includes(a.status)
+        && new Date(a.appointmentDate) >= new Date(now.toDateString()))
+      .sort((a, b) => {
+        const d = new Date(a.appointmentDate) - new Date(b.appointmentDate)
+        return d !== 0 ? d : String(a.appointmentTime || '').localeCompare(String(b.appointmentTime || ''))
+      })
 
     res.json({
       success: true,
