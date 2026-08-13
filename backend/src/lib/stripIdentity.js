@@ -34,7 +34,10 @@ const IDENTITY = {
 
   // A result/report belongs to one order and one test. Re-pointing it would
   // attach a finding to the wrong patient just as surely as moving the order.
-  labResult:       ['orderId', 'testId'],
+  // enteredById/verifiedById are the signatures on a clinical document. The
+  // update schema is .passthrough(), so without these a caller could sign a
+  // result off in a pathologist's name they picked themselves.
+  labResult:       ['orderId', 'testId', 'enteredById', 'verifiedById'],
   radiologyReport: ['orderId'],
 
   // Catalogue rows own nothing beyond ALWAYS.

@@ -97,23 +97,25 @@ function transformApiOrder(apiOrder) {
     patientAge: age,
     patientGender: patient?.gender || 'male',
     patientPhone: patient?.phonePrimary || '',
+    // Category and specimen come from what was ordered, NOT from a constant.
+    // Both used to be hard-coded, so a Stool or CSF test read "Blood" on the
+    // screen the phlebotomist collects from. Orders raised before this change
+    // carry neither, and blank is the honest answer for those.
     tests: parsedTests.map(t => ({
       testId: t.testId,
       testName: t.testName,
       testCode: testShortCode(t),
-      testCategory: 'hematology',
-      specimenType: 'Blood',
+      testCategory: t.testCategory || '',
+      specimenType: t.specimenType || '',
       urgency: t.urgency || 'routine',
-      status: 'pending',
     })),
     clinicalIndication: apiOrder.clinicalIndication || '',
     provisionalDiagnosis: apiOrder.provisionalDiagnosis || '',
     priority: apiOrder.priority || 'routine',
     status: apiOrder.status || 'pending',
     orderDate: new Date(apiOrder.orderDate),
-    requestingDoctor: '',
+    requestingDoctor: apiOrder.requestedBy?.fullName || '',
     sampleCollectedAt: apiOrder.sampleCollectedAt ? new Date(apiOrder.sampleCollectedAt) : null,
-    sampleCollectedBy: apiOrder.sampleCollectedBy || null,
     accessionNumber: apiOrder.accessionNumber || null,
     notes: apiOrder.notes || '',
   }
@@ -132,14 +134,17 @@ function transformApiResult(apiResult) {
     isAbnormal: apiResult.isAbnormal || false,
     isCritical: apiResult.isCritical || false,
     flag: apiResult.flag || '',
-    referenceRangeMin: apiResult.referenceRangeMin || null,
-    referenceRangeMax: apiResult.referenceRangeMax || null,
-    referenceRangeText: apiResult.referenceRangeMin && apiResult.referenceRangeMax
+    // `??` and `!= null`, never `||` — a lower bound of 0 is a real range on
+    // plenty of tests (ketones, bilirubin, protein in urine). `|| null` erased
+    // it, and the `&&` below then blanked the whole printed range with it.
+    referenceRangeMin: apiResult.referenceRangeMin ?? null,
+    referenceRangeMax: apiResult.referenceRangeMax ?? null,
+    referenceRangeText: apiResult.referenceRangeMin != null && apiResult.referenceRangeMax != null
       ? `${apiResult.referenceRangeMin}-${apiResult.referenceRangeMax} ${apiResult.resultUnit || ''}`
       : '',
-    enteredBy: '',
-    enteredAt: new Date(),
-    verifiedBy: null,
+    // printLabReport signs the report with these two names.
+    enteredBy: apiResult.enteredBy?.fullName || '',
+    verifiedBy: apiResult.verifiedBy?.fullName || null,
     verifiedAt: apiResult.verifiedAt ? new Date(apiResult.verifiedAt) : null,
     comment: apiResult.comment || '',
     status: apiResult.verifiedAt ? 'verified' : 'draft',
@@ -590,9 +595,13 @@ export default function LaboratoryModule() {
 
       const newOrder = await labApi.createOrder({
         patientId: data.patientId,
+        // Snapshot, not a lookup: the catalogue can be re-categorised later, and
+        // an order must keep saying what was ordered on the day it was raised.
         tests: selectedTests.map(t => ({
           testId: t.id,
           testName: t.testName,
+          testCategory: t.testCategory,
+          specimenType: t.specimenType,
           urgency: data.priority
         })),
         clinicalIndication: data.clinicalIndication,
@@ -665,7 +674,6 @@ export default function LaboratoryModule() {
             status: 'sample_collected',
             sampleCollectedAt: new Date(),
             accessionNumber: updated.accessionNumber,
-            tests: order.tests.map(t => ({ ...t, status: 'collected' }))
           }
           : order
       ))
@@ -687,7 +695,6 @@ export default function LaboratoryModule() {
           ? {
             ...order,
             status: 'in_progress',
-            tests: order.tests.map(t => ({ ...t, status: 'in_progress' }))
           }
           : order
       ))
@@ -775,7 +782,6 @@ export default function LaboratoryModule() {
           ? {
             ...order,
             status: 'completed',
-            tests: order.tests.map(t => ({ ...t, status: 'completed' }))
           }
           : order
       ))
@@ -1584,7 +1590,7 @@ export default function LaboratoryModule() {
                                   </div>
                                 )}
                               </div>
-                            ) : (
+                            ) : ( 
                               <Button
                                 onClick={() => {
                                   setSelectedTest(tests.find(t => t.id === test.testId) || null)
