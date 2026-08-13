@@ -49,9 +49,9 @@ backend/restore-from-render.js
 # history forever, they conflict on every parallel run, and a reviewer has to scroll
 # past them to reach the twenty files that are actually the change.
 #
-# The tools that create them ARE tracked (e2e/*.mjs, docs/*.mjs, run-audit.sh), and
-# so is the report they feed (docs/modules/*.html), because that is the deliverable.
-# The raw material is not.
+# The tools that create them are NOT tracked either — e2e/ and docs/ came back out
+# at the owner's instruction (see the block below), so this list is now only about
+# size, not about what is or is not a deliverable.
 e2e/shots/
 e2e/audit-report/
 docs/images/
@@ -77,6 +77,19 @@ docs/images/
 e2e/
 docs/
 CLAUDE.md
+
+# The shell wrappers around e2e/ — same rule, same reason. They only run because
+# e2e/ is on this machine, so tracking them would ship four scripts that do
+# nothing on a fresh clone.
+run-audit.sh
+run-audit-overnight.sh
+stop-audit.sh
+watch-audit.sh
+
+# Screenshots a verification run writes next to the repo root. Named .tmp on
+# purpose so a forgotten one is obvious; ignored so a forgotten one is harmless.
+*.tmp.png
+*.tmp.mjs
 scripts/
 backend/scripts/*
 !backend/scripts/build-clinical-kb.mjs
