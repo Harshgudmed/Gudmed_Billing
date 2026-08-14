@@ -104,7 +104,7 @@ body{font-family:Arial,Helvetica,sans-serif;font-size:10pt;color:#000;background
     </div>
     <div class="opd-no">
       <div class="opd-label">OPD NO.</div>
-      <div class="opd-val">${mrn}</div>
+      <div class="opd-val">${mrn}</div> 
     </div>
   </div>
 

@@ -3,6 +3,7 @@
 //
 // Run:  node seed-queue.js
 import { db } from './src/config/db.js'
+import { nextQueueNumber } from './src/utils/queueNumber.js'
 
 const HOW_MANY = 10 // number of queue entries to create
 
@@ -13,13 +14,6 @@ const STATUSES = ['waiting', 'waiting', 'called', 'in_service'] // mostly waitin
 
 function pick(arr, i) { return arr[i % arr.length] }
 function randInt(min, max) { return Math.floor(Math.random() * (max - min + 1)) + min }
-
-function queueNumber(serviceArea, i) {
-  const date = new Date().toISOString().slice(0, 10).replace(/-/g, '')
-  const prefix = serviceArea.substring(0, 3).toUpperCase()
-  const seq = String(i).padStart(4, '0')
-  return `${prefix}${date}${seq}`
-}
 
 async function main() {
   console.log('Seeding patient Queue (linked to existing patients)...\n')
@@ -62,7 +56,7 @@ async function main() {
         patientId: p.id,
         serviceArea,
         serviceType: pick(SERVICE_TYPES, i),
-        queueNumber: queueNumber(serviceArea, i + 1),
+        queueNumber: await nextQueueNumber(db, org.id, serviceArea),
         priority: pick(PRIORITIES, i),
         assignedToId: staff?.id ?? null,
         assignedRoom: `Room ${randInt(1, 12)}`,
@@ -74,7 +68,8 @@ async function main() {
       },
     })
     created++
-    console.log(`  ✅ ${queueNumber(serviceArea, i + 1)}  ${p.firstName} ${p.lastName}  [MRN ${p.mrn}]  ${serviceArea}/${status}`)
+    const token = await db.queueManagement.findFirst({ where: { patientId: p.id, organizationId: org.id }, orderBy: { createdAt: 'desc' }, select: { queueNumber: true } })
+    console.log(`  ✅ ${token?.queueNumber}  ${p.firstName} ${p.lastName}  [MRN ${p.mrn}]  ${serviceArea}/${status}`)
   }
 
   const total = await db.queueManagement.count({ where: { organizationId: org.id } })

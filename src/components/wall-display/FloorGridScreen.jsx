@@ -30,6 +30,7 @@ export function FloorGridScreen() {
       headerTitle={data?.floor?.name || 'Floor'}
       headerSubtitle={data?.screens > 1 ? `Screen ${data.screen}/${data.screens}` : ''}
       columns={data?.columns || []}
+      announce={data?.announce}
       horizontalScroll={!screens}
     />
   )

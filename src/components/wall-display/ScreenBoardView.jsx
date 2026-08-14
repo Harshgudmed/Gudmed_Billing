@@ -60,6 +60,7 @@ export function ScreenBoardView() {
       maxVisible={data?.screen?.maxDoctors || DEFAULT_MAX_VISIBLE}
       slideMs={(data?.screen?.sliderSpeedSeconds || 30) * 1000}
       tickerText={data?.screen?.announcementText}
+      announce={data?.announce}
     />
   )
 }

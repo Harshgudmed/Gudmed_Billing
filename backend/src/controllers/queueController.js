@@ -468,11 +468,34 @@ export async function callNextPatient(req, res, next) {
       const claimedId = (await claim('called')) ?? (await claim('waiting'))
       if (!claimedId) return { completedId: current?.id ?? null, nowServing: null }
 
+      // Promote the patient AFTER this one to 'called' — the board's whole
+      // "You're next · Be ready" mechanism is `status === 'called'`, and until
+      // now nothing but a hand-pressed Alert button ever wrote it. A doctor
+      // using the one button this endpoint exists to be therefore produced no
+      // warning at all: the person who should have been getting their reports
+      // out found out when they were waved in.
+      //
+      // Same QUEUE_ORDER_BY as the claim above, so the patient warned is exactly
+      // the one the next press will call. `updateMany` with the status in the
+      // WHERE for the same reason claim() uses it — two doctors finishing at
+      // once must not both promote, and the loser writing nothing is correct.
+      const upNext = await tx.queueManagement.findFirst({
+        where: { ...scope, status: 'waiting', id: { not: claimedId } },
+        orderBy: QUEUE_ORDER_BY,
+        select: { id: true },
+      })
+      if (upNext) {
+        await tx.queueManagement.updateMany({
+          where: { id: upNext.id, status: 'waiting' },
+          data: { status: 'called', calledAt: new Date() },
+        })
+      }
+
       const nowServing = await tx.queueManagement.findUnique({
         where: { id: claimedId },
         include: { patient: { select: PATIENT_NAME_SELECT } },
       })
-      return { completedId: current?.id ?? null, nowServing }
+      return { completedId: current?.id ?? null, nowServing, upNextId: upNext?.id ?? null }
     })
 
     emitDisplayRefresh(ORG_ID) // push: next patient called — the board's main live event

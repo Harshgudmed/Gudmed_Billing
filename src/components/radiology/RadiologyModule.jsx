@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef, lazy, Suspense } from 'react'
 import CancelActionDialog from '@/components/common/CancelActionDialog'
+import { useCancelAction } from '@/components/common/hooks/useCancelAction'
 import { useDebounce } from '@/lib/useDebounce'
 import { dateRangeFor } from '@/components/common/DateFilter'
 import { getOrgSettings } from '@/lib/orgSettings'
@@ -155,9 +156,7 @@ export default function RadiologyModule() {
   const [editOrderForm, setEditOrderForm] = useState({ urgency: 'routine', clinicalIndication: '', notes: '' })
   const [savingEditOrder, setSavingEditOrder] = useState(false)
 
-  const [showCancelDialog, setShowCancelDialog] = useState(false)
-  const [cancellingOrder, setCancellingOrder] = useState(null)
-  const [cancelSubmitting, setCancelSubmitting] = useState(false)
+
 
   // Report dialog
   const [showReportDialog, setShowReportDialog] = useState(false)
@@ -375,31 +374,18 @@ export default function RadiologyModule() {
     setSavingEditOrder(false)
   }
 
-  // Reschedule moves the booking; cancel settles the money. Both come from the
-  // one shared dialog, which has already worked out what the refund would be —
-  // but the amount is NOT sent, because the server recomputes it from this
-  // hospital's own settings. What the browser shows is a preview, not the figure.
-  const handleCancelAction = async (choice) => {
-    if (!cancellingOrder) return
-    setCancelSubmitting(true)
-    try {
-      if (choice.action === 'reschedule') {
-        await handleUpdateStatus(cancellingOrder.id, cancellingOrder.status, {
-          scheduledDate: new Date(`${choice.date}T${choice.time}`).toISOString(),
-          notes: `Rescheduled: ${choice.reason}`,
-        })
-        toast.success(`Moved to ${choice.date} at ${choice.time}`)
-      } else {
-        await handleUpdateStatus(cancellingOrder.id, 'cancelled', { cancellationReason: choice.reason })
-        toast.success(choice.instant
-          ? 'Cancelled — refund issued at the counter'
-          : 'Cancelled — refund sent for approval')
-      }
-      setShowCancelDialog(false)
-      setCancellingOrder(null)
-    } catch { /* already toasted by handleUpdateStatus */ }
-    setCancelSubmitting(false)
-  }
+  // Reschedule moves the booking; cancel settles the money. The shared dialog has
+  // already worked out what the refund would be — but the amount is NOT sent: the
+  // server recomputes it from this hospital's own settings, so what the browser
+  // shows is a preview, not the figure.
+  const cancelAction = useCancelAction({
+    reschedule: (o, c) => handleUpdateStatus(o.id, o.status, {
+      scheduledDate: c.date,
+      notes: `Rescheduled: ${c.reason}`,
+    }),
+    cancel: (o, c) => handleUpdateStatus(o.id, 'cancelled', { cancellationReason: c.reason }),
+    onDone: () => fetchStats(),
+  })
 
   // ── Report handlers ───────────────────────────────────────────────────────
 
@@ -833,7 +819,7 @@ ${order.clinicalIndication ? `<div class="section"><div class="section-header">C
                           <Button size="sm" variant="ghost" title="Edit" onClick={() => { setEditingOrder(o); setEditOrderForm({ urgency: o.urgency || 'routine', clinicalIndication: o.clinicalIndication || '', notes: o.notes || '' }); setShowEditOrderDialog(true) }}>
                             <Edit className="h-4 w-4" />
                           </Button>
-                          <Button size="sm" variant="ghost" className="text-red-500" title="Cancel" onClick={() => { setCancellingOrder(o); setShowCancelDialog(true) }}>
+                          <Button size="sm" variant="ghost" className="text-red-500" title="Cancel" onClick={() => cancelAction.start(o)}>
                             <XCircle className="h-4 w-4" />
                           </Button>
                         </>}
@@ -1293,15 +1279,11 @@ ${order.clinicalIndication ? `<div class="section"><div class="section-header">C
           RadiologyOrder carries no price of its own; what the patient was charged
           is the exam's price, which the orders query already includes. */}
       <CancelActionDialog
-        open={showCancelDialog}
-        onOpenChange={setShowCancelDialog}
+        {...cancelAction.dialogProps}
         module="radiology"
-        record={cancellingOrder}
-        amount={cancellingOrder?.exam?.price ?? 0}
-        title={cancellingOrder?.orderNumber}
-        subtitle={cancellingOrder?.patientName}
-        onConfirm={handleCancelAction}
-        isSubmitting={cancelSubmitting}
+        amount={cancelAction.record?.exam?.price ?? 0}
+        title={cancelAction.record?.orderNumber}
+        subtitle={cancelAction.record?.patient ? getFullName(cancelAction.record.patient) : ''}
       />
 
       {/* ── Report Dialog ── */}

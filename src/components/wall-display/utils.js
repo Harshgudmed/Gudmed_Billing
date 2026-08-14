@@ -1,5 +1,8 @@
 import { formatTime12h } from '@/lib/format'
+import { shortToken } from '@/lib/queueToken'
 import { MASK_PATIENT_IDENTITY, DEPARTMENT_COLORS, COLUMN_SIZE_TIERS, BASE_COLUMN_SIZE } from './constants'
+
+export { shortToken }
 
 export function maskPatientName(name) {
   const parts = String(name || '').trim().split(/\s+/).filter(Boolean)
@@ -7,6 +10,31 @@ export function maskPatientName(name) {
   const [given, ...rest] = parts
   return `${given} ${rest.map((p) => p[0].toUpperCase() + '.').join(' ')}`
 }
+
+/**
+ * How this hospital wants a patient named on its boards.
+ *
+ * One function, used by every board, because the alternative — each screen
+ * deciding for itself — is how the room grid ends up showing names while the
+ * room detail shows tokens, on the same floor, for the same patient.
+ *
+ * A token is a number nobody in the hall can attach to a person; a name is
+ * readable from across the room. Which one is right depends on the hospital, so
+ * neither is hardcoded. When the chosen field is missing, the other one is used
+ * rather than printing a dash — a board with nothing on it helps nobody.
+ */
+export function patientLabel(entry, cfg = {}) {
+  const name = entry?.name && entry.name !== '—' ? maskPatientName(entry.name) : ''
+  const token = shortToken(entry?.token)
+  const mode = cfg.displayPatientAs || 'name'
+  if (mode === 'token') return token || name || '—'
+  if (mode === 'both') return [name, token].filter(Boolean).join(' · ') || '—'
+  return name || token || '—'
+}
+
+/** Whether to print the doctor's name. Some hospitals treat who is sitting where
+ *  as internal, and a shared room's doctor changes through the day anyway. */
+export const showDoctorName = (cfg = {}) => cfg.displayShowDoctorName !== false
 
 export function maskUhid(uhid) {
   const s = String(uhid || '')

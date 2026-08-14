@@ -7,7 +7,9 @@ import { format } from 'date-fns'
 import client from '@/api/client'
 import PatientLookup from '@/components/common/PatientLookup'
 import RefundApprovalsTab from './RefundApprovalsTab'
-import { Receipt, RefreshCw, Plus, Search, Trash2, Shield, Eye, Printer, Download, TrendingUp, Clock, AlertCircle, Pencil, X } from 'lucide-react'
+import { Receipt, RefreshCw, Plus, Search, Trash2, Shield, Eye, Printer, Download, TrendingUp, Clock, AlertCircle, Pencil, X, XCircle } from 'lucide-react'
+import CancelActionDialog from '@/components/common/CancelActionDialog'
+import { useCancelAction } from '@/components/common/hooks/useCancelAction'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -360,6 +362,7 @@ export default function BillingModule({ onBack }) {
   const [refundAmount, setRefundAmount] = useState('')
   const [refundReason, setRefundReason] = useState('')
   const [showPayModal, setShowPayModal] = useState(null)
+
   const [payMethod, setPayMethod] = useState('Cash')
   // Re-entrancy lock for payments: the ref blocks a double-click synchronously
   // (before React re-renders the disabled button), so no duplicate charge is posted.
@@ -514,6 +517,11 @@ export default function BillingModule({ onBack }) {
             // it rendered "Pending" with a live Pay button — the cashier took
             // the money at the counter and only then hit the server's refusal.
             cancelled: inv.status === 'cancelled' || inv.paymentStatus === 'cancelled',
+            // The raw status too. The cancel dialog asks "has the work started?"
+            // to price the cancellation, and answers it from this — without it
+            // every bill read as already-worked and was charged the after-work
+            // rate, including a draft nothing had been fulfilled from.
+            status: inv.status,
             // From the RAW items: normItems drops type/sourceType.
             billTypes: invoiceTypesOf(items),
             items: normItems, discount: inv.discountPercentage || 0, gstPct: 0,
@@ -1118,6 +1126,41 @@ export default function BillingModule({ onBack }) {
   }
 
   // ── Filtered invoices ──────────────────────────────────────────────────────
+  // Cancelling an invoice reverses what it fulfilled — the medicine goes back on
+  // the shelf, its lab and radiology orders are cancelled — and that whole cascade
+  // already lives in the API (reverseInvoiceFulfillment). Anything collected is
+  // refunded through the same endpoint the Refund button uses, so an instant-refund
+  // hospital and an approval one behave here exactly as they do everywhere else.
+  const cancelAction = useCancelAction({
+    // A bill cannot move, but the day the patient must pay by can.
+    reschedule: (b, c) => client.patch('/billing', {
+      resource: 'invoice',
+      id: b.dbId,
+      updates: { dueDate: c.date, notes: `Due date extended: ${c.reason}` },
+    }),
+    cancel: async (b, c) => {
+      const paid = Number(b.amountPaid) || 0
+      // Refund FIRST. Cancelling archives the invoice and the API refuses a refund
+      // against a cancelled document — the other order loses the money silently.
+      if (paid > 0 && c.refund > 0) {
+        await client.post('/billing', {
+          resource: 'refund',
+          invoiceId: b.dbId,
+          amount: Math.min(c.refund, paid),
+          refundReason: c.reason,
+          paymentMethod: 'cash',
+        })
+      }
+      await client.patch('/billing', {
+        resource: 'invoice',
+        id: b.dbId,
+        updates: { status: 'cancelled', cancellationReason: c.reason },
+      })
+    },
+    messages: { rescheduled: (c) => `Due date moved to ${c.date}` },
+    onDone: () => fetchAll(),
+  })
+
   const filteredBills = bills // Backend handles pagination and filtering now
 
   // ── Filtered insurance claims (client-side; claims list is fetched in full) ─
@@ -1302,6 +1345,12 @@ export default function BillingModule({ onBack }) {
                               <Button size="sm" variant="outline" onClick={() => setShowInvoiceModal(b)}>View</Button>
                               {!b.cancelled && (!b.paid || (b.balanceDue ?? (b.total - (b.amountPaid || 0))) > 0) && (
                                 <Button size="sm" onClick={() => { setShowPayModal(b); setPayMethod('Cash') }}>Pay</Button>
+                              )}
+                              {!b.cancelled && (
+                                <Button size="sm" variant="ghost" className="text-red-500" title="Cancel"
+                                  onClick={() => cancelAction.start(b)}>
+                                  <XCircle className="h-4 w-4" />
+                                </Button>
                               )}
                             </div>
                           </TableCell>
@@ -1911,6 +1960,16 @@ export default function BillingModule({ onBack }) {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Cancel — the shared dialog all four modules use. An invoice cannot be
+          rescheduled, so it offers only Cancel & refund. */}
+      <CancelActionDialog
+        {...cancelAction.dialogProps}
+        module="billing"
+        amount={Number(cancelAction.record?.amountPaid) || 0}
+        title={cancelAction.record?.invoiceNo}
+        subtitle={cancelAction.record?.patientName}
+      />
 
       {/* ── Pay Dialog ── */}
       <Dialog open={!!showPayModal} onOpenChange={() => setShowPayModal(null)}>

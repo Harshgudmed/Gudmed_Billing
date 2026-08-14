@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useMemo } from 'react'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { DoorOpen, Bell } from 'lucide-react'
 import { toast } from 'sonner'
@@ -9,14 +9,16 @@ import { drName } from '@/lib/utils'
 import { formatTime12h } from '@/lib/format'
 import { Board, Breadcrumb } from './Board'
 import { CARD, TEXT_MUTED } from './constants'
-import { maskPatientName, maskUhid, emptyRoomLabel } from './utils'
+import { patientLabel, showDoctorName, maskUhid, emptyRoomLabel } from './utils'
 import { useIdleReturn } from './hooks'
+import { useQueueAnnouncements } from './useQueueAnnouncements'
+import { readOrgSettings } from '@/lib/orgSettingsSchema'
 
 // One doctor's lane on the room screen: their current consultation, their next
 // patients, and — only for staff — their own controls. Self-contained so two or
 // three doctors sharing a room each get an identical, independent block that
 // never touches another doctor's queue.
-function DoctorLane({ g, showControls, busy, onCall, onAlert }) {
+function DoctorLane({ g, showControls, busy, onCall, onAlert, cfg = {} }) {
   const inProg = g.inProgress
   const next = g.patients?.[0] || null
   const shown = g.patients || []
@@ -27,8 +29,13 @@ function DoctorLane({ g, showControls, busy, onCall, onAlert }) {
       {/* Lane header — a tinted strip so each doctor's block reads as one unit
           at a glance, and the active one is unmistakable. */}
       <div className={`flex flex-wrap items-center gap-x-3 gap-y-1 px-6 py-3.5 ${g.active ? 'bg-emerald-50' : 'bg-slate-50'}`}>
+        {/* A hospital that hides doctor names still needs the lanes told apart,
+            so an unnamed lane says which room position it is rather than going
+            blank — a shared room shows two or three of these side by side. */}
         <span className="text-2xl font-bold text-slate-800">
-          {g.doctorName === 'Unassigned' ? 'Unassigned' : drName(g.doctorName)}
+          {!showDoctorName(cfg) ? 'Consultation'
+            : g.doctorName === 'Unassigned' ? 'Unassigned'
+            : drName(g.doctorName)}
         </span>
         {g.active
           ? <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-100 px-2.5 py-0.5 text-xs font-bold uppercase tracking-wider text-emerald-700">
@@ -47,7 +54,7 @@ function DoctorLane({ g, showControls, busy, onCall, onAlert }) {
           <div className={`mb-2 text-[11px] font-bold uppercase tracking-[0.2em] ${TEXT_MUTED}`}>Patient In</div>
           {inProg ? (
             <div className="relative flex-1 overflow-hidden rounded-xl bg-gradient-to-br from-emerald-50 to-white p-4 ring-1 ring-emerald-200">
-              <div className="break-words text-2xl font-bold leading-tight text-slate-800">{maskPatientName(inProg.name)}</div>
+              <div className="break-words text-2xl font-bold leading-tight text-slate-800">{patientLabel(inProg, cfg)}</div>
               <div className={`mt-0.5 font-mono text-sm ${TEXT_MUTED}`}>{maskUhid(inProg.uhid)}</div>
             </div>
           ) : (
@@ -59,11 +66,11 @@ function DoctorLane({ g, showControls, busy, onCall, onAlert }) {
             <div className="mt-3 grid grid-cols-2 gap-2.5">
               <button
                 onClick={onCall}
-                disabled={busy || !next}
+                disabled={busy || (!inProg && !next)}
                 className="flex items-center justify-center gap-2 rounded-xl bg-[#2E4168] px-4 py-3 text-sm font-bold text-white shadow-sm transition-all hover:bg-[#253453] hover:shadow disabled:cursor-not-allowed disabled:opacity-40"
               >
                 <DoorOpen className="h-4 w-4" />
-                {inProg ? 'Finish & next' : 'Call next in'}
+                {inProg ? (next ? 'Finish & next' : 'Finish consultation') : 'Call next in'}
               </button>
               <button
                 onClick={onAlert}
@@ -100,7 +107,7 @@ function DoctorLane({ g, showControls, busy, onCall, onAlert }) {
                       isNext ? 'bg-amber-100 text-amber-700' : 'bg-slate-100 text-slate-500'
                     }`}>{i + 1}</span>
                     <span className="min-w-0 flex-1">
-                      <span className="block truncate text-xl font-semibold text-slate-800">{maskPatientName(p.name)}</span>
+                      <span className="block truncate text-xl font-semibold text-slate-800">{patientLabel(p, cfg)}</span>
                       {isNext && (
                         <span className="mt-0.5 flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-amber-700">
                           <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-amber-500" />
@@ -195,6 +202,31 @@ export function RoomScreen() {
   // Live push (with a slow polling fallback) instead of a 3s poll — see useLiveRefresh.
   useLiveRefresh(load)
 
+  // Spoken announcements. This route is BOTH the doctor's console and a
+  // waiting-room wall panel (see doctorMode above), and the panel is the one
+  // that needs to be heard — so it announces from the same data either way.
+  // Mapped into the hook's one shape here; the grid board sends a different
+  // payload and maps its own.
+  //
+  // ABOVE the `if (!data)` return, and it has to stay there: React requires the
+  // same hooks in the same order on every render, and a hook after an early
+  // return runs only sometimes. Placing these below it threw "Rendered more
+  // hooks than during the previous render" the moment the first payload landed.
+  const voiceUnits = useMemo(
+    () => (data?.waitingGroups || []).map((g) => ({
+      room: data?.room?.roomNumber,
+      doctor: g.doctorName,
+      serving: g.inProgress,
+      alerted: (g.patients || []).filter((p) => p.alerted),
+    })),
+    [data],
+  )
+  useQueueAnnouncements(voiceUnits, data?.announce)
+
+  // Name, token or both, and whether the doctor is named — the hospital's call,
+  // read through the shared schema so an unset value still has a sane default.
+  const cfg = useMemo(() => readOrgSettings(data?.announce || {}), [data?.announce])
+
   if (!data) return <Board><div className="p-10 text-slate-500">Loading…</div></Board>
 
   const { room, activeDoctor: a, waitingGroups } = data
@@ -256,6 +288,7 @@ export function RoomScreen() {
                 busy={busy}
                 onCall={() => callInNext(g.doctorId)}
                 onAlert={() => g.patients[0] && alertNext(g.patients[0].queueEntryId)}
+                cfg={cfg}
               />
             ))}
           </div>
@@ -264,3 +297,4 @@ export function RoomScreen() {
     </Board>
   )
 }
+

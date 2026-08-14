@@ -45,14 +45,21 @@ function RoomCard({ r, onOpen }) {
               </span>
             )}
           </div>
-          <div className="mt-3 truncate text-2xl font-bold leading-snug">
+          {/* Wraps to a second line rather than truncating. "Dr. Deepika
+              Deshp…" is not a doctor's name — a patient standing across the
+              hall cannot tell it from Dr. Deshmukh, and this card exists to
+              tell them exactly that. Grid items already stretch to the tallest
+              in their row, so the two-line card does not make the row ragged.
+              Capped at two lines so one very long name cannot push the waiting
+              count off the card. */}
+          <div className="mt-3 text-2xl font-bold leading-snug [overflow-wrap:anywhere] line-clamp-2">
             {a.unassigned ? <span className="font-medium text-slate-400">No doctor assigned</span> : drName(a.doctorName)}
             {!a.unassigned && a.manual && (
               <span className="ml-2 align-middle rounded-full bg-amber-50 px-2.5 py-1 text-xs font-bold uppercase tracking-wider text-amber-700 ring-1 ring-amber-200">Cover</span>
             )}
           </div>
           {otherDoctors.length > 0 && (
-            <div className={`mt-1.5 truncate text-base ${TEXT_MUTED}`}>
+            <div className={`mt-1.5 line-clamp-2 [overflow-wrap:anywhere] text-base ${TEXT_MUTED}`}>
               + {otherDoctors.map((d) => drName(d.doctorName)).join(', ')}
             </div>
           )}
