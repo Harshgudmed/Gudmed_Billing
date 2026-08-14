@@ -18,15 +18,19 @@ import { formatMoney } from '@/lib/format'
 // things this table holds. Everything else (the reason, the refund sum, the
 // instant-vs-approval wording) is identical in all four and lives below, once.
 //
-// Reschedule is offered only where it means something. A scan is an appointment
-// and can move; a bill is a document and a dispensed medicine has left the
-// counter, so offering "reschedule" there would be a control nobody can explain.
+// "Reschedule" does not mean the same thing in all four, so each says what it
+// means and whether a time is part of it. A scan moves to a new slot; a bill is a
+// document and cannot move, but the date the patient must pay by can.
 export const CANCEL_MODULES = {
   billing: {
     label: 'Invoice',
-    reschedule: false,
-    // A draft has been raised but nothing was fulfilled from it yet.
-    workStarted: (r) => r?.status !== 'draft',
+    reschedule: true,
+    rescheduleVerb: 'Reschedule',
+    rescheduleHint: 'Moves the payment due date. The bill itself is unchanged.',
+    // A draft has been raised but nothing was fulfilled from it yet. Guarded on
+    // the status being PRESENT: `undefined !== 'draft'` is true, so a record that
+    // forgot to carry its status would silently be charged the after-work rate.
+    workStarted: (r) => !!r?.status && r.status !== 'draft',
   },
   pharmacy: {
     label: 'Sale',
@@ -38,11 +42,15 @@ export const CANCEL_MODULES = {
   radiology: {
     label: 'Scan',
     reschedule: true,
+    rescheduleVerb: 'Reschedule',
+    rescheduleHint: 'Moves the scan to a new date.',
     workStarted: (r) => r?.status === 'in_progress' || r?.status === 'completed' || !!r?.examPerformedAt,
   },
   laboratory: {
     label: 'Lab Order',
     reschedule: true,
+    rescheduleVerb: 'Reschedule',
+    rescheduleHint: 'Moves the sample collection to a new date.',
     // Anything past 'pending' means the tube was drawn — the reagent is spent.
     workStarted: (r) => r?.status !== 'pending',
   },
@@ -65,7 +73,6 @@ export default function CancelActionDialog({
   const [action, setAction] = useState('refund')
   const [reason, setReason] = useState('')
   const [date, setDate] = useState('')
-  const [time, setTime] = useState('')
 
   // Everything the user typed is cleared when the dialog closes. Without this the
   // next record opens carrying the previous one's reason and date — and the
@@ -75,7 +82,6 @@ export default function CancelActionDialog({
       setAction(cfg.reschedule ? 'reschedule' : 'refund')
       setReason('')
       setDate('')
-      setTime('')
     }
   }, [open, cfg.reschedule])
 
@@ -84,13 +90,13 @@ export default function CancelActionDialog({
   const instant = isInstantRefund(orgInfo)
 
   const canConfirm = reason.trim().length > 0
-    && (action !== 'reschedule' || (date && time))
+    && (action !== 'reschedule' || !!date)
     && !isSubmitting
 
   const submit = () => {
     if (!canConfirm) return
     onConfirm(action === 'reschedule'
-      ? { action: 'reschedule', reason: reason.trim(), date, time }
+      ? { action: 'reschedule', reason: reason.trim(), date }
       : { action: 'refund', reason: reason.trim(), amount, charge, refund, chargePct, instant })
   }
 
@@ -117,7 +123,7 @@ export default function CancelActionDialog({
           {cfg.reschedule && (
             <div className="flex gap-2">
               {[
-                { key: 'reschedule', Icon: CalendarClock, text: 'Reschedule' },
+                { key: 'reschedule', Icon: CalendarClock, text: cfg.rescheduleVerb ?? 'Reschedule' },
                 { key: 'refund', Icon: IndianRupee, text: 'Cancel & refund' },
               ].map(({ key, Icon, text }) => (
                 <button
@@ -136,10 +142,10 @@ export default function CancelActionDialog({
           )}
 
           {action === 'reschedule' ? (
-            <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-2">
               <div>
                 <Label>New date *</Label>
-                {/* Today is the floor: a scan cannot be moved into the past. */}
+                {/* Today is the floor: nothing can be moved into the past. */}
                 <Input
                   type="date"
                   value={date}
@@ -147,10 +153,9 @@ export default function CancelActionDialog({
                   onChange={(e) => setDate(e.target.value)}
                 />
               </div>
-              <div>
-                <Label>New time *</Label>
-                <Input type="time" value={time} onChange={(e) => setTime(e.target.value)} />
-              </div>
+              {cfg.rescheduleHint && (
+                <p className="text-xs text-gray-500">{cfg.rescheduleHint}</p>
+              )}
             </div>
           ) : (
             <div className="rounded-lg border p-3 text-sm space-y-1">
@@ -207,7 +212,7 @@ export default function CancelActionDialog({
             disabled={!canConfirm}
           >
             {isSubmitting && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
-            {action === 'reschedule' ? 'Reschedule' : `Cancel & refund ${formatMoney(refund)}`}
+            {action === 'reschedule' ? (cfg.rescheduleVerb ?? 'Reschedule') : `Cancel & refund ${formatMoney(refund)}`}
           </Button>
         </DialogFooter>
       </DialogContent>

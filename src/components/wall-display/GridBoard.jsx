@@ -1,10 +1,12 @@
-import { useState, useEffect, useRef } from 'react'
+﻿import { useState, useEffect, useRef, useMemo } from 'react'
 import Logo from '@/components/Logo'
 import { useOrgSettings } from '@/lib/useOrgSettings'
 import { drName } from '@/lib/utils'
 import { TEXT_MUTED, DEFAULT_MAX_VISIBLE, DEFAULT_SLIDE_MS } from './constants'
-import { maskPatientName, emptyRoomLabel, columnSize } from './utils'
+import { patientLabel, showDoctorName, emptyRoomLabel, columnSize } from './utils'
 import { useLiveClock } from './hooks'
+import { useQueueAnnouncements } from './useQueueAnnouncements'
+import { readOrgSettings } from '@/lib/orgSettingsSchema'
 
 function GridClock() {
   const now = useLiveClock()
@@ -25,9 +27,14 @@ function GridClock() {
 // turn it is from across the floor. `colCount` is how many columns are
 // sharing the screen RIGHT NOW (after paging) — fewer columns get bigger type,
 // so the board never leaves width on the table when only 1-2 doctors are in.
-function RoomColumn({ c, colCount = 5 }) {
+function RoomColumn({ c, colCount = 5, cfg = {} }) {
   const active = c.doctorState === 'active'
   const size = columnSize(colCount)
+  // A hospital that hides the doctor still needs the room's state, so the
+  // "closed / next session" line stays — only the name goes.
+  const doctorLine = !showDoctorName(cfg)
+    ? (c.doctorState === 'closed' ? emptyRoomLabel(c.nextSession) : null)
+    : (c.doctorName ? drName(c.doctorName) : (c.doctorState === 'closed' ? emptyRoomLabel(c.nextSession) : 'No doctor'))
   return (
     <div className="flex h-full min-h-0 flex-col overflow-hidden rounded-xl bg-white shadow-sm ring-1 ring-slate-200">
       {/* Header — active room gets the navy fill so open rooms pop; a closed
@@ -44,9 +51,9 @@ function RoomColumn({ c, colCount = 5 }) {
             </span>
           )}
         </div>
-        <div className={`mt-1.5 truncate font-bold leading-tight ${size.doctor}`}>
-          {c.doctorName ? drName(c.doctorName) : (c.doctorState === 'closed' ? emptyRoomLabel(c.nextSession) : 'No doctor')}
-        </div>
+        {doctorLine && (
+          <div className={`mt-1.5 truncate font-bold leading-tight ${size.doctor}`}>{doctorLine}</div>
+        )}
         {c.department && <div className={`truncate text-xs font-medium ${active ? 'text-white/50' : 'text-slate-400'}`}>{c.department}</div>}
       </div>
 
@@ -59,7 +66,7 @@ function RoomColumn({ c, colCount = 5 }) {
           </span>
           <span className="min-w-0">
             <span className="block text-[10px] font-bold uppercase tracking-[0.15em] text-emerald-600">In Patient</span>
-            <span className={`block truncate font-bold text-emerald-900 ${size.now}`}>{maskPatientName(c.nowServing.name)}</span>
+            <span className={`block truncate font-bold text-emerald-900 ${size.now}`}>{patientLabel(c.nowServing, cfg)}</span>
           </span>
         </div>
       )}
@@ -82,7 +89,7 @@ function RoomColumn({ c, colCount = 5 }) {
                 p.flash ? 'bg-amber-500 text-white' : active ? 'bg-[#2E4168]/10 text-[#2E4168]' : 'bg-slate-100 text-slate-400'
               }`}>{i + 1}</span>
               <span className="min-w-0 flex-1">
-                <span className={`block truncate font-semibold leading-tight text-slate-800 ${size.patient}`}>{maskPatientName(p.name)}</span>
+                <span className={`block truncate font-semibold leading-tight text-slate-800 ${size.patient}`}>{patientLabel(p, cfg)}</span>
                 {p.flash && <span className="text-[11px] font-bold uppercase tracking-wider text-amber-700">You're next Be ready</span>}
               </span>
               {p.visitType === 'follow_up' && (
@@ -108,8 +115,28 @@ function RoomColumn({ c, colCount = 5 }) {
 // so a presenter can scroll to any doctor and it never jumps away mid-demo.
 // The default (auto-slide) is for the wall TV, where nobody is there to scroll —
 // there it MUST page itself. See ScreenBoardView vs FloorGridScreen.
-export function GridBoard({ headerTitle, headerSubtitle, columns, maxVisible = DEFAULT_MAX_VISIBLE, slideMs = DEFAULT_SLIDE_MS, tickerText, resetKey, horizontalScroll = false }) {
+export function GridBoard({ headerTitle, headerSubtitle, columns, maxVisible = DEFAULT_MAX_VISIBLE, slideMs = DEFAULT_SLIDE_MS, tickerText, resetKey, announce, horizontalScroll = false }) {
   const { orgInfo } = useOrgSettings() // the hospital's own name, straight from Settings
+  // What this hospital wants shown — name, token, or both, and whether the
+  // doctor is named at all. Defaults come from the shared schema, so a hospital
+  // that has never opened Settings still gets a sensible board.
+  const cfg = useMemo(() => readOrgSettings(announce || {}), [announce])
+  // Announces from ALL columns, not just the visible page: a patient called into
+  // a room that happens to be on page 2 still has to be told. The board pages
+  // itself every 30 seconds; the person waiting does not.
+  //
+  // Mapped into the hook's one shape here rather than teaching the hook this
+  // feed's field names — the room screen calls it with a different payload.
+  const voiceUnits = useMemo(
+    () => columns.map((c) => ({
+      room: c.roomNumber,
+      doctor: c.doctorName,
+      serving: c.nowServing,
+      alerted: (c.patients || []).filter((p) => p.flash),
+    })),
+    [columns],
+  )
+  const voice = useQueueAnnouncements(voiceUnits, announce)
   const [page, setPage] = useState(0)
   const totalWaiting = columns.reduce((n, c) => n + (c.waitingCount || 0), 0)
   // In scroll mode there are no pages — the whole list shows and the user scrolls.
@@ -160,6 +187,21 @@ export function GridBoard({ headerTitle, headerSubtitle, columns, maxVisible = D
                 <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-emerald-400" />
               </span>
               {headerTitle}{headerSubtitle ? ` · ${headerSubtitle}` : ''}
+              {/* Announcements on but nothing has actually come out of the
+                  speakers yet — almost always the browser's autoplay policy,
+                  which fails without an error. From across a hall that looks
+                  exactly like "nobody has been called", so it has to be visible
+                  to whoever walks past. */}
+              {voice.enabled && !voice.heard && (
+                <span className="rounded bg-amber-400/90 px-1.5 py-px text-[10px] font-bold tracking-normal text-amber-950">
+                  sound not started
+                </span>
+              )}
+              {voice.languageFallback && (
+                <span className="rounded bg-amber-400/90 px-1.5 py-px text-[10px] font-bold tracking-normal text-amber-950">
+                  {voice.languageFallback} voice missing
+                </span>
+              )}
             </div>
           </div>
         </div>
@@ -188,7 +230,7 @@ export function GridBoard({ headerTitle, headerSubtitle, columns, maxVisible = D
         <div className="flex flex-1 gap-3 overflow-x-auto p-3">
           {visible.map((c) => (
             <div key={`${c.roomId}::${c.doctorId || 'none'}`} className="w-[22rem] shrink-0">
-              <RoomColumn c={c} colCount={3} />
+              <RoomColumn c={c} colCount={3} cfg={cfg} />
             </div>
           ))}
         </div>
@@ -197,7 +239,7 @@ export function GridBoard({ headerTitle, headerSubtitle, columns, maxVisible = D
           className="grid flex-1 gap-3 p-3"
           style={{ gridTemplateColumns: `repeat(${visible.length}, 1fr)` }}
         >
-          {visible.map((c) => <RoomColumn key={`${c.roomId}::${c.doctorId || 'none'}`} c={c} colCount={visible.length} />)}
+          {visible.map((c) => <RoomColumn key={`${c.roomId}::${c.doctorId || 'none'}`} c={c} colCount={visible.length} cfg={cfg} />)}
         </div>
       )}
 
@@ -209,3 +251,5 @@ export function GridBoard({ headerTitle, headerSubtitle, columns, maxVisible = D
     </div>
   )
 }
+
+

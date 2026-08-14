@@ -10,7 +10,7 @@ import {
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
-import { RefreshCw, Loader2, Printer } from "lucide-react";
+import { RefreshCw, Loader2, Printer, XCircle } from "lucide-react";
 import { format } from "date-fns";
 import { statusBadge } from "../pharmacyHelpers";
 import { Pagination } from "@/components/common/Pagination";
@@ -45,6 +45,7 @@ export default function SalesReportsTab({
   salesTotal,   // total revenue across the period (DB sum)
   refresh,
   orgInfo,
+  onCancelSale,   // opens the shared cancel dialog; absent = no cancel offered
 }) {
   return (
     <TabsContent value="sales" className="space-y-4">
@@ -145,6 +146,19 @@ export default function SalesReportsTab({
                         >
                           <Printer className="h-4 w-4" />
                         </Button>
+                        {/* A cancelled sale is already void — offering to cancel
+                            it again would take the stock back a second time. */}
+                        {onCancelSale && s.paymentStatus !== "cancelled" && (
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            title="Cancel"
+                            className="h-7 w-7 text-red-500"
+                            onClick={() => onCancelSale(s)}
+                          >
+                            <XCircle className="h-4 w-4" />
+                          </Button>
+                        )}
                       </TableCell>
                     </TableRow>
                   );

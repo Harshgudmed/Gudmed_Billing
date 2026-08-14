@@ -131,7 +131,10 @@ async function buildRoomColumns(orgId, rooms, { includeIdle = false } = {}) {
   // needed to group by doctor and count.
   const rawEntries = roomIds.length ? await db.queueManagement.findMany({
     where: { organizationId: orgId, roomId: { in: roomIds }, status: { in: [...WAITING_STATUSES, 'in_progress'] }, joinedQueueAt: todayRange() },
-    select: { id: true, roomId: true, assignedToId: true, followUpDoctorId: true, status: true, visitType: true, priorityRank: true, joinedQueueAt: true, createdAt: true },
+    // queueNumber is carried so a hospital can announce the token instead of the
+    // patient's name — a name spoken over hall speakers reaches further than the
+    // same name printed on the screen.
+    select: { id: true, roomId: true, assignedToId: true, followUpDoctorId: true, status: true, visitType: true, queueNumber: true, priorityRank: true, joinedQueueAt: true, createdAt: true },
     orderBy: QUEUE_ORDER_BY,
   }) : []
   const entriesByRoom = new Map(roomIds.map((id) => [id, []]))
@@ -174,8 +177,9 @@ async function buildRoomColumns(orgId, rooms, { includeIdle = false } = {}) {
         doctorName: link?.doctorName || null, // unresolved names filled in by hydrateColumns
         active: doctorId === activeId,
         waitingCount: waiting.length,
-        _waiting: waiting.slice(0, PER_COL).map((e) => ({ id: e.id, visitType: e.visitType, flash: e.status === 'called' })),
+        _waiting: waiting.slice(0, PER_COL).map((e) => ({ id: e.id, visitType: e.visitType, queueNumber: e.queueNumber, flash: e.status === 'called' })),
         _inProgId: inProgId,
+        _inProgToken: inProgByDoctor.get(doctorId)?.queueNumber || null,
       })
     }
   }
@@ -212,10 +216,23 @@ async function hydrateColumns(columns) {
       doctorState: 'active',
       active: c.active,
       waitingCount: c.waitingCount,
-      nowServing: inProg ? { name: patientFullName(inProg), uhid: inProg?.mrn || '—' } : null,
+      // queueEntryId, not just the name: the board announces this patient aloud
+      // and the fallback poll re-delivers the same payload every 30 seconds.
+      // Without an id to remember, the hall would hear the same name again and
+      // again for as long as the patient is in the room.
+      nowServing: inProg
+        ? { queueEntryId: c._inProgId, name: patientFullName(inProg), uhid: inProg?.mrn || '—', token: c._inProgToken }
+        : null,
       patients: c._waiting.map((w) => {
         const p = patientById.get(w.id)
-        return { queueEntryId: w.id, name: patientFullName(p) || '—', uhid: p?.mrn || '—', visitType: w.visitType, flash: w.flash }
+        return {
+          queueEntryId: w.id, name: patientFullName(p) || '—', uhid: p?.mrn || '—',
+          visitType: w.visitType, flash: w.flash,
+          // The token is minted per day and already unique. It never reached the
+          // board, so a hospital that would rather not say a patient's name out
+          // loud in a public hall had nothing else to announce.
+          token: w.queueNumber || null,
+        }
       }),
     }
   })
@@ -273,8 +290,33 @@ export async function getFloorQueue(req, res, next) {
     // this TV actually renders.
     const columns = await hydrateColumns(visible)
 
-    res.json({ success: true, data: { floor, screen, screens, totalColumns, columns } })
+    res.json({ success: true, data: { floor, screen, screens, totalColumns, columns, announce: await announceSettings(ORG_ID) } })
   } catch (err) { next(err) }
+}
+
+/**
+ * The hospital's board settings — what the display SHOWS (`display*`) and what
+ * it SAYS (`announce*`).
+ *
+ * Sent with the queue it already fetches rather than as a second request, so a
+ * wall display still makes exactly one call per refresh.
+ *
+ * ONLY those two prefixes, never the whole settings blob: a display board is a
+ * public screen in a corridor and the rest of that object — GST number, refund
+ * policy, API keys — is nobody's business out there. Defaults are NOT applied
+ * here; they are declared once in src/lib/orgSettingsSchema.js and applied by
+ * the caller, so the board and the Settings form can never disagree about what
+ * "unset" means.
+ */
+const BOARD_SETTING_PREFIXES = ['announce', 'display']
+
+async function announceSettings(organizationId) {
+  const org = await db.organization.findUnique({ where: { id: organizationId }, select: { settings: true } })
+  let stored = {}
+  try { stored = JSON.parse(org?.settings || '{}') } catch { stored = {} }
+  return Object.fromEntries(
+    Object.entries(stored).filter(([k]) => BOARD_SETTING_PREFIXES.some((p) => k.startsWith(p))),
+  )
 }
 
 // GET /api/display/screen-queue?screenId= — the room-based counterpart to
@@ -327,6 +369,7 @@ export async function getScreenQueue(req, res, next) {
           sliderSpeedSeconds: displayScreen.sliderSpeedSeconds,
           announcementText: displayScreen.announcementText,
         },
+        announce: await announceSettings(ORG_ID),
         totalColumns: columns.length,
         columns,
       },
@@ -410,6 +453,9 @@ export async function getRoomQueue(req, res, next) {
       // position, so the message on the wall is always something a human chose
       // to put there.
       alerted: e.status === 'called',
+      // For hospitals that announce the token rather than the name — a name
+      // spoken over hall speakers reaches further than the same name on screen.
+      token: e.queueNumber || null,
     })
 
     const inProgress = inProgressEntry ? {
@@ -481,6 +527,7 @@ export async function getRoomQueue(req, res, next) {
         // board shows all of them; a single-doctor room just has one.
         inProgressList: inProgressEntries.map((e) => ({ ...toPatientDTO(e), prescriptionUploaded: !!e.prescriptionUploadedAt })),
         waitingGroups,
+        announce: await announceSettings(ORG_ID),
       },
     })
   } catch (err) { next(err) }

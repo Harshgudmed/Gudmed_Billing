@@ -226,3 +226,81 @@ export async function create(req, res, next) {
     next(err)
   }
 }
+
+/**
+ * POST /pharmacy/sales/:id/cancel  — void a sale and put the medicine back.
+ *
+ * Cancelling only the row would leave the stock decremented for ever: the same
+ * box could never be sold again and the shelf would stop matching the ledger.
+ * The reversal mirrors reverseInvoiceFulfillment in billingController — positive
+ * deltas THROUGH recordStockChange, never a bare increment, or every later
+ * balanceAfter in StockLedger is wrong and the count can never be audited back
+ * to a document.
+ *
+ * Batch quantities are deliberately not restored: one line can be drawn FIFO
+ * across several batches and batch tracking is best-effort (stockService.js);
+ * quantityInStock stays the authority for selling.
+ *
+ * Money is NOT settled here. A sale raised from the billing counter is owned by
+ * its Invoice — the refund belongs to that document, through the endpoint that
+ * knows this hospital's refund mode.
+ */
+export async function cancel(req, res, next) {
+  try {
+    const ORGANIZATION_ID = getOrgId(req)
+    const { reason } = req.body || {}
+    if (!reason || !String(reason).trim()) {
+      throw makeError('A cancellation reason is required', 400, 'REASON_REQUIRED')
+    }
+
+    const data = await db.$transaction(async (tx) => {
+      const sale = await tx.pharmacySale.findFirst({
+        where: { id: req.params.id, organizationId: ORGANIZATION_ID },
+        select: { id: true, items: true, paymentStatus: true, receiptNumber: true },
+      })
+      if (!sale) throw makeError('Sale not found', 404, 'SALE_NOT_FOUND')
+      // Guarded, not assumed: cancelling twice would return the stock twice and
+      // leave the shelf claiming medicine that was never returned.
+      if (sale.paymentStatus === 'cancelled') {
+        throw makeError('This sale is already cancelled', 409, 'ALREADY_CANCELLED')
+      }
+
+      let items = []
+      try { items = JSON.parse(sale.items || '[]') } catch { items = [] }
+
+      const returned = []
+      for (const item of items) {
+        const quantity = Number(item.quantity) || 0
+        if (!item.drugId || quantity <= 0) continue
+        await recordStockChange(tx, {
+          organizationId: ORGANIZATION_ID,
+          drugId: item.drugId,
+          changeType: 'return',
+          quantityDelta: quantity,
+          reference: sale.id,
+          note: `Cancelled pharmacy sale ${sale.receiptNumber}: ${String(reason).trim()}`,
+          createdById: req.user?.id || null,
+        })
+        returned.push({ drugId: item.drugId, quantity })
+      }
+
+      // Voided, never deleted: the row is the record of what was dispensed and
+      // later reversed, and the ledger rows point at its id.
+      //
+      // The reason is written onto the StockLedger rows above, not onto the sale —
+      // PharmacySale has no free-text column, and adding one is a migration this
+      // change does not need. The ledger is the better home anyway: it is the row
+      // an auditor reads when asking why the shelf count moved.
+      const updated = await tx.pharmacySale.update({
+        where: { id: sale.id },
+        data: { paymentStatus: 'cancelled' },
+      })
+
+      return { sale: updated, stockReturned: returned }
+    })
+
+    res.json({ success: true, data })
+  } catch (err) {
+    handleServiceError(err, res, next)
+  }
+}

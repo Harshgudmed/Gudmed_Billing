@@ -18,10 +18,32 @@ import { resolveRequestedById } from './requestedBy.js'
 const linesFrom = (items, sourceType) =>
   items.filter((i) => i.sourceType === sourceType && i.sourceId)
 
+/** Marks a prescription as raised by billing, and names the invoice that did it.
+ *  Same shape as the `[HCC:150]` tag this repo already parses out of notes — the
+ *  alternative was a migration to add an invoiceId column for a link that only
+ *  two functions ever follow. */
+export const invoiceTag = (invoiceNumber) => `[INV:${invoiceNumber}]`
+export const invoiceOfPrescription = (notes) => (String(notes || '').match(/\[INV:([^\]]+)\]/) || [])[1] || null
+
 /**
- * Sell the billed medicines: check stock, draw down batches FIFO, write the
- * stock ledger, and record a PharmacySale so the sale shows in pharmacy reports.
- * Throws 422 INSUFFICIENT_STOCK (before any write) if any line is short.
+ * Raise the prescription the billed medicines imply — do NOT take them off the
+ * shelf yet.
+ *
+ * WHY NOT: the medicine leaves the shelf when the pharmacist hands it over, not
+ * when the cashier takes the money. Deducting at billing time meant a patient who
+ * paid and never collected had the stock counted as gone for ever, and a hospital
+ * with a separate pharmacy window had no list of what was waiting to be handed
+ * out — the sale existed, but nothing told the pharmacist it was theirs to do.
+ *
+ * So billing now raises a Prescription, which is exactly what the Pharmacy
+ * module's Prescriptions tab already lists and its Dispense button already knows
+ * how to fulfil. That path consumes the batches, writes the stock ledger and
+ * records the PharmacySale — all of it already written, none of it duplicated
+ * here.
+ *
+ * Stock is still CHECKED before the bill is raised. Billing a medicine the shelf
+ * does not have is a promise the pharmacy cannot keep, and the patient finds out
+ * at the window after paying.
  */
 export async function fulfillPharmacyItems(tx, { organizationId, items, invoice, patientId, actorId }) {
   const lines = linesFrom(items, 'pharmacy')
@@ -29,60 +51,33 @@ export async function fulfillPharmacyItems(tx, { organizationId, items, invoice,
 
   const stockItems = lines.map((i) => ({ drugId: i.sourceId, quantity: i.quantity, drugName: i.serviceName }))
 
-  // Check every line BEFORE consuming any, so a short line can't leave earlier
-  // lines already decremented (the transaction would roll back, but failing fast
-  // gives the biller the full shortage list in one go).
+  // Checked, not reserved. Two bills raised in the same second for the last box
+  // will both pass — the shortage then surfaces at dispense, where the pharmacist
+  // can see it and act, rather than one of them silently taking stock to -1.
   const shortages = await findShortages(tx, { organizationId, items: stockItems })
   if (shortages.length) throw insufficientStockError(shortages)
 
-  const soldItems = []
-  for (const line of lines) {
-    const { consumed } = await consumeFromBatches(tx, { drugId: line.sourceId, quantity: line.quantity })
-    soldItems.push({
-      drugId: line.sourceId,
-      drugName: line.serviceName,
-      quantity: line.quantity,
-      unitPrice: line.unitPrice,
-      total: line.total,
-      gstRate: line.gstRate || 0,
-      batchNumber: consumed.map((c) => c.batchNumber).join('/') || '',
-      expiryDate: consumed[0]?.expiryDate || null,
-    })
-  }
+  const rxItems = lines.map((line) => ({
+    drugId: line.sourceId,
+    drugName: line.serviceName,
+    quantity: line.quantity,
+    // What was charged, so the dispense receipt shows the billed price rather
+    // than today's catalogue price — the patient has already paid this.
+    unitPrice: line.unitPrice,
+    gstRate: line.gstRate || 0,
+  }))
 
-  const subtotal = soldItems.reduce((sum, i) => sum + i.total, 0)
-  const sale = await tx.pharmacySale.create({
+  return tx.prescription.create({
     data: {
       organizationId,
       patientId: patientId || null,
-      servedById: actorId || null,
-      saleType: 'prescription',
-      items: JSON.stringify(soldItems),
-      subtotal,
-      discountAmount: 0,
-      totalAmount: subtotal,
-      // The Invoice — not this sale — owns the money. Marking the sale unpaid here
-      // would double-count revenue in pharmacy reports, so it mirrors the invoice.
-      paymentStatus: invoice.paymentStatus === 'paid' ? 'paid' : 'pending',
-      paymentMethod: 'billing_counter',
-      amountPaid: 0,
-      receiptNumber: invoice.invoiceNumber,
+      prescriptionDate: new Date(),
+      items: JSON.stringify(rxItems),
+      status: 'pending',
+      notes: `${invoiceTag(invoice.invoiceNumber)} Billed at the counter — collect from pharmacy`,
+      createdById: actorId || null,
     },
   })
-
-  for (const item of soldItems) {
-    await recordStockChange(tx, {
-      organizationId,
-      drugId: item.drugId,
-      changeType: 'sale',
-      quantityDelta: -item.quantity,
-      reference: sale.id,
-      note: `Billing invoice ${invoice.invoiceNumber}`,
-      createdById: actorId || null,
-    })
-  }
-
-  return sale
 }
 
 /**

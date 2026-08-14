@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+﻿import { useState, useEffect } from 'react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -6,11 +6,12 @@ import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Switch } from '@/components/ui/switch'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { Cpu, Server, Pill, MessageSquare, Loader2, ArrowLeft, ChevronRight, Save } from 'lucide-react'
+import { Cpu, Server, Pill, MessageSquare, Volume2, Loader2, ArrowLeft, ChevronRight, Save } from 'lucide-react'
 import { toast } from 'sonner'
 import client from '@/api/client'
 import machineIntegrationApi from '@/api/machineIntegrationApi'
 import MachineIntegrationSetup from './MachineIntegrationSetup'
+import QueueAnnouncementsPanel from './QueueAnnouncementsPanel'
 
 // ── Integration catalog: 4 cards shown on the hub ────────────────────────────
 // `lab` opens the full machine-management screen; the rest open a config panel
@@ -52,6 +53,16 @@ const CATALOG = [
       { name: 'autoSyncEnabled', label: 'Auto Sync', type: 'switch' },
       { name: 'syncIntervalMinutes', label: 'Sync Interval (minutes)', type: 'number', placeholder: '60' },
     ],
+  },
+  {
+    // The queue reaching a speaker in the corridor — the same shape of thing as
+    // the PACS card reaching an imaging server, which is why it sits here rather
+    // than among the organisation's own details.
+    key: 'queue',
+    name: 'Queue Display & Announcements',
+    icon: Volume2,
+    description: 'Name or token on the waiting-hall boards, the doctor name, and the spoken call.',
+    kind: 'panel', // its own screen — see QueueAnnouncementsPanel
   },
   {
     key: 'sms',
@@ -163,6 +174,14 @@ export default function IntegrationsHub({ settings = {}, onSaved }) {
       </div>
     )
   }
+  if (view === 'queue') {
+    return (
+      <div className="space-y-4">
+        <Button variant="ghost" size="sm" onClick={() => setView(null)}><ArrowLeft className="h-4 w-4 mr-1" />Back to Integrations</Button>
+        <QueueAnnouncementsPanel settings={settings} onSaved={onSaved} />
+      </div>
+    )
+  }
   if (view) {
     const def = CATALOG.find((c) => c.key === view)
     return <ConfigPanel def={def} settings={settings} onSaved={onSaved} onBack={() => setView(null)} />
@@ -173,11 +192,18 @@ export default function IntegrationsHub({ settings = {}, onSaved }) {
     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
       {CATALOG.map((def) => {
         const Icon = def.icon
+        // Announcements are stored at the TOP level of settings, not under
+        // .integrations — the display boards read them through the shared
+        // orgSettingsSchema, so the badge has to look where they really are.
         const badge = def.key === 'lab'
           ? (machineCount != null
               ? { label: `${machineCount} machine${machineCount === 1 ? '' : 's'}`, cls: machineCount ? 'bg-green-100 text-green-700' : '' }
               : { label: 'Manage', cls: '' })
-          : configBadge((settings.integrations || {})[def.key])
+          : def.key === 'queue'
+            ? (settings.announceEnabled
+                ? { label: 'Speaking', cls: 'bg-green-100 text-green-700' }
+                : { label: 'Silent', cls: '' })
+            : configBadge((settings.integrations || {})[def.key])
         return (
           <button
             key={def.key}
@@ -201,3 +227,4 @@ export default function IntegrationsHub({ settings = {}, onSaved }) {
     </div>
   )
 }
+

@@ -8,6 +8,13 @@ const path = require('node:path')
 const store = require('./deviceStore')
 const monitorIdentity = require('./monitorIdentity')
 
+// A wall TV has nobody to click it, and Chromium refuses to play audio until a
+// page has had a user gesture. Without this switch the board's spoken
+// announcements call speak(), get no error, and produce no sound — the single
+// hardest failure of this feature to diagnose, because everything looks fine.
+// Must be set BEFORE the app is ready; a switch appended later is ignored.
+app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required')
+
 // display.id -> BrowserWindow. Keyed by the OS monitor id (not a running index),
 // so removing one monitor only closes that one window and leaves the rest alone.
 const windows = new Map()
