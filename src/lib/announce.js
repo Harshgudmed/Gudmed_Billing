@@ -83,19 +83,27 @@ export function createAnnouncer(engine) {
 
   const hasSeeded = () => seeded
 
-  /** Pick the closest installed voice, and record it when the language is missing. */
+  /** Pick the closest installed voice (preferring clear female voices like Zira/Heera/Jenny/Google). */
   function voiceFor(lang) {
     const voices = engine.voices ? engine.voices() : []
     if (!voices.length) return null
     const want = String(lang || '').toLowerCase()
-    const exact = voices.find((v) => String(v.lang).toLowerCase() === want)
-    if (exact) return exact
-    // hi-IN → any hi-*; en-IN → any en-*
     const base = want.split('-')[0]
-    const sameLanguage = voices.find((v) => String(v.lang).toLowerCase().startsWith(base))
-    if (sameLanguage) return sameLanguage
+    const pool = voices.filter((v) => {
+      const l = String(v.lang || '').toLowerCase()
+      return l === want || l.startsWith(base)
+    })
+    const list = pool.length ? pool : voices
+
+    // Prefer clear female voices (Zira, Heera, Jenny, Google Female, etc.)
+    const female = list.find((v) => /female|zira|heera|jenny|google|kalpana/i.test(v.name))
+    if (female) return female
+
+    const nonMale = list.find((v) => !/david|mark|george/i.test(v.name))
+    if (nonMale) return nonMale
+
     state.languageFallback = lang
-    return voices.find((v) => String(v.lang).toLowerCase().startsWith('en')) || voices[0]
+    return list[0]
   }
 
   /**
