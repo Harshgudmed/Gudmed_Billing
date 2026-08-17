@@ -9,6 +9,7 @@ import { Save, Volume2 } from 'lucide-react'
 import client from '@/api/client'
 import { toFormValues, fromFormValues } from '@/lib/orgSettingsSchema'
 import { clearOrgCache } from '@/lib/orgSettings'
+import { templatesFor, isDefaultText, needsOwnWording } from '@/lib/announceTemplates'
 
 // What the waiting-hall display boards say out loud.
 //
@@ -29,6 +30,22 @@ export default function QueueAnnouncementsPanel({ settings, onSaved }) {
   useEffect(() => { setForm(toFormValues(settings || {})) }, [settings])
 
   const set = (k) => (v) => setForm((p) => ({ ...p, [k]: v }))
+
+  /**
+   * Changing the language changes the words with it — but only while they are
+   * still an untouched default.
+   *
+   * Without the swap, picking मराठी loads a Marathi voice and hands it Hindi to
+   * read. Without the guard, a hospital that spent ten minutes wording its own
+   * announcement loses it by opening the dropdown to look at the options.
+   */
+  const setLanguage = (lang) => setForm((p) => {
+    const next = { ...p, announceLanguage: lang }
+    const tpl = templatesFor(lang)
+    if (isDefaultText('ready', p.announceReadyText)) next.announceReadyText = tpl.ready
+    if (isDefaultText('call', p.announceCallText)) next.announceCallText = tpl.call
+    return next
+  })
 
   async function save() {
     setSaving(true)
@@ -119,7 +136,7 @@ export default function QueueAnnouncementsPanel({ settings, onSaved }) {
         <div className="grid md:grid-cols-3 gap-4">
           <div className="space-y-2">
             <Label>Language</Label>
-            <Select value={form.announceLanguage} onValueChange={set('announceLanguage')}>
+            <Select value={form.announceLanguage} onValueChange={setLanguage}>
               <SelectTrigger><SelectValue placeholder="Select Language" /></SelectTrigger>
               <SelectContent className="max-h-60 overflow-y-auto">
                 <SelectItem value="en-IN">English (India)</SelectItem>
@@ -143,9 +160,19 @@ export default function QueueAnnouncementsPanel({ settings, onSaved }) {
               </SelectContent>
             </Select>
             <p className="text-xs text-gray-500">
-              Hindi needs the Windows Hindi speech pack on each display PC. Without
-              it the board speaks English and shows that it did.
+              Each language needs its Windows speech pack on every display PC.
+              Without it the board speaks English and shows on screen that it did.
             </p>
+            {/* Only three languages ship with written announcements. Saying so
+                here is the point: an English sentence arriving silently under a
+                Tamil setting is the failure this warning exists to prevent. */}
+            {needsOwnWording(form.announceLanguage) && (
+              <p className="rounded border border-amber-200 bg-amber-50 px-2 py-1.5 text-xs text-amber-800">
+                No wording is supplied for this language &mdash; the two sentences
+                below are still English. Please type them in your own words, or
+                the board will read English with this language&rsquo;s voice.
+              </p>
+            )}
           </div>
 
           <div className="space-y-2">

@@ -5,7 +5,7 @@ import { createAnnouncer, fillTemplate } from '../announce.js'
 // A fake speech engine: records what was said, in order, and resolves instantly.
 // The real one takes ~5 seconds per utterance, which is why the ordering and
 // de-duplication rules are tested against this instead of against a browser.
-function fakeEngine({ voices = [{ lang: 'en-US', name: 'David' }], failOn = null } = {}) {
+function fakeEngine({ voices = [{ lang: 'en-US', name: 'David' }], failOn = null, silent = false } = {}) {
   const said = []
   const chimes = []
   let speaking = 0
@@ -16,7 +16,10 @@ function fakeEngine({ voices = [{ lang: 'en-US', name: 'David' }], failOn = null
     get overlapped() { return overlapped },
     voices: () => voices,
     wait: () => Promise.resolve(),
-    chime: async () => { chimes.push(said.length) },
+    // `silent` is the autoplay-blocked page: NOTHING reaches the speakers, so
+    // the chime fails too. A fake where the chime always works cannot represent
+    // that, and would let a broken board test as healthy.
+    chime: async () => { if (silent) throw new Error('blocked'); chimes.push(said.length) },
     speak: async (text, opts) => {
       if (failOn && text.includes(failOn)) throw new Error('voice unavailable')
       // If a second utterance starts while one is running, the hall hears both
@@ -149,19 +152,70 @@ test('repeat is clamped — a bad setting cannot make the board talk over the ne
   assert.equal(eng.said.length, 3, '99 repeats would hold the queue for minutes')
 })
 
-test('state.heard stays false until something really came out — silence is a fault worth showing', async () => {
-  const eng = fakeEngine({ failOn: 'Ramesh' })
-  const a = createAnnouncer(eng)
+test('a page whose audio is blocked never reads as working — silence is a fault worth showing', async () => {
+  // The autoplay policy stops EVERYTHING, chime included, and reports no error
+  // to the page. From across a hall that is indistinguishable from "nobody has
+  // been called", so the board has to be able to tell the difference.
+  const blocked = fakeEngine({ silent: true, failOn: 'Ramesh' })
+  const a = createAnnouncer(blocked)
 
   assert.equal(a.state.heard, false)
   a.announce({ id: 'q1:call', text: 'Ramesh to Room 3' })
   await tick()
-  assert.equal(a.state.heard, false, 'a blocked autoplay policy must not read as working')
+  assert.equal(a.state.heard, false, 'nothing reached the speakers, so nothing may be claimed')
 
   const ok = createAnnouncer(fakeEngine())
   ok.announce({ id: 'q2:call', text: 'Suresh to Room 5' })
   await tick()
   assert.equal(ok.state.heard, true)
+})
+
+test('a chime that plays while the VOICE fails still proves the speakers are alive', async () => {
+  // Different fault, different answer: if the chime came out, the output device
+  // works and the problem is the voice — telling staff "no sound" would send
+  // them to check the wrong thing.
+  const eng = fakeEngine({ failOn: 'Ramesh' })
+  const a = createAnnouncer(eng)
+  a.announce({ id: 'q1:call', text: 'Ramesh to Room 3' })
+  await tick()
+
+  assert.equal(eng.chimes.length, 1)
+  assert.equal(eng.said.length, 0, 'the voice failed')
+  assert.equal(a.state.heard, true, 'but audio itself is fine')
+  assert.match(a.state.lastError, /voice unavailable/)
+})
+
+test('a chime with no words still plays — that is how a board proves its speakers work', async () => {
+  const eng = fakeEngine()
+  const a = createAnnouncer(eng)
+
+  // On startup the board seeds silently, then sounds ONE bare chime. Without it,
+  // a board whose audio is blocked looks exactly like a board where nobody has
+  // been called — and browsers block audio with no error at all.
+  const queued = a.announce({ id: '__ready__', text: '', chime: true })
+  await tick()
+
+  assert.equal(queued, true)
+  assert.equal(eng.chimes.length, 1, 'the chime must sound')
+  assert.equal(eng.said.length, 0, 'but nobody may be announced')
+  assert.equal(a.state.heard, true, 'and it must clear the "sound not started" warning')
+})
+
+test('a call with neither words nor a chime does nothing at all', async () => {
+  const eng = fakeEngine()
+  const a = createAnnouncer(eng)
+  assert.equal(a.announce({ id: 'x', text: '', chime: false }), false)
+  await tick()
+  assert.equal(eng.chimes.length, 0)
+  assert.equal(eng.said.length, 0)
+})
+
+test('the startup chime is not counted as a spoken announcement', async () => {
+  const eng = fakeEngine()
+  const a = createAnnouncer(eng)
+  a.announce({ id: '__ready__', text: '', chime: true })
+  await tick()
+  assert.equal(a.state.spokenCount, 0, 'nobody was announced, so the count stays 0')
 })
 
 test('a board running for weeks does not grow its memory without limit', async () => {

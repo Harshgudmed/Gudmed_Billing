@@ -106,11 +106,16 @@ export function createAnnouncer(engine) {
    * both must be heard. Callers therefore pass something like
    * `${queueEntryId}:ready` and `${queueEntryId}:call`.
    */
-  function announce({ id, text, lang = 'en-IN', repeat = 1, chime = true }) {
-    if (!id || !text) return false
+  function announce({ id, text = '', lang = 'en-IN', repeat = 1, chime = true }) {
+    if (!id) return false
+    // Text may be deliberately empty — a board sounds a bare chime on startup to
+    // prove its speakers work without reading out patients who were already
+    // waiting. A call with neither words nor a chime has nothing to do.
+    const words = String(text).trim()
+    if (!words && !chime) return false
     if (spoken.has(id)) return false
     remember(id)
-    pending.push({ text, lang, repeat: Math.max(1, Math.min(3, Number(repeat) || 1)), chime })
+    pending.push({ text: words, lang, repeat: Math.max(1, Math.min(3, Number(repeat) || 1)), chime })
     drain()
     return true
   }
@@ -127,10 +132,17 @@ export function createAnnouncer(engine) {
         const voice = voiceFor(item.lang)
         for (let i = 0; i < item.repeat; i++) {
           try {
-            if (item.chime && engine.chime) await engine.chime()
-            await engine.speak(item.text, { lang: item.lang, voice })
-            state.heard = true
-            state.spokenCount += 1
+            if (item.chime && engine.chime) {
+              await engine.chime()
+              // The chime alone is proof the output device works — which is the
+              // whole point of the startup one, where there are no words to say.
+              state.heard = true
+            }
+            if (item.text) {
+              await engine.speak(item.text, { lang: item.lang, voice })
+              state.heard = true
+              state.spokenCount += 1
+            }
           } catch (err) {
             // A failed utterance must not stop the queue: the NEXT patient's
             // announcement is more useful than retrying this one.
@@ -183,67 +195,32 @@ export function browserEngine() {
     voices: () => cached,
     wait: (ms) => new Promise((r) => setTimeout(r, ms)),
 
-    // The station chime — three rising bell notes before the words.
+    // A short two-tone chime, synthesised rather than shipped as a file: a wall
+    // board must work with no network, and this is ~20 lines against a download.
     //
-    // Its job is to buy the first second of the sentence. Without it the
-    // patient's name is already half-said before anyone in the hall has looked
-    // up, and the one word that matters is the one they miss.
-    //
-    // Synthesised, not a downloaded file: a waiting-room board has to work when
-    // the hospital's internet does not, and this is thirty lines against an
-    // asset that can 404 in the one place nobody is watching.
-    //
-    // Why it sounds like a bell rather than a beep:
-    //   · G5-B5-D6 — a major triad. Rising reads as "something is coming";
-    //     a falling pair reads as "that's over", which is the wrong message.
-    //   · Each note carries a quiet octave above it, detuned by half a hertz.
-    //     A single sine is a test tone; two slightly-apart partials beat against
-    //     each other and the ear hears warmth.
-    //   · Long exponential tails that OVERLAP the next note, so it rings as one
-    //     phrase instead of three separate pips.
-    //   · Every level is ramped. A gain switched on at full is a hard click,
-    //     and on hall speakers a click is louder than the note.
+    // Deliberately BRIEF. A longer three-note bell was tried and sounded better
+    // on its own, but it ran 2.3 seconds before the words started — and this
+    // plays before every single call, all day, in a room people are sitting in.
+    // The chime's job is to make heads turn, then get out of the way.
     chime: () => new Promise((resolve) => {
       const Ctx = typeof window !== 'undefined' && (window.AudioContext || window.webkitAudioContext)
       if (!Ctx) return resolve()
       try {
         const ctx = new Ctx()
-        const t0 = ctx.currentTime + 0.02
-        // Shared output stage, gently rolled off above 6 kHz — cheap PA speakers
-        // turn high partials into hiss, and a hospital hall is full of hard
-        // surfaces that already exaggerate them.
-        const out = ctx.createGain()
-        out.gain.value = 0.9
-        const tone = ctx.createBiquadFilter()
-        tone.type = 'lowpass'
-        tone.frequency.value = 6000
-        out.connect(tone); tone.connect(ctx.destination)
-
-        const NOTES = [783.99, 987.77, 1174.66]   // G5 · B5 · D6
-        const GAP = 0.26
-        const RING = 1.5
-
-        NOTES.forEach((freq, i) => {
-          const at = t0 + i * GAP
-          // Fundamental, plus its octave at a fifth of the level: the octave is
-          // what makes it read as a bell rather than as a whistle.
-          for (const [mult, level, detune] of [[1, 0.34, 0], [2, 0.07, 0.5]]) {
-            const osc = ctx.createOscillator()
-            const gain = ctx.createGain()
-            osc.type = 'sine'
-            osc.frequency.value = freq * mult + detune
-            osc.connect(gain); gain.connect(out)
-            gain.gain.setValueAtTime(0.0001, at)
-            gain.gain.exponentialRampToValueAtTime(level, at + 0.012)  // struck, not faded in
-            gain.gain.exponentialRampToValueAtTime(0.0001, at + RING)  // and left to ring
-            osc.start(at); osc.stop(at + RING + 0.05)
-          }
-        })
-
-        // Let the last note decay, then a beat of silence before the words. Run
-        // together, the chime and the first syllable mask each other.
-        const total = (NOTES.length - 1) * GAP + RING
-        setTimeout(() => { ctx.close?.(); resolve() }, total * 1000 + 260)
+        const now = ctx.currentTime
+        for (const [i, freq] of [880, 1174].entries()) {
+          const osc = ctx.createOscillator()
+          const gain = ctx.createGain()
+          osc.frequency.value = freq
+          osc.connect(gain); gain.connect(ctx.destination)
+          const at = now + i * 0.18
+          // Ramped, not switched: a square-edged start is a click on hall speakers.
+          gain.gain.setValueAtTime(0.0001, at)
+          gain.gain.exponentialRampToValueAtTime(0.25, at + 0.02)
+          gain.gain.exponentialRampToValueAtTime(0.0001, at + 0.17)
+          osc.start(at); osc.stop(at + 0.18)
+        }
+        setTimeout(() => { ctx.close?.(); resolve() }, 420)
       } catch { resolve() }
     }),
 
@@ -254,7 +231,7 @@ export function browserEngine() {
       if (voice) u.voice = voice
       // Slightly under normal: names read at default speed run together in a
       // room with hard floors and a reverberant ceiling.
-      u.rate = 0.92
+      u.rate = 1.0
       let settled = false
       const done = (fn, arg) => { if (!settled) { settled = true; fn(arg) } }
       u.onend = () => done(resolve)
