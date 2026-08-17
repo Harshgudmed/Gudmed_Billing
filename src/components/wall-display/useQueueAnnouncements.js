@@ -84,18 +84,6 @@ export function useQueueAnnouncements(units, settings) {
     if (!a.hasSeeded()) {
       if (!items.length) return
       a.seed(items.map((i) => i.id))
-
-      // Then sound the chime ONCE, with no words.
-      //
-      // Two problems, one answer. Seeding is silent by design, so opening a
-      // board looks identical to a board whose audio is broken — and the way
-      // audio breaks here is the browser's autoplay policy, which produces no
-      // error at all. A single chime proves the speakers are alive without
-      // announcing anyone who was already waiting, and it flips `state.heard`,
-      // which is what clears the "sound not started" warning in the header.
-      if (cfg.announceEnabled) {
-        a.announce({ id: '__ready__', text: ' ', chime: true, repeat: 1, lang: cfg.announceLanguage })
-      }
       setStatus((s) => ({ ...s, enabled: cfg.announceEnabled }))
       return
     }
