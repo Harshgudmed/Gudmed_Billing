@@ -23,7 +23,9 @@ export function useAppointments() {
     setError(null);
     const [usersResult, departmentsResult] =
       await Promise.allSettled([
-        client.get("/settings?resource=users"),
+        // lean=1 carries consultationFee, which the default select omits — it is
+        // why the doctor dropdown never showed the fee it promises.
+        client.get("/settings?resource=users&role=doctor&lean=1"),
         client.get("/settings?resource=departments"),
       ]);
     if (usersResult.status === "fulfilled")
@@ -71,8 +73,13 @@ export function useAppointments() {
     return res.data ?? [];
   }, []);
 
+  // Tolerant of a MISSING role/isActive, not just a wrong one. The request now
+  // asks the server for `role=doctor`, and during a deploy where the frontend
+  // ships before the backend the lean payload comes back without those two
+  // columns — comparing them then drops every row and the dropdown goes empty,
+  // which is worse than the missing fee this fixed.
   const doctors = useMemo(
-    () => users.filter((user) => user.role === "doctor" && user.isActive),
+    () => users.filter((user) => (user.role ?? "doctor") === "doctor" && user.isActive !== false),
     [users],
   );
 

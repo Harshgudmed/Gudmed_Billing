@@ -113,9 +113,13 @@ export default function RegisterPatientForm({ onSuccess, onCancel }) {
   useEffect(() => {
     const loadSettings = async () => {
       try {
-        const doctorsRes = await client.get('/settings?resource=users')
+        // lean=1 is what carries consultationFee — the default select does not
+        // have it, so the fee box sat empty and the dropdown showed no (₹…).
+        const doctorsRes = await client.get('/settings?resource=users&role=doctor&lean=1')
         if (doctorsRes.success) {
-          setDoctors((doctorsRes.data ?? []).filter(u => u.role === 'doctor'))
+          // See useAppointments: role may be absent mid-deploy, and comparing it
+          // then would empty the dropdown rather than narrow it.
+          setDoctors((doctorsRes.data ?? []).filter(u => (u.role ?? 'doctor') === 'doctor'))
         }
 
         const deptsRes = await client.get('/settings?resource=departments')
