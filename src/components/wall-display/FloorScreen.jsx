@@ -122,7 +122,13 @@ export function FloorScreen() {
 
   return (
     <Board>
-      <div className="px-10 pb-10 pt-6">
+      {/* A flex COLUMN that fills what the header leaves, because the room list
+          below already asks for `flex-1 overflow-y-auto` — and `flex-1` does
+          nothing unless its parent is a flex container. This div was a plain
+          block, so the list grew to its content, Board's `overflow-hidden`
+          clipped it, and a floor with more than nine rooms lost the rest with no
+          way to scroll to them. */}
+      <div className="flex min-h-0 flex-1 flex-col px-10 pb-6 pt-6">
         <Breadcrumb crumbs={[{ label: 'All Floors', onClick: () => navigate('/display') }, { label: floor?.name || '…' }]} />
         <div className="mb-8 flex gap-2 overflow-x-auto border-b border-slate-200">
           {floor?.departments.map((d) => (
