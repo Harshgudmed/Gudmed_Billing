@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { createAnnouncer, browserEngine, fillTemplate } from '@/lib/announce'
 import { readOrgSettings } from '@/lib/orgSettingsSchema'
 import { shortToken } from './utils'
+import { announceValues, templatesFor, isDefaultText } from '@/lib/announceTemplates'
 
 // Turns the board's columns into spoken announcements.
 //
@@ -49,6 +50,15 @@ export function useQueueAnnouncements(units, settings) {
     // rather than `undefined` read aloud.
     const cfg = readOrgSettings(settings || {})
 
+    // Wording still on a default — including the older text this app shipped,
+    // which hardcoded {token} — is upgraded to the current default for the
+    // chosen language. The Settings panel does exactly the same on load, and
+    // both must agree: a screen that shows one sentence while the hall hears
+    // another is worse than either being wrong on its own.
+    const tpl = templatesFor(cfg.announceLanguage, cfg.announceSay)
+    if (isDefaultText('ready', cfg.announceReadyText)) cfg.announceReadyText = tpl.ready
+    if (isDefaultText('call', cfg.announceCallText)) cfg.announceCallText = tpl.call
+
     // Collect first, announce after — so the seed on the very first payload
     // covers everything currently on screen, in one pass.
     const items = []
@@ -56,24 +66,22 @@ export function useQueueAnnouncements(units, settings) {
       const room = u.room ?? ''
       const doctor = u.doctor || ''
 
+      const spoken = (entry) => announceValues({
+        mode: cfg.announceSay, lang: cfg.announceLanguage,
+        name: entry?.name, token: shortToken(entry?.token) || '', room, doctor,
+      })
+
       if (u.serving?.queueEntryId) {
-        const sToken = shortToken(u.serving.token)
         items.push({
           id: `${u.serving.queueEntryId}:call`,
-          text: fillTemplate(cfg.announceCallText, {
-            name: subject(cfg.announceSay, u.serving), room, doctor,
-            token: sToken || '',
-          }),
+          text: fillTemplate(cfg.announceCallText, spoken(u.serving)),
         })
       }
       for (const p of u.alerted || []) {
         if (!p?.queueEntryId) continue
-        const pToken = shortToken(p.token)
         items.push({
           id: `${p.queueEntryId}:ready`,
-          text: fillTemplate(cfg.announceReadyText, {
-            name: subject(cfg.announceSay, p), room, doctor, token: pToken || '',
-          }),
+          text: fillTemplate(cfg.announceReadyText, spoken(p)),
         })
       }
     }
@@ -81,9 +89,28 @@ export function useQueueAnnouncements(units, settings) {
     // A board that has just loaded — or reloaded after a power cut — must not
     // recite everyone already on screen. Mark them as said, and speak only what
     // changes from here.
+    //
+    // Seeding is keyed on THE PAYLOAD HAVING ARRIVED, not on it containing
+    // anyone. Keying it on items was a real bug: a board opened onto an empty
+    // room stayed unseeded, so the first Alert a receptionist pressed became the
+    // seed and was swallowed in silence — every time, and only the first time,
+    // which is the hardest kind to report. `settings` is undefined until the
+    // fetch lands, so it is the honest signal for "we have data now".
     if (!a.hasSeeded()) {
-      if (!items.length) return
+      if (settings === undefined) return
       a.seed(items.map((i) => i.id))
+
+      // Then sound the chime ONCE, with no words.
+      //
+      // Two problems, one answer. Seeding is silent by design, so opening a
+      // board looks identical to a board whose audio is broken — and the way
+      // audio breaks here is the browser's autoplay policy, which reports no
+      // error at all. A single chime proves the speakers are alive without
+      // announcing anyone who was already waiting, and it clears the "sound not
+      // started" warning in the header.
+      if (cfg.announceEnabled) {
+        a.announce({ id: '__ready__', text: '', chime: true, repeat: 1, lang: cfg.announceLanguage })
+      }
       setStatus((s) => ({ ...s, enabled: cfg.announceEnabled }))
       return
     }
@@ -94,6 +121,7 @@ export function useQueueAnnouncements(units, settings) {
         a.announce({
           id: item.id, text: item.text, lang: cfg.announceLanguage,
           repeat: cfg.announceRepeat, chime: cfg.announceChime,
+          gender: cfg.announceVoiceGender,
         })
       }
     } else {
@@ -106,15 +134,4 @@ export function useQueueAnnouncements(units, settings) {
   }, [units, settings])
 
   return status
-}
-
-/** Name, token, or both — formatted clearly for speech synthesis.
- *  "4" spoken alone sounds like a digit; "Token number 4" is clear to the hall. */
-function subject(mode, entry) {
-  const name = entry?.name && entry.name !== '—' ? entry.name : ''
-  const token = shortToken(entry?.token)
-  const formattedToken = token ? `Token number ${token}` : ''
-  if (mode === 'token') return formattedToken || name
-  if (mode === 'both') return [name, formattedToken].filter(Boolean).join(', ')
-  return name || formattedToken
 }

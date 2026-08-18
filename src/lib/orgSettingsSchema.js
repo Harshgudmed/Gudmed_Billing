@@ -60,16 +60,30 @@ export const ORG_SETTING_FIELDS = [
   // hospital rewrites both lines in its own words.
   { key: 'announceEnabled',  type: 'bool',   default: false,
     label: 'Speak announcements on display boards' },
+  // Four languages, not eighteen. The longer list offered choices this app has
+  // no announcement text for, so picking one loaded that language's voice and
+  // handed it English to read — a worse failure than not offering it. These four
+  // are the ones with written wording in lib/announceTemplates.js; adding a
+  // fifth means adding its two sentences there in the same change.
   { key: 'announceLanguage', type: 'text',   default: 'en-IN',
-    label: 'Announcement language', options: [
-      'en-IN', 'en-US', 'en-GB',
-      'hi-IN', 'mr-IN', 'ta-IN', 'te-IN', 'kn-IN', 'ml-IN', 'bn-IN', 'gu-IN', 'pa-IN', 'or-IN', 'ur-IN', 'as-IN',
-      'es-ES', 'fr-FR', 'ar-SA'
-    ] },
+    label: 'Announcement language', options: ['en-IN', 'hi-IN', 'mr-IN', 'ta-IN'] },
   { key: 'announceSay',      type: 'text',   default: 'name',
     label: 'Announce by', options: ['name', 'token', 'both'] },
   { key: 'announceRepeat',   type: 'number', default: 2,
     label: 'Repeat each announcement' },
+  // Which voice reads it. Matched by NAME against the voices Windows has
+  // installed, because the Web Speech API exposes no gender field at all —
+  // `SpeechSynthesisVoice` carries name, lang and localService and nothing more.
+  //
+  // Female by default: it is what public-address systems overwhelmingly use, and
+  // on this machine the language choice alone would land on Hemant (male) for
+  // Hindi purely because Windows lists him first.
+  //
+  // Language always wins over gender. A hospital that asked for Marathi gets the
+  // Marathi voice even if only a male one is installed — an English female voice
+  // reading Marathi text is the worse outcome by far.
+  { key: 'announceVoiceGender', type: 'text', default: 'female',
+    label: 'Announcement voice', options: ['female', 'male', 'any'] },
   { key: 'announceChime',    type: 'bool',   default: true,
     label: 'Play a chime first' },
   { key: 'announceReadyText', type: 'text',
