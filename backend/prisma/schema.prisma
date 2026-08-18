@@ -792,7 +792,10 @@ model Prescription {
   // Relations
   patientId      String
   consultationId String?
-  doctorId       String
+  // Optional, because a medicine bought at the billing counter has no
+  // prescribing doctor. Required, it made fulfillInvoiceItems throw inside the
+  // invoice transaction, so billing ANY medicine failed outright.
+  doctorId       String?
 
   // Prescription Details
   prescriptionDate DateTime @default(now())
@@ -818,7 +821,7 @@ model Prescription {
   organization  Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   patient       Patient        @relation(fields: [patientId], references: [id], onDelete: Cascade)
   consultation  Consultation?  @relation(fields: [consultationId], references: [id])
-  doctor        User           @relation("PrescribingDoctor", fields: [doctorId], references: [id])
+  doctor        User?          @relation("PrescribingDoctor", fields: [doctorId], references: [id])
   dispensedBy   User?          @relation("DispensingPharmacist", fields: [dispensedById], references: [id])
   pharmacySales PharmacySale[]
 

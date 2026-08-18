@@ -65,6 +65,14 @@ async function billFor(items) {
 const cancelInvoice = (id) =>
   callController(update, { resource: 'invoice', id, updates: { status: 'cancelled', cancellationReason: 'test' } })
 
+// Billing links its prescription by the [INV:...] tag in notes — there is no
+// column joining the two, so this mirrors exactly what the reversal matches on.
+const prescriptionFor = (invoice) =>
+  db.prescription.findFirst({
+    where: { organizationId: ORG, notes: { startsWith: `[INV:${invoice.invoiceNumber}]` } },
+    select: { id: true, status: true, doctorId: true, items: true },
+  })
+
 const stockOf = async (drugId) =>
   (await db.pharmacyDrug.findUnique({ where: { id: drugId }, select: { quantityInStock: true } })).quantityInStock
 
@@ -94,6 +102,7 @@ after(async () => {
     const sales = await db.pharmacySale.findMany({ where: { receiptNumber: number }, select: { id: true } }).catch(() => [])
     await db.stockLedger.deleteMany({ where: { reference: { in: sales.map((s) => s.id) } } }).catch(() => {})
     await db.pharmacySale.deleteMany({ where: { id: { in: sales.map((s) => s.id) } } }).catch(() => {})
+    await db.prescription.deleteMany({ where: { organizationId: ORG, notes: { startsWith: `[INV:${number}]` } } }).catch(() => {})
   }
   await db.payment.deleteMany({ where: { invoiceId: { in: trash.invoiceIds } } }).catch(() => {})
   await db.auditLog.deleteMany({ where: { entityId: { in: trash.invoiceIds } } }).catch(() => {})
@@ -101,42 +110,60 @@ after(async () => {
   await db.$disconnect()
 })
 
-test('cancelling a pharmacy bill puts the medicine back on the shelf', { skip }, async () => {
+test('billing a medicine does not touch the shelf — it raises work for the pharmacy', { skip }, async () => {
+  // The medicine leaves when the pharmacist hands it over, not when the cashier
+  // takes the money. Deducting at billing time meant a patient who paid and
+  // never collected had the stock counted as gone for ever.
   const before = await stockOf(fixtures.drug.id)
   const invoice = await billFor([{
     serviceName: fixtures.drug.drugName, quantity: 6, unitPrice: 100, total: 600,
     sourceType: 'pharmacy', sourceId: fixtures.drug.id,
   }])
 
-  assert.equal(await stockOf(fixtures.drug.id), before - 6, 'billing must draw the stock down first')
+  assert.equal(await stockOf(fixtures.drug.id), before, 'billing must not move stock')
 
-  await cancelInvoice(invoice.id)
-  assert.equal(await stockOf(fixtures.drug.id), before,
-    'a voided bill must not leave the shelf short — the medicine was never handed over')
+  const rx = await prescriptionFor(invoice)
+  assert.ok(rx, 'the pharmacy must be told to dispense it, or the patient paid for nothing')
+  assert.equal(rx.status, 'pending')
+  assert.equal(rx.doctorId, null, 'a counter sale has no prescribing doctor and must not invent one')
+  assert.deepEqual(JSON.parse(rx.items).map((i) => [i.drugId, i.quantity]), [[fixtures.drug.id, 6]])
 })
 
-test('the stock return is written to the ledger, so the shelf can be reconciled', { skip }, async () => {
+test('cancelling the bill takes the medicine off the pharmacy queue', { skip }, async () => {
+  // Without this the item stayed in the pharmacy's list and was handed over for
+  // a bill nobody paid — the reversal only knew about the OLD design, where
+  // billing wrote a PharmacySale under the invoice number.
+  const before = await stockOf(fixtures.drug.id)
   const invoice = await billFor([{
     serviceName: fixtures.drug.drugName, quantity: 3, unitPrice: 100, total: 300,
     sourceType: 'pharmacy', sourceId: fixtures.drug.id,
   }])
   await cancelInvoice(invoice.id)
 
-  const entries = await db.stockLedger.findMany({
-    where: { drugId: fixtures.drug.id, note: { contains: invoice.invoiceNumber } },
-    orderBy: { createdAt: 'asc' },
-    select: { changeType: true, quantityDelta: true, balanceAfter: true },
-  })
-  const sale = entries.find((e) => e.quantityDelta < 0)
-  const ret = entries.find((e) => e.quantityDelta > 0)
-  assert.ok(sale, 'the sale must appear in the ledger')
-  assert.ok(ret, 'the return must appear in the ledger — a bare stock increment leaves every later balance wrong')
-  assert.equal(ret.changeType, 'return')
-  assert.equal(ret.quantityDelta, -sale.quantityDelta, 'exactly what was taken is what comes back')
-  assert.equal(ret.balanceAfter, await stockOf(fixtures.drug.id), 'the ledger balance matches the real shelf count')
+  assert.equal((await prescriptionFor(invoice)).status, 'cancelled',
+    'a voided bill must not leave dispensable medicine in the pharmacy queue')
+  assert.equal(await stockOf(fixtures.drug.id), before,
+    'and nothing is returned to the shelf, because nothing ever left it')
 })
 
-test('double-clicking cancel does not return the stock twice', { skip }, async () => {
+test('medicine already handed over is NOT quietly withdrawn by a cancellation', { skip }, async () => {
+  // Once the pharmacist has dispensed, the stock really left and a PharmacySale
+  // exists. Flipping that row back would lose the record of what went out the
+  // door; it needs a human, exactly like a lab sample already collected.
+  const invoice = await billFor([{
+    serviceName: fixtures.drug.drugName, quantity: 2, unitPrice: 100, total: 200,
+    sourceType: 'pharmacy', sourceId: fixtures.drug.id,
+  }])
+  const rx = await prescriptionFor(invoice)
+  await db.prescription.update({ where: { id: rx.id }, data: { status: 'fully_dispensed' } })
+
+  await cancelInvoice(invoice.id)
+
+  assert.equal((await prescriptionFor(invoice)).status, 'fully_dispensed',
+    'a dispensed prescription must survive the cancellation for a human to resolve')
+})
+
+test('double-clicking cancel is refused the second time, and changes nothing twice', { skip }, async () => {
   const before = await stockOf(fixtures.drug.id)
   const invoice = await billFor([{
     serviceName: fixtures.drug.drugName, quantity: 4, unitPrice: 100, total: 400,
@@ -146,22 +173,46 @@ test('double-clicking cancel does not return the stock twice', { skip }, async (
   const [first, second] = await Promise.all([cancelInvoice(invoice.id), cancelInvoice(invoice.id)])
   const outcomes = [first.status, second.status].sort()
   assert.deepEqual(outcomes, [200, 409], 'exactly one cancel wins; the other is refused as already cancelled')
-  assert.equal(await stockOf(fixtures.drug.id), before,
-    'the shelf must not gain goods that were only ever dispensed once')
+  assert.equal((await prescriptionFor(invoice)).status, 'cancelled')
+  assert.equal(await stockOf(fixtures.drug.id), before, 'the shelf must not gain goods that never left it')
 })
 
-test('the cancelled sale is voided, never deleted, so the return stays traceable', { skip }, async () => {
-  const invoice = await billFor([{
-    serviceName: fixtures.drug.drugName, quantity: 2, unitPrice: 100, total: 200,
-    sourceType: 'pharmacy', sourceId: fixtures.drug.id,
-  }])
+test('an OLD bill, from when billing deducted stock, still reverses correctly', { skip }, async () => {
+  // Bills raised before the design change carry a PharmacySale under the INVOICE
+  // number, and their stock really was deducted. Cancelling one must still put
+  // it back — the reversal path for them is not dead code, it is history.
+  // Counter billing cannot produce this shape any more, so the row is built here.
+  const invoice = await billFor([{ serviceName: 'Legacy pharmacy bill', quantity: 1, unitPrice: 200, total: 200 }])
+  const before = await stockOf(fixtures.drug.id)
+
+  await db.pharmacySale.create({
+    data: {
+      organizationId: ORG, patientId: fixtures.patientId,
+      receiptNumber: invoice.invoiceNumber,
+      items: JSON.stringify([{ drugId: fixtures.drug.id, quantity: 2, unitPrice: 100 }]),
+      subtotal: 200, totalAmount: 200, amountPaid: 200,
+      paymentMethod: 'cash', paymentStatus: 'paid',
+    },
+  })
+  await db.pharmacyDrug.update({ where: { id: fixtures.drug.id }, data: { quantityInStock: before - 2 } })
+
   await cancelInvoice(invoice.id)
 
+  assert.equal(await stockOf(fixtures.drug.id), before, 'the medicine must come back — it was never handed over')
   const sale = await db.pharmacySale.findFirst({
     where: { receiptNumber: invoice.invoiceNumber }, select: { paymentStatus: true },
   })
-  assert.ok(sale, 'the sale row must survive — the stock ledger points at it')
+  assert.ok(sale, 'the sale row must survive — the stock ledger points at its id')
   assert.equal(sale.paymentStatus, 'cancelled', 'and it must stop counting as pharmacy revenue')
+
+  const ret = await db.stockLedger.findFirst({
+    where: { drugId: fixtures.drug.id, note: { contains: invoice.invoiceNumber }, quantityDelta: { gt: 0 } },
+    select: { changeType: true, quantityDelta: true, balanceAfter: true },
+  })
+  assert.ok(ret, 'the return must appear in the ledger — a bare increment leaves every later balance wrong')
+  assert.equal(ret.changeType, 'return')
+  assert.equal(ret.quantityDelta, 2)
+  assert.equal(ret.balanceAfter, before, 'the ledger balance matches the real shelf count')
 })
 
 test('no money can be taken against a cancelled invoice', { skip }, async () => {
