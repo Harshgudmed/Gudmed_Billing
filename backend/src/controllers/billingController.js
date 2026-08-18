@@ -5,7 +5,7 @@ import { todayRange, dayRange } from '../lib/dates.js'
 import { nextSeriesNumber, invoiceProbe } from "../lib/counters.js";
 import { recalcInvoice, refundableAmount } from "../lib/invoiceLedger.js";
 import { refundSettings, isInstantRefund } from "../lib/refundPolicy.js";
-import { fulfillInvoiceItems } from "../lib/invoiceFulfillment.js";
+import { fulfillInvoiceItems, invoiceTag } from "../lib/invoiceFulfillment.js";
 import { recordStockChange } from "../pharmacy/stockService.js";
 import { round2 } from "../lib/money.js";
 import { priceInvoiceItems } from "../lib/catalogPrice.js";
@@ -189,7 +189,7 @@ function nextRefundNumber(tx, organizationId) {
  * reversal commit together.
  */
 async function reverseInvoiceFulfillment(tx, { organizationId, invoice, actorId }) {
-  const reversed = { saleId: null, stockReturned: [], labOrderIds: [], radiologyOrderIds: [] }
+  const reversed = { saleId: null, stockReturned: [], labOrderIds: [], radiologyOrderIds: [], prescriptionIds: [] }
 
   const sale = await tx.pharmacySale.findFirst({
     where: { organizationId, receiptNumber: invoice.invoiceNumber },
@@ -253,6 +253,33 @@ async function reverseInvoiceFulfillment(tx, { organizationId, invoice, actorId 
       data: { status: 'cancelled', cancellationReason: `Invoice ${invoice.invoiceNumber} cancelled` },
     })
     reversed.radiologyOrderIds = radiologyOrders.map((o) => o.id)
+  }
+
+  // The prescription billing raised, so the pharmacy stops offering to dispense
+  // a voided bill.
+  //
+  // Billing a medicine no longer deducts stock — it raises a pending
+  // Prescription and the stock leaves when the pharmacist hands it over. The
+  // sale block above therefore finds nothing for a counter-billed medicine: the
+  // dispense mints its OWN receiptNumber (RCP-...), not the invoice number. So
+  // without this, cancelling the bill left the item sitting in the pharmacy's
+  // queue and it was handed out for a bill nobody paid.
+  //
+  // Only 'pending' is touched, and the guard is in the where so a cancel racing
+  // a dispense cannot both win. Once it IS dispensed the medicine really left
+  // the shelf and a PharmacySale exists — that needs a human, exactly like a lab
+  // sample already collected.
+  const prescriptions = await tx.prescription.findMany({
+    where: { organizationId, status: 'pending', notes: { startsWith: invoiceTag(invoice.invoiceNumber) } },
+    select: { id: true },
+  })
+  if (prescriptions.length) {
+    const ids = prescriptions.map((p) => p.id)
+    const { count } = await tx.prescription.updateMany({
+      where: { id: { in: ids }, status: 'pending' },
+      data: { status: 'cancelled' },
+    })
+    if (count) reversed.prescriptionIds = ids
   }
 
   return reversed
