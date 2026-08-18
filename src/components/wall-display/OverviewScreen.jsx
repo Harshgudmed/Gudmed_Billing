@@ -24,7 +24,14 @@ export function OverviewScreen() {
 
   return (
     <Board>
-      <div className="px-10 pb-10 pt-8">
+      {/* Scrolls, unlike the other boards.
+          Board is `h-screen overflow-hidden` because a wall TV has nobody to
+          scroll it — right for the room grids, wrong for THIS one. It is the
+          page a person taps, its height grows with the number of floors, and a
+          hospital with five floors already loses the last card off the bottom
+          with no way to reach it. min-h-0 is what lets a flex child actually
+          shrink and scroll instead of pushing its parent taller. */}
+      <div className="min-h-0 flex-1 overflow-y-auto px-10 pb-10 pt-8">
         <h1 className="text-5xl font-bold tracking-tight">Select a Floor</h1>
         <p className={`mt-2 mb-8 text-xl ${TEXT_MUTED}`}>Tap a floor to see its departments and rooms.</p>
         {floors.length === 0 ? (
