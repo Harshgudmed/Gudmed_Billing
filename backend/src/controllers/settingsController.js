@@ -94,6 +94,11 @@ export async function getUsers(req, res, next) {
           specialization: true,
           departmentId: true,
           consultationFee: true,
+          // Every caller filling a doctor dropdown filters on these two. Without
+          // them `lean` does not shrink the list, it empties it — the filter
+          // compares undefined and drops every row.
+          role: true,
+          isActive: true,
         }
       : {
           id: true,
