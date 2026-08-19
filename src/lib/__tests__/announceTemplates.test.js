@@ -140,8 +140,12 @@ test('each language is written in its own script, not transliterated', () => {
 
 test('Hindi and Marathi are different words, not the same text in one script', () => {
   assert.notEqual(templatesFor('hi-IN', 'name').call, templatesFor('mr-IN', 'name').call)
-  assert.match(templatesFor('mr-IN', 'name').call, /खोली/, 'room is खोली in Marathi, not रूम')
-  assert.match(templatesFor('mr-IN', 'name').call, /मध्ये या/)
+  // "रूम नंबर" is shared with Hindi on purpose — hospitals asked for it, as it
+  // reads more professionally than "खोली". The languages still differ in their
+  // own verbs and phrasing, which is what proves this is not a copy-paste.
+  assert.match(templatesFor('mr-IN', 'name').call, /मध्ये या/, 'Marathi uses मध्ये या, not Hindi में आएं')
+  assert.doesNotMatch(templatesFor('hi-IN', 'name').call, /मध्ये या/)
+  assert.match(templatesFor('mr-IN', 'name').ready, /तुमचा नंबर पुढे आहे/, 'Marathi keeps its own wording')
 })
 
 test('the token label is in the language, never English inside a Hindi sentence', () => {
