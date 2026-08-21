@@ -117,10 +117,19 @@ export function useQueueAnnouncements(units, settings) {
 
     if (cfg.announceEnabled) {
       for (const item of items) {
-        if (!item.text) continue
+        // Chime-only: ring the bell for each called/alerted patient but say
+        // nothing. The item still carries a unique id, so each event chimes
+        // once — just with no words behind it.
+        const text = cfg.announceChimeOnly ? '' : item.text
+        // Nothing to play at all — no words and no chime — so skip it (and do
+        // not "remember" an id that was never announced).
+        if (!text && !cfg.announceChime) continue
         a.announce({
-          id: item.id, text: item.text, lang: cfg.announceLanguage,
-          repeat: cfg.announceRepeat, chime: cfg.announceChime,
+          id: item.id, text, lang: cfg.announceLanguage,
+          // A repeated bell with no words just rings twice for no reason, so
+          // chime-only always sounds once.
+          repeat: cfg.announceChimeOnly ? 1 : cfg.announceRepeat,
+          chime: cfg.announceChime,
           gender: cfg.announceVoiceGender,
         })
       }
