@@ -97,7 +97,10 @@ export default function QueueAnnouncementsPanel({ settings, onSaved }) {
 
   const [playing, setPlaying] = useState(null)
   const listen = async (which, text) => {
-    if (!text) return
+    // Chime-only mode says no words, so the preview must not either — otherwise
+    // "Hear it" would speak a sentence the board never will.
+    const speakText = form.announceChimeOnly ? '' : text
+    if (!speakText && !form.announceChime) return
     setPlaying(which)
     try {
       const eng = browserEngine()
@@ -107,7 +110,7 @@ export default function QueueAnnouncementsPanel({ settings, onSaved }) {
       const a = createAnnouncer(eng)
       await new Promise((resolve) => {
         a.announce({
-          id: `preview:${Date.now()}`, text,
+          id: `preview:${Date.now()}`, text: speakText,
           lang: form.announceLanguage,
           gender: form.announceVoiceGender,
           chime: !!form.announceChime,
@@ -323,6 +326,20 @@ export default function QueueAnnouncementsPanel({ settings, onSaved }) {
               />
               Play a chime first
             </label>
+            <label className="flex items-center gap-2 text-sm pt-1">
+              <input
+                type="checkbox"
+                checked={!!form.announceChimeOnly}
+                onChange={(e) => set('announceChimeOnly')(e.target.checked)}
+              />
+              Chime only &mdash; no spoken words
+            </label>
+            {form.announceChimeOnly && (
+              <p className="text-xs text-gray-500">
+                Only the bell rings when a patient is called &mdash; the sentences
+                below are not spoken. Needs &ldquo;Play a chime first&rdquo; on.
+              </p>
+            )}
           </div>
         </div>
 

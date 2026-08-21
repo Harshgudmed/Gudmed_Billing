@@ -86,6 +86,13 @@ export const ORG_SETTING_FIELDS = [
     label: 'Announcement voice', options: ['female', 'male', 'any'] },
   { key: 'announceChime',    type: 'bool',   default: true,
     label: 'Play a chime first' },
+  // Chime-only: ring the bell for each called/alerted patient but say NO words.
+  // For a hall that wants an audible cue without a spoken name or token, or a
+  // display PC with no speech voice installed for the chosen language (where the
+  // words would be silent anyway — see lib/announce.js). The chime still needs
+  // announceChime on; with both off, the board makes no sound at all.
+  { key: 'announceChimeOnly', type: 'bool',  default: false,
+    label: 'Chime only — no spoken words' },
   { key: 'announceReadyText', type: 'text',
     default: '{name}, you are next. Please wait near Room {room} and keep your reports ready.',
     label: 'Announcement — get ready' },
