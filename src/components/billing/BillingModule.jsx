@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useOrgSettings } from '@/lib/useOrgSettings'
+import { useEnabledModules } from '@/lib/useEnabledModules'
 import { formatMoney as fmt, formatDateTime } from '@/lib/format'
 import { calcAge, getFullName } from '@/lib/patient'
 import { toast } from 'sonner'
@@ -127,6 +128,19 @@ const DEPT_LABEL = {
   Procedure: 'Procedure',
   Radiology: 'Radiology',
   Vaccine: 'Vaccination',
+}
+
+// Which department belongs to which module, using the toggle names from
+// roleConfig's MODULES. Switching Laboratory off in Settings already removes it
+// from the sidebar; it must also stop being offered here, or a hospital with no
+// laboratory can still be handed a lab bill to raise.
+//
+// Consultation, Procedure and Vaccine have no module behind them — they are
+// billing services this screen owns — so they are always offered.
+const DEPT_MODULE = {
+  Lab: 'laboratory',
+  Pharmacy: 'pharmacy',
+  Radiology: 'radiology',
 }
 
 const BILLING_ITEMS_PER_PAGE = 10
@@ -651,6 +665,12 @@ export default function BillingModule({ onBack }) {
   }, [fetchServices, fetchStats, fetchClaims])
 
   const { orgInfo: hookOrgInfo } = useOrgSettings()
+  // Settings → Modules decides which departments this hospital can bill for.
+  // Updates live: the hook listens for the same `modulesChange` event the
+  // sidebar does, so switching Laboratory off removes it from here without a
+  // reload — and a cart already holding lab items is left alone rather than
+  // being silently emptied under the biller.
+  const { isEnabled: isModuleEnabled } = useEnabledModules()
 
   useEffect(() => {
     setOrgInfo(hookOrgInfo)
@@ -1417,7 +1437,7 @@ export default function BillingModule({ onBack }) {
                   <div className="flex items-start gap-2">
                     <span className="text-xs font-medium text-gray-500 whitespace-nowrap mt-1.5">Department</span>
                     <div className="flex flex-wrap gap-x-4 gap-y-1.5">
-                      {Object.keys(CATALOGUE).map(cat => (
+                      {Object.keys(CATALOGUE).filter(cat => isModuleEnabled(DEPT_MODULE[cat])).map(cat => (
                         <label key={cat} className="flex items-center gap-1.5 cursor-pointer text-sm">
                           <input
                             type="radio"

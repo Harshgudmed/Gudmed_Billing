@@ -84,6 +84,7 @@ const ALL_MODULES = [
   { key: 'insurance',            label: 'Insurance / TPA',      description: 'Payer policies and claim tracking' },
   { key: 'deathCertificate',     label: 'Death Certificates',   description: 'Issue and track death certificates' },
   { key: 'inpatient',            label: 'Inpatient (IPD)',      description: 'Admissions, wards/beds, IPD billing, and discharge' },
+  { key: 'ot',                   label: 'Operation Theatre',    description: 'Theatre list, case bookings, and the surgical record' },
   { key: 'pharmacy',             label: 'Pharmacy',             description: 'Drug inventory, dispensing, and sales' },
   { key: 'doctorAccountability', label: 'Doctor Accountability', description: 'Doctor commissions and settlements' },
   { key: 'inventory',            label: 'Inventory',            description: 'Stock management across departments' },
@@ -229,12 +230,20 @@ export default function SettingsModule() {
     setModules(newModules)
     // Update the sidebar immediately (it listens for this event)
     window.dispatchEvent(new CustomEvent('modulesChange', { detail: newModules }))
+    // The event only reaches screens that are already mounted. Anything opened
+    // AFTER the toggle reads getOrgRaw(), which serves a process-lifetime cache
+    // — so without this, navigating from here to Billing showed the module list
+    // as it was before the switch, until a full page reload.
+    clearOrgCache()
     try {
       await client.patch('/settings', { resource: 'organization', modulesEnabled: newModules })
       toast.success(`${key} module ${newModules[key] ? 'enabled' : 'disabled'}`)
     } catch {
       toast.error('Failed to update module settings')
       setModules(modules)
+      // Put the cache back in step with the rollback too, or the screens that
+      // did not see this event keep serving the change that failed to save.
+      clearOrgCache()
       window.dispatchEvent(new CustomEvent('modulesChange', { detail: modules }))
     }
   }
