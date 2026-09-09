@@ -469,6 +469,10 @@ export default function PatientLookup({
           <Loader2 className="h-4 w-4 animate-spin text-gray-400 absolute right-3 top-1/2 -translate-y-1/2" />
         )}
       </div>
+      {/* One character types nothing back and looks broken. Say why. */}
+      {search.length === 1 && (
+        <p className="text-xs text-gray-500">Keep typing — at least 2 characters.</p>
+      )}
       {open && search.length >= 2 && (
         <div className="border rounded-md divide-y max-h-48 overflow-y-auto bg-white shadow-sm">
           {results.length === 0 && !loading ? (
@@ -510,13 +514,20 @@ export default function PatientLookup({
           )}
         </div>
       )}
-      <div className="flex items-center justify-between">
-        {showHint ? (
+      {/* The hint used to say only "search by UHID, name, or phone", which names
+          the fields without showing what any of them looks like. Someone using
+          this for the first time does not know a UHID is ten digits, or that a
+          partial name works. Two worked examples answer both, and cost one line.
+          Hidden once the user starts typing — by then it is in the way. */}
+      <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
+        {showHint && search.length === 0 ? (
           <p className="text-xs text-gray-500">
-            Search registered patients by UHID, name, or phone.
+            Search by <b className="font-medium text-gray-700">UHID</b>, <b className="font-medium text-gray-700">name</b> or{' '}
+            <b className="font-medium text-gray-700">phone</b> — e.g. <span className="font-mono">1000000029</span>,{' '}
+            <span className="font-mono">Rohit Kumar</span>, <span className="font-mono">9876543210</span>
           </p>
         ) : <span />}
-        <Button type="button" variant="link" size="sm" className="h-auto p-0 text-xs gap-1 text-blue-600"
+        <Button type="button" variant="link" size="sm" className="h-auto p-0 text-xs gap-1 text-blue-600 shrink-0"
           onClick={() => setAddingNew(true)}>
           <UserPlus className="h-3.5 w-3.5" /> Patient not in records? Add new
         </Button>

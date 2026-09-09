@@ -29,13 +29,43 @@ import insuranceRoutes from './insuranceRoutes.js'
 import { router as deathCertificateRoutes } from './deathCertificateRoutes.js'
 import inpatientRoutes from './inpatientRoutes.js'
 import machineIntegrationRoutes from './machineIntegrationRoutes.js'
+import preRegistrationRoutes from './preRegistrationRoutes.js'
 import partnerRoutes from './partnerRoutes.js'
+import otRoutes from './otRoutes.js'
+import otClinicalRoutes from './otClinicalRoutes.js'
+import { createPreRegistration, getPublicOrg } from '../controllers/preRegistrationController.js'
+import { rateLimit } from '../middleware/rateLimit.js'
 
 export const router = Router()
 
 // Public routes (no auth needed)
 router.use('/auth',   authRoutes)
 router.use('/import', importRoutes)  // data import — protected by x-import-secret header
+
+// Self-service pre-registration from the hospital's QR code — a walk-up patient
+// has no login, so these two sit ABOVE authenticate. They create nothing but a
+// pending row (no UHID, no Patient); the reception side that turns one into a
+// real patient IS behind authenticate (see '/pre-registration' below).
+//
+// Rate-limited because this is the one route on the whole API where an
+// anonymous caller can WRITE. A pending row is cheap and sweeps itself after
+// 48h, but nothing stopped a script filling reception's list with thousands of
+// them in the meantime.
+//
+// Counted per HOSPITAL, not per address: behind the load balancer the resolved
+// address varies between edge nodes (see partnerRoutes.js — an IP-keyed limiter
+// there refused 3 of 150 instead of 90), and per-hospital means a flood aimed at
+// one cannot lock walk-ups out of another. 30 a minute is far above a real
+// counter's pace and far below a script's.
+const preRegLimit = rateLimit({
+  limit: Number(process.env.PREREG_RATE_LIMIT) || 30,
+  windowMs: 60_000,
+  message: 'Too many submissions — please wait a moment and try again',
+  keyBy: (req) => req.body?.organizationId || req.ip,
+})
+
+router.get('/public/org/:orgId',    getPublicOrg)
+router.post('/public/pre-registration', preRegLimit, createPreRegistration)
 
 // Razorpay calls this server-to-server with no cookie or JWT. Mounted here, ahead
 // of `authenticate`, or every webhook is rejected with 401 in production and the
@@ -90,3 +120,14 @@ router.use('/insurance',             authorize(), insuranceRoutes)
 router.use('/death-certificates',    authorize(), deathCertificateRoutes)
 router.use('/inpatient',             authorize(), inpatientRoutes)
 router.use('/machine-integration',   authorize(), machineIntegrationRoutes)
+router.use('/pre-registration',      authorize(), preRegistrationRoutes)
+// Named roles, unlike the modules above: a lab technician or pharmacist has no
+// business in the theatre list at all, so they are refused at the door rather
+// than per action. Who may cancel / re-team a case is narrowed again inside the
+// controller. admin and super_admin always pass.
+// 'billing' and 'billing_clerk' are both accepted: the User.role comment in
+// schema.prisma says billing_clerk, the web app's roleConfig key is billing.
+router.use('/ot',                    authorize('doctor', 'nurse', 'receptionist', 'billing', 'billing_clerk'), otRoutes)
+// The case documents. Same door as /ot; who may WRITE each one is narrowed per
+// document inside the controller.
+router.use('/ot-clinical',           authorize('doctor', 'nurse', 'receptionist', 'billing', 'billing_clerk'), otClinicalRoutes)

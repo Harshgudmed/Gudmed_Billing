@@ -27,6 +27,18 @@ export function getActor(req) {
   };
 }
 
+// Service errors, in the shape svcErr() below already understands.
+//
+// This file owned the RESPONDER and not the CONSTRUCTORS, so every module wrote
+// its own `Object.assign(new Error(m), { status: 400 })` — nine copies across the
+// OT module alone, and one of them drifted (a 404 that should have been a 409).
+// Pairing them here means a status or a payload shape changes in one place.
+export const bad = (message) => Object.assign(new Error(message), { status: 400 })
+export const notFound = (message = 'Not found') => Object.assign(new Error(message), { status: 404 })
+export const conflict = (message, code) => Object.assign(new Error(message), { status: 409, code })
+export const forbidden = (message = 'Your role cannot perform this action') =>
+  Object.assign(new Error(message), { status: 403, code: 'FORBIDDEN' })
+
 /** Standard error responder preserving a service error's HTTP status + code. */
 export function svcErr(res, e) {
   return res

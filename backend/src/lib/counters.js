@@ -186,6 +186,7 @@ const SERIES_MODELS = {
   INS_CLAIM: [['insuranceClaim', 'claimNumber']],
   AMBULANCE_TRIP: [['ambulanceTrip', 'tripNumber']],
   PURCHASE_ORDER: [['pharmacyPurchaseOrder', 'poNumber']],
+  OT: [['otBooking', 'caseNumber']],
 }
 
 /** The probe for a series, or null for a series with no rows to probe. */

@@ -88,9 +88,14 @@ const emptyPatientForm = {
  * Props:
  *  - onSuccess(patient): called after a successful registration
  *  - onCancel(): called when the Cancel button is clicked
+ *  - initialData: pre-fills the form (used by the reception "Confirm a
+ *    self-registration" flow, where the patient already typed their own
+ *    details on their phone — reception only checks them and adds the doctor
+ *    + appointment). Omitted everywhere else, so those callers still open a
+ *    blank form exactly as before.
  */
-export default function RegisterPatientForm({ onSuccess, onCancel }) {
-  const [patientForm, setPatientForm] = useState(emptyPatientForm)
+export default function RegisterPatientForm({ onSuccess, onCancel, initialData }) {
+  const [patientForm, setPatientForm] = useState(() => ({ ...emptyPatientForm, ...(initialData || {}) }))
   // Keyed by field name — { firstName: "message", ... } — populated by either
   // the pre-submit Zod check or a validation error the backend returns.
   const [fieldErrors, setFieldErrors] = useState({})

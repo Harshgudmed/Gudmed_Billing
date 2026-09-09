@@ -27,6 +27,7 @@ export const MODULES = {
   insurance:            { path: 'insurance',             label: 'Insurance / TPA',      toggle: 'insurance' },
   deathCertificate:     { path: 'death-certificates',    label: 'Death Certificates',   toggle: 'deathCertificate' },
   inpatient:            { path: 'inpatient',             label: 'Inpatient (IPD)',      toggle: 'inpatient' },
+  ot:                   { path: 'ot',                    label: 'Operation Theatre',    toggle: 'ot' },
   pharmacy:             { path: 'pharmacy',              label: 'Pharmacy',             toggle: 'pharmacy' },
   billing:              { path: 'billing',               label: 'Billing',              toggle: null },
   doctorAccountability: { path: 'doctor-accountability', label: 'Doctor Accountability', toggle: 'doctorAccountability' },
@@ -40,7 +41,7 @@ export const ROLES = {
     home: 'dashboard',
     modules: [
       'dashboard', 'patients', 'appointments', 'preTriage', 'queue', 'opd', 'pharmacy',
-      'laboratory', 'radiology', 'dayCare', 'ambulance', 'insurance', 'deathCertificate', 'inpatient', 'billing',
+      'laboratory', 'radiology', 'dayCare', 'ambulance', 'insurance', 'deathCertificate', 'inpatient', 'ot', 'billing',
       'doctorAccountability', 'settings',
     ],
   },
@@ -50,12 +51,12 @@ export const ROLES = {
     // 'queue' shows the doctor their OWN patients' queue only — the backend
     // (queueController.getQueue) scopes it to entries assigned/following-up to
     // this doctor, so they never see another doctor's patients.
-    modules: ['dashboard', 'opd', 'queue', 'patients', 'doctorAccountability'],
+    modules: ['dashboard', 'opd', 'queue', 'patients', 'doctorAccountability', 'ot'],
   },
   receptionist: {
     label: 'Receptionist',
     home: 'appointments',
-    modules: ['dashboard', 'appointments', 'preTriage', 'queue', 'patients', 'billing'],
+    modules: ['dashboard', 'appointments', 'preTriage', 'queue', 'patients', 'billing', 'ot'],
   },
 
   // ── Phase 3.0: clinical-orders roles. Mapped in backend rbac.js already; these
@@ -63,7 +64,7 @@ export const ROLES = {
   nurse: {
     label: 'Nurse',
     home: 'dashboard',
-    modules: ['dashboard', 'preTriage', 'patients'],
+    modules: ['dashboard', 'preTriage', 'patients', 'ot'],
   },
   pharmacist: {
     label: 'Pharmacist',

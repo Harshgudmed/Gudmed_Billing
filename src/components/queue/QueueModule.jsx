@@ -18,6 +18,7 @@ import client from '@/api/client'
 // downloaded and parsed for nothing.
 const AppointmentsModule = lazy(() => import('@/components/appointments/AppointmentsModule'))
 const BillingModule = lazy(() => import('@/components/billing/BillingModule'))
+const SelfRegistrationModule = lazy(() => import('@/components/registration/SelfRegistrationModule'))
 import { QueueRow } from '@/components/queue/QueueRow'
 import { QueueEmptyState } from '@/components/queue/QueueEmptyState'
 
@@ -195,6 +196,7 @@ export default function QueueModule() {
       <Tabs value={activeTab} onValueChange={setActiveTab}>
         <TabsList>
           <TabsTrigger value="queue">Queue</TabsTrigger>
+          <TabsTrigger value="registrations">New Registrations</TabsTrigger>
           <TabsTrigger value="appointments">Appointments</TabsTrigger>
           <TabsTrigger value="billing">Billing</TabsTrigger>
         </TabsList>
@@ -281,6 +283,13 @@ export default function QueueModule() {
               />
             </CardContent>
           </Card>
+        </TabsContent>
+
+        {/* ── New Registrations Tab (QR self-registration) ── */}
+        <TabsContent value="registrations">
+          <Suspense fallback={<TabLoading name="Registrations" />}>
+            <SelfRegistrationModule />
+          </Suspense>
         </TabsContent>
 
         {/* ── Appointments Tab ── */}

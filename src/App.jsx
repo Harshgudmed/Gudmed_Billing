@@ -46,11 +46,13 @@ const AmbulancePage            = lazy(() => import('./pages/AmbulancePage.jsx'))
 const InsurancePage            = lazy(() => import('./pages/InsurancePage.jsx'))
 const DeathCertificatePage     = lazy(() => import('./pages/DeathCertificatePage.jsx'))
 const InpatientPage            = lazy(() => import('./pages/InpatientPage.jsx'))
+const OtPage                   = lazy(() => import('./pages/OtPage.jsx'))
 const NotFoundPage             = lazy(() => import('./pages/NotFoundPage.jsx'))
 // No Shell (no sidebar/header) — this runs full-screen on a lobby TV/second
 // monitor, so it's mounted outside both the legacy and role-based Shell trees.
 const DisplayBoardPage         = lazy(() => import('./pages/DisplayBoardPage.jsx'))
 const DisplayAutoPage          = lazy(() => import('./pages/DisplayAutoPage.jsx'))
+const SelfRegisterPage         = lazy(() => import('./pages/SelfRegisterPage.jsx'))
 
 // Module key → page component. Shared by both legacy and role-based routing.
 const PAGE_BY_MODULE = {
@@ -67,6 +69,7 @@ const PAGE_BY_MODULE = {
   insurance:            InsurancePage,
   deathCertificate:     DeathCertificatePage,
   inpatient:            InpatientPage,
+  ot:                   OtPage,
   pharmacy:             PharmacyPage,
   billing:              BillingPage,
   doctorAccountability: DoctorAccountabilityPage,
@@ -91,6 +94,7 @@ const LEGACY_NAV = [
   { to: '/insurance',             label: 'Insurance / TPA' },
   { to: '/death-certificates',    label: 'Death Certificates' },
   { to: '/inpatient',             label: 'Inpatient (IPD)' },
+  { to: '/ot',                    label: 'Operation Theatre' },
   { to: '/billing',               label: 'Billing' },
   { to: '/doctor-accountability', label: 'Doctor Accountability' },
   { to: '/settings',              label: 'Settings' },
@@ -108,6 +112,7 @@ const MODULE_BY_PATH = {
   '/insurance':             'insurance',
   '/death-certificates':    'deathCertificate',
   '/inpatient':             'inpatient',
+  '/ot':                    'ot',
   '/pharmacy':              'pharmacy',
   '/doctor-accountability': 'doctorAccountability',
 }
@@ -268,6 +273,7 @@ function LegacyApp() {
         <Route path="/insurance"             element={<InsurancePage />} />
         <Route path="/death-certificates"    element={<DeathCertificatePage />} />
         <Route path="/inpatient"             element={<InpatientPage />} />
+        <Route path="/ot"                    element={<OtPage />} />
         <Route path="/pharmacy"              element={<PharmacyPage />} />
         <Route path="/billing"               element={<BillingPage />} />
         <Route path="/doctor-accountability" element={<DoctorAccountabilityPage />} />
@@ -452,6 +458,10 @@ export default function App() {
           <Route path="/display/auto" element={<DisplayAutoPage />} />
           {/* Queue display board — no Shell, full-screen, second-monitor use */}
           <Route path="/display/*" element={<DisplayBoardPage />} />
+          {/* Public self-registration — a walk-up patient fills their own
+              details from the hospital's QR code. No Shell, no login: mounted
+              here, outside the authenticated tree. */}
+          <Route path="/self-register" element={<SelfRegisterPage />} />
           <Route path="*" element={AUTH_ENFORCED ? <AuthedApp /> : <LegacyApp />} />
         </Routes>
       </Suspense>

@@ -54,6 +54,40 @@ const PERMS = {
   // ── IPD Specialist Consultations ──
   // Any clinical role can request; only the consulting doctor updates notes/completes.
   'ipd-consultation': ['receptionist', 'doctor', 'nurse'],
+
+  // ── Operation Theatre ──
+  // Booking a list is desk work; deciding a case is not. The route guard already
+  // keeps lab/pharmacy/radiology out of OT entirely — these narrow what the roles
+  // that ARE in OT may do, which the route cannot express because one endpoint
+  // serves every verb.
+  //
+  // Rooms and the surgery catalogue are configuration: receptionists maintain them.
+  'ot-theatre': ['receptionist'],
+  'ot-surgery': ['receptionist'],
+
+  // A receptionist books and re-times the list — that is the job.
+  'ot-booking': ['receptionist', 'doctor'],
+  'ot-reschedule': ['receptionist', 'doctor'],
+
+  // Moving a case ALONG the day (confirm, check in, start, complete) is theatre
+  // floor work, so nurses do it too.
+  'ot-status': ['receptionist', 'doctor', 'nurse'],
+
+  // But calling a case OFF is a clinical decision with a medicolegal reason
+  // attached, so it stays with the surgeon. A receptionist who needs a case
+  // cancelled asks the surgeon — which is what happens on a real theatre list.
+  'ot-cancel': ['doctor'],
+
+  // Who scrubbed in is a nursing record. Billing has no business editing it.
+  'ot-team': ['doctor', 'nurse'],
+
+  // ── The four case documents ──
+  // Each belongs to the discipline that signs it. A receptionist books the list;
+  // none of these are theirs to write.
+  'ot-preop': ['doctor'], // the anaesthetist assesses and declares fitness
+  'ot-checklist': ['nurse', 'doctor'], // the nurse runs it; either may sign a phase
+  'ot-anaesthesia': ['doctor'],
+  'ot-opnote': ['doctor'], // the surgeon dictates
 }
 
 // An order may only be COMPLETED by the discipline that fulfils that order type.
