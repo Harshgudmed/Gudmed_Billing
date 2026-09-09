@@ -44,6 +44,24 @@ const RETRYABLE = new Set([
   // the same guard, so it is listed for the same reason.
   '20260808120000_restore_patient_foreign_keys',
   '20260808130000_clinical_order_patient_fk',
+
+  // Failed on its first deploy with
+  //     ERROR: relation "PreRegistration" already exists
+  // because production already HAD all nine tables: they arrived by `db push`
+  // and no migration ever recorded them. The migration was written from a diff
+  // of migrations-vs-schema, which cannot see that.
+  //
+  // Every statement is now guarded — CREATE TABLE / INDEX ... IF NOT EXISTS,
+  // DROP CONSTRAINT IF EXISTS, and each ADD CONSTRAINT inside the same
+  // `DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_constraint …)` block the
+  // patient-foreign-key migrations above use — so it creates what is absent and
+  // leaves what is present.
+  //
+  // Verified against both: a database built from migrations alone, and one put
+  // into production's exact state (migrations to 20260818120000, then `db push`,
+  // no record of this migration). Applied clean on both, leaving 9 tables and
+  // Prescription_doctorId_fkey present with ON DELETE SET NULL.
+  '20260909120000_add_operation_theatre_and_pre_registration',
 ])
 
 if (!process.env.DATABASE_URL) {

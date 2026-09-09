@@ -22,10 +22,10 @@
 -- migration in order without error.
 
 -- DropForeignKey
-ALTER TABLE "Prescription" DROP CONSTRAINT "Prescription_doctorId_fkey";
+ALTER TABLE "Prescription" DROP CONSTRAINT IF EXISTS "Prescription_doctorId_fkey";
 
 -- CreateTable
-CREATE TABLE "PreRegistration" (
+CREATE TABLE IF NOT EXISTS "PreRegistration" (
     "id" TEXT NOT NULL,
     "organizationId" TEXT NOT NULL,
     "firstName" TEXT NOT NULL,
@@ -40,7 +40,7 @@ CREATE TABLE "PreRegistration" (
 );
 
 -- CreateTable
-CREATE TABLE "OperatingTheatre" (
+CREATE TABLE IF NOT EXISTS "OperatingTheatre" (
     "id" TEXT NOT NULL,
     "organizationId" TEXT NOT NULL,
     "floorId" TEXT,
@@ -58,7 +58,7 @@ CREATE TABLE "OperatingTheatre" (
 );
 
 -- CreateTable
-CREATE TABLE "SurgeryCatalog" (
+CREATE TABLE IF NOT EXISTS "SurgeryCatalog" (
     "id" TEXT NOT NULL,
     "organizationId" TEXT NOT NULL,
     "chargeItemId" TEXT,
@@ -75,7 +75,7 @@ CREATE TABLE "SurgeryCatalog" (
 );
 
 -- CreateTable
-CREATE TABLE "OtBooking" (
+CREATE TABLE IF NOT EXISTS "OtBooking" (
     "id" TEXT NOT NULL,
     "organizationId" TEXT NOT NULL,
     "patientId" TEXT NOT NULL,
@@ -110,7 +110,7 @@ CREATE TABLE "OtBooking" (
 );
 
 -- CreateTable
-CREATE TABLE "OtTeamMember" (
+CREATE TABLE IF NOT EXISTS "OtTeamMember" (
     "id" TEXT NOT NULL,
     "organizationId" TEXT NOT NULL,
     "bookingId" TEXT NOT NULL,
@@ -125,7 +125,7 @@ CREATE TABLE "OtTeamMember" (
 );
 
 -- CreateTable
-CREATE TABLE "OtPreOpAssessment" (
+CREATE TABLE IF NOT EXISTS "OtPreOpAssessment" (
     "id" TEXT NOT NULL,
     "organizationId" TEXT NOT NULL,
     "bookingId" TEXT NOT NULL,
@@ -169,7 +169,7 @@ CREATE TABLE "OtPreOpAssessment" (
 );
 
 -- CreateTable
-CREATE TABLE "OtSafetyChecklist" (
+CREATE TABLE IF NOT EXISTS "OtSafetyChecklist" (
     "id" TEXT NOT NULL,
     "organizationId" TEXT NOT NULL,
     "bookingId" TEXT NOT NULL,
@@ -219,7 +219,7 @@ CREATE TABLE "OtSafetyChecklist" (
 );
 
 -- CreateTable
-CREATE TABLE "OtAnaesthesiaRecord" (
+CREATE TABLE IF NOT EXISTS "OtAnaesthesiaRecord" (
     "id" TEXT NOT NULL,
     "organizationId" TEXT NOT NULL,
     "bookingId" TEXT NOT NULL,
@@ -248,7 +248,7 @@ CREATE TABLE "OtAnaesthesiaRecord" (
 );
 
 -- CreateTable
-CREATE TABLE "OtOperativeNote" (
+CREATE TABLE IF NOT EXISTS "OtOperativeNote" (
     "id" TEXT NOT NULL,
     "organizationId" TEXT NOT NULL,
     "bookingId" TEXT NOT NULL,
@@ -276,146 +276,252 @@ CREATE TABLE "OtOperativeNote" (
 );
 
 -- CreateIndex
-CREATE INDEX "PreRegistration_organizationId_status_createdAt_idx" ON "PreRegistration"("organizationId", "status", "createdAt");
+CREATE INDEX IF NOT EXISTS "PreRegistration_organizationId_status_createdAt_idx" ON "PreRegistration"("organizationId", "status", "createdAt");
 
 -- CreateIndex
-CREATE INDEX "PreRegistration_organizationId_phonePrimary_idx" ON "PreRegistration"("organizationId", "phonePrimary");
+CREATE INDEX IF NOT EXISTS "PreRegistration_organizationId_phonePrimary_idx" ON "PreRegistration"("organizationId", "phonePrimary");
 
 -- CreateIndex
-CREATE INDEX "OperatingTheatre_organizationId_idx" ON "OperatingTheatre"("organizationId");
+CREATE INDEX IF NOT EXISTS "OperatingTheatre_organizationId_idx" ON "OperatingTheatre"("organizationId");
 
 -- CreateIndex
-CREATE INDEX "OperatingTheatre_status_idx" ON "OperatingTheatre"("status");
+CREATE INDEX IF NOT EXISTS "OperatingTheatre_status_idx" ON "OperatingTheatre"("status");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "OperatingTheatre_organizationId_name_key" ON "OperatingTheatre"("organizationId", "name");
+CREATE UNIQUE INDEX IF NOT EXISTS "OperatingTheatre_organizationId_name_key" ON "OperatingTheatre"("organizationId", "name");
 
 -- CreateIndex
-CREATE INDEX "SurgeryCatalog_organizationId_idx" ON "SurgeryCatalog"("organizationId");
+CREATE INDEX IF NOT EXISTS "SurgeryCatalog_organizationId_idx" ON "SurgeryCatalog"("organizationId");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "SurgeryCatalog_organizationId_name_key" ON "SurgeryCatalog"("organizationId", "name");
+CREATE UNIQUE INDEX IF NOT EXISTS "SurgeryCatalog_organizationId_name_key" ON "SurgeryCatalog"("organizationId", "name");
 
 -- CreateIndex
-CREATE INDEX "OtBooking_organizationId_scheduledStart_idx" ON "OtBooking"("organizationId", "scheduledStart");
+CREATE INDEX IF NOT EXISTS "OtBooking_organizationId_scheduledStart_idx" ON "OtBooking"("organizationId", "scheduledStart");
 
 -- CreateIndex
-CREATE INDEX "OtBooking_organizationId_status_idx" ON "OtBooking"("organizationId", "status");
+CREATE INDEX IF NOT EXISTS "OtBooking_organizationId_status_idx" ON "OtBooking"("organizationId", "status");
 
 -- CreateIndex
-CREATE INDEX "OtBooking_theatreId_scheduledStart_idx" ON "OtBooking"("theatreId", "scheduledStart");
+CREATE INDEX IF NOT EXISTS "OtBooking_theatreId_scheduledStart_idx" ON "OtBooking"("theatreId", "scheduledStart");
 
 -- CreateIndex
-CREATE INDEX "OtBooking_patientId_idx" ON "OtBooking"("patientId");
+CREATE INDEX IF NOT EXISTS "OtBooking_patientId_idx" ON "OtBooking"("patientId");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "OtBooking_organizationId_caseNumber_key" ON "OtBooking"("organizationId", "caseNumber");
+CREATE UNIQUE INDEX IF NOT EXISTS "OtBooking_organizationId_caseNumber_key" ON "OtBooking"("organizationId", "caseNumber");
 
 -- CreateIndex
-CREATE INDEX "OtTeamMember_organizationId_bookingId_idx" ON "OtTeamMember"("organizationId", "bookingId");
+CREATE INDEX IF NOT EXISTS "OtTeamMember_organizationId_bookingId_idx" ON "OtTeamMember"("organizationId", "bookingId");
 
 -- CreateIndex
-CREATE INDEX "OtTeamMember_userId_role_idx" ON "OtTeamMember"("userId", "role");
+CREATE INDEX IF NOT EXISTS "OtTeamMember_userId_role_idx" ON "OtTeamMember"("userId", "role");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "OtTeamMember_bookingId_role_memberName_key" ON "OtTeamMember"("bookingId", "role", "memberName");
+CREATE UNIQUE INDEX IF NOT EXISTS "OtTeamMember_bookingId_role_memberName_key" ON "OtTeamMember"("bookingId", "role", "memberName");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "OtPreOpAssessment_bookingId_key" ON "OtPreOpAssessment"("bookingId");
+CREATE UNIQUE INDEX IF NOT EXISTS "OtPreOpAssessment_bookingId_key" ON "OtPreOpAssessment"("bookingId");
 
 -- CreateIndex
-CREATE INDEX "OtPreOpAssessment_organizationId_idx" ON "OtPreOpAssessment"("organizationId");
+CREATE INDEX IF NOT EXISTS "OtPreOpAssessment_organizationId_idx" ON "OtPreOpAssessment"("organizationId");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "OtSafetyChecklist_bookingId_key" ON "OtSafetyChecklist"("bookingId");
+CREATE UNIQUE INDEX IF NOT EXISTS "OtSafetyChecklist_bookingId_key" ON "OtSafetyChecklist"("bookingId");
 
 -- CreateIndex
-CREATE INDEX "OtSafetyChecklist_organizationId_idx" ON "OtSafetyChecklist"("organizationId");
+CREATE INDEX IF NOT EXISTS "OtSafetyChecklist_organizationId_idx" ON "OtSafetyChecklist"("organizationId");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "OtAnaesthesiaRecord_bookingId_key" ON "OtAnaesthesiaRecord"("bookingId");
+CREATE UNIQUE INDEX IF NOT EXISTS "OtAnaesthesiaRecord_bookingId_key" ON "OtAnaesthesiaRecord"("bookingId");
 
 -- CreateIndex
-CREATE INDEX "OtAnaesthesiaRecord_organizationId_idx" ON "OtAnaesthesiaRecord"("organizationId");
+CREATE INDEX IF NOT EXISTS "OtAnaesthesiaRecord_organizationId_idx" ON "OtAnaesthesiaRecord"("organizationId");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "OtOperativeNote_bookingId_key" ON "OtOperativeNote"("bookingId");
+CREATE UNIQUE INDEX IF NOT EXISTS "OtOperativeNote_bookingId_key" ON "OtOperativeNote"("bookingId");
 
 -- CreateIndex
-CREATE INDEX "OtOperativeNote_organizationId_idx" ON "OtOperativeNote"("organizationId");
+CREATE INDEX IF NOT EXISTS "OtOperativeNote_organizationId_idx" ON "OtOperativeNote"("organizationId");
 
 -- AddForeignKey
-ALTER TABLE "PreRegistration" ADD CONSTRAINT "PreRegistration_organizationId_fkey" FOREIGN KEY ("organizationId") REFERENCES "Organization"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'PreRegistration_organizationId_fkey') THEN
+    ALTER TABLE "PreRegistration" ADD CONSTRAINT "PreRegistration_organizationId_fkey" FOREIGN KEY ("organizationId") REFERENCES "Organization"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+  END IF;
+END $$;
 
 -- AddForeignKey
-ALTER TABLE "Prescription" ADD CONSTRAINT "Prescription_doctorId_fkey" FOREIGN KEY ("doctorId") REFERENCES "User"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'Prescription_doctorId_fkey') THEN
+    ALTER TABLE "Prescription" ADD CONSTRAINT "Prescription_doctorId_fkey" FOREIGN KEY ("doctorId") REFERENCES "User"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+  END IF;
+END $$;
 
 -- AddForeignKey
-ALTER TABLE "OperatingTheatre" ADD CONSTRAINT "OperatingTheatre_organizationId_fkey" FOREIGN KEY ("organizationId") REFERENCES "Organization"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'OperatingTheatre_organizationId_fkey') THEN
+    ALTER TABLE "OperatingTheatre" ADD CONSTRAINT "OperatingTheatre_organizationId_fkey" FOREIGN KEY ("organizationId") REFERENCES "Organization"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+  END IF;
+END $$;
 
 -- AddForeignKey
-ALTER TABLE "OperatingTheatre" ADD CONSTRAINT "OperatingTheatre_floorId_fkey" FOREIGN KEY ("floorId") REFERENCES "Floor"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'OperatingTheatre_floorId_fkey') THEN
+    ALTER TABLE "OperatingTheatre" ADD CONSTRAINT "OperatingTheatre_floorId_fkey" FOREIGN KEY ("floorId") REFERENCES "Floor"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+  END IF;
+END $$;
 
 -- AddForeignKey
-ALTER TABLE "OperatingTheatre" ADD CONSTRAINT "OperatingTheatre_departmentId_fkey" FOREIGN KEY ("departmentId") REFERENCES "Department"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'OperatingTheatre_departmentId_fkey') THEN
+    ALTER TABLE "OperatingTheatre" ADD CONSTRAINT "OperatingTheatre_departmentId_fkey" FOREIGN KEY ("departmentId") REFERENCES "Department"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+  END IF;
+END $$;
 
 -- AddForeignKey
-ALTER TABLE "SurgeryCatalog" ADD CONSTRAINT "SurgeryCatalog_organizationId_fkey" FOREIGN KEY ("organizationId") REFERENCES "Organization"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'SurgeryCatalog_organizationId_fkey') THEN
+    ALTER TABLE "SurgeryCatalog" ADD CONSTRAINT "SurgeryCatalog_organizationId_fkey" FOREIGN KEY ("organizationId") REFERENCES "Organization"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+  END IF;
+END $$;
 
 -- AddForeignKey
-ALTER TABLE "SurgeryCatalog" ADD CONSTRAINT "SurgeryCatalog_chargeItemId_fkey" FOREIGN KEY ("chargeItemId") REFERENCES "ChargeMaster"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'SurgeryCatalog_chargeItemId_fkey') THEN
+    ALTER TABLE "SurgeryCatalog" ADD CONSTRAINT "SurgeryCatalog_chargeItemId_fkey" FOREIGN KEY ("chargeItemId") REFERENCES "ChargeMaster"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+  END IF;
+END $$;
 
 -- AddForeignKey
-ALTER TABLE "OtBooking" ADD CONSTRAINT "OtBooking_organizationId_fkey" FOREIGN KEY ("organizationId") REFERENCES "Organization"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'OtBooking_organizationId_fkey') THEN
+    ALTER TABLE "OtBooking" ADD CONSTRAINT "OtBooking_organizationId_fkey" FOREIGN KEY ("organizationId") REFERENCES "Organization"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+  END IF;
+END $$;
 
 -- AddForeignKey
-ALTER TABLE "OtBooking" ADD CONSTRAINT "OtBooking_patientId_fkey" FOREIGN KEY ("patientId") REFERENCES "Patient"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'OtBooking_patientId_fkey') THEN
+    ALTER TABLE "OtBooking" ADD CONSTRAINT "OtBooking_patientId_fkey" FOREIGN KEY ("patientId") REFERENCES "Patient"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+  END IF;
+END $$;
 
 -- AddForeignKey
-ALTER TABLE "OtBooking" ADD CONSTRAINT "OtBooking_admissionId_fkey" FOREIGN KEY ("admissionId") REFERENCES "Admission"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'OtBooking_admissionId_fkey') THEN
+    ALTER TABLE "OtBooking" ADD CONSTRAINT "OtBooking_admissionId_fkey" FOREIGN KEY ("admissionId") REFERENCES "Admission"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+  END IF;
+END $$;
 
 -- AddForeignKey
-ALTER TABLE "OtBooking" ADD CONSTRAINT "OtBooking_theatreId_fkey" FOREIGN KEY ("theatreId") REFERENCES "OperatingTheatre"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'OtBooking_theatreId_fkey') THEN
+    ALTER TABLE "OtBooking" ADD CONSTRAINT "OtBooking_theatreId_fkey" FOREIGN KEY ("theatreId") REFERENCES "OperatingTheatre"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+  END IF;
+END $$;
 
 -- AddForeignKey
-ALTER TABLE "OtBooking" ADD CONSTRAINT "OtBooking_surgeryId_fkey" FOREIGN KEY ("surgeryId") REFERENCES "SurgeryCatalog"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'OtBooking_surgeryId_fkey') THEN
+    ALTER TABLE "OtBooking" ADD CONSTRAINT "OtBooking_surgeryId_fkey" FOREIGN KEY ("surgeryId") REFERENCES "SurgeryCatalog"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+  END IF;
+END $$;
 
 -- AddForeignKey
-ALTER TABLE "OtBooking" ADD CONSTRAINT "OtBooking_primarySurgeonId_fkey" FOREIGN KEY ("primarySurgeonId") REFERENCES "User"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'OtBooking_primarySurgeonId_fkey') THEN
+    ALTER TABLE "OtBooking" ADD CONSTRAINT "OtBooking_primarySurgeonId_fkey" FOREIGN KEY ("primarySurgeonId") REFERENCES "User"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+  END IF;
+END $$;
 
 -- AddForeignKey
-ALTER TABLE "OtBooking" ADD CONSTRAINT "OtBooking_anaesthetistId_fkey" FOREIGN KEY ("anaesthetistId") REFERENCES "User"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'OtBooking_anaesthetistId_fkey') THEN
+    ALTER TABLE "OtBooking" ADD CONSTRAINT "OtBooking_anaesthetistId_fkey" FOREIGN KEY ("anaesthetistId") REFERENCES "User"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+  END IF;
+END $$;
 
 -- AddForeignKey
-ALTER TABLE "OtTeamMember" ADD CONSTRAINT "OtTeamMember_organizationId_fkey" FOREIGN KEY ("organizationId") REFERENCES "Organization"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'OtTeamMember_organizationId_fkey') THEN
+    ALTER TABLE "OtTeamMember" ADD CONSTRAINT "OtTeamMember_organizationId_fkey" FOREIGN KEY ("organizationId") REFERENCES "Organization"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+  END IF;
+END $$;
 
 -- AddForeignKey
-ALTER TABLE "OtTeamMember" ADD CONSTRAINT "OtTeamMember_bookingId_fkey" FOREIGN KEY ("bookingId") REFERENCES "OtBooking"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'OtTeamMember_bookingId_fkey') THEN
+    ALTER TABLE "OtTeamMember" ADD CONSTRAINT "OtTeamMember_bookingId_fkey" FOREIGN KEY ("bookingId") REFERENCES "OtBooking"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+  END IF;
+END $$;
 
 -- AddForeignKey
-ALTER TABLE "OtTeamMember" ADD CONSTRAINT "OtTeamMember_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'OtTeamMember_userId_fkey') THEN
+    ALTER TABLE "OtTeamMember" ADD CONSTRAINT "OtTeamMember_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+  END IF;
+END $$;
 
 -- AddForeignKey
-ALTER TABLE "OtPreOpAssessment" ADD CONSTRAINT "OtPreOpAssessment_organizationId_fkey" FOREIGN KEY ("organizationId") REFERENCES "Organization"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'OtPreOpAssessment_organizationId_fkey') THEN
+    ALTER TABLE "OtPreOpAssessment" ADD CONSTRAINT "OtPreOpAssessment_organizationId_fkey" FOREIGN KEY ("organizationId") REFERENCES "Organization"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+  END IF;
+END $$;
 
 -- AddForeignKey
-ALTER TABLE "OtPreOpAssessment" ADD CONSTRAINT "OtPreOpAssessment_bookingId_fkey" FOREIGN KEY ("bookingId") REFERENCES "OtBooking"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'OtPreOpAssessment_bookingId_fkey') THEN
+    ALTER TABLE "OtPreOpAssessment" ADD CONSTRAINT "OtPreOpAssessment_bookingId_fkey" FOREIGN KEY ("bookingId") REFERENCES "OtBooking"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+  END IF;
+END $$;
 
 -- AddForeignKey
-ALTER TABLE "OtSafetyChecklist" ADD CONSTRAINT "OtSafetyChecklist_organizationId_fkey" FOREIGN KEY ("organizationId") REFERENCES "Organization"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'OtSafetyChecklist_organizationId_fkey') THEN
+    ALTER TABLE "OtSafetyChecklist" ADD CONSTRAINT "OtSafetyChecklist_organizationId_fkey" FOREIGN KEY ("organizationId") REFERENCES "Organization"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+  END IF;
+END $$;
 
 -- AddForeignKey
-ALTER TABLE "OtSafetyChecklist" ADD CONSTRAINT "OtSafetyChecklist_bookingId_fkey" FOREIGN KEY ("bookingId") REFERENCES "OtBooking"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'OtSafetyChecklist_bookingId_fkey') THEN
+    ALTER TABLE "OtSafetyChecklist" ADD CONSTRAINT "OtSafetyChecklist_bookingId_fkey" FOREIGN KEY ("bookingId") REFERENCES "OtBooking"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+  END IF;
+END $$;
 
 -- AddForeignKey
-ALTER TABLE "OtAnaesthesiaRecord" ADD CONSTRAINT "OtAnaesthesiaRecord_organizationId_fkey" FOREIGN KEY ("organizationId") REFERENCES "Organization"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'OtAnaesthesiaRecord_organizationId_fkey') THEN
+    ALTER TABLE "OtAnaesthesiaRecord" ADD CONSTRAINT "OtAnaesthesiaRecord_organizationId_fkey" FOREIGN KEY ("organizationId") REFERENCES "Organization"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+  END IF;
+END $$;
 
 -- AddForeignKey
-ALTER TABLE "OtAnaesthesiaRecord" ADD CONSTRAINT "OtAnaesthesiaRecord_bookingId_fkey" FOREIGN KEY ("bookingId") REFERENCES "OtBooking"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'OtAnaesthesiaRecord_bookingId_fkey') THEN
+    ALTER TABLE "OtAnaesthesiaRecord" ADD CONSTRAINT "OtAnaesthesiaRecord_bookingId_fkey" FOREIGN KEY ("bookingId") REFERENCES "OtBooking"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+  END IF;
+END $$;
 
 -- AddForeignKey
-ALTER TABLE "OtOperativeNote" ADD CONSTRAINT "OtOperativeNote_organizationId_fkey" FOREIGN KEY ("organizationId") REFERENCES "Organization"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'OtOperativeNote_organizationId_fkey') THEN
+    ALTER TABLE "OtOperativeNote" ADD CONSTRAINT "OtOperativeNote_organizationId_fkey" FOREIGN KEY ("organizationId") REFERENCES "Organization"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+  END IF;
+END $$;
 
 -- AddForeignKey
-ALTER TABLE "OtOperativeNote" ADD CONSTRAINT "OtOperativeNote_bookingId_fkey" FOREIGN KEY ("bookingId") REFERENCES "OtBooking"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'OtOperativeNote_bookingId_fkey') THEN
+    ALTER TABLE "OtOperativeNote" ADD CONSTRAINT "OtOperativeNote_bookingId_fkey" FOREIGN KEY ("bookingId") REFERENCES "OtBooking"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+  END IF;
+END $$;
 
+-- Columns added to OtOperativeNote after the table itself. Harmless when the
+-- table was just created above; the point is a production copy that predates
+-- them. All nullable, so safe on a table that already holds rows.
+ALTER TABLE "OtOperativeNote" ADD COLUMN IF NOT EXISTS "complicationTypes" TEXT;
+ALTER TABLE "OtOperativeNote" ADD COLUMN IF NOT EXISTS "procedureStatus" TEXT;
+ALTER TABLE "OtOperativeNote" ADD COLUMN IF NOT EXISTS "patientDestination" TEXT;
