@@ -29,6 +29,7 @@ import insuranceRoutes from './insuranceRoutes.js'
 import { router as deathCertificateRoutes } from './deathCertificateRoutes.js'
 import inpatientRoutes from './inpatientRoutes.js'
 import machineIntegrationRoutes from './machineIntegrationRoutes.js'
+import partnerRoutes from './partnerRoutes.js'
 
 export const router = Router()
 
@@ -40,6 +41,12 @@ router.use('/import', importRoutes)  // data import — protected by x-import-se
 // of `authenticate`, or every webhook is rejected with 401 in production and the
 // payment is never banked. It authenticates itself via the webhook signature.
 router.post('/payments/webhook', handleWebhook)
+
+// The doctor portal's backend reads a doctor's appointment list from here.
+// Another system, not a person — no cookie to present — so it sits above
+// `authenticate` and carries x-partner-key instead. Read-only, and the endpoint
+// refuses everything until DOCTOR_PORTAL_PARTNER_SECRET is set.
+router.use('/partner', partnerRoutes)
 
 // Apply authenticate middleware to all routes below
 router.use(authenticate)
