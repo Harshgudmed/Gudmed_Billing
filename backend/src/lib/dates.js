@@ -161,3 +161,41 @@ export function nowInZone(instant = new Date(), timeZone = HOSPITAL_TZ) {
   const dayOfWeek = new Date(Date.UTC(Number(p.year), Number(p.month) - 1, Number(p.day))).getUTCDay()
   return { hhmm: `${String(hour).padStart(2, '0')}:${p.minute}`, dayOfWeek }
 }
+
+/**
+ * Parse a date a user typed, and refuse the three ways JavaScript accepts one it
+ * should not. Returns a Date; throws a 400-shaped error naming the field.
+ *
+ *   new Date("hello")          -> Invalid Date, and stored as NULL if unchecked
+ *   new Date("2032-02-30")     -> 2 March. A calendar overflow rolls FORWARD
+ *                                 silently, so a case is booked on a day nobody
+ *                                 chose and nobody is told.
+ *   new Date("99999-01-01")    -> year 99998 — a valid JS Date that Postgres
+ *                                 then refuses, turning a typo into a 500.
+ *
+ * Lives here because two controllers needed it and the second one was written
+ * without the rollover check: OT bookings rejected 30 February while the OT case
+ * record accepted it, on the same screen.
+ */
+export function parseUserDate(value, label, { minYear = 1900, maxYear = 2200 } = {}) {
+  const fail = (message) => { throw Object.assign(new Error(message), { status: 400 }) }
+
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) fail(`${label} is not a valid date and time`)
+
+  // Read the parsed date back against the text. A Date object being re-used has
+  // no such text, so it is skipped.
+  const written = String(value).match(/^(\d{4})-(\d{2})-(\d{2})/)
+  if (written) {
+    const [, year, month, day] = written
+    const rolled = date.getFullYear() !== Number(year)
+      || date.getMonth() + 1 !== Number(month)
+      || date.getDate() !== Number(day)
+    if (rolled) fail(`${label} is not a real calendar date`)
+  }
+
+  const year = date.getFullYear()
+  if (year < minYear || year > maxYear) fail(`${label} is outside the years a hospital record can cover`)
+
+  return date
+}
