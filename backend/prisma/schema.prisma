@@ -123,6 +123,19 @@ model Organization {
   displayDevices        DisplayDevice[]
   doctorRoomAssignments DoctorRoomAssignment[]
   consultationSchedules ConsultationSchedule[]
+  preRegistrations      PreRegistration[]
+
+  // Operation Theatre
+  operatingTheatres     OperatingTheatre[]
+  surgeryCatalog        SurgeryCatalog[]
+
+  otBookings            OtBooking[]
+
+  otTeamMembers         OtTeamMember[]
+  otPreOpAssessments    OtPreOpAssessment[]
+  otSafetyChecklists    OtSafetyChecklist[]
+  otAnaesthesiaRecords  OtAnaesthesiaRecord[]
+  otOperativeNotes      OtOperativeNote[]
 }
 
 /// User (Staff)
@@ -226,6 +239,11 @@ model User {
   // Death certificates
   deathCertificatesCertified DeathCertificate[] @relation("CertifiedBy")
   deathCertificatesIssued    DeathCertificate[] @relation("IssuedBy")
+  otSurgeries      OtBooking[] @relation("OtPrimarySurgeon")
+  otAnaesthesias   OtBooking[] @relation("OtAnaesthetist")
+  otTeamMemberships OtTeamMember[] @relation("OtTeamMemberUser")
+
+
 
   @@index([organizationId])
   @@index([role])
@@ -253,6 +271,8 @@ model Department {
 
   // One department name per organization — prevents the duplicate-department
   // rows that the frontend used to compensate for.
+  operatingTheatres OperatingTheatre[]
+
   @@unique([organizationId, name])
   @@index([organizationId])
 }
@@ -361,6 +381,8 @@ model Patient {
   ambulanceTrips      AmbulanceTrip[]
   insuranceCases      InsuranceCase[]
   deathCertificates   DeathCertificate[]
+  otBookings   OtBooking[]
+
 
   @@unique([organizationId, mrn])
   @@index([organizationId])
@@ -372,12 +394,63 @@ model Patient {
   // 1M-row table). This composite lets Postgres index-scan straight to the page.
   @@index([organizationId, isActive, createdAt], map: "idx_patient_org_active_created")
   // Trigram (fuzzy substring) indexes — patientController.js's search does
-  // `ILIKE '%term%'` across these 3 columns, which without these indexes does
+  // `ILIKE '%term%'` across these columns, which without these indexes does
   // a full sequential scan (benchmarked: ~3s worst case at 1M+ rows). With
   // them, Postgres uses a Bitmap Index Scan instead (benchmarked: ~3ms).
+  //
+  // middleName and phonePrimary were created directly on the database and were
+  // missing HERE, so every `prisma migrate diff` against production proposed
+  // dropping them — a push would have silently taken patient search back to a
+  // sequential scan on 200k rows. Declared now, so the schema describes what is
+  // actually deployed.
   @@index([firstName(ops: raw("gin_trgm_ops"))], type: Gin, map: "idx_patient_firstname_trgm")
   @@index([lastName(ops: raw("gin_trgm_ops"))], type: Gin, map: "idx_patient_lastname_trgm")
+  @@index([middleName(ops: raw("gin_trgm_ops"))], type: Gin, map: "idx_patient_middlename_trgm")
   @@index([mrn(ops: raw("gin_trgm_ops"))], type: Gin, map: "idx_patient_mrn_trgm")
+  @@index([phonePrimary(ops: raw("gin_trgm_ops"))], type: Gin, map: "idx_patient_phone_trgm")
+}
+
+/// Self-service pre-registration (QR-code walk-up).
+///
+/// A patient fills their own details on their phone via the hospital's QR code,
+/// BEFORE reaching the counter. This is deliberately NOT a Patient row: it has no
+/// UHID, because a UHID identifies a confirmed patient of the hospital, and
+/// anyone can scan a public QR. Reception searches these by name/phone, checks
+/// them, and on "Confirm" the real Patient (with UHID) + first appointment are
+/// created through the normal patientController.create path — after which this
+/// row is deleted.
+///
+/// The full self-filled form is kept as one JSON blob (`formData`) rather than a
+/// column per field: it is written once and read once, straight back into the
+/// same patient form, so mirroring all ~30 Patient columns here would be dead
+/// duplication. Only the three fields reception SEARCHES on are real columns.
+model PreRegistration {
+  id             String @id @default(cuid())
+  organizationId String
+
+  // Real columns only for what reception searches on (name + phone), indexed.
+  firstName    String
+  lastName     String
+  phonePrimary String
+
+  // The entire self-filled patient form, exactly as it will be POSTed to
+  // /patients on confirm. JSON string (Postgres text) to match how the rest of
+  // this schema stores blobs (allergies, settings, …).
+  formData String
+
+  // pending → waiting at the counter · (row is deleted on confirm/reject, so
+  // this is really just a marker for a future "rejected but keep for audit").
+  status String @default("pending")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  // Reception's pending list: this org, newest first.
+  @@index([organizationId, status, createdAt])
+  // Search-by-phone, the reception's fastest lookup ("what's your number?").
+  @@index([organizationId, phonePrimary])
 }
 
 /// Patient Document (KYC & Records)
@@ -668,6 +741,8 @@ model Admission {
   clinicalOrders            ClinicalOrder[]
   ipdConsultations          IpdConsultation[]
   orderTasks                OrderTask[]
+  otBookings   OtBooking[]
+
 
   @@index([organizationId])
   @@index([patientId])
@@ -1744,6 +1819,8 @@ model ChargeMaster {
 
   organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   ipdCharges   IpdCharge[]
+  surgeries    SurgeryCatalog[]
+
 
   @@unique([organizationId, code])
   @@index([organizationId, serviceGroup])
@@ -2653,6 +2730,8 @@ model Floor {
 
   organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   rooms        Room[]
+  operatingTheatres OperatingTheatre[]
+
 
   @@unique([organizationId, name])
   @@index([organizationId])
@@ -3003,4 +3082,441 @@ model DeathCertificate {
   @@index([organizationId])
   @@index([patientId])
   @@index([certificateNumber])
+}
+
+// ============================================
+// OPERATION THEATRE (OT)
+// ============================================
+
+/// A physical operating theatre — OT-1, OT-2, Modular OT.
+///
+/// Deliberately NOT reusing `Room`: that model is the OPD consultation room
+/// (sittingType, queueEntries, displayScreen, doctorLinks). An OT shares none
+/// of that and needs its own status + turnaround, so it gets its own table.
+model OperatingTheatre {
+  id             String  @id @default(cuid())
+  organizationId String
+  floorId        String?
+  departmentId   String?
+
+  name        String // "OT-1", "Modular OT"
+  code        String?
+  theatreType String? // MAJOR | MINOR | MODULAR | EMERGENCY | DAY_CARE
+  status      String  @default("AVAILABLE") // AVAILABLE | OCCUPIED | CLEANING | MAINTENANCE | UNAVAILABLE
+
+  /// Turnaround added after every case when checking for booking clashes.
+  /// Without it two surgeries can be booked back-to-back with no cleaning gap.
+  cleaningMinutes Int     @default(30)
+  isActive        Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  floor        Floor?       @relation(fields: [floorId], references: [id])
+  department   Department?  @relation(fields: [departmentId], references: [id])
+  bookings OtBooking[]
+
+
+  @@unique([organizationId, name])
+  @@index([organizationId])
+  @@index([status])
+}
+
+/// The list of surgeries this hospital performs — the OT equivalent of a
+/// catalogue. `chargeItemId` points at ChargeMaster so the fee resolves through
+/// the SAME tariff engine as every other billable service; OT never gets a
+/// second price list.
+model SurgeryCatalog {
+  id             String  @id @default(cuid())
+  organizationId String
+  chargeItemId   String? // FK ChargeMaster — where the price comes from
+
+  name               String // "Total Knee Replacement"
+  code               String? // "SUR-TKR"
+  specialty          String? // Orthopaedics, General Surgery…
+  defaultMinutes     Int     @default(60) // typical duration, pre-fills the booking
+  defaultAnaesthesia String? // GENERAL | SPINAL | EPIDURAL | REGIONAL | LOCAL | SEDATION | NONE
+  isActive           Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  organization Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  chargeItem   ChargeMaster? @relation(fields: [chargeItemId], references: [id])
+  bookings OtBooking[]
+
+
+  @@unique([organizationId, name])
+  @@index([organizationId])
+}
+
+/// A scheduled surgical case — the row every other OT record hangs off.
+///
+/// `admissionId` is optional HERE because an elective case is booked days before
+/// the patient is admitted. It becomes REQUIRED at check-in (enforced in the
+/// service, not the schema): vitals, nursing notes, IpdCharge and Bill all key on
+/// admissionId, so a case cannot enter theatre without one or it can never be
+/// charted or billed.
+model OtBooking {
+  id             String  @id @default(cuid())
+  organizationId String
+  patientId      String
+  admissionId    String? // filled by check-in; see note above
+  theatreId      String
+  surgeryId      String?
+
+  caseNumber    String // OT-2026-27-000123, from nextSeriesNumber()
+  procedureName String // snapshot — survives a catalogue rename
+  laterality    String? // LEFT | RIGHT | BILATERAL | NA
+  priority      String  @default("ELECTIVE") // ELECTIVE | URGENT | EMERGENCY
+
+  /// The anatomical site, in words: "right knee", "left eye", "L4-L5".
+  /// Separate from `laterality`, which is only the side — knowing it is the RIGHT
+  /// side does not say right WHAT, and both are read out at the WHO Time Out.
+  siteOfSurgery String?
+
+  /// Where the patient is now — "Ward 3, Bed 12", "Emergency", "Day Care".
+  /// The porter is sent from this; without it the theatre rings round to find them.
+  patientLocation String?
+
+  /// Equipment this case needs in the room: C-arm, laparoscopy stack, microscope.
+  /// Free text until an equipment register exists (Phase 3), so the list can be
+  /// written the way the surgeon asks for it today.
+  equipmentNeeded String?
+
+  scheduledStart   DateTime
+  scheduledEnd     DateTime
+  estimatedMinutes Int?
+  actualStart      DateTime?
+  actualEnd        DateTime?
+
+  primarySurgeonId String
+  anaesthetistId   String?
+
+  status String @default("SCHEDULED")
+  // SCHEDULED | CONFIRMED | CHECKED_IN | IN_THEATRE | COMPLETED | CANCELLED | POSTPONED
+
+  cancelReason     String?
+  postponeReason   String?
+  statusChangeNote String?
+  notes            String?
+
+  bookedById   String?
+  bookedByName String? // snapshot — the record must read correctly if the user is removed
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  organization Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  patient      Patient          @relation(fields: [patientId], references: [id])
+  admission    Admission?       @relation(fields: [admissionId], references: [id], onDelete: Restrict)
+  theatre      OperatingTheatre @relation(fields: [theatreId], references: [id])
+  surgery      SurgeryCatalog?  @relation(fields: [surgeryId], references: [id])
+  surgeon      User             @relation("OtPrimarySurgeon", fields: [primarySurgeonId], references: [id])
+  anaesthetist User?            @relation("OtAnaesthetist", fields: [anaesthetistId], references: [id])
+  team OtTeamMember[]
+
+  // The four documents a case produces. Each optional, each one per case.
+  preOpAssessment   OtPreOpAssessment?
+  safetyChecklist   OtSafetyChecklist?
+  anaesthesiaRecord OtAnaesthesiaRecord?
+  operativeNote     OtOperativeNote?
+
+
+  @@unique([organizationId, caseNumber])
+  @@index([organizationId, scheduledStart])
+  @@index([organizationId, status])
+  @@index([theatreId, scheduledStart])
+  @@index([patientId])
+}
+
+/// Who was in theatre for a case, and in what role.
+///
+/// Rows rather than a JSON blob so "which cases did this scrub nurse work?" is a
+/// query and the role can be validated. `memberName` is snapshotted because
+/// visiting surgeons have no User row at all.
+model OtTeamMember {
+  id             String  @id @default(cuid())
+  organizationId String
+  bookingId      String
+  userId         String?
+
+  role String
+  // PRIMARY_SURGEON | ASSISTANT_SURGEON | ANAESTHETIST | SCRUB_NURSE
+  // | CIRCULATING_NURSE | OT_TECHNICIAN | PERFUSIONIST | OBSERVER
+
+  memberName String // snapshot — visiting/external staff have no User row
+  isExternal Boolean @default(false)
+  notes      String?
+
+  createdAt DateTime @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  booking      OtBooking    @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  user         User?        @relation("OtTeamMemberUser", fields: [userId], references: [id])
+
+  @@unique([bookingId, role, memberName])
+  @@index([organizationId, bookingId])
+  @@index([userId, role])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// OT Phase 2 — the four documents a case produces.
+//
+// Four records, not one, because in a real theatre these are four separate legal
+// documents with four different authors and four different sign-offs: the
+// anaesthetist assesses beforehand, the nurse runs the checklist, the
+// anaesthetist keeps the anaesthesia chart, the surgeon dictates the note. One
+// combined table would let any of them overwrite another's work.
+//
+// Each is optional and one per case. Post-op recovery observations are NOT here:
+// they are vitals, and VitalsRecord already carries BP, pulse, SpO2, pain score,
+// AVPU, GCS and intake/output against the admission every OT case has by check-in.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Written before the case, usually by the anaesthetist. Its conclusion —
+/// `fitness` — is what says the surgery may go ahead.
+model OtPreOpAssessment {
+  id             String @id @default(cuid())
+  organizationId String
+  bookingId      String @unique
+
+  diagnosis        String?
+  plannedProcedure String?
+
+  /// WHY this operation, which is not the same as the diagnosis. "Gallstones" is
+  /// the diagnosis; "recurrent biliary colic, failed medical management" is the
+  /// indication, and it is the line an insurer and a medico-legal review read.
+  indication String?
+
+  allergies String? // "None known" is a finding; blank is not
+  currentMedication String?
+  comorbidities     String? // DM, HTN, CAD, asthma, CKD…
+  previousSurgery   String? // and any past trouble with anaesthesia
+
+  asaGrade   String? // I | II | III | IV | V | VI, suffixed E for emergency
+  mallampati Int? // 1-4 — airway difficulty
+  airwayNote String?
+
+  heightCm Float?
+  weightKg Float?
+
+  systolicBp  Int?
+  diastolicBp Int?
+  heartRate   Int?
+  spo2        Float?
+
+  bloodGroup        String?
+  haemoglobin       Float?
+  investigationNote String? // ECG, chest X-ray, coagulation — whatever was ordered
+
+  fastingFrom  DateTime? // the clock the ward works to
+  fastingNote  String?
+  consentTaken Boolean   @default(false)
+  consentBy    String? // who signed — the patient, or the relative and why
+
+  /// FIT | UNFIT | FIT_WITH_CONDITIONS. The case must not proceed on UNFIT.
+  fitness     String?
+  fitnessNote String?
+
+  assessedById   String?
+  assessedByName String? // snapshot — the record must read correctly if the user leaves
+  assessedAt     DateTime?
+
+  /// The second look, on the day, just before the patient goes in. A fitness
+  /// decided a week ago is not a fitness now — the fast may be broken, the BP up,
+  /// a chest infection new. Kept separate from the first assessment so both
+  /// remain readable, and so an unchecked case is visibly unchecked.
+  reassessedAt     DateTime?
+  reassessedById   String?
+  reassessedByName String?
+  reassessFitness  String? // FIT | UNFIT | FIT_WITH_CONDITIONS, as found today
+  reassessNote     String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  booking      OtBooking    @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+}
+
+/// The WHO Surgical Safety Checklist — three moments, three sign-offs.
+///
+/// Sign In happens before anaesthesia, Time Out before the incision, Sign Out
+/// before the patient leaves the room. Separate columns rather than one
+/// "completed" flag, because the whole point of the checklist is WHEN each was
+/// done and by whom; a single tick proves nothing.
+model OtSafetyChecklist {
+  id             String @id @default(cuid())
+  organizationId String
+  bookingId      String @unique
+
+  // ── Sign In — before anaesthesia ──
+  signInAt            DateTime?
+  signInById          String?
+  signInByName        String?
+  identityConfirmed   Boolean   @default(false)
+  siteMarked          Boolean   @default(false)
+  consentConfirmed    Boolean   @default(false)
+  anaesthesiaCheck    Boolean   @default(false)
+  pulseOximeterOn     Boolean   @default(false)
+  knownAllergy        Boolean   @default(false)
+  difficultAirwayRisk Boolean   @default(false)
+  bloodLossRisk       Boolean   @default(false)
+  signInNote          String?
+
+  // ── Time Out — before the incision ──
+  timeOutAt         DateTime?
+  timeOutById       String?
+  timeOutByName     String?
+  teamIntroduced    Boolean   @default(false)
+  patientSiteAgreed Boolean   @default(false)
+  antibioticGiven   Boolean   @default(false)
+  imagingDisplayed  Boolean   @default(false)
+  criticalStepsSaid Boolean   @default(false)
+  timeOutNote       String?
+
+  // ── Sign Out — before leaving the room ──
+  signOutAt         DateTime?
+  signOutById       String?
+  signOutByName     String?
+  procedureRecorded Boolean   @default(false)
+  specimenLabelled  Boolean   @default(false)
+  equipmentIssue    String?
+  recoveryConcern   String?
+  signOutNote       String?
+
+  // ── Counts ──
+  // WHO asks only whether the counts are correct. The numbers are kept as well,
+  // because a retained swab is found by comparing them — and "correct" ticked by
+  // someone who never counted is exactly the failure this record exists to catch.
+  swabInitial       Int?
+  swabFinal         Int?
+  instrumentInitial Int?
+  instrumentFinal   Int?
+  needleInitial     Int?
+  needleFinal       Int?
+  countsCorrect     Boolean @default(false)
+  countedById       String?
+  countedByName     String?
+  countNote         String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  booking      OtBooking    @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+}
+
+/// The anaesthetist's chart for the case.
+model OtAnaesthesiaRecord {
+  id             String @id @default(cuid())
+  organizationId String
+  bookingId      String @unique
+
+  /// GENERAL | SPINAL | EPIDURAL | REGIONAL | LOCAL | SEDATION | COMBINED
+  anaesthesiaType String?
+  asaGrade        String?
+
+  airwayDevice    String? // ETT | LMA | FACE_MASK | NASAL | TRACHEOSTOMY
+  tubeSize        String?
+  ventilationMode String? // SPONTANEOUS | CONTROLLED | ASSISTED | SIMV | PSV
+  ventilatorNote  String? // tidal volume, rate, PEEP, FiO2
+
+  drugsGiven String? // agent, dose, time — free text until a drug table earns its place
+  fluidsMl   Int?
+  fluidNote  String?
+  bloodGiven Boolean @default(false)
+  bloodUnits Int?
+  bloodNote  String? // product, group, cross-match number
+
+  monitoringNote String? // what was monitored, and anything it showed
+  complication   String?
+
+  inductionAt DateTime?
+  reversalAt  DateTime?
+
+  recordedById   String?
+  recordedByName String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  booking      OtBooking    @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+}
+
+/// The surgeon's operative note — what was found, what was done, what came out.
+///
+/// `procedurePerformed` is separate from the booking's `procedureName` on
+/// purpose: a case is booked as one operation and not rarely turns into another
+/// on the table, and the bill follows what was PERFORMED.
+model OtOperativeNote {
+  id             String @id @default(cuid())
+  organizationId String
+  bookingId      String @unique
+
+  incisionAt DateTime?
+  closureAt  DateTime?
+
+  findings           String?
+  procedurePerformed String?
+  procedureNote      String? // the step-by-step account
+  complication       String?
+
+  specimenSent   Boolean @default(false)
+  specimenDetail String? // what, how many, sent where
+
+  bloodLossMl Int?
+  drainDetail String?
+
+  postOpInstruction String?
+
+  /// Which kinds of complication occurred, as a JSON array of canonical codes —
+  /// the same shape as Patient.allergies, which is the pattern this system
+  /// already uses for coded multi-select clinical facts.
+  ///
+  /// THREE states, and the difference matters:
+  ///   null   nobody has answered yet
+  ///   "[]"   the surgeon said there were none
+  ///   [...]  these kinds occurred
+  /// Reading "no complications" off an unanswered field is how an audit comes to
+  /// believe a hospital never has any.
+  ///
+  /// The codes are a clinical taxonomy, deliberately NOT per-hospital: if each
+  /// hospital named its own, "how many bleeding complications across the group"
+  /// would stop being answerable, which is the whole reason for structuring this.
+  /// The list lives in otClinicalController.js and is mirrored in src/api/otApi.js.
+  complicationTypes String?
+
+  /// How the case ended: COMPLETED | MODIFIED | ABANDONED
+  /// Without this, a surgery abandoned after induction and one that finished as
+  /// planned read identically in the record. They are not the same event — the
+  /// bill differs, the audit counts them apart, and an abandoned case is the one
+  /// a coroner asks about. Absent means nobody has said yet.
+  procedureStatus String?
+
+  /// Where the patient went from the table: RECOVERY | ICU | HDU | WARD | HOME
+  /// The handover, written down. Until now the record stopped at the theatre
+  /// door and nothing said whether the patient went to a ward bed or to ICU.
+  patientDestination String?
+
+  dictatedById   String?
+  dictatedByName String?
+  dictatedAt     DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  booking      OtBooking    @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
 }
