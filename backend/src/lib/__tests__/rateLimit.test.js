@@ -27,6 +27,14 @@ before(async () => {
   // A second route with a window short enough to watch it reset.
   app.get('/short', rateLimit({ limit: 1, windowMs: 300 }), (_req, res) => res.json({ ok: true }))
 
+  // Keyed on a header rather than the address — what the partner feed does,
+  // because behind a load balancer the address is not stable enough to count.
+  app.get('/by-key', rateLimit({
+    limit: 2,
+    windowMs: 60_000,
+    keyBy: (req) => req.headers['x-test-key'] || req.ip,
+  }), (_req, res) => res.json({ ok: true }))
+
   await new Promise((resolve) => { server = app.listen(0, resolve) })
   baseUrl = `http://127.0.0.1:${server.address().port}`
 })
@@ -72,6 +80,26 @@ describe(`the partner rate limiter (${stamp})`, () => {
     assert.ok(header, 'Retry-After is missing, so a caller can only guess')
     const seconds = Number(header)
     assert.ok(seconds > 0 && seconds <= 60, `expected 1-60 seconds, got ${header}`)
+  })
+
+  // The production failure this replaced: every request resolved to a slightly
+  // different address, so each opened its own bucket and the limit never bit.
+  // Counting against the credential instead means one caller shares one bucket
+  // however many addresses they arrive from.
+  test('keyBy counts one caller as one caller, whatever their address', async () => {
+    const send = (key) => fetch(`${baseUrl}/by-key`, { headers: { 'x-test-key': key } })
+    assert.equal((await send('alice')).status, 200)
+    assert.equal((await send('alice')).status, 200)
+    assert.equal((await send('alice')).status, 429, 'the third from alice is over her limit')
+  })
+
+  test('keyBy keeps separate callers in separate buckets', async () => {
+    const send = (key) => fetch(`${baseUrl}/by-key`, { headers: { 'x-test-key': key } })
+    // alice is already over her limit from the test above; bob starts fresh.
+    assert.equal((await send('bob')).status, 200, 'bob must not pay for alice\'s traffic')
+    assert.equal((await send('bob')).status, 200)
+    assert.equal((await send('bob')).status, 429)
+    assert.equal((await send('alice')).status, 429, 'and alice is still over hers')
   })
 
   test('the window resets, and the caller is served again', async () => {
