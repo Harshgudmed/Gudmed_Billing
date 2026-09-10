@@ -51,7 +51,12 @@ export const ROLES = {
     // 'queue' shows the doctor their OWN patients' queue only — the backend
     // (queueController.getQueue) scopes it to entries assigned/following-up to
     // this doctor, so they never see another doctor's patients.
-    modules: ['dashboard', 'opd', 'queue', 'patients', 'doctorAccountability', 'ot'],
+    // 'appointments' shows the doctor their OWN list only — appointmentController
+    // forces where.doctorId to the logged-in doctor and ignores any doctorId in
+    // the query, so this cannot widen what they see. Without it the dashboard's
+    // "Today's Appointments → View All" button pointed at a route this role has
+    // no entry for, and the catch-all bounced them back to OPD.
+    modules: ['dashboard', 'opd', 'appointments', 'queue', 'patients', 'doctorAccountability', 'ot'],
   },
   receptionist: {
     label: 'Receptionist',
