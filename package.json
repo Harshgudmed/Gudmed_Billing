@@ -18,7 +18,8 @@
     "e2e:shot": "node e2e/shot.js",
     "e2e:smoke": "node e2e/smoke.js",
     "qa:drname": "node e2e/lint-drname.mjs",
-    "qa:patientname": "node e2e/lint-patientname.mjs"
+    "qa:patientname": "node e2e/lint-patientname.mjs",
+    "lint": "eslint ."
   },
   "dependencies": {
     "@hookform/resolvers": "^3.10.0",
@@ -57,6 +58,9 @@
     "@vitejs/plugin-react": "^4.3.4",
     "autoprefixer": "^10.4.20",
     "concurrently": "^10.0.3",
+    "eslint": "^10.10.0",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "globals": "^17.12.0",
     "lighthouse": "^13.4.1",
     "playwright": "^1.61.1",
     "postcss": "^8.5.3",

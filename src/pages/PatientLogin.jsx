@@ -20,6 +20,24 @@ export default function PatientLogin() {
   const [password, setPassword] = useState('')
   const [submitting, setSubmitting] = useState(false)
 
+  // The hero image state lives up here, ABOVE the redirect below, for the reason
+  // App.jsx spells out on its own early return: React counts hooks per render.
+  // These two sat after `if (user) return <Navigate/>`, so a signed-in visitor
+  // ran two fewer hooks than an anonymous one — and the render where `user`
+  // flips (a logout while this page is mounted) changes the count mid-life,
+  // which React answers with "rendered more hooks than during the previous
+  // render" and takes the tree down.
+  const hero = LOGIN_HERO.patient
+  const [imgLoaded, setImgLoaded] = useState(false)
+
+  useEffect(() => {
+    if (!hero?.img) return
+    setImgLoaded(false)
+    const img = new Image()
+    img.src = hero.img
+    img.onload = () => setImgLoaded(true)
+  }, [hero?.img])
+
   if (user) {
     return <Navigate to={user.role === 'patient' ? '/patient' : '/'} replace />
   }
@@ -37,17 +55,6 @@ export default function PatientLogin() {
       setSubmitting(false)
     }
   }
-
-  const hero = LOGIN_HERO.patient
-  const [imgLoaded, setImgLoaded] = useState(false)
-
-  useEffect(() => {
-    if (!hero?.img) return
-    setImgLoaded(false)
-    const img = new Image()
-    img.src = hero.img
-    img.onload = () => setImgLoaded(true)
-  }, [hero?.img])
 
   return (
     <div className="min-h-screen flex">

@@ -589,7 +589,7 @@ export default function SettingsModule() {
           <div className="flex justify-end">
             <Button onClick={saveOrganization} disabled={savingOrg}>
               {savingOrg ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Save className="h-4 w-4 mr-2" />}
-              Save Settings
+              Save 
             </Button>
           </div>
         </TabsContent>

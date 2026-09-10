@@ -17,7 +17,7 @@ async function exportData() {
 
     console.log('⚠️  Since your ISP blocks port 5432, use this alternative:\n')
 
-    console.log('✅ SOLUTION: Use Render's built-in backup feature:')
+    console.log("✅ SOLUTION: Use Render's built-in backup feature:")
     console.log('   1. Go to: https://dashboard.render.com')
     console.log('   2. Click on: gudmed-db (PostgreSQL)')
     console.log('   3. Look for: "Backups" section')
