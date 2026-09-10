@@ -3,7 +3,7 @@ import { useOrgSettings } from '@/lib/useOrgSettings'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '@/lib/auth'
 import { AUTH_ENFORCED } from '@/lib/roleConfig'
-import { formatDistanceToNow, format } from 'date-fns'
+import { formatDistanceToNow, format, isSameDay } from 'date-fns'
 import {
   Users, Calendar, Clock, IndianRupee, FlaskConical, Pill, BedDouble,
   AlertCircle, TrendingUp, Timer, UserPlus, Stethoscope, Receipt, Activity
@@ -231,7 +231,12 @@ export default function DashboardModule() {
         <Card>
           <CardHeader>
             <div className="flex items-center justify-between">
-              <CardTitle>Today's Appointments</CardTitle>
+              {/* "Upcoming", not "Today's". The query behind this list is bounded
+                  below only — `appointmentDate: { gte: today }` — so it has
+                  always carried today AND everything after it, which is why the
+                  stat tile above could read 1 while three rows sat under a
+                  heading claiming they were all today's. */}
+              <CardTitle>Upcoming Appointments</CardTitle>
               <Button variant="outline" size="sm" onClick={() => navigate(`${base}/appointments`)}>
                 View All
               </Button>
@@ -247,8 +252,15 @@ export default function DashboardModule() {
                         <p className="font-medium truncate">
                           {getFullName(apt.patient)}
                         </p>
+                        {/* The day is named, because this list spans days. A row
+                            reading only "3:00 PM" was indistinguishable from
+                            today's when it was a week away. Today says "Today"
+                            rather than a date, so the common case stays short. */}
                         <p className="text-sm text-gray-500">
-                          {formatTime12h(apt.appointmentTime)} &bull; {apt.chiefComplaint || 'Consultation'}
+                          {isSameDay(new Date(apt.appointmentDate), new Date())
+                            ? 'Today'
+                            : format(new Date(apt.appointmentDate), 'EEE d MMM')}
+                          {' · '}{formatTime12h(apt.appointmentTime)} &bull; {apt.chiefComplaint || 'Consultation'}
                         </p>
                       </div>
                       <Badge className={getStatusBadgeClass(apt.status)}>
@@ -258,7 +270,7 @@ export default function DashboardModule() {
                   ))}
                 </div>
               ) : (
-                <div className="text-center py-8 text-gray-500">No appointments today</div>
+                <div className="text-center py-8 text-gray-500">No upcoming appointments</div>
               )}
             </ScrollArea>
           </CardContent>

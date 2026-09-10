@@ -174,13 +174,6 @@ export default function OpdModule() {
   const [customEnd, setCustomEnd] = useState('')
   const [filterHasRx, setFilterHasRx] = useState(false)
 
-  // One doctor in the list means one doctor to pick: select them, because the
-  // "All Doctors" option is not rendered when there is no choice to make, and a
-  // filter left on a value with no matching option shows as blank.
-  useEffect(() => {
-    if (doctors.length === 1) setFilterDoctor((current) => (current === 'all' ? doctors[0].id : current))
-  }, [doctors])
-
   // Turn the today/week/month/specific/custom date modes into a concrete
   // {startDate,endDate} the server can filter on.
   const opdDateRange = (() => {
@@ -230,6 +223,20 @@ export default function OpdModule() {
   // doctor types, so nothing here needs the catalogue of everybody.
   const [selectedPatientRecord, setSelectedPatientRecord] = useState(null)
   const [doctors, setDoctors] = useState([])
+
+  // One doctor in the list means one doctor to pick: select them, because the
+  // "All Doctors" option is not rendered when there is no choice to make, and a
+  // filter left on a value with no matching option shows as blank.
+  //
+  // Must sit AFTER the `doctors` declaration above. It was written higher up
+  // beside the other filter state, and the dependency array is evaluated during
+  // render — before `const doctors` is initialised — which threw
+  // "Cannot access 'doctors' before initialization" and took the whole page to
+  // the error boundary.
+  useEffect(() => {
+    if (doctors.length === 1) setFilterDoctor((current) => (current === 'all' ? doctors[0].id : current))
+  }, [doctors])
+
   const drugPicker = useCatalogueSearch(searchDrugs)
   const labTestPicker = useCatalogueSearch(searchLabTests)
   const radExamPicker = useCatalogueSearch(searchRadExams)
