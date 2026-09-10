@@ -111,7 +111,10 @@ export default function DoctorSlotsView({
                   <SelectValue placeholder="Select Doctor" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="all">All Doctors</SelectItem>
+                  {/* Offered only when there is actually a choice. A doctor's
+                      list is scoped to themselves, so "All Doctors" would name
+                      their own week as if it were the whole hospital's. */}
+                  {doctors.length > 1 && <SelectItem value="all">All Doctors</SelectItem>}
                   {doctors.map((doctor) => (
                     <SelectItem key={doctor.id} value={doctor.id}>
                       {drName(doctor.fullName)}

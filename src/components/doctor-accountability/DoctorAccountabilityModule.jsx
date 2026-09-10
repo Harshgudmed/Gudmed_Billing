@@ -422,6 +422,12 @@ function CommissionsTab({ openAddSignal }) {
   const [filterDoctor, setFilterDoctor] = useState('all')
   const [filterStatus, setFilterStatus] = useState('all')
   const [filterDate, setFilterDate] = useState('all')
+
+  // See OpdModule: with a single doctor the "all" option is not rendered, so a
+  // filter still holding 'all' would display as blank.
+  useEffect(() => {
+    if (doctors.length === 1) setFilterDoctor((current) => (current === 'all' ? doctors[0].id : current))
+  }, [doctors])
   // The hospital's own details for the printed report — same shape as before,
   // but actually populated: the old useState's setter was never called, so every
   // print came out headed 'Hospital'.
@@ -694,7 +700,8 @@ function CommissionsTab({ openAddSignal }) {
         <Select value={filterDoctor} onValueChange={setFilterDoctor}>
           <SelectTrigger className="w-44"><SelectValue placeholder="All Doctors" /></SelectTrigger>
           <SelectContent>
-            <SelectItem value="all">All Doctors</SelectItem>
+            {/* Only when there is a choice — see OpdModule. */}
+            {doctors.length > 1 && <SelectItem value="all">All Doctors</SelectItem>}
             {doctors.map(d => <SelectItem key={d.id} value={d.id}>{drName(d.fullName)}</SelectItem>)}
           </SelectContent>
         </Select>

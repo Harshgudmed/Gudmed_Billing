@@ -145,7 +145,8 @@ export default function AppointmentsListView({
                 <SelectValue placeholder="All Doctors" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">All Doctors</SelectItem>
+                {/* See DoctorSlotsView: no "all" when there is only one name. */}
+                {filterDoctors.length > 1 && <SelectItem value="all">All Doctors</SelectItem>}
                 {filterDoctors.map((doctor) => (
                   <SelectItem key={doctor.id} value={doctor.id}>
                     {drName(doctor.fullName)}

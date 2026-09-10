@@ -174,6 +174,13 @@ export default function OpdModule() {
   const [customEnd, setCustomEnd] = useState('')
   const [filterHasRx, setFilterHasRx] = useState(false)
 
+  // One doctor in the list means one doctor to pick: select them, because the
+  // "All Doctors" option is not rendered when there is no choice to make, and a
+  // filter left on a value with no matching option shows as blank.
+  useEffect(() => {
+    if (doctors.length === 1) setFilterDoctor((current) => (current === 'all' ? doctors[0].id : current))
+  }, [doctors])
+
   // Turn the today/week/month/specific/custom date modes into a concrete
   // {startDate,endDate} the server can filter on.
   const opdDateRange = (() => {
@@ -538,7 +545,10 @@ export default function OpdModule() {
           </div>
           <SearchableSelect
             options={[
-              { value: 'all', label: 'All Doctors' },
+              // No "all" when there is only one name to pick — a doctor's list
+              // is scoped to themselves, so it would label their own work as
+              // every doctor's.
+              ...(doctors.length > 1 ? [{ value: 'all', label: 'All Doctors' }] : []),
               ...doctors.map(d => ({ value: d.id, label: drName(d.fullName) }))
             ]}
             value={filterDoctor}

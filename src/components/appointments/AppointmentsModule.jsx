@@ -320,6 +320,21 @@ export default function AppointmentsModule() {
     );
   }, [selectedDepartmentId, doctors]);
 
+  // When there is only one doctor to choose from, choose them.
+  //
+  // A doctor's own list is the only one the server will return them, so the
+  // dropdown resolves to a single name — and leaving it reading "All Doctors"
+  // offers a choice that does not exist and labels their own week as everyone's.
+  // Both filters are set: the slots tab and the list tab keep separate state.
+  useEffect(() => {
+    if (doctors.length !== 1) return;
+    const onlyId = doctors[0].id;
+    setSelectedDoctor((current) => (current === "all" ? onlyId : current));
+    setFilters((current) =>
+      current.doctor === "all" ? { ...current, doctor: onlyId } : current,
+    );
+  }, [doctors]);
+
   // Today's status counts come from the server (DB groupBy), refreshed on mount
   // and after any change — no need to load every appointment just to count them.
   const [stats, setStats] = useState({
