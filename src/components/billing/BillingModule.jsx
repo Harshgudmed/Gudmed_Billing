@@ -8,7 +8,9 @@ import { format } from 'date-fns'
 import client from '@/api/client'
 import PatientLookup from '@/components/common/PatientLookup'
 import RefundApprovalsTab from './RefundApprovalsTab'
-import { Receipt, RefreshCw, Plus, Search, Trash2, Shield, Eye, Printer, Download, TrendingUp, Clock, AlertCircle, Pencil, X, XCircle } from 'lucide-react'
+// ReceiptIndianRupee, not Receipt: the plain one carries a dollar sign, which is
+// the wrong currency on every screen in this hospital.
+import { ReceiptIndianRupee, RefreshCw, Plus, Search, Trash2, Shield, Eye, Printer, Download, TrendingUp, Clock, AlertCircle, Pencil, X, XCircle } from 'lucide-react'
 import CancelActionDialog from '@/components/common/CancelActionDialog'
 import { useCancelAction } from '@/components/common/hooks/useCancelAction'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
@@ -1251,7 +1253,7 @@ export default function BillingModule({ onBack }) {
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-3xl font-bold flex items-center gap-2">
-            <Receipt className="h-7 w-7 text-blue-600" />Billing &amp; Payments
+            <ReceiptIndianRupee className="h-7 w-7 text-blue-600" />Billing &amp; Payments
           </h1>
           <p className="text-gray-500">Invoice management and payment collection</p>
         </div>
