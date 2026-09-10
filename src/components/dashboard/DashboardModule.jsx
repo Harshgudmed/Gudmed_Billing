@@ -146,18 +146,24 @@ export default function DashboardModule() {
           </CardContent>
         </Card>
 
-        <Card className="cursor-pointer hover:shadow-lg hover:border-green-300 transition-all" onClick={() => navigate(`${base}/billing`)}>
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium text-gray-600">Today's Revenue</CardTitle>
-            <IndianRupee className="h-5 w-5 text-green-600" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">₹ {(stats.todayRevenue || 0).toLocaleString()}</div>
-            <p className="text-xs text-green-600 flex items-center mt-1">
-              <TrendingUp className="h-3 w-3 mr-1" /> Collected today
-            </p>
-          </CardContent>
-        </Card>
+        {/* Absent for a doctor — the API omits the figure rather than sending a
+            zero, because "₹0" is a claim about the hospital's day and this card
+            also navigates to Billing, which a doctor's workspace has no route
+            for. Every other role still gets it. */}
+        {stats.todayRevenue !== undefined && (
+          <Card className="cursor-pointer hover:shadow-lg hover:border-green-300 transition-all" onClick={() => navigate(`${base}/billing`)}>
+            <CardHeader className="flex flex-row items-center justify-between pb-2">
+              <CardTitle className="text-sm font-medium text-gray-600">Today's Revenue</CardTitle>
+              <IndianRupee className="h-5 w-5 text-green-600" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">₹ {(stats.todayRevenue || 0).toLocaleString()}</div>
+              <p className="text-xs text-green-600 flex items-center mt-1">
+                <TrendingUp className="h-3 w-3 mr-1" /> Collected today
+              </p>
+            </CardContent>
+          </Card>
+        )}
       </div>
 
       {/* Secondary Stats — every card is clickable and navigates to its module */}
@@ -184,23 +190,28 @@ export default function DashboardModule() {
           </CardContent>
         </Card>
 
-        <Card className="cursor-pointer hover:shadow-lg hover:border-indigo-300 transition-all" onClick={() => navigate(`${base}/inpatient`)}>
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium text-gray-600">Bed Occupancy</CardTitle>
-            <BedDouble className="h-5 w-5 text-indigo-600" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">
-              {(stats.occupiedBeds || 0)}/{((stats.occupiedBeds || 0) + (stats.availableBeds || 0)) || 0}
-            </div>
-            <Progress
-              value={((stats.occupiedBeds || 0) + (stats.availableBeds || 0)) > 0
-                ? ((stats.occupiedBeds || 0) / ((stats.occupiedBeds || 0) + (stats.availableBeds || 0))) * 100
-                : 0}
-              className="mt-2 h-2"
-            />
-          </CardContent>
-        </Card>
+        {/* Same as Revenue above: ward occupancy belongs to the hospital, not to
+            one doctor, and this card navigates to Inpatient — another module a
+            doctor's workspace does not carry. */}
+        {stats.occupiedBeds !== undefined && (
+          <Card className="cursor-pointer hover:shadow-lg hover:border-indigo-300 transition-all" onClick={() => navigate(`${base}/inpatient`)}>
+            <CardHeader className="flex flex-row items-center justify-between pb-2">
+              <CardTitle className="text-sm font-medium text-gray-600">Bed Occupancy</CardTitle>
+              <BedDouble className="h-5 w-5 text-indigo-600" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">
+                {(stats.occupiedBeds || 0)}/{((stats.occupiedBeds || 0) + (stats.availableBeds || 0)) || 0}
+              </div>
+              <Progress
+                value={((stats.occupiedBeds || 0) + (stats.availableBeds || 0)) > 0
+                  ? ((stats.occupiedBeds || 0) / ((stats.occupiedBeds || 0) + (stats.availableBeds || 0))) * 100
+                  : 0}
+                className="mt-2 h-2"
+              />
+            </CardContent>
+          </Card>
+        )}
 
         <Card className="cursor-pointer hover:shadow-lg hover:border-red-300 transition-all" onClick={() => navigate(`${base}/opd`)}>
           <CardHeader className="flex flex-row items-center justify-between pb-2">

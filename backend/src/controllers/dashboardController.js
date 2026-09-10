@@ -95,11 +95,17 @@ async function computeDashboard(ORG_ID, myDoctorId) {
         }),
 
     // Single groupBy replaces two separate bed.count() round-trips.
-    db.bed.groupBy({
-      by: ['status'],
-      where: { organizationId: ORG_ID },
-      _count: { _all: true },
-    }),
+    //
+    // Skipped for a doctor, like the payments aggregate above: ward occupancy is
+    // the hospital's business, not one doctor's, and their dashboard does not
+    // render it. Not asking is a round-trip saved, not just a field hidden.
+    isDoctor
+      ? Promise.resolve([])
+      : db.bed.groupBy({
+          by: ['status'],
+          where: { organizationId: ORG_ID },
+          _count: { _all: true },
+        }),
 
     // Critical alerts — org-scoped so one tenant never sees another's count.
     // Scoped further to the doctor's own lab orders when a doctor is logged in.
@@ -162,9 +168,16 @@ async function computeDashboard(ORG_ID, myDoctorId) {
       todayAppointments,
       pendingLabOrders,
       pendingPrescriptions,
-      todayRevenue: todayPayments._sum.amount || 0,
-      occupiedBeds,
-      availableBeds: totalBeds - occupiedBeds,
+      // OMITTED for a doctor rather than sent as zero. The payments aggregate
+      // above already refuses them the figure, but a tile reading "Today's
+      // Revenue ₹0" states something false — the hospital did collect money,
+      // this doctor is simply not the audience for it. Absent, the tile is not
+      // drawn at all, which is the honest version of "not yours to see".
+      ...(isDoctor ? {} : {
+        todayRevenue: todayPayments._sum.amount || 0,
+        occupiedBeds,
+        availableBeds: totalBeds - occupiedBeds,
+      }),
       queueWaiting,
       criticalAlerts: criticalLabResults,
     },
