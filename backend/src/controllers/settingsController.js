@@ -75,6 +75,32 @@ export async function getUsers(req, res, next) {
     if (role) where.role = role
     if (departmentId) where.departmentId = departmentId
 
+    // WHO MAY LIST WHOM — applied AFTER the query filters above, so it cannot be
+    // widened by asking for a different `role`.
+    //
+    // This endpoint answered every logged-in user with the whole staff roster.
+    // A doctor calling it with no filter got 1,137 rows including the admins'
+    // email addresses and phone numbers — everything an attacker needs to aim a
+    // phishing mail at the account that can create users. With `role=doctor` it
+    // still handed over all 1,132 doctors and, in the lean shape, each one's
+    // consultationFee.
+    //
+    // Nothing breaks by narrowing it. Every non-admin screen that calls this is
+    // filling a DOCTOR dropdown and already does `.filter(u => u.role ===
+    // 'doctor')` in the browser (OpdModule, NotesAndOrders, DayCareModule,
+    // RegisterPatientForm, useAppointments) — the roster was being fetched and
+    // then thrown away.
+    const actorRole = req.user?.role
+    if (actorRole && actorRole !== 'admin' && actorRole !== 'super_admin') {
+      where.role = 'doctor'
+
+      // And a doctor's dropdowns are their own name only. Their appointment
+      // list is already scoped to them by appointmentController, so offering
+      // colleagues to filter by was a menu of empty results — and a directory
+      // of who else works here, with their fees.
+      if (actorRole === 'doctor' && req.user?.userId) where.id = req.user.userId
+    }
+
     // Only the columns the callers actually read. Every screen that hits this
     // endpoint does so to fill a doctor/staff dropdown — it needs a name, a role
     // and a department, not the whole row. Selecting explicitly (rather than
