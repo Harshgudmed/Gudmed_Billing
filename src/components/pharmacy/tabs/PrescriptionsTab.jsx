@@ -11,7 +11,8 @@ import {
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
-import { CheckCircle, Printer, Loader2 } from "lucide-react";
+import { Input } from "@/components/ui/input";
+import { CheckCircle, Printer, Loader2, Search } from "lucide-react";
 import { format } from "date-fns";
 import { statusBadge } from "../pharmacyHelpers";
 import { Pagination } from "@/components/common/Pagination";
@@ -27,24 +28,37 @@ export default function PrescriptionsTab({
   totalPages,
   openDispenseDialog,
   handlePrintLabel,
+  search = "",     // searched on the server: patient name / UHID / phone, doctor
+  setSearch,
 }) {
   return (
     <TabsContent value="prescriptions" className="space-y-4">
-      <Select
-        value={prescriptionFilter}
-        onValueChange={setPrescriptionFilter}
-      >
-        <SelectTrigger className="w-52">
-          <SelectValue />
-        </SelectTrigger>
-        <SelectContent>
-          <SelectItem value="all">All</SelectItem>
-          <SelectItem value="pending">Pending</SelectItem>
-          <SelectItem value="fully_dispensed">Dispensed</SelectItem>
-          <SelectItem value="partially_dispensed">Partial</SelectItem>
-          <SelectItem value="cancelled">Cancelled</SelectItem>
-        </SelectContent>
-      </Select>
+      <div className="flex gap-3">
+        <div className="relative flex-1">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+          <Input
+            className="pl-9"
+            placeholder="Search patient, UHID, phone or doctor..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
+        </div>
+        <Select
+          value={prescriptionFilter}
+          onValueChange={setPrescriptionFilter}
+        >
+          <SelectTrigger className="w-52">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All</SelectItem>
+            <SelectItem value="pending">Pending</SelectItem>
+            <SelectItem value="fully_dispensed">Dispensed</SelectItem>
+            <SelectItem value="partially_dispensed">Partial</SelectItem>
+            <SelectItem value="cancelled">Cancelled</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
       <Card>
         <CardContent className="p-0">
           <Table>
@@ -72,7 +86,7 @@ export default function PrescriptionsTab({
                     colSpan={7}
                     className="text-center py-8 text-gray-400"
                   >
-                    No prescriptions
+                    {search.trim() ? "No prescriptions match your search" : "No prescriptions"}
                   </TableCell>
                 </TableRow>
               ) : (

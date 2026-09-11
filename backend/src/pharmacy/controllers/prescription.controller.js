@@ -6,6 +6,7 @@ import { createPrescriptionSchema, updatePrescriptionSchema } from '../validatio
 import { getPagination, paginationMeta, handleServiceError, makeError } from '../utils.js'
 import { recordStockChange, consumeFromBatches, findShortages, insufficientStockError } from '../stockService.js'
 import { PATIENT_NAME_SELECT } from '../../lib/patientName.js'
+import { patientSearchWhere } from '../../lib/patientSearch.js'
 
 const SORTABLE_FIELDS = ['prescriptionDate', 'status', 'createdAt']
 
@@ -15,13 +16,19 @@ const DOCTOR_SELECT  = { id: true, fullName: true }
 export async function list(req, res, next) {
   try {
     const ORGANIZATION_ID = getOrgId(req)
-    const { status, patientId, doctorId, sortBy, sortOrder } = req.query
+    const { status, patientId, doctorId, sortBy, sortOrder, search = '' } = req.query
     const { page, limit, skip } = getPagination(req.query)
 
     const where = { organizationId: ORGANIZATION_ID }
     if (status) where.status = status
     if (patientId) where.patientId = patientId
     if (doctorId) where.doctorId = doctorId
+    // Patient name / UHID / phone (the shared patient search), or the
+    // prescribing doctor's name.
+    const searchWhere = patientSearchWhere(search, 'patient', (term) => [
+      { doctor: { fullName: { contains: term, mode: 'insensitive' } } },
+    ])
+    if (searchWhere) Object.assign(where, searchWhere)
 
     const orderBy = SORTABLE_FIELDS.includes(sortBy)
       ? { [sortBy]: sortOrder === 'asc' ? 'asc' : 'desc' }

@@ -110,9 +110,21 @@ export default function PharmacyModule() {
   const [prescriptionFilter, setPrescriptionFilter] = useState("all");
   const [salesPeriod, setSalesPeriod] = useState("month");
 
+  const [rxSearch, setRxSearch] = useState("");
+  const debouncedRxSearch = useDebounce(rxSearch, 300);
   const rxPage = useServerPagination("/pharmacy/prescriptions", {
     perPage: DRUGS_PER_PAGE,
-    params: { status: prescriptionFilter === "all" ? "" : prescriptionFilter },
+    params: { status: prescriptionFilter === "all" ? "" : prescriptionFilter, search: debouncedRxSearch },
+  });
+
+  // Dashboard search. Its "Pending Prescriptions" card is its own small query
+  // (latest pending, searched on the server) instead of a slice of the page the
+  // Prescriptions tab holds — that tab's status filter or search emptied it.
+  const [dashSearch, setDashSearch] = useState("");
+  const debouncedDashSearch = useDebounce(dashSearch, 300);
+  const pendingRxPage = useServerPagination("/pharmacy/prescriptions", {
+    perPage: 5,
+    params: { status: "pending", search: debouncedDashSearch },
   });
 
   const saleStartDate = useMemo(() => {
@@ -425,6 +437,7 @@ ${rx.notes ? `<div class="note-bar"><strong>Notes:</strong> ${escapeHtml(rx.note
     setSelectedPrescription(null);
     setDispenseWarnings([]);
     rxPage.refresh();
+    pendingRxPage.refresh();
     drugPage.refresh();
     fetchStats();
   };
@@ -584,11 +597,8 @@ ${rx.notes ? `<div class="note-bar"><strong>Notes:</strong> ${escapeHtml(rx.note
 
   // Preview list for the dashboard's "Pending Prescriptions" card. The KPI count
   // beside it comes from stats.pendingPrescriptions (whole table); this is only the
-  // handful shown, drawn from the prescriptions page currently loaded.
-  const pendingRx = useMemo(
-    () => rxPage.rows.filter((p) => p.status === "pending"),
-    [rxPage.rows],
-  );
+  // handful shown (pendingRxPage above).
+  const pendingRx = pendingRxPage.rows;
   const todaySalesTotal = stats?.todaySalesTotal ?? 0;
 
   const mrp = parseFloat(drugForm.mrp) || 0;
@@ -609,7 +619,7 @@ ${rx.notes ? `<div class="note-bar"><strong>Notes:</strong> ${escapeHtml(rx.note
           <p className="text-gray-500">Drug inventory, prescriptions &amp; dispensing</p>
         </div>
         <div className="flex gap-2">
-          <Button variant="outline" onClick={() => { drugPage.refresh(); batchPage.refresh(); poPage.refresh(); rxPage.refresh(); salePage.refresh(); fetchStats(); }}>
+          <Button variant="outline" onClick={() => { drugPage.refresh(); batchPage.refresh(); poPage.refresh(); rxPage.refresh(); pendingRxPage.refresh(); salePage.refresh(); fetchStats(); }}>
             <RefreshCw className="h-4 w-4 mr-1" /> Refresh
           </Button>
           <Button variant="outline" onClick={() => setShowSaleDialog(true)}>
@@ -660,6 +670,8 @@ ${rx.notes ? `<div class="note-bar"><strong>Notes:</strong> ${escapeHtml(rx.note
           lowStockDrugs={lowStockDrugs}
           lowStockPage={lowStockPage}
           setLowStockPage={setLowStockPage}
+          search={dashSearch}
+          setSearch={setDashSearch}
           setActiveTab={setActiveTab}
           openDispenseDialog={openDispenseDialog}
           setSelectedDrug={setSelectedDrug}
@@ -692,6 +704,8 @@ ${rx.notes ? `<div class="note-bar"><strong>Notes:</strong> ${escapeHtml(rx.note
         <PrescriptionsTab
           prescriptionFilter={prescriptionFilter}
           setPrescriptionFilter={setPrescriptionFilter}
+          search={rxSearch}
+          setSearch={setRxSearch}
           prescriptions={rxPage.rows}
           loading={rxPage.loading}
           page={rxPage.page}

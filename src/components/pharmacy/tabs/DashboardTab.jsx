@@ -8,7 +8,8 @@ import { Badge } from "@/components/ui/badge";
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
-import { AlertTriangle, Package } from "lucide-react";
+import { Input } from "@/components/ui/input";
+import { AlertTriangle, Package, Search } from "lucide-react";
 import { format } from "date-fns";
 import { stockBadge } from "../pharmacyHelpers";
 import { formatMoney } from "@/lib/format";
@@ -38,9 +39,30 @@ export default function DashboardTab({
   setSelectedDrug,
   setStockAdjust,
   setShowStockDialog,
+  search = "",
+  setSearch,
 }) {
+  // The search narrows the lists below, not the KPI cards (those are the whole
+  // pharmacy). Pending prescriptions arrive already searched on the server; the
+  // low-stock and expiring lists are previews (the 20 most urgent of each), so
+  // they are filtered here.
+  const q = search.trim().toLowerCase();
+  const matches = (...fields) => !q || fields.some((f) => String(f || "").toLowerCase().includes(q));
+  const shownLowStock = lowStockDrugs.filter((d) => matches(d.drugName, d.drugCategory));
+  const shownExpiring = expiringBatches.filter((b) => matches(b.drug?.drugName, b.batchNumber));
+  const shownLowStockPage = Math.min(lowStockPage, Math.max(1, Math.ceil(shownLowStock.length / 10)));
+
   return (
     <TabsContent value="dashboard" className="space-y-4">
+      <div className="relative max-w-md">
+        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+        <Input
+          className="pl-9"
+          placeholder="Search patient, drug or batch..."
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+        />
+      </div>
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
         {[
           {
@@ -134,7 +156,7 @@ export default function DashboardTab({
           </CardHeader>
           <CardContent>
             {pendingRx.length === 0 ? (
-              <p className="text-sm text-gray-400 text-center py-4">No pending prescriptions</p>
+              <p className="text-sm text-gray-400 text-center py-4">{q ? `No pending prescription matches “${search.trim()}”` : "No pending prescriptions"}</p>
             ) : (
               <div className="space-y-2">
                 {pendingRx.slice(0, 5).map(rx => {
@@ -190,11 +212,16 @@ export default function DashboardTab({
                 </TableRow>
               </TableHeader>
               <TableBody>
+                {shownLowStock.length === 0 && (
+                  <TableRow>
+                    <TableCell colSpan={6} className="text-center py-6 text-gray-400">No low-stock drug matches “{search.trim()}”</TableCell>
+                  </TableRow>
+                )}
                 {(() => {
                   const ITEMS_PER_PAGE = 10
-                  const startIdx = (lowStockPage - 1) * ITEMS_PER_PAGE
+                  const startIdx = (shownLowStockPage - 1) * ITEMS_PER_PAGE
                   const endIdx = startIdx + ITEMS_PER_PAGE
-                  const paginatedLowStock = lowStockDrugs.slice(startIdx, endIdx)
+                  const paginatedLowStock = shownLowStock.slice(startIdx, endIdx)
                   return paginatedLowStock.map(d => (
                     <TableRow key={d.id}>
                       <TableCell className="font-medium">{d.drugName}</TableCell>
@@ -218,8 +245,8 @@ export default function DashboardTab({
               </TableBody>
             </Table>
             <Pagination
-              page={lowStockPage}
-              totalPages={Math.ceil(lowStockDrugs.length / 10)}
+              page={shownLowStockPage}
+              totalPages={Math.ceil(shownLowStock.length / 10)}
               onPageChange={setLowStockPage}
             />
           </CardContent>
@@ -247,7 +274,12 @@ export default function DashboardTab({
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {expiringBatches.slice(0, 10).map((b) => {
+                {shownExpiring.length === 0 && (
+                  <TableRow>
+                    <TableCell colSpan={5} className="text-center py-6 text-gray-400">No expiring batch matches “{search.trim()}”</TableCell>
+                  </TableRow>
+                )}
+                {shownExpiring.slice(0, 10).map((b) => {
                   const dl = Math.ceil(
                     (new Date(b.expiryDate) - new Date()) / 86400000,
                   );
