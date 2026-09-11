@@ -127,19 +127,24 @@ export default function AppointmentsListView({
                 ))}
               </SelectContent>
             </Select>
-            <Select value={departmentFilter} onValueChange={setDepartmentFilter}>
-              <SelectTrigger className="w-[180px]">
-                <SelectValue placeholder="All Departments" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Departments</SelectItem>
-                {uniqueDepartments.map((department) => (
-                  <SelectItem key={department.id} value={department.name}>
-                    {department.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            {/* A single doctor (a doctor's own login) is offered only their own
+                department, with no "all" — see AppointmentsModule. With no
+                department at all there is nothing to choose, so no dropdown. */}
+            {(filterDoctors.length !== 1 || uniqueDepartments.length > 0) && (
+              <Select value={departmentFilter} onValueChange={setDepartmentFilter}>
+                <SelectTrigger className="w-[180px]">
+                  <SelectValue placeholder="All Departments" />
+                </SelectTrigger>
+                <SelectContent>
+                  {filterDoctors.length !== 1 && <SelectItem value="all">All Departments</SelectItem>}
+                  {uniqueDepartments.map((department) => (
+                    <SelectItem key={department.id} value={department.name}>
+                      {department.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
             <Select value={doctorFilter} onValueChange={setDoctorFilter}>
               <SelectTrigger className="w-[180px]">
                 <SelectValue placeholder="All Doctors" />

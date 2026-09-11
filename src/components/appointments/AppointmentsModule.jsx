@@ -326,14 +326,35 @@ export default function AppointmentsModule() {
   // dropdown resolves to a single name — and leaving it reading "All Doctors"
   // offers a choice that does not exist and labels their own week as everyone's.
   // Both filters are set: the slots tab and the list tab keep separate state.
+  //
+  // The list's department filter follows the same rule: a doctor works in one
+  // department, so that is the only one offered, and it is selected. The server
+  // filters by the DOCTOR's department (appointmentController getAll), so this
+  // matches every one of their appointments. A doctor with no department keeps
+  // "all" and the list view hides the dropdown.
+  const soleDoctorDepartment = useMemo(
+    () =>
+      doctors.length === 1
+        ? departments.find((d) => d.id === doctors[0].departmentId) ?? null
+        : null,
+    [doctors, departments],
+  );
+  const listDepartments =
+    doctors.length === 1 ? (soleDoctorDepartment ? [soleDoctorDepartment] : []) : departments;
+
   useEffect(() => {
     if (doctors.length !== 1) return;
     const onlyId = doctors[0].id;
+    const deptName = soleDoctorDepartment?.name;
     setSelectedDoctor((current) => (current === "all" ? onlyId : current));
-    setFilters((current) =>
-      current.doctor === "all" ? { ...current, doctor: onlyId } : current,
-    );
-  }, [doctors]);
+    setFilters((current) => {
+      const doctor = current.doctor === "all" ? onlyId : current.doctor;
+      const department = deptName && current.department === "all" ? deptName : current.department;
+      return doctor === current.doctor && department === current.department
+        ? current
+        : { ...current, doctor, department };
+    });
+  }, [doctors, soleDoctorDepartment]);
 
   // Today's status counts come from the server (DB groupBy), refreshed on mount
   // and after any change — no need to load every appointment just to count them.
@@ -1026,7 +1047,7 @@ export default function AppointmentsModule() {
             setDepartmentFilter={(department) => setFiltersField("department", department)}
             doctorFilter={filters.doctor}
             setDoctorFilter={(doctor) => setFiltersField("doctor", doctor)}
-            uniqueDepartments={departments}
+            uniqueDepartments={listDepartments}
             filterDoctors={doctors}
             filteredAppointments={listData.rows}
             total={listData.total}
