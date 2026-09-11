@@ -1,6 +1,8 @@
 ﻿import { useState, useEffect, lazy, Suspense } from 'react'
 import { toFormValues, fromFormValues } from '@/lib/orgSettingsSchema'
 import { clearOrgCache } from '@/lib/orgSettings'
+import { requiredNameSchema, optionalMobileSchema } from '@/lib/schemas/patientFormSchema'
+import { PhoneInput } from '@/components/common/PhoneInput'
 import { drName } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -9,7 +11,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Badge } from '@/components/ui/badge'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import {
-  Settings, Building2, Users, Package, Link2, Database,
+  Settings, Building2, Users, Package, Link2, Database, Search,
   Save, Plus, Edit, Eye, CheckCircle, XCircle, AlertCircle, RefreshCw, Loader2, Clock, Palette,
   MessageCircle, Bell, DoorOpen, MonitorPlay,
 } from 'lucide-react'
@@ -28,6 +30,7 @@ import { zodResolver } from '@hookform/resolvers/zod'
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form'
 import client from '@/api/client'
 import { useServerPagination } from '@/lib/useServerPagination'
+import { useDebounce } from '@/lib/useDebounce'
 import { Pagination } from '@/components/common/Pagination'
 import IntegrationsHub from './IntegrationsHub'
 import RoomsManager from './RoomsManager'
@@ -59,12 +62,17 @@ const INDIAN_STATES = [
   'Delhi', 'Jammu & Kashmir', 'Ladakh', 'Chandigarh', 'Puducherry',
 ]
 
+// Staff are people with names and mobile numbers, exactly like patients, so the
+// rules come from the same place the patient form uses rather than being
+// re-typed loosely here. Before this, `fullName` accepted "A1 Sharma" and
+// `phone` accepted literally anything — no length, no digits check, and the
+// field had no <FormMessage/> to have shown a complaint even if it had one.
 const userSchema = z.object({
-  fullName: z.string().min(2, 'Name is required'),
+  fullName: requiredNameSchema('Full name'),
   email: z.string().email('Valid email required'),
   role: z.string().min(1, 'Role is required'),
   departmentId: z.string().optional(),
-  phone: z.string().optional(),
+  phone: optionalMobileSchema('Phone'),
   specialization: z.string().optional(),
   // Required when creating (validated in onSubmitUser); on edit, blank means "keep".
   password: z.string().optional().or(z.literal('')),
@@ -103,7 +111,17 @@ export default function SettingsModule() {
   // Server-side paginated users list (Settings → Users). The DB slices, so the
   // browser only ever holds one page — the same endpoint still returns the full
   // list to the app's doctor dropdowns when called without page/limit.
-  const usersPagination = useServerPagination('/settings', { perPage: ITEMS_PER_PAGE, params: { resource: 'users' } })
+  // Typing filters on the SERVER, not in the page that happens to be loaded.
+  // With ten users per page and a thousand-odd staff, a browser-side filter
+  // would only ever search the ten rows in front of you — the endpoint already
+  // matches on fullName and email (settingsController.getUsers), so the search
+  // just had to be handed to it. Debounced so a name is one request, not eight.
+  const [userSearch, setUserSearch] = useState('')
+  const debouncedUserSearch = useDebounce(userSearch, 300)
+  const usersPagination = useServerPagination('/settings', {
+    perPage: ITEMS_PER_PAGE,
+    params: { resource: 'users', search: debouncedUserSearch },
+  })
 
   const [orgForm, setOrgForm] = useState({
     name: '', slug: '', email: '', phone: '', address: '', city: '',
@@ -597,10 +615,19 @@ export default function SettingsModule() {
         {/* Users Tab */}
         <TabsContent value="users" className="space-y-4">
           <Card>
-            <CardHeader className="flex flex-row items-center justify-between">
+            <CardHeader className="flex flex-row items-center justify-between gap-4">
               <div>
                 <CardTitle>User Management</CardTitle>
                 <CardDescription>Add, edit, and manage user accounts</CardDescription>
+              </div>
+              <div className="relative w-full max-w-xs ml-auto">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+                <Input
+                  className="pl-9"
+                  placeholder="Search by name or email…"
+                  value={userSearch}
+                  onChange={(e) => setUserSearch(e.target.value)}
+                />
               </div>
               <Dialog open={showUserDialog} onOpenChange={open => { setShowUserDialog(open); if (!open) setEditingUser(null) }}>
                 <DialogTrigger asChild>
@@ -657,8 +684,21 @@ export default function SettingsModule() {
                           </Select>
                         </FormItem>
                       )} />
+                      {/* PhoneInput, not Input: it strips +91, leading zeros,
+                          spaces and letters as they are typed or pasted, so the
+                          value reaching the form is already the bare 10 digits
+                          the schema checks. The placeholder said "+91 98765
+                          43210" while nothing accepted or removed a +91.
+                          <FormMessage/> was missing too, so the field could not
+                          have reported a problem even once it had rules. */}
                       <FormField control={userForm.control} name="phone" render={({ field }) => (
-                        <FormItem><FormLabel>Phone</FormLabel><FormControl><Input placeholder="+91 98765 43210" {...field} /></FormControl></FormItem>
+                        <FormItem>
+                          <FormLabel>Phone</FormLabel>
+                          <FormControl>
+                            <PhoneInput placeholder="98765 43210" value={field.value ?? ''} onChange={field.onChange} onBlur={field.onBlur} name={field.name} />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
                       )} />
                       <FormField control={userForm.control} name="specialization" render={({ field }) => (
                         <FormItem><FormLabel>Specialization</FormLabel><FormControl><Input placeholder="General Practice" {...field} /></FormControl></FormItem>

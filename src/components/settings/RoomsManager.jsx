@@ -9,6 +9,7 @@ import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { SearchableSelect } from '@/components/ui/searchable-select'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogTrigger } from '@/components/ui/dialog'
 import { drName } from '@/lib/utils'
 
@@ -141,12 +142,21 @@ function RoomDialog({ floorId, departments, onSaved, trigger, room }) {
           </div>
           <div className="space-y-2">
             <Label>Department</Label>
-            <Select value={departmentId} onValueChange={setDepartmentId}>
-              <SelectTrigger><SelectValue placeholder="Select department" /></SelectTrigger>
-              <SelectContent>
-                {departments.map((d) => <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>)}
-              </SelectContent>
-            </Select>
+            {/* SearchableSelect, not Select: a hospital with ten departments is
+                fine to scroll, one with sixty is not, and the plain Select has
+                no way to type. The component is the same one the booking form
+                and OPD already use — no server call here, the departments are
+                already loaded, so it filters the list it was handed. */}
+            <SearchableSelect
+              className="w-full"
+              value={departmentId}
+              onChange={setDepartmentId}
+              options={departments.map((d) => ({ value: d.id, label: d.name }))}
+              placeholder="Select department"
+              searchPlaceholder="Type to search departments…"
+              emptyText="No matching department"
+              minSearchLength={0}
+            />
           </div>
           <div className="space-y-2">
             <Label>Label</Label>
@@ -508,13 +518,24 @@ export default function RoomsManager() {
                     className="pl-9"
                   />
                 </div>
-                <Select value={deptFilter} onValueChange={setDeptFilter}>
-                  <SelectTrigger className="w-[190px]"><SelectValue placeholder="All departments" /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">All departments</SelectItem>
-                    {departments.map((d) => <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>)}
-                  </SelectContent>
-                </Select>
+                {/* Searchable, like the department field in the Add Room
+                    dialog above — the same list, the same component, so a
+                    department can be typed rather than scrolled to. The filter
+                    itself (filteredRooms) is unchanged: this only changes how
+                    the department is picked. */}
+                <SearchableSelect
+                  className="w-[220px]"
+                  value={deptFilter}
+                  onChange={(v) => setDeptFilter(v || 'all')}
+                  options={[
+                    { value: 'all', label: 'All departments' },
+                    ...departments.map((d) => ({ value: d.id, label: d.name })),
+                  ]}
+                  placeholder="All departments"
+                  searchPlaceholder="Type to search departments…"
+                  emptyText="No matching department"
+                  minSearchLength={0}
+                />
               </div>
 
               {rooms.length === 0 ? (

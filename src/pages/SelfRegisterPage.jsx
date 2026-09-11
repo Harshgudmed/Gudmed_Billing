@@ -4,6 +4,7 @@ import { CheckCircle2, Loader2, UserPlus } from 'lucide-react'
 import client from '@/api/client'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { PhoneInput } from '@/components/common/PhoneInput'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 
@@ -234,8 +235,13 @@ export default function SelfRegisterPage() {
           <Section title="Contact" subtitle="How the hospital reaches you">
             <div data-error={!!errors.phonePrimary}>
               <Field label="Mobile number" required error={errors.phonePrimary} hint="Reception finds you by this">
-                <Input type="tel" inputMode="numeric" maxLength={10} value={form.phonePrimary}
-                  onChange={(e) => set('phonePrimary')(e.target.value.replace(/\D/g, '').slice(0, 10))}
+                {/* The shared field, not a local `.replace().slice(0, 10)`.
+                    Slicing turns "+91 98765 43210" into "9198765432" — ten
+                    digits, starts with 9, passes the schema, and reaches
+                    nobody. sanitizePhoneInput strips the country code instead,
+                    and leaves anything it cannot recognise for the schema to
+                    refuse rather than inventing a number from it. */}
+                <PhoneInput value={form.phonePrimary} onChange={set('phonePrimary')}
                   placeholder="9876543210" />
               </Field>
             </div>
@@ -270,8 +276,8 @@ export default function SelfRegisterPage() {
               <Input value={form.emergencyContactName} onChange={(e) => set('emergencyContactName')(e.target.value)} />
             </Field>
             <Field label="Their mobile" error={errors.emergencyContactPhone}>
-              <Input type="tel" inputMode="numeric" maxLength={10} value={form.emergencyContactPhone}
-                onChange={(e) => set('emergencyContactPhone')(e.target.value.replace(/\D/g, '').slice(0, 10))} />
+              {/* Same field, same reason as the mobile above. */}
+              <PhoneInput value={form.emergencyContactPhone} onChange={set('emergencyContactPhone')} />
             </Field>
           </Section>
 
