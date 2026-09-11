@@ -1,5 +1,5 @@
 import { useState, useMemo, useEffect } from 'react'
-import { Check, ChevronsUpDown, Search, Loader2 } from 'lucide-react'
+import { Check, ChevronsUpDown, Search, Loader2, Plus } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -31,6 +31,12 @@ import { useDebounce } from '@/lib/useDebounce'
  *  - minSearchLength: characters required before searching (default 2)
  *  - selectedLabel: label for `value` when the selected row isn't in `options`
  *    (server mode only holds the current result page, not the whole catalogue)
+ *
+ * ── Free text (optional) ──
+ *  - allowCustom: the options become suggestions rather than the only choices.
+ *    Whatever is typed can be used as the value ("Use “…”" row, or Enter), and
+ *    a value that is not in `options` is shown as written. Off by default, so
+ *    every existing picker still only accepts a listed option.
  */
 export function SearchableSelect({
   options = [],
@@ -46,6 +52,7 @@ export function SearchableSelect({
   loading = false,
   minSearchLength = 2,
   selectedLabel,
+  allowCustom = false,
 }) {
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState('')
@@ -64,7 +71,14 @@ export function SearchableSelect({
   // In server mode `options` IS the result set — filtering it again locally
   // would hide rows the server deliberately returned.
   const selected = options.find(o => o.value === value)
-  const selectedText = selected?.label ?? (value ? selectedLabel : undefined)
+  const selectedText = selected?.label ?? (value ? (selectedLabel ?? (allowCustom ? value : undefined)) : undefined)
+
+  // Free text: offer the typed words themselves unless they already match an
+  // option exactly (then that option is the one to pick).
+  const typed = query.trim()
+  const exactOption = typed ? options.find(o => String(o.label).toLowerCase() === typed.toLowerCase()) : undefined
+  const canUseTyped = allowCustom && !!typed && !exactOption
+  const choose = (v) => { onChange(v); setOpen(false); setQuery('') }
 
   const filtered = useMemo(() => {
     if (serverMode) return options
@@ -99,12 +113,29 @@ export function SearchableSelect({
             autoFocus
             value={query}
             onChange={(e) => setQuery(e.target.value)}
+            onKeyDown={allowCustom ? (e) => {
+              // Enter keeps what was typed. preventDefault also stops it from
+              // submitting a surrounding form.
+              if (e.key !== 'Enter' || !typed) return
+              e.preventDefault()
+              choose(exactOption ? exactOption.value : typed)
+            } : undefined}
             placeholder={searchPlaceholder}
             className="border-0 focus-visible:ring-0 focus-visible:ring-offset-0 h-10 px-2"
           />
           {loading && <Loader2 className="h-4 w-4 shrink-0 animate-spin text-gray-400" />}
         </div>
         <div className="max-h-64 overflow-y-auto p-1" onWheel={(e) => e.stopPropagation()}>
+          {canUseTyped && (
+            <button
+              type="button"
+              onClick={() => choose(typed)}
+              className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm text-blue-700 hover:bg-gray-100"
+            >
+              <Plus className="h-4 w-4 shrink-0" />
+              <span className="truncate">Use “{typed}”</span>
+            </button>
+          )}
           {serverMode && query.trim().length < minSearchLength ? (
             <div className="py-6 text-center text-sm text-gray-400">
               Type at least {minSearchLength} characters to search
@@ -112,13 +143,13 @@ export function SearchableSelect({
           ) : loading && filtered.length === 0 ? (
             <div className="py-6 text-center text-sm text-gray-400">Searching...</div>
           ) : filtered.length === 0 ? (
-            <div className="py-6 text-center text-sm text-gray-400">{emptyText}</div>
+            canUseTyped ? null : <div className="py-6 text-center text-sm text-gray-400">{emptyText}</div>
           ) : (
             filtered.map(o => (
               <button
                 key={o.value}
                 type="button"
-                onClick={() => { onChange(o.value); setOpen(false); setQuery('') }}
+                onClick={() => choose(o.value)}
                 className={cn(
                   'flex w-full items-start gap-2 rounded-sm px-2 py-1.5 text-left text-sm hover:bg-gray-100',
                   o.value === value && 'bg-gray-50'

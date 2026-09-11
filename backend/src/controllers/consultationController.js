@@ -20,8 +20,13 @@ export async function getAll(req, res, next) {
     // A doctor only sees their own consultations.
     const myDoctorId = scopedDoctorId(req)
     if (myDoctorId) baseWhere.doctorId = myDoctorId
+    // Doctor name and complaint too: searching "priya" found patients called
+    // Priya but none of Dr. Priya Mehta's consultations. A doctor's own search
+    // is still inside their own consultations (baseWhere.doctorId above).
     const searchWhere = patientSearchWhere(search, 'patient', (term) => [
       { diagnosis: { contains: term, mode: 'insensitive' } },
+      { chiefComplaint: { contains: term, mode: 'insensitive' } },
+      { doctor: { fullName: { contains: term, mode: 'insensitive' } } },
     ])
     if (searchWhere) Object.assign(baseWhere, searchWhere)
 

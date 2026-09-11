@@ -314,6 +314,15 @@ export default function OpdModule() {
   const onProblemChange = async (cond) => {
     setProblem(cond)
     if (!cond) { setGuidance(null); return }
+    // A problem the doctor typed, rather than picked from the department's
+    // list, has no knowledge-base entry to look up: it becomes the diagnosis
+    // as written, with no suggestions.
+    if (!department || !conditions.some(c => c.condition === cond)) {
+      setGuidance(null)
+      clinicalForm.setValue('diagnosis', cond)
+      if (!clinicalForm.getValues('chiefComplaint')) clinicalForm.setValue('chiefComplaint', cond)
+      return
+    }
     setGuidanceLoading(true)
     try {
       const res = await client.get(`/clinical-kb/condition?specialty=${encodeURIComponent(department)}&condition=${encodeURIComponent(cond)}`)
@@ -548,7 +557,7 @@ export default function OpdModule() {
         <div className="flex flex-wrap gap-3 items-center">
           <div className="relative flex-1 min-w-[220px] max-w-sm">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
-            <Input className="pl-9 rounded-xl" placeholder="Search by patient, UHID, diagnosis..." value={filterSearch} onChange={e => setFilterSearch(e.target.value)} />
+            <Input className="pl-9 rounded-xl" placeholder="Search by patient, UHID, doctor, diagnosis..." value={filterSearch} onChange={e => setFilterSearch(e.target.value)} />
           </div>
           <SearchableSelect
             options={[
@@ -821,15 +830,15 @@ export default function OpdModule() {
                   className="w-full rounded-xl"
                   value={problem}
                   onChange={onProblemChange}
-                  disabled={!department}
+                  allowCustom
                   options={conditions.map(c => ({
                     value: c.condition,
                     label: c.condition,
                     sublabel: c.icd10 && !/not specified/i.test(c.icd10) ? c.icd10 : undefined,
                     keywords: c.icd10 || '',
                   }))}
-                  placeholder={department ? 'Select problem' : 'Select a department first'}
-                  searchPlaceholder="Type to search problems..."
+                  placeholder={department ? 'Pick or type the problem' : 'Type the problem'}
+                  searchPlaceholder="Type the problem..."
                   emptyText="No matching problem"
                 />
               </div>
