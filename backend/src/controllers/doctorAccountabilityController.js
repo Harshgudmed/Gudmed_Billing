@@ -1,6 +1,7 @@
 import { db } from '../config/db.js'
 import { getOrgId } from "../lib/reqContext.js";
 import { scopedDoctorId } from '../utils/scope.js'
+import { round2 } from '../lib/money.js'
 import { assertValidShift, assertNoSelfOverlap } from '../lib/activeDoctor.js'
 import { roomIdsInTimetable } from '../lib/doctorTimetable.js'
 
@@ -423,6 +424,73 @@ export async function handlePatch(req, res, next) {
         },
       })
       return res.json({ success: true, message: `${commissionIds.length} commission(s) settled successfully` })
+    }
+
+    // Edit one commission's invoice figures.
+    //
+    // The Commissions tab has always had an Edit button, a dialog and a save
+    // that PATCHes here with resource=commission — and this handler only knew
+    // 'settle', so every save came back 400 "Unknown resource" and the dialog
+    // said "Failed to update". There was no commission update anywhere.
+    if (resource === 'commission') {
+      const { id } = req.query
+
+      // A doctor does not edit their own commission. The amount is their pay;
+      // letting the payee change the invoice figure it is computed from is the
+      // one write here that must not be self-service. Admins and coordinators
+      // (scopedDoctorId === null) edit as before.
+      if (scopedDoctorId(req)) {
+        return res.status(403).json({ success: false, error: 'Commissions are edited by the hospital, not by the doctor' })
+      }
+
+      const invoiceAmount = Number(req.body?.invoiceAmount)
+      if (!Number.isFinite(invoiceAmount) || invoiceAmount <= 0) {
+        return res.status(400).json({ success: false, error: 'Enter a valid invoice amount' })
+      }
+
+      // Tenant guard, as handleDelete does: the row must belong to this org.
+      const existing = await db.doctorCommission.findFirst({
+        where: { id, organizationId: ORG_ID },
+        select: { id: true, status: true, commissionRate: true, commissionType: true },
+      })
+      if (!existing) return res.status(404).json({ success: false, error: 'Commission not found' })
+
+      // Settled means paid. Changing the invoice under a payment already made
+      // would leave the ledger and the payout disagreeing with no trace of why.
+      if (existing.status !== 'pending') {
+        return res.status(409).json({ success: false, error: 'Only a pending commission can be edited — this one is already settled' })
+      }
+
+      // An invoice named here must be one of this hospital's.
+      let invoiceId = req.body?.invoiceId || null
+      if (invoiceId) {
+        const inv = await db.invoice.findFirst({ where: { id: invoiceId, organizationId: ORG_ID }, select: { id: true } })
+        if (!inv) return res.status(400).json({ success: false, error: 'That invoice was not found in this hospital' })
+      }
+
+      // Computed HERE from the stored rate and type. The dialog also sends a
+      // commissionAmount it worked out itself; that is a display value and is
+      // ignored — the server does not take a payout figure from the browser.
+      const commissionAmount = existing.commissionType === 'percentage'
+        ? round2((invoiceAmount * existing.commissionRate) / 100)
+        : round2(existing.commissionRate)
+
+      // Compare-and-set on status: if a settle lands between the read above and
+      // this write, the count is 0 and the edit is refused instead of rewriting
+      // a commission that was just paid.
+      const { count } = await db.doctorCommission.updateMany({
+        where: { id, organizationId: ORG_ID, status: 'pending' },
+        data: { invoiceAmount: round2(invoiceAmount), commissionAmount, invoiceId },
+      })
+      if (count === 0) {
+        return res.status(409).json({ success: false, error: 'This commission was settled while you were editing it' })
+      }
+
+      const updated = await db.doctorCommission.findFirst({
+        where: { id, organizationId: ORG_ID },
+        include: { doctor: { select: { id: true, fullName: true } } },
+      })
+      return res.json({ success: true, data: updated })
     }
 
     res.status(400).json({ success: false, error: 'Unknown resource' })
