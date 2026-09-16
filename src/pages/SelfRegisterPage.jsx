@@ -1,12 +1,10 @@
 import { useEffect, useMemo, useState } from 'react'
-import { z } from 'zod'
 import { CheckCircle2, Loader2, UserPlus } from 'lucide-react'
 import client from '@/api/client'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { PhoneInput } from '@/components/common/PhoneInput'
-import { Label } from '@/components/ui/label'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import PatientDetailsFields from '@/components/common/PatientDetailsFields'
+import { patientDetailsSchema, issuesToFieldErrors } from '@/lib/schemas/patientFormSchema'
+import { sanitizeTextInput, sanitizeNameInput } from '@/components/common/textFieldUtils'
 
 // The public, no-login page a patient reaches by scanning the hospital's QR
 // code. They fill their OWN details here before the counter, so reception only
@@ -16,67 +14,27 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 // the authenticated tree (see App.jsx) because a walk-up patient has no account.
 // It never creates a Patient or a UHID — only a pending row the counter turns
 // into a real registration.
-
-// Only the five fields reception truly needs to find and identify a person are
-// required; everything else is optional so a nervous patient on a phone in a
-// waiting hall is never blocked by a field they don't know. Reception fills or
-// fixes the rest at the counter.
-const schema = z.object({
-  firstName: z.string().trim().min(2, 'Please enter your first name'),
-  middleName: z.string().trim().optional().or(z.literal('')),
-  lastName: z.string().trim().min(1, 'Please enter your last name'),
-  dateOfBirth: z.string().min(1, 'Please choose your date of birth'),
-  gender: z.enum(['male', 'female', 'other'], { errorMap: () => ({ message: 'Please choose' }) }),
-  phonePrimary: z.string().trim().regex(/^[6-9]\d{9}$/, 'Enter a 10-digit mobile number'),
-  email: z.string().trim().email('Enter a valid email').optional().or(z.literal('')),
-  houseNumber: z.string().trim().optional().or(z.literal('')),
-  street: z.string().trim().optional().or(z.literal('')),
-  city: z.string().trim().optional().or(z.literal('')),
-  state: z.string().trim().optional().or(z.literal('')),
-  pincode: z.string().trim().regex(/^\d{6}$/, 'PIN must be 6 digits').optional().or(z.literal('')),
-  bloodGroup: z.string().optional().or(z.literal('')),
-  emergencyContactName: z.string().trim().optional().or(z.literal('')),
-  emergencyContactPhone: z.string().trim().optional().or(z.literal('')),
-})
-
-const BLOOD_GROUPS = ['A+', 'A-', 'B+', 'B-', 'O+', 'O-', 'AB+', 'AB-']
+//
+// The fields and their rules are NOT written here. They are the same
+// PatientDetailsFields and patientDetailsSchema reception registers with, so
+// what the patient types is exactly what the counter's form expects — same
+// labels, same validation, same field names. This page used to carry its own
+// copy of both, which is how it came to ask for "Mobile number" where reception
+// asked for "Primary Phone", and to skip locality, district, second phone,
+// marital status, relationship and insurance altogether — nine fields reception
+// then had to type again, which is the work this page exists to remove.
+//
+// Two reception-only fields are hidden (showMedicoLegal): "Referred By" and
+// "MLC Number" are the hospital's record of the visit, not the patient's to
+// fill in.
 
 const EMPTY = {
-  firstName: '', middleName: '', lastName: '', dateOfBirth: '', gender: '',
-  phonePrimary: '', email: '',
-  houseNumber: '', street: '', city: '', state: '', pincode: '',
-  bloodGroup: '', emergencyContactName: '', emergencyContactPhone: '',
-}
-
-/** 'yyyy-MM-dd' for today — a birth date can never be in the future. */
-function todayYmd() {
-  const n = new Date()
-  return `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, '0')}-${String(n.getDate()).padStart(2, '0')}`
-}
-
-function Field({ label, required, error, children, hint }) {
-  return (
-    <div className="space-y-1.5">
-      <Label className="text-sm font-medium text-slate-700">
-        {label} {required && <span className="text-red-500">*</span>}
-      </Label>
-      {children}
-      {hint && !error && <p className="text-xs text-slate-400">{hint}</p>}
-      {error && <p className="text-xs font-medium text-red-600">{error}</p>}
-    </div>
-  )
-}
-
-function Section({ title, subtitle, children }) {
-  return (
-    <div className="rounded-xl border border-slate-200 bg-white p-4 sm:p-5 shadow-sm">
-      <div className="mb-4">
-        <h2 className="text-base font-semibold text-slate-800">{title}</h2>
-        {subtitle && <p className="text-xs text-slate-400">{subtitle}</p>}
-      </div>
-      <div className="grid gap-4 sm:grid-cols-2">{children}</div>
-    </div>
-  )
+  firstName: '', middleName: '', lastName: '', dateOfBirth: '', gender: 'male',
+  maritalStatus: '', referredBy: '', mlcNumber: '',
+  phonePrimary: '', phoneSecondary: '', email: '',
+  houseNumber: '', street: '', locality: '', city: '', district: '', state: '', pincode: '',
+  emergencyContactName: '', emergencyContactPhone: '', emergencyContactRelationship: '',
+  bloodGroup: '', hasInsurance: false, insuranceProvider: '', insuranceId: '',
 }
 
 export default function SelfRegisterPage() {
@@ -86,7 +44,8 @@ export default function SelfRegisterPage() {
   const [org, setOrg] = useState(null)
   const [orgError, setOrgError] = useState('')
   const [form, setForm] = useState(EMPTY)
-  const [errors, setErrors] = useState({})
+  const [fieldErrors, setFieldErrors] = useState({})
+  const [formError, setFormError] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [done, setDone] = useState(false)
 
@@ -101,40 +60,46 @@ export default function SelfRegisterPage() {
     return () => { live = false }
   }, [orgId])
 
-  const set = (k) => (v) => {
-    setForm((p) => ({ ...p, [k]: v }))
-    if (errors[k]) setErrors((e) => ({ ...e, [k]: undefined }))
+  // The same three setters the reception form passes down, so every field
+  // behaves identically on a phone and at the counter.
+  const setField = (field, value) => {
+    setForm((prev) => ({ ...prev, [field]: value }))
+    setFieldErrors((prev) => (prev[field] ? { ...prev, [field]: undefined } : prev))
   }
+  const setTextField = (field, raw) => setField(field, sanitizeTextInput(raw))
+  const setNameField = (field, raw) => setField(field, sanitizeNameInput(raw))
 
   async function submit(e) {
     e.preventDefault()
-    const parsed = schema.safeParse(form)
+    setFormError('')
+
+    const parsed = patientDetailsSchema.safeParse(form)
     if (!parsed.success) {
-      const fieldErrors = {}
-      for (const issue of parsed.error.issues) {
-        const key = issue.path[0]
-        if (key && !fieldErrors[key]) fieldErrors[key] = issue.message
-      }
-      setErrors(fieldErrors)
+      setFieldErrors(issuesToFieldErrors(parsed.error.issues))
       // Jump to the first thing that needs fixing — on a long phone form the
       // error can be well above the button they just pressed.
-      const first = document.querySelector('[data-error="true"]')
-      first?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      setTimeout(() => {
+        document.querySelector('.border-red-500, .text-red-600')?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      }, 50)
       return
     }
 
     setSubmitting(true)
     try {
-      // Send only what was filled — blanks stay out of the stored form.
+      // Send only what was filled — blanks stay out of the stored form, which
+      // is handed back to the reception form untouched on confirm.
       const payload = { organizationId: orgId }
       for (const [k, v] of Object.entries(parsed.data)) {
-        if (v !== undefined && v !== '') payload[k] = v
+        if (v !== undefined && v !== '' && v !== false) payload[k] = v
       }
       await client.post('/public/pre-registration', payload)
       setDone(true)
       window.scrollTo({ top: 0, behavior: 'smooth' })
     } catch (err) {
-      setErrors((prev) => ({ ...prev, _form: err?.message || 'Could not submit. Please try again.' }))
+      if ((err.status === 400 || err.status === 422) && Array.isArray(err.details)) {
+        setFieldErrors(issuesToFieldErrors(err.details))
+      }
+      setFormError(err?.message || 'Could not submit. Please try again.')
     } finally {
       setSubmitting(false)
     }
@@ -188,101 +153,22 @@ export default function SelfRegisterPage() {
           </p>
         </div>
 
-        <form onSubmit={submit} className="space-y-4" noValidate>
-          {/* Your details */}
-          <Section title="Your details" subtitle="As on your ID">
-            <div data-error={!!errors.firstName}>
-              <Field label="First name" required error={errors.firstName}>
-                <Input value={form.firstName} onChange={(e) => set('firstName')(e.target.value)} placeholder="Ramesh" />
-              </Field>
-            </div>
-            <Field label="Middle name" error={errors.middleName}>
-              <Input value={form.middleName} onChange={(e) => set('middleName')(e.target.value)} placeholder="(optional)" />
-            </Field>
-            <div data-error={!!errors.lastName}>
-              <Field label="Last name" required error={errors.lastName}>
-                <Input value={form.lastName} onChange={(e) => set('lastName')(e.target.value)} placeholder="Kumar" />
-              </Field>
-            </div>
-            <div data-error={!!errors.dateOfBirth}>
-              <Field label="Date of birth" required error={errors.dateOfBirth}>
-                <Input type="date" max={todayYmd()} value={form.dateOfBirth} onChange={(e) => set('dateOfBirth')(e.target.value)} />
-              </Field>
-            </div>
-            <div data-error={!!errors.gender}>
-              <Field label="Gender" required error={errors.gender}>
-                <Select value={form.gender} onValueChange={set('gender')}>
-                  <SelectTrigger><SelectValue placeholder="Choose" /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="male">Male</SelectItem>
-                    <SelectItem value="female">Female</SelectItem>
-                    <SelectItem value="other">Other</SelectItem>
-                  </SelectContent>
-                </Select>
-              </Field>
-            </div>
-            <Field label="Blood group" error={errors.bloodGroup} hint="If you know it">
-              <Select value={form.bloodGroup} onValueChange={set('bloodGroup')}>
-                <SelectTrigger><SelectValue placeholder="(optional)" /></SelectTrigger>
-                <SelectContent>
-                  {BLOOD_GROUPS.map((b) => <SelectItem key={b} value={b}>{b}</SelectItem>)}
-                </SelectContent>
-              </Select>
-            </Field>
-          </Section>
+        <form
+          onSubmit={submit}
+          className="space-y-4 [&_input:not([type=checkbox])]:h-11 [&_input:not([type=checkbox])]:text-[15px]"
+          noValidate
+        >
+          <PatientDetailsFields
+            patientForm={form}
+            setField={setField}
+            setNameField={setNameField}
+            setTextField={setTextField}
+            fieldErrors={fieldErrors}
+            showMedicoLegal={false}
+          />
 
-          {/* Contact */}
-          <Section title="Contact" subtitle="How the hospital reaches you">
-            <div data-error={!!errors.phonePrimary}>
-              <Field label="Mobile number" required error={errors.phonePrimary} hint="Reception finds you by this">
-                {/* The shared field, not a local `.replace().slice(0, 10)`.
-                    Slicing turns "+91 98765 43210" into "9198765432" — ten
-                    digits, starts with 9, passes the schema, and reaches
-                    nobody. sanitizePhoneInput strips the country code instead,
-                    and leaves anything it cannot recognise for the schema to
-                    refuse rather than inventing a number from it. */}
-                <PhoneInput value={form.phonePrimary} onChange={set('phonePrimary')}
-                  placeholder="9876543210" />
-              </Field>
-            </div>
-            <Field label="Email" error={errors.email}>
-              <Input type="email" value={form.email} onChange={(e) => set('email')(e.target.value)} placeholder="(optional)" />
-            </Field>
-          </Section>
-
-          {/* Address — all optional */}
-          <Section title="Address" subtitle="Optional — reception can add this">
-            <Field label="House / Flat no." error={errors.houseNumber}>
-              <Input value={form.houseNumber} onChange={(e) => set('houseNumber')(e.target.value)} />
-            </Field>
-            <Field label="Street / Area" error={errors.street}>
-              <Input value={form.street} onChange={(e) => set('street')(e.target.value)} />
-            </Field>
-            <Field label="City" error={errors.city}>
-              <Input value={form.city} onChange={(e) => set('city')(e.target.value)} placeholder="Mumbai" />
-            </Field>
-            <Field label="State" error={errors.state}>
-              <Input value={form.state} onChange={(e) => set('state')(e.target.value)} placeholder="Maharashtra" />
-            </Field>
-            <Field label="PIN code" error={errors.pincode}>
-              <Input inputMode="numeric" maxLength={6} value={form.pincode}
-                onChange={(e) => set('pincode')(e.target.value.replace(/\D/g, '').slice(0, 6))} placeholder="400001" />
-            </Field>
-          </Section>
-
-          {/* Emergency contact — optional */}
-          <Section title="Emergency contact" subtitle="Optional — someone we can call">
-            <Field label="Name" error={errors.emergencyContactName}>
-              <Input value={form.emergencyContactName} onChange={(e) => set('emergencyContactName')(e.target.value)} />
-            </Field>
-            <Field label="Their mobile" error={errors.emergencyContactPhone}>
-              {/* Same field, same reason as the mobile above. */}
-              <PhoneInput value={form.emergencyContactPhone} onChange={set('emergencyContactPhone')} />
-            </Field>
-          </Section>
-
-          {errors._form && (
-            <p className="rounded-lg bg-red-50 px-4 py-3 text-center text-sm font-medium text-red-700">{errors._form}</p>
+          {formError && (
+            <p className="rounded-lg bg-red-50 px-4 py-3 text-center text-sm font-medium text-red-700">{formError}</p>
           )}
 
           <div className="sticky bottom-0 -mx-4 bg-slate-50/80 px-4 py-3 backdrop-blur">

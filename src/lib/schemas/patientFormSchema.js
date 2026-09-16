@@ -100,12 +100,16 @@ function toLocalDateTime(dateStr, timeStr) {
   return isNaN(dt.getTime()) ? null : dt
 }
 
-// ── Register + first-appointment form ─────────────────────────────────────
-// Mirrors backend/src/controllers/patientController.js `patientSchema` for the
-// patient fields, plus the doctor/date the form additionally requires before
-// it will book the first appointment. The backend schema stays authoritative;
-// this only stops obviously-bad input before it makes a round trip.
-export const patientFormSchema = z.object({
+// ── The patient's own details ─────────────────────────────────────────────
+// Mirrors backend/src/controllers/patientController.js `patientSchema`. The
+// backend schema stays authoritative; this only stops obviously-bad input
+// before it makes a round trip.
+//
+// Kept separate from the appointment fields below because two screens collect
+// exactly these and nothing else: reception's registration form and the
+// patient's own phone from the entrance QR (see PatientDetailsFields, which
+// renders them). One schema, so the two cannot drift apart.
+export const patientDetailsSchema = z.object({
   firstName: requiredNameSchema('First name'),
   middleName: optionalNameSchema('Middle name'),
   lastName: requiredNameSchema('Last name'),
@@ -135,16 +139,41 @@ export const patientFormSchema = z.object({
   hasInsurance: z.boolean().default(false),
   insuranceProvider: optionalTextSchema,
   insuranceId: optionalTextSchema,
+})
+
+// ── Register + (optionally) the first appointment ─────────────────────────
+// Registration and booking are two different acts, and a hospital does the
+// first without the second all the time — a walk-in who will be seen later, a
+// patient registered from their own QR submission, someone who only needs a
+// lab test. Requiring a doctor and a date to register meant reception could not
+// register that person at all.
+//
+// `bookAppointment` is the form's own checkbox (same idea as hasInsurance): the
+// appointment fields appear only when it is ticked, and the doctor and date are
+// required only then. Registration is the default act; booking is the addition.
+export const patientFormSchema = patientDetailsSchema.extend({
+  bookAppointment: z.boolean().default(false),
 
   department: optionalTextSchema,
-  doctor: z.string().min(1, 'Please select a doctor'),
+  doctor: optionalTextSchema,
   consultationFee: optionalTextSchema,
   appointmentType: optionalTextSchema,
   priority: optionalTextSchema,
-  appointmentDate: requiredDateSchema('Appointment date'),
+  appointmentDate: optionalTextSchema,
   appointmentTime: optionalTextSchema,
   notes: optionalTextSchema,
 }).superRefine((data, ctx) => {
+  // Not booking: the appointment fields are not on screen, so nothing about
+  // them can be required or wrong.
+  if (data.bookAppointment === false) return
+
+  if (!data.doctor) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'Please select a doctor', path: ['doctor'] })
+  }
+  if (!data.appointmentDate) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'Appointment date is required', path: ['appointmentDate'] })
+  }
+
   // Mirrors the backend's past-booking guard (see appointmentController.js
   // `create`) so a doomed submission is caught here instead of after the
   // patient record has already been created.
