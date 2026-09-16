@@ -1,7 +1,6 @@
-import { useState, useEffect, useCallback } from 'react'
-import QRCode from 'qrcode'
+import { useState, useCallback } from 'react'
 import { toast } from 'sonner'
-import { QrCode, Search, RefreshCw, UserCheck, Trash2, Clock, Download } from 'lucide-react'
+import { QrCode, Search, RefreshCw, UserCheck, Trash2, Clock } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -13,17 +12,18 @@ import { useDebounce } from '@/lib/useDebounce'
 import client from '@/api/client'
 import RegisterPatientForm from '@/components/common/RegisterPatientForm'
 
-// Reception's side of self-service registration. Two things in one place:
-//   1. The hospital's QR poster — the link a patient scans to self-register.
-//   2. The pending list — people who filled the form on their phone and are now
-//      at the counter. Reception searches by name/phone, opens the pre-filled
-//      registration form, adds the doctor + appointment, and confirms — which
-//      mints the UHID (through the normal patient-create path) and clears the
-//      pending row.
+// Reception's side of self-service registration: the pending list — people who
+// filled the form on their phone and are now at the counter. Reception searches
+// by name/phone, opens the pre-filled registration form, adds the doctor +
+// appointment, and confirms — which mints the UHID (through the normal
+// patient-create path) and clears the pending row.
 //
-// Multi-hospital by construction: the QR carries THIS org's id, and the pending
-// list is scoped server-side to the caller's org (getOrgId), so one hospital
-// never sees or confirms another's walk-ups.
+// The QR poster itself lives in Settings → Integrations (SelfRegistrationQr):
+// printing it is a set-up-once admin job, not something the counter needs.
+//
+// Multi-hospital by construction: the pending list is scoped server-side to the
+// caller's org (getOrgId), so one hospital never sees or confirms another's
+// walk-ups.
 
 const PER_PAGE = 10
 
@@ -43,67 +43,10 @@ function timeAgo(iso) {
   return h < 24 ? `${h} h ago` : `${Math.floor(h / 24)} d ago`
 }
 
-// ── The QR poster ──────────────────────────────────────────────────────────
-function QrPoster({ orgId, orgName }) {
-  const [dataUrl, setDataUrl] = useState('')
-  const link = `${window.location.origin}/self-register?org=${orgId}`
-
-  useEffect(() => {
-    if (!orgId) return
-    // High error-correction so the code still scans when printed small or if the
-    // poster gets a little scuffed on a hospital wall.
-    QRCode.toDataURL(link, { width: 220, margin: 2, errorCorrectionLevel: 'H' })
-      .then(setDataUrl)
-      .catch(() => setDataUrl(''))
-  }, [link, orgId])
-
-  const download = () => {
-    if (!dataUrl) return
-    const a = document.createElement('a')
-    a.href = dataUrl
-    a.download = `self-registration-qr-${orgId}.png`
-    a.click()
-  }
-
-  return (
-    <Card>
-      <CardContent className="flex flex-col items-center gap-4 p-5 sm:flex-row sm:items-center">
-        <div className="shrink-0 rounded-lg border bg-white p-2">
-          {dataUrl
-            ? <img src={dataUrl} alt="Self-registration QR code" className="h-40 w-40" />
-            : <div className="flex h-40 w-40 items-center justify-center text-slate-300"><QrCode className="h-10 w-10" /></div>}
-        </div>
-        <div className="min-w-0 flex-1 text-center sm:text-left">
-          <h3 className="flex items-center justify-center gap-2 text-base font-semibold text-slate-800 sm:justify-start">
-            <QrCode className="h-4 w-4 text-blue-600" /> Patient self-registration QR
-          </h3>
-          <p className="mt-1 text-sm text-slate-500">
-            Print this and put it at the entrance. Patients scan it to fill their own
-            details before the counter — reception just finds and confirms them.
-          </p>
-          <p className="mt-2 break-all rounded bg-slate-50 px-2 py-1 text-xs text-slate-500">{link}</p>
-          <Button variant="outline" size="sm" className="mt-3" onClick={download} disabled={!dataUrl}>
-            <Download className="mr-1.5 h-4 w-4" /> Download QR
-          </Button>
-        </div>
-      </CardContent>
-    </Card>
-  )
-}
-
 export default function SelfRegistrationModule() {
-  const [org, setOrg] = useState(null)
   const [search, setSearch] = useState('')
   const debouncedSearch = useDebounce(search, 300)
   const [confirming, setConfirming] = useState(null) // the pending row being confirmed
-
-  // This hospital's id + name for the QR and header. /settings is the org the
-  // logged-in reception belongs to, so the QR is automatically THIS hospital's.
-  useEffect(() => {
-    let live = true
-    client.get('/settings').then((res) => { if (live) setOrg(res.data) }).catch(() => {})
-    return () => { live = false }
-  }, [])
 
   const pending = useServerPagination('/pre-registration', {
     perPage: PER_PAGE,
@@ -137,7 +80,9 @@ export default function SelfRegistrationModule() {
 
   return (
     <div className="space-y-4">
-      <QrPoster orgId={org?.id} orgName={org?.name} />
+      <p className="flex items-center gap-1.5 text-xs text-slate-500">
+        <QrCode className="h-3.5 w-3.5" /> The registration QR for the entrance is in Settings → Integrations.
+      </p>
 
       {/* Search */}
       <div className="flex flex-wrap items-center gap-2">

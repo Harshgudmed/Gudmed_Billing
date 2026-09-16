@@ -6,12 +6,13 @@ import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Switch } from '@/components/ui/switch'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { Cpu, Server, Pill, MessageSquare, Volume2, Loader2, ArrowLeft, ChevronRight, Save } from 'lucide-react'
+import { Cpu, Server, Pill, MessageSquare, Volume2, QrCode, Loader2, ArrowLeft, ChevronRight, Save } from 'lucide-react'
 import { toast } from 'sonner'
 import client from '@/api/client'
 import machineIntegrationApi from '@/api/machineIntegrationApi'
 import MachineIntegrationSetup from './MachineIntegrationSetup'
 import QueueAnnouncementsPanel from './QueueAnnouncementsPanel'
+import SelfRegistrationQr from '@/components/registration/SelfRegistrationQr'
 
 // ── Integration catalog: 4 cards shown on the hub ────────────────────────────
 // `lab` opens the full machine-management screen; the rest open a config panel
@@ -77,6 +78,16 @@ const CATALOG = [
       { name: 'apiKey', label: 'API Key', type: 'password' },
       { name: 'senderId', label: 'Sender ID', placeholder: 'e.g. GUDMED' },
     ],
+  },
+  {
+    // A patient's phone reaching the hospital's registration desk. Nothing to
+    // configure — the QR is this hospital's link — so it is a set-up-once item
+    // for the admin, not something the counter screen needs to carry.
+    key: 'selfRegistration',
+    name: 'Patient Registration QR',
+    icon: QrCode,
+    description: 'Print the QR for the entrance. Patients scan it and fill their own details.',
+    kind: 'panel', // its own screen — see SelfRegistrationQr
   },
 ]
 
@@ -182,6 +193,14 @@ export default function IntegrationsHub({ settings = {}, onSaved }) {
       </div>
     )
   }
+  if (view === 'selfRegistration') {
+    return (
+      <div className="space-y-4">
+        <Button variant="ghost" size="sm" onClick={() => setView(null)}><ArrowLeft className="h-4 w-4 mr-1" />Back to Integrations</Button>
+        <SelfRegistrationQr />
+      </div>
+    )
+  }
   if (view) {
     const def = CATALOG.find((c) => c.key === view)
     return <ConfigPanel def={def} settings={settings} onSaved={onSaved} onBack={() => setView(null)} />
@@ -203,7 +222,9 @@ export default function IntegrationsHub({ settings = {}, onSaved }) {
             ? (settings.announceEnabled
                 ? { label: 'Speaking', cls: 'bg-green-100 text-green-700' }
                 : { label: 'Silent', cls: '' })
-            : configBadge((settings.integrations || {})[def.key])
+            : def.key === 'selfRegistration'
+              ? { label: 'Ready', cls: 'bg-green-100 text-green-700' }
+              : configBadge((settings.integrations || {})[def.key])
         return (
           <button
             key={def.key}
