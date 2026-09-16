@@ -139,7 +139,7 @@ export default function SelfRegistrationModule() {
           typed. Reception checks it, adds the doctor + appointment, and submits;
           onSuccess mints the UHID and we clear the pending row. */}
       <Dialog open={!!confirming} onOpenChange={(o) => !o && setConfirming(null)}>
-        <DialogContent className="max-h-[90vh] max-w-3xl overflow-y-auto">
+        <DialogContent className="w-[calc(100vw-1rem)] max-w-3xl max-h-[calc(100dvh-1rem)] overflow-y-auto p-4 sm:w-[95vw] sm:max-h-[90vh] sm:p-6">
           {confirming && (
             <RegisterPatientForm
               initialData={confirming.form}

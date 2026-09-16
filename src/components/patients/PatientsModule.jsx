@@ -187,7 +187,7 @@ export default function PatientsModule() {
             <DialogTrigger asChild>
               <Button><Plus className="h-4 w-4 mr-2" />Register Patient</Button>
             </DialogTrigger>
-            <DialogContent className="max-w-3xl w-[95vw] max-h-[90vh] overflow-y-auto">
+            <DialogContent className="w-[calc(100vw-1rem)] max-w-3xl max-h-[calc(100dvh-1rem)] overflow-y-auto p-4 sm:w-[95vw] sm:max-h-[90vh] sm:p-6">
               <RegisterPatientForm
                 onCancel={() => setShowRegDialog(false)}
                 onSuccess={() => { setShowRegDialog(false); fetchPatients(); }}
