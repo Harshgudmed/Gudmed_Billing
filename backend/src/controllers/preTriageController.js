@@ -5,7 +5,7 @@ import { getOrgId } from "../lib/reqContext.js";
 import { listResponse } from "../lib/pagination.js";
 import { PATIENT_NAME_SELECT } from '../lib/patientName.js'
 import { ageFromDob } from '../utils/patientSnapshot.js'
-import { nextSeriesNumber, generateUHID } from '../lib/counters.js'
+import { nextSeriesNumber } from '../lib/counters.js'
 
 // Screening numbers come from the atomic per-org counter, not from 3 random
 // digits. With only 1,000 values a day and a GLOBALLY @unique screeningNumber,
@@ -158,44 +158,8 @@ export async function update(req, res, next) {
   }
 }
 
-// POST /api/pre-triage/:id/convert  — convert screening to registered patient
-export async function convertToPatient(req, res, next) {
-  try {
-    const ORG_ID = getOrgId(req)
-    // Org-scoped: convert-by-id-alone let one hospital convert another's
-    // screening AND mint a patient from its PII into the attacker's org.
-    const screening = await db.preTriage.findFirst({ where: { id: req.params.id, organizationId: ORG_ID } })
-    if (!screening) return res.status(404).json({ success: false, error: 'Screening not found' })
-
-    // Use a Prisma transaction to guarantee both database operations succeed or fail together
-    const patient = await db.$transaction(async (tx) => {
-      // Same atomic UHID series every other registration path uses. The old
-      // `UHID${Date.now().toString().slice(-8)}` used only the last 8 digits of
-      // the clock, which wrap every ~27.8 hours — so a conversion could collide
-      // with yesterday's on the @unique mrn even with zero concurrency.
-      const mrn = await generateUHID(tx, ORG_ID)
-      const newPatient = await tx.patient.create({
-        data: {
-          organizationId: ORG_ID,
-          mrn,
-          firstName: screening.firstName || 'Unknown',
-          lastName: screening.lastName || 'Patient',
-          dateOfBirth: new Date(),
-          gender: screening.gender || 'unknown',
-          phonePrimary: screening.phone,
-        },
-      })
-
-      await tx.preTriage.update({
-        where: { id: req.params.id },
-        data: { status: 'registered_as_patient', patientId: newPatient.id },
-      })
-
-      return newPatient
-    })
-
-    res.status(201).json({ success: true, data: patient })
-  } catch (err) {
-    next(err)
-  }
-}
+// There is deliberately no "convert screening to patient" here. It used to mint
+// a UHID with no duplicate check and today's date as the date of birth, so a
+// patient who was already registered got a second UHID (Navya Iyer, Prakash
+// Saxena, Krishna Choudhury). Screening only links an existing patient (create,
+// above); a new person is registered at the counter through POST /patients.

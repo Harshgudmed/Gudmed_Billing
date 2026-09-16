@@ -158,9 +158,9 @@ test('two hospitals can each hold the SAME UHID — a second hospital is not blo
   // The production blocker this whole migration exists for. generateUHID counts
   // PER ORG, so every hospital's first patient is handed "1000000001" — but
   // Patient.mrn carried a GLOBAL @unique, so whichever hospital committed second
-  // died with P2002 and could not register a single person. Neither caller
-  // (patientController.create, preTriage convertToPatient) retries, so the front
-  // desk just saw a 500. Fixed by @@unique([organizationId, mrn]).
+  // died with P2002 and could not register a single person. The caller
+  // (patientController.create) does not retry, so the front desk just saw a
+  // 500. Fixed by @@unique([organizationId, mrn]).
   //
   // Both writes must actually hit the table: asserting only on the counter (as
   // the test above does) would still pass with the global index in place.

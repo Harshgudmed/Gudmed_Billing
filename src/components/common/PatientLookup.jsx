@@ -102,6 +102,11 @@ const emptyNew = {
  * Search registered patients by UHID/name/phone, OR register a new (walk-in)
  * patient inline if they don't exist in the database. Either way, onSelect()
  * receives the patient object for downstream forms.
+ *
+ * `allowAddNew={false}` makes it search-only: both "add new" entry points are
+ * hidden, so the screen can link an existing patient but never mint a UHID.
+ * Pre-Triage uses this — screening is not registration; a UHID is issued at
+ * the registration counter only.
  */
 export default function PatientLookup({
   selectedPatient,
@@ -110,6 +115,7 @@ export default function PatientLookup({
   placeholder = 'Search by UHID, name, or phone...',
   className = '',
   showHint = true,
+  allowAddNew = true,
 }) {
   const [search, setSearch] = useState('')
   const [results, setResults] = useState([])
@@ -227,7 +233,7 @@ export default function PatientLookup({
   }
 
   // ── Add-new (walk-in) inline form ──
-  if (addingNew) {
+  if (addingNew && allowAddNew) {
     return (
       <div className={`rounded-lg border border-blue-200 bg-blue-50/40 p-3 space-y-3 max-h-[70vh] overflow-y-auto ${className}`}>
         <div className="flex items-center justify-between">
@@ -478,6 +484,7 @@ export default function PatientLookup({
           {results.length === 0 && !loading ? (
             <div className="p-3 text-center">
               <p className="text-sm text-gray-500 mb-2">No patients found for &ldquo;{search}&rdquo;</p>
+              {allowAddNew && (
               <Button type="button" size="sm" variant="outline" className="gap-1.5"
                 onClick={() => {
                   // prefill name from the search text if it looks like a name
@@ -487,6 +494,7 @@ export default function PatientLookup({
                 }}>
                 <UserPlus className="h-3.5 w-3.5" /> Add as new patient
               </Button>
+              )}
             </div>
           ) : (
             results.map((p) => (
@@ -527,10 +535,12 @@ export default function PatientLookup({
             <span className="font-mono">Rohit Kumar</span>, <span className="font-mono">9876543210</span>
           </p>
         ) : <span />}
-        <Button type="button" variant="link" size="sm" className="h-auto p-0 text-xs gap-1 text-blue-600 shrink-0"
-          onClick={() => setAddingNew(true)}>
-          <UserPlus className="h-3.5 w-3.5" /> Patient not in records? Add new
-        </Button>
+        {allowAddNew && (
+          <Button type="button" variant="link" size="sm" className="h-auto p-0 text-xs gap-1 text-blue-600 shrink-0"
+            onClick={() => setAddingNew(true)}>
+            <UserPlus className="h-3.5 w-3.5" /> Patient not in records? Add new
+          </Button>
+        )}
       </div>
     </div>
   )

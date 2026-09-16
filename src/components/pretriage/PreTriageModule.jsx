@@ -7,7 +7,7 @@ import { z } from 'zod'
 import { toast } from 'sonner'
 import { format } from 'date-fns'
 import {
-  History, Plus, Search, Thermometer, UserPlus,
+  History, Plus, Search, Thermometer,
   ArrowRight, CheckCircle, Clock, Activity,
   RefreshCw, Loader2, Eye, Pencil, Printer,
 } from 'lucide-react'
@@ -460,16 +460,6 @@ export default function PreTriageModule() {
     }
   }
 
-  const handleConvert = async (id) => {
-    try {
-      const res = await client.post(`/pre-triage/${id}/convert`)
-      toast.success(`Converted to patient. UHID: ${res.data.mrn}`)
-      screeningsPagination.refresh()
-    } catch {
-      toast.error('Failed to convert to patient')
-    }
-  }
-
   if (screeningsPagination.loading && screenings.length === 0) return (
     <div className="flex items-center justify-center p-12">
       <Loader2 className="h-8 w-8 animate-spin text-[#2E4168]" />
@@ -637,7 +627,11 @@ export default function PreTriageModule() {
                     <TableCell className="font-medium">{s.screeningNumber}</TableCell>
                     <TableCell>
                       <div>{getFullName(s)}</div>
-                      {s.patient?.mrn && <div className="text-xs font-mono text-gray-500">UHID: {s.patient.mrn}</div>}
+                      {s.patient?.mrn
+                        ? <div className="text-xs font-mono text-gray-500">UHID: {s.patient.mrn}</div>
+                        // Screening is not registration: an unlinked person gets
+                        // their UHID at the counter, never from this screen.
+                        : !s.patientId && <div className="text-xs font-medium text-amber-700">Not registered — send to registration counter</div>}
                       {s.phone && <div className="text-xs text-gray-400">{s.phone}</div>}
                     </TableCell>
                     <TableCell>{s.age ?? '—'}y / {s.gender}</TableCell>
@@ -692,15 +686,6 @@ export default function PreTriageModule() {
                         >
                           <Pencil className="h-4 w-4" />
                         </Button>
-                        {s.status === 'screening' && (
-                          <Button
-                            size="sm" variant="outline"
-                            onClick={() => handleConvert(s.id)}
-                            className="bg-green-50 text-green-700 border-green-200 hover:bg-green-100 ml-1"
-                          >
-                            <UserPlus className="h-4 w-4 mr-1" /> Convert
-                          </Button>
-                        )}
                       </div>
                     </TableCell>
                   </TableRow>
@@ -746,6 +731,9 @@ export default function PreTriageModule() {
                     onSelect={fillFromPatient}
                     onClear={clearPatient}
                     placeholder="Search registered patient by UHID, name, or phone..."
+                    // Link an existing patient only — a new person is screened
+                    // by name + phone and registered at the counter.
+                    allowAddNew={false}
                   />
                 )}
 

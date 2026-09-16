@@ -4,7 +4,6 @@ import {
   getOne,
   create,
   update,
-  convertToPatient,
 } from '../controllers/preTriageController.js'
 import { validate } from '../middleware/validate.js'
 import { createPreTriageSchema, updatePreTriageSchema } from '../validations/preTriage.validation.js'
@@ -15,6 +14,7 @@ router.get('/', getAll)
 router.get('/:id', getOne)
 router.post('/', validate(createPreTriageSchema), create)
 router.patch('/:id', validate(updatePreTriageSchema), update)
-router.post('/:id/convert', convertToPatient)
+// No "convert to patient" route: screening is not registration. A UHID is
+// issued only by POST /patients, at the registration counter.
 
 export default router
