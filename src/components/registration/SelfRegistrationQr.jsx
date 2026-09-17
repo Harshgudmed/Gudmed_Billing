@@ -135,7 +135,8 @@ async function drawPoster({ org, color, qrUrl, link, withLogo = true }) {
   // Measure the steps first, so the QR takes whatever room is left and the
   // steps can never slide under the footer (a long hospital name adds a line
   // to the header band and would otherwise push them off the page).
-  const footH = 150
+  // Taller when the hospital has a phone number, to fit the helpdesk line.
+  const footH = org.phone ? 220 : 150
   const left = 150
   const textX = left + 90
   const stepFont = `500 36px ${FONT}`
@@ -188,10 +189,34 @@ async function drawPoster({ org, color, qrUrl, link, withLogo = true }) {
   ctx.fillStyle = '#334155'
   ctx.font = `600 32px ${FONT}`
   ctx.fillText('No app needed  •  Takes about a minute  •  Saves time at the counter', W / 2, H - footH + 58)
+  if (org.phone) {
+    // "Need Help or Assistance? Call our Helpdesk: <number>" — one centred
+    // line, the number bold in the hospital colour so it is found at a glance.
+    // Shrinks to fit when the phone field holds more than one number.
+    const ask = 'Need Help or Assistance?  Call our Helpdesk: '
+    ctx.font = `500 32px ${FONT}`
+    const fullAskW = ctx.measureText(ask).width
+    ctx.font = `800 36px ${FONT}`
+    const scale = Math.min(1, (W - 100) / (fullAskW + ctx.measureText(org.phone).width))
+    const askFont = `500 ${Math.floor(32 * scale)}px ${FONT}`
+    const numFont = `800 ${Math.floor(36 * scale)}px ${FONT}`
+    ctx.font = askFont
+    const askW = ctx.measureText(ask).width
+    ctx.font = numFont
+    const numW = ctx.measureText(org.phone).width
+    const startX = (W - askW - numW) / 2
+    ctx.textAlign = 'left'
+    ctx.fillStyle = '#334155'
+    ctx.font = askFont
+    ctx.fillText(ask, startX, H - footH + 118)
+    ctx.fillStyle = color
+    ctx.font = numFont
+    ctx.fillText(org.phone, startX + askW, H - footH + 118)
+    ctx.textAlign = 'center'
+  }
   ctx.fillStyle = '#64748b'
   ctx.font = `400 24px ${FONT}`
-  const contact = [org.phone && `Help: ${org.phone}`, link].filter(Boolean).join('   ·   ')
-  ctx.fillText(wrap(ctx, contact, W - 120)[0], W / 2, H - footH + 108)
+  ctx.fillText(wrap(ctx, link, W - 120)[0], W / 2, H - 34)
 
   return canvas.toDataURL('image/png')
 }
