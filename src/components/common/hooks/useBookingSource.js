@@ -26,6 +26,16 @@ import client from '@/api/client'
 let _departments = null
 let _inflight = null
 
+/**
+ * Forget the cached departments. Called on login and logout (lib/auth.jsx): the
+ * cache belongs to ONE hospital's session, and without this a second hospital
+ * signing in on the same tab was shown the first hospital's departments.
+ */
+export function clearBookingSourceCache() {
+  _departments = null
+  _inflight = null
+}
+
 async function loadDepartments() {
   if (_departments) return _departments
   if (_inflight) return _inflight

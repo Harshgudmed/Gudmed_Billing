@@ -1,9 +1,21 @@
 import { createContext, useContext, useEffect, useState, useCallback } from 'react'
 import client from '@/api/client'
+import { clearOrgCache } from '@/lib/orgSettings'
+import { clearBookingSourceCache } from '@/components/common/hooks/useBookingSource'
 
 // Auth state for the web app. Restores the session from the httpOnly cookie via
 // /auth/me on mount, and exposes login/logout. The login response token is also
 // stored in localStorage as the Bearer fallback used by the API client.
+
+// Everything the app keeps in memory about ONE hospital — its name, logo and
+// address (printed on bills, reports and the QR poster) and its departments.
+// Signing out and in again does not reload the page, so without this a second
+// hospital signing in on the same tab saw the first hospital's name in the
+// sidebar and printed it on their bills.
+function forgetHospital() {
+  clearOrgCache()
+  clearBookingSourceCache()
+}
 
 const AuthContext = createContext(null)
 
@@ -35,6 +47,7 @@ export function AuthProvider({ children }) {
   const login = useCallback(async (email, password) => {
     const res = await client.post('/auth/login', { email, password })
     if (res?.token) localStorage.setItem('token', res.token)
+    forgetHospital()
     setUser(res.user)
     return res.user
   }, [])
@@ -43,6 +56,7 @@ export function AuthProvider({ children }) {
   const patientLogin = useCallback(async (identifier, password) => {
     const res = await client.post('/auth/patient-login', { identifier, password })
     if (res?.token) localStorage.setItem('token', res.token)
+    forgetHospital()
     setUser(res.user)
     return res.user
   }, [])
@@ -50,6 +64,7 @@ export function AuthProvider({ children }) {
   const logout = useCallback(async () => {
     try { await client.post('/auth/logout') } catch { /* ignore */ }
     localStorage.removeItem('token')
+    forgetHospital()
     setUser(null)
   }, [])
 
