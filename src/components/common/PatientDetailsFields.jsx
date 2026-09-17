@@ -2,10 +2,11 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { Users, Phone, MapPin, AlertCircle, Shield, FileText } from 'lucide-react'
+import { Users, Phone, MapPin, AlertCircle, Shield, FileText, Check } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { PhoneInput } from './PhoneInput'
 import { sanitizeTextInput, sanitizeMultilineInput } from './textFieldUtils'
+import { BLOOD_GROUPS } from '@/components/patients/utils/patientUtils'
 
 // The patient half of registration — who the person is, how to reach them,
 // where they live, who to call, and their insurance. Nothing else: no doctor,
@@ -43,6 +44,24 @@ export const INSURANCE_PROVIDERS = [
 
 export const MARITAL_STATUSES = ['Single', 'Married', 'Divorced', 'Widowed', 'Other']
 
+// The range the date-of-birth picker opens in: nobody is born tomorrow, and
+// 120 years covers the oldest patient a hospital will register. Read at render,
+// not at import: a screen left open overnight would otherwise still cap the
+// date at yesterday, and reject a baby registered after midnight.
+const dobMax = () => {
+  const d = new Date()
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+const dobMin = () => `${new Date().getFullYear() - 120}-01-01`
+
+// The stored value is lowercase (the API and the patient list filter on it);
+// the label is what the patient reads.
+export const GENDERS = [
+  { value: 'male',   label: 'Male' },
+  { value: 'female', label: 'Female' },
+  { value: 'other',  label: 'Other' },
+]
+
 // Renders next to a field, right under its Input/Select, for both a Zod
 // validation error caught before submit and a validation error the backend
 // sends back after it — one place, either source.
@@ -73,6 +92,57 @@ export function NotesSection({ value, setField }) {
 }
 
 /**
+ * A short list of choices as buttons the patient taps, instead of a dropdown.
+ *
+ * On a phone a dropdown is a tap, a scroll and a second tap, with the list
+ * covering the form while it is open. These lists are short enough to sit on
+ * the screen, so one tap answers the question. Tapping the chosen option again
+ * clears it, except where an answer is required.
+ *
+ * Buttons are at least 44px tall — the smallest target a thumb hits reliably.
+ */
+function ChoiceChips({ label, value, options, onChange, required = false, error, cols = '' }) {
+  return (
+    // Phone screens only — the dropdown beside it takes over from sm: up, so a
+    // desktop keeps the form it has always had.
+    <div className="sm:hidden">
+      <Label className="text-xs text-gray-600">
+        {label} {required && <span className="text-red-500">*</span>}
+      </Label>
+      <div className={cn('mt-1 flex flex-wrap gap-2', cols)}>
+        {options.map(opt => {
+          const selected = value === opt.value
+          return (
+            <button
+              key={opt.value}
+              type="button"
+              aria-pressed={selected}
+              onClick={() => onChange(selected && !required ? '' : opt.value)}
+              // The chosen one has to be obvious at arm's length on a phone in a
+              // busy corridor: a tick, a ring around it, a heavier colour and
+              // bolder text — colour alone was too easy to miss, and is invisible
+              // to a colour-blind patient. Pressing any option dips it slightly,
+              // so a tap that did register is felt even before the eye catches up.
+              className={cn(
+                'flex min-h-[48px] flex-1 basis-[28%] items-center justify-center gap-1.5 rounded-xl border px-3 text-[15px] transition-all active:scale-[0.97]',
+                selected
+                  ? 'border-blue-600 bg-blue-600 font-semibold text-white shadow-sm ring-2 ring-blue-200'
+                  : 'border-gray-300 bg-white font-medium text-gray-700 active:bg-gray-100',
+                error && !selected && 'border-red-400',
+              )}
+            >
+              {selected && <Check className="h-4 w-4 shrink-0" strokeWidth={3} />}
+              {opt.label}
+            </button>
+          )
+        })}
+      </div>
+      <FieldError message={error} />
+    </div>
+  )
+}
+
+/**
  * @param {object}   patientForm   the form values (firstName, phonePrimary, …)
  * @param {function} setField      (name, value) — stores the value as given
  * @param {function} setNameField  (name, value) — for person/place names
@@ -83,6 +153,12 @@ export function NotesSection({ value, setField }) {
  *                   fills in on their own phone. Defaults to true so reception
  *                   keeps the form it has always had. "Referred By" is shown
  *                   either way: the patient knows who sent them.
+ * @param {boolean}  patientFilling  on a PHONE-SIZED screen only, gender, blood
+ *                   group and marital status become tappable options instead of
+ *                   dropdowns — for the QR page, which is filled in on a phone.
+ *                   From sm: up (tablet, desktop) the dropdowns are shown as
+ *                   before, and reception is unaffected either way: it does not
+ *                   pass this. Same fields, same stored values, both ways.
  */
 export default function PatientDetailsFields({
   patientForm,
@@ -91,6 +167,7 @@ export default function PatientDetailsFields({
   setTextField,
   fieldErrors = {},
   showMedicoLegal = true,
+  patientFilling = false,
 }) {
   return (
     <>
@@ -118,26 +195,62 @@ export default function PatientDetailsFields({
         <div className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-3 [&>div]:min-w-0">
           <div>
             <Label className="text-xs text-gray-600">Date of Birth <span className="text-red-500">*</span></Label>
-            <Input className={cn('mt-1', fieldErrors.dateOfBirth && 'border-red-500')} type="date" value={patientForm.dateOfBirth} onChange={e => setField('dateOfBirth', e.target.value)} required />
+            <Input
+              className={cn('mt-1', fieldErrors.dateOfBirth && 'border-red-500')}
+              type="date"
+              value={patientForm.dateOfBirth}
+              onChange={e => setField('dateOfBirth', e.target.value)}
+              required
+              // A patient filling this on their own phone gets the date picker
+              // from tapping anywhere in the field, not just the small icon at
+              // its edge, and the picker opens within a sensible range instead
+              // of at today — a birth date is never in the future, and the year
+              // list starts at a plausible one rather than scrolling from 2026.
+              // Reception is unchanged: it does not pass patientFilling, and
+              // types dates rather than picking them.
+              {...(patientFilling ? {
+                max: dobMax(),
+                min: dobMin(),
+                onClick: e => { try { e.currentTarget.showPicker?.() } catch { /* not allowed here — the icon still works */ } },
+              } : {})}
+            />
             <FieldError message={fieldErrors.dateOfBirth} />
           </div>
-          <div>
+          {patientFilling && (
+            <ChoiceChips
+              label="Gender"
+              required
+              value={patientForm.gender}
+              onChange={v => setField('gender', v)}
+              error={fieldErrors.gender}
+              options={GENDERS}
+            />
+          )}
+          <div className={cn(patientFilling && 'hidden sm:block')}>
             <Label className="text-xs text-gray-600">Gender <span className="text-red-500">*</span></Label>
             <Select value={patientForm.gender} onValueChange={v => setField('gender', v)}>
               <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
               <SelectContent>
-                <SelectItem value="male">Male</SelectItem>
-                <SelectItem value="female">Female</SelectItem>
-                <SelectItem value="other">Other</SelectItem>
+                {GENDERS.map(g => <SelectItem key={g.value} value={g.value}>{g.label}</SelectItem>)}
               </SelectContent>
             </Select>
           </div>
-          <div>
+          {patientFilling && (
+            <ChoiceChips
+              label="Blood Group"
+              value={patientForm.bloodGroup}
+              onChange={v => setField('bloodGroup', v)}
+              error={fieldErrors.bloodGroup}
+              options={BLOOD_GROUPS.map(bg => ({ value: bg, label: bg }))}
+              cols="[&>button]:basis-[20%]"
+            />
+          )}
+          <div className={cn(patientFilling && 'hidden sm:block')}>
             <Label className="text-xs text-gray-600">Blood Group</Label>
             <Select value={patientForm.bloodGroup} onValueChange={v => setField('bloodGroup', v)}>
               <SelectTrigger className="mt-1"><SelectValue placeholder="Select" /></SelectTrigger>
               <SelectContent>
-                {['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-'].map(bg => (
+                {BLOOD_GROUPS.map(bg => (
                   <SelectItem key={bg} value={bg}>{bg}</SelectItem>
                 ))}
               </SelectContent>
@@ -145,7 +258,16 @@ export default function PatientDetailsFields({
           </div>
         </div>
         <div className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-3 [&>div]:min-w-0">
-          <div>
+          {patientFilling && (
+            <ChoiceChips
+              label="Marital Status"
+              value={patientForm.maritalStatus}
+              onChange={v => setField('maritalStatus', v)}
+              error={fieldErrors.maritalStatus}
+              options={MARITAL_STATUSES.map(m => ({ value: m, label: m }))}
+            />
+          )}
+          <div className={cn(patientFilling && 'hidden sm:block')}>
             <Label className="text-xs text-gray-600">Marital Status</Label>
             <Select value={patientForm.maritalStatus} onValueChange={v => setField('maritalStatus', v)}>
               <SelectTrigger className="mt-1"><SelectValue placeholder="Select" /></SelectTrigger>

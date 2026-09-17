@@ -7,7 +7,7 @@ import PatientLookup from '@/components/common/PatientLookup'
 import { Label } from '@/components/ui/label'
 import AppointmentFields, { buildAppointmentPayload, format12Hour } from '@/components/common/AppointmentFields'
 import { patientDetailsSchema, patientFormSchema, issuesToFieldErrors } from '@/lib/schemas/patientFormSchema'
-import { drName } from '@/lib/utils'
+import { cn, drName } from '@/lib/utils'
 import { sanitizeTextInput, sanitizeNameInput } from '@/components/common/textFieldUtils'
 import { printAppointmentCard } from '@/components/appointments/appointmentPrint'
 
@@ -286,31 +286,67 @@ export default function SelfRegisterPage() {
             poster on a wall and should see at once whose form this is (the same
             logo and name the poster carries). The generic icon is only the
             fallback for a hospital with no logo. */}
-        <div className="mb-6 text-center">
+        {/* On a phone the header is tightened up — a patient standing in the
+            corridor should reach the first field without scrolling past a
+            half-screen of heading. The words are the same on both. */}
+        <div className="mb-6 text-center max-sm:mb-5">
           {org?.logoUrl ? (
             <img
               src={org.logoUrl}
               alt={`${org.name} logo`}
-              className="mx-auto mb-3 h-20 w-20 rounded-2xl border border-slate-200 bg-white object-contain p-2 shadow-sm"
+              className="mx-auto mb-3 h-20 w-20 rounded-2xl border border-slate-200 bg-white object-contain p-2 shadow-sm max-sm:mb-2 max-sm:h-16 max-sm:w-16"
             />
           ) : (
-            <div className="mx-auto mb-3 flex h-16 w-16 items-center justify-center rounded-full bg-blue-100">
+            <div className="mx-auto mb-3 flex h-16 w-16 items-center justify-center rounded-full bg-blue-100 max-sm:mb-2 max-sm:h-14 max-sm:w-14">
               <UserPlus className="h-8 w-8 text-blue-600" />
             </div>
           )}
-          <h1 className="text-2xl font-bold text-slate-800 [text-wrap:balance]">
+          <h1 className="text-2xl font-bold text-slate-800 [text-wrap:balance] max-sm:text-xl">
             {org?.name || 'Patient Registration'}
           </h1>
           {org?.city && <p className="text-sm text-slate-500">{org.city}</p>}
-          <p className="mt-4 text-lg font-semibold text-slate-700">Patient Registration &amp; Appointment Booking</p>
-          <p className="mt-1 text-sm text-slate-500">
+          <p className="mt-4 text-lg font-semibold text-slate-700 max-sm:mt-3 max-sm:text-base">Patient Registration &amp; Appointment Booking</p>
+          <p className="mt-1 text-sm text-slate-500 max-sm:text-[13px]">
             Complete your registration or book an appointment online and save time at the reception counter.
           </p>
         </div>
 
+        {/* Phone styling for the SHARED fields, applied from here so the same
+            components keep reception's look untouched — none of these rules
+            exist above sm:. A phone gets: white cards instead of grey panels,
+            taller fields, and 16px text in every field, which is the size below
+            which iOS zooms the page in the moment a field is tapped, leaving
+            the patient scrolled sideways on a form they cannot read. */}
         <form
           onSubmit={submit}
-          className="space-y-4 [&_input:not([type=checkbox])]:h-11 [&_input:not([type=checkbox])]:text-[15px]"
+          className={cn(
+            'space-y-4',
+            // One size for every field on this page. The inputs are set taller
+            // than the shared default here, so the dropdowns (Gender, Blood
+            // Group, Marital Status, State) have to be set with them or they
+            // sit 8px shorter than the box beside them, which is what a patient
+            // notices first.
+            '[&_input:not([type=checkbox])]:h-11 [&_input:not([type=checkbox])]:text-[15px]',
+            '[&_button[role=combobox]]:h-11 [&_button[role=combobox]]:text-[15px]',
+            '[&_textarea]:text-[15px]',
+            'max-sm:space-y-3',
+            'max-sm:[&_section]:rounded-2xl max-sm:[&_section]:border-slate-200 max-sm:[&_section]:bg-white max-sm:[&_section]:p-4 max-sm:[&_section]:shadow-sm',
+            // the icon + title row that opens every section
+            'max-sm:[&_section>div:first-of-type]:mb-1 max-sm:[&_section>div:first-of-type]:text-[15px] max-sm:[&_section>div:first-of-type]:text-slate-800',
+            'max-sm:[&_label]:text-[13px] max-sm:[&_label]:text-slate-600',
+            'max-sm:[&_input:not([type=checkbox])]:h-12 max-sm:[&_input:not([type=checkbox])]:rounded-xl max-sm:[&_input:not([type=checkbox])]:bg-white max-sm:[&_input:not([type=checkbox])]:text-base',
+            'max-sm:[&_textarea]:rounded-xl max-sm:[&_textarea]:bg-white max-sm:[&_textarea]:text-base',
+            'max-sm:[&_button[role=combobox]]:h-12 max-sm:[&_button[role=combobox]]:rounded-xl max-sm:[&_button[role=combobox]]:bg-white max-sm:[&_button[role=combobox]]:text-base',
+            'max-sm:[&_button[role=checkbox]]:h-5 max-sm:[&_button[role=checkbox]]:w-5',
+            // The browser's own calendar button inside the date field. Left
+            // alone it floats right beside the digits, mid-field, which reads as
+            // a stray icon; it belongs at the edge of the box like the arrow on
+            // the dropdowns beside it. On a phone it is also enlarged, because a
+            // 1rem target is a hard thing to hit with a thumb.
+            '[&_input[type=date]]:relative',
+            '[&_input[type=date]::-webkit-calendar-picker-indicator]:absolute [&_input[type=date]::-webkit-calendar-picker-indicator]:right-3 [&_input[type=date]::-webkit-calendar-picker-indicator]:cursor-pointer [&_input[type=date]::-webkit-calendar-picker-indicator]:opacity-60',
+            'max-sm:[&_input[type=date]::-webkit-calendar-picker-indicator]:h-6 max-sm:[&_input[type=date]::-webkit-calendar-picker-indicator]:w-6',
+          )}
           noValidate
         >
           {/* New or already registered — chosen first, so a returning patient
@@ -334,7 +370,7 @@ export default function SelfRegisterPage() {
                     // A returning patient is here to book.
                     if (key === 'existing') setField('bookAppointment', true)
                   }}
-                  className={`rounded-lg border p-3 text-left transition-colors ${mode === key
+                  className={`rounded-lg border p-3 text-left transition-colors max-sm:rounded-2xl max-sm:p-4 ${mode === key
                     ? 'border-blue-600 bg-blue-50 ring-1 ring-blue-600'
                     : 'border-slate-200 bg-white hover:bg-slate-50'}`}
                 >
@@ -390,6 +426,7 @@ export default function SelfRegisterPage() {
               setTextField={setTextField}
               fieldErrors={fieldErrors}
               showMedicoLegal={false}
+              patientFilling
             />
           )}
           {(mode === 'new' || existingPatient) && (
@@ -414,17 +451,22 @@ export default function SelfRegisterPage() {
             <p className="rounded-lg bg-red-50 px-4 py-3 text-center text-sm font-medium text-red-700">{formError}</p>
           )}
 
-          <div className="sticky bottom-0 -mx-4 bg-slate-50/80 px-4 py-3 backdrop-blur">
+          {/* On a phone: a full-width bar that follows the patient down the
+              form, so the button is always under their thumb. On a wider screen
+              that bar covers the fields and reads as a banner rather than a
+              button, so there it is an ordinary button at the end of the form,
+              with the required-fields note beside it. */}
+          <div className="sticky bottom-0 -mx-4 border-t border-slate-200 bg-slate-50/90 px-4 py-3 backdrop-blur sm:static sm:mx-0 sm:flex sm:flex-row-reverse sm:items-center sm:justify-between sm:border-0 sm:bg-transparent sm:px-0 sm:backdrop-blur-none">
             <Button
               type="submit"
               disabled={submitting || !org || (mode === 'existing' && (!existingPatient || !form.bookAppointment))}
-              className="h-12 w-full text-base"
+              className="h-12 w-full text-base sm:h-11 sm:w-auto sm:px-10"
             >
               {submitting
                 ? <><Loader2 className="mr-2 h-5 w-5 animate-spin" /> {form.bookAppointment ? 'Booking…' : 'Submitting…'}</>
                 : form.bookAppointment || mode === 'existing' ? 'Book appointment' : 'Submit'}
             </Button>
-            <p className="mt-2 text-center text-xs text-slate-400">
+            <p className="mt-2 text-center text-xs text-slate-400 sm:mt-0">
               Fields marked <span className="text-red-500">*</span> are required.
             </p>
           </div>
