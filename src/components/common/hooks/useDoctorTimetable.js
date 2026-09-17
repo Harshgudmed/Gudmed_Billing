@@ -50,7 +50,7 @@ export function slotsForDate(timetable, date) {
  * Custom hook to manage fetching and calculating a doctor's available time slots.
  * This abstracts away the heavy math and API calls from the UI components.
  */
-export function useDoctorTimetable(doctorId, appointmentDate, onSlotsGenerated) {
+export function useDoctorTimetable(doctorId, appointmentDate, onSlotsGenerated, { url } = {}) {
   const [doctorTimetable, setDoctorTimetable] = useState(null)
   const [availableTimeSlots, setAvailableTimeSlots] = useState([])
   const [timetableLoading, setTimetableLoading] = useState(false)
@@ -65,7 +65,9 @@ export function useDoctorTimetable(doctorId, appointmentDate, onSlotsGenerated) 
         if (!doctorId) return
 
         setTimetableLoading(true)
-        const res = await client.get(`/doctor-accountability?resource=timetable&doctorId=${doctorId}`)
+        // `url` lets a caller without a login (the QR booking page) read the
+        // same timetable through the hospital's public endpoint.
+        const res = await client.get(url ? url(doctorId) : `/doctor-accountability?resource=timetable&doctorId=${doctorId}`)
         if (res.success) {
           setDoctorTimetable(res.data.timetable)
         }

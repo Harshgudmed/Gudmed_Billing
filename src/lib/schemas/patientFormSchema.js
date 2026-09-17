@@ -139,6 +139,8 @@ export const patientDetailsSchema = z.object({
   hasInsurance: z.boolean().default(false),
   insuranceProvider: optionalTextSchema,
   insuranceId: optionalTextSchema,
+
+  notes: optionalTextSchema,
 })
 
 // ── Register + (optionally) the first appointment ─────────────────────────
@@ -161,7 +163,6 @@ export const patientFormSchema = patientDetailsSchema.extend({
   priority: optionalTextSchema,
   appointmentDate: optionalTextSchema,
   appointmentTime: optionalTextSchema,
-  notes: optionalTextSchema,
 }).superRefine((data, ctx) => {
   // Not booking: the appointment fields are not on screen, so nothing about
   // them can be required or wrong.

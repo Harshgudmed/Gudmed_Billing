@@ -1,10 +1,11 @@
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { Textarea } from '@/components/ui/textarea'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { Users, Phone, MapPin, AlertCircle, Shield } from 'lucide-react'
+import { Users, Phone, MapPin, AlertCircle, Shield, FileText } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { PhoneInput } from './PhoneInput'
-import { sanitizeTextInput } from './textFieldUtils'
+import { sanitizeTextInput, sanitizeMultilineInput } from './textFieldUtils'
 
 // The patient half of registration — who the person is, how to reach them,
 // where they live, who to call, and their insurance. Nothing else: no doctor,
@@ -51,15 +52,37 @@ export function FieldError({ message }) {
 }
 
 /**
+ * Free-text notes about the visit. Separate from the fields above because the
+ * reception form places it after the appointment section, while the QR page has
+ * no appointment section to place it after — one component, two positions.
+ */
+export function NotesSection({ value, setField }) {
+  return (
+    <section className="rounded-lg border bg-gray-50/60 p-4 space-y-3">
+      <div className="flex items-center gap-2 text-sm font-semibold text-gray-700">
+        <FileText className="h-4 w-4 text-blue-600" />Notes
+      </div>
+      <Textarea
+        rows={3}
+        value={value}
+        onChange={e => setField('notes', sanitizeMultilineInput(e.target.value))}
+        placeholder="Any additional notes (reason for visit, special instructions, referral details...)"
+      />
+    </section>
+  )
+}
+
+/**
  * @param {object}   patientForm   the form values (firstName, phonePrimary, …)
  * @param {function} setField      (name, value) — stores the value as given
  * @param {function} setNameField  (name, value) — for person/place names
  * @param {function} setTextField  (name, value) — for free text
  * @param {object}   fieldErrors   { fieldName: 'message' }
- * @param {boolean}  showMedicoLegal  reception-only fields (Referred By, MLC
- *                   number): a hospital record about the visit, not something a
- *                   patient fills in on their own phone. Defaults to true so
- *                   reception keeps the form it has always had.
+ * @param {boolean}  showMedicoLegal  the MLC (medico-legal case) number — a
+ *                   hospital record about the visit, not something a patient
+ *                   fills in on their own phone. Defaults to true so reception
+ *                   keeps the form it has always had. "Referred By" is shown
+ *                   either way: the patient knows who sent them.
  */
 export default function PatientDetailsFields({
   patientForm,
@@ -131,12 +154,12 @@ export default function PatientDetailsFields({
               </SelectContent>
             </Select>
           </div>
+          <div>
+            <Label className="text-xs text-gray-600">Referred By</Label>
+            <Input className="mt-1" value={patientForm.referredBy} onChange={e => setNameField('referredBy', e.target.value)} placeholder="Doctor / clinic / person" />
+          </div>
           {showMedicoLegal && (
             <>
-              <div>
-                <Label className="text-xs text-gray-600">Referred By</Label>
-                <Input className="mt-1" value={patientForm.referredBy} onChange={e => setNameField('referredBy', e.target.value)} placeholder="Doctor / clinic / person" />
-              </div>
               <div>
                 <Label className="text-xs text-gray-600">MLC Number</Label>
                 <Input className="mt-1" spellCheck={false} autoCorrect="off" value={patientForm.mlcNumber} onChange={e => setTextField('mlcNumber', e.target.value)} placeholder="Medico-legal case no. (if any)" />

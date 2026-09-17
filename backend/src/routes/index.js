@@ -34,6 +34,7 @@ import partnerRoutes from './partnerRoutes.js'
 import otRoutes from './otRoutes.js'
 import otClinicalRoutes from './otClinicalRoutes.js'
 import { createPreRegistration, getPublicOrg } from '../controllers/preRegistrationController.js'
+import { publicDepartments, publicDoctors, publicDoctorTimetable, publicRegisterAndBook } from '../controllers/publicBookingController.js'
 import { rateLimit } from '../middleware/rateLimit.js'
 
 export const router = Router()
@@ -66,6 +67,34 @@ const preRegLimit = rateLimit({
 
 router.get('/public/org/:orgId',    getPublicOrg)
 router.post('/public/pre-registration', preRegLimit, createPreRegistration)
+
+// A patient booking their own appointment from the QR page. These call the SAME
+// handlers the logged-in counter uses (see publicBookingController) — only the
+// hospital comes from the link instead of a session. Rate-limited because they
+// are anonymous: reads per hospital, bookings per hospital AND per mobile number,
+// so one phone cannot fill a doctor's day.
+const publicReadLimit = rateLimit({
+  limit: Number(process.env.PUBLIC_READ_RATE_LIMIT) || 120,
+  windowMs: 60_000,
+  message: 'Too many requests — please wait a moment and try again',
+  keyBy: (req) => `read:${req.params?.orgId || req.ip}`,
+})
+const publicBookHospitalLimit = rateLimit({
+  limit: Number(process.env.PUBLIC_BOOK_RATE_LIMIT) || 20,
+  windowMs: 60_000,
+  message: 'Too many bookings right now — please wait a moment and try again',
+  keyBy: (req) => `book:${req.params?.orgId || req.ip}`,
+})
+const publicBookPhoneLimit = rateLimit({
+  limit: Number(process.env.PUBLIC_BOOK_PER_PHONE_LIMIT) || 3,
+  windowMs: 60 * 60_000,
+  message: 'Too many bookings from this mobile number — please contact the hospital',
+  keyBy: (req) => `phone:${req.params?.orgId}:${String(req.body?.patient?.phonePrimary || req.ip)}`,
+})
+router.get('/public/org/:orgId/departments',      publicReadLimit, publicDepartments)
+router.get('/public/org/:orgId/doctors',          publicReadLimit, publicDoctors)
+router.get('/public/org/:orgId/doctor-timetable', publicReadLimit, publicDoctorTimetable)
+router.post('/public/org/:orgId/book',            publicBookHospitalLimit, publicBookPhoneLimit, publicRegisterAndBook)
 
 // Razorpay calls this server-to-server with no cookie or JWT. Mounted here, ahead
 // of `authenticate`, or every webhook is rejected with 401 in production and the
