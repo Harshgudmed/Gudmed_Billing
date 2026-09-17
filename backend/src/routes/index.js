@@ -34,7 +34,7 @@ import partnerRoutes from './partnerRoutes.js'
 import otRoutes from './otRoutes.js'
 import otClinicalRoutes from './otClinicalRoutes.js'
 import { createPreRegistration, getPublicOrg } from '../controllers/preRegistrationController.js'
-import { publicDepartments, publicDoctors, publicDoctorTimetable, publicRegisterAndBook } from '../controllers/publicBookingController.js'
+import { publicDepartments, publicDoctors, publicDoctorTimetable, publicFindPatient, publicRegisterAndBook } from '../controllers/publicBookingController.js'
 import { rateLimit } from '../middleware/rateLimit.js'
 
 export const router = Router()
@@ -89,11 +89,20 @@ const publicBookPhoneLimit = rateLimit({
   limit: Number(process.env.PUBLIC_BOOK_PER_PHONE_LIMIT) || 3,
   windowMs: 60 * 60_000,
   message: 'Too many bookings from this mobile number — please contact the hospital',
-  keyBy: (req) => `phone:${req.params?.orgId}:${String(req.body?.patient?.phonePrimary || req.ip)}`,
+  keyBy: (req) => `phone:${req.params?.orgId}:${String(req.body?.patient?.phonePrimary || req.body?.existing?.mobile || req.ip)}`,
 })
 router.get('/public/org/:orgId/departments',      publicReadLimit, publicDepartments)
 router.get('/public/org/:orgId/doctors',          publicReadLimit, publicDoctors)
 router.get('/public/org/:orgId/doctor-timetable', publicReadLimit, publicDoctorTimetable)
+// Finding one's own record needs a complete mobile number; the tighter
+// per-address limit keeps anyone from walking through numbers.
+const publicFindLimit = rateLimit({
+  limit: Number(process.env.PUBLIC_FIND_RATE_LIMIT) || 20,
+  windowMs: 10 * 60_000,
+  message: 'Too many searches — please wait a few minutes or ask at the reception counter',
+  keyBy: (req) => `find:${req.params?.orgId}:${req.ip}`,
+})
+router.get('/public/org/:orgId/patients',         publicReadLimit, publicFindLimit, publicFindPatient)
 router.post('/public/org/:orgId/book',            publicBookHospitalLimit, publicBookPhoneLimit, publicRegisterAndBook)
 
 // Razorpay calls this server-to-server with no cookie or JWT. Mounted here, ahead

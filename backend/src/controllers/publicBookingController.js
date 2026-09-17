@@ -1,7 +1,7 @@
 import { db } from '../config/db.js'
 import { getDepartments, getUsers } from './settingsController.js'
 import { handleGet as doctorAccountabilityGet } from './doctorAccountabilityController.js'
-import { create as createPatient } from './patientController.js'
+import { create as createPatient, getAll as searchPatients } from './patientController.js'
 import { create as createAppointment } from './appointmentController.js'
 import { createAppointmentSchema } from '../validations/appointment.validation.js'
 
@@ -93,6 +93,59 @@ export async function publicDoctorTimetable(req, res, next) {
   } catch (err) { next(err) }
 }
 
+// ── An already-registered patient finding their record ──────────────────────
+
+/** "Ramesh" → "R*****" — enough for a person to recognise their own name, not to read someone else's. */
+const mask = (s) => (s ? String(s)[0] + '*'.repeat(Math.max(1, String(s).length - 1)) : '')
+
+/** "1000000123" → "******0123" — enough to tell family members apart, not to copy. */
+const maskUhid = (s) => (s ? '*'.repeat(Math.max(0, String(s).length - 4)) + String(s).slice(-4) : '')
+
+/**
+ * This hospital's active patients registered on exactly this 10-digit mobile.
+ *
+ * The search itself is the patients list's own (patientController.getAll →
+ * patientSearchWhere). What this adds is what an anonymous page needs: the
+ * counter's search matches any part of a name or number, so a page anyone can
+ * open answers only a complete mobile number, exactly — never a name, never a
+ * few digits.
+ */
+async function findRegistered(organizationId, mobile) {
+  const m = String(mobile || '').trim()
+  if (!/^[6-9]\d{9}$/.test(m)) return []
+  const found = await capture(searchPatients, { organizationId, query: { search: m, limit: '20', status: 'active' } })
+  const rows = found.status === 200 && Array.isArray(found.body?.data) ? found.body.data : []
+  return rows.filter((p) => p.phonePrimary === m)
+}
+
+/**
+ * GET /api/public/org/:orgId/patients?search=<10-digit mobile>
+ * For PatientLookup on the QR page: everyone registered on that mobile (a
+ * family often shares one), with names and UHIDs masked. No address, email,
+ * date of birth or history.
+ */
+export async function publicFindPatient(req, res, next) {
+  try {
+    const org = await hospitalFrom(req, res)
+    if (!org) return
+    const rows = await findRegistered(org.id, req.query.search)
+    return res.json({
+      success: true,
+      data: rows.map((p) => ({
+        id: p.id,
+        mrn: maskUhid(p.mrn),
+        firstName: mask(p.firstName),
+        middleName: '',
+        lastName: mask(p.lastName),
+        gender: p.gender,
+        // Only the number the caller typed, echoed back so the booking can
+        // name it again.
+        phonePrimary: p.phonePrimary,
+      })),
+    })
+  } catch (err) { next(err) }
+}
+
 // ── Register + book ─────────────────────────────────────────────────────────
 
 // How far ahead a phone may book. Reception can book any future date; an
@@ -120,15 +173,31 @@ export async function publicRegisterAndBook(req, res, next) {
       return res.status(400).json({ success: false, error: `Online booking is open for the next ${MAX_DAYS_AHEAD} days. Please choose an earlier date.` })
     }
 
+    let patientRow
+    let alreadyRegistered = false
+
+    // Already registered (chosen on the page from the people on a mobile number):
+    // the choice is checked again HERE — the patient must be one of those
+    // registered on that mobile, never just any id the browser sends.
+    const { existing } = req.body || {}
+    if (existing) {
+      const match = (await findRegistered(org.id, existing.mobile)).find((p) => p.id === existing.patientId)
+      if (!match) {
+        return res.status(404).json({ success: false, error: 'No record matches this mobile number. Please register as a new patient.' })
+      }
+      patientRow = match
+      alreadyRegistered = true
+    }
+
     // 1. Register — the same handler reception's form calls. `appointment` is
     //    dropped from the patient body: that nested shortcut books without any of
     //    the booking rules, which is exactly what this endpoint must not allow.
     const { appointment: _nested, ...patientBody } = patient
-    const registered = await capture(createPatient, { organizationId: org.id, body: patientBody })
+    const registered = patientRow ? null : await capture(createPatient, { organizationId: org.id, body: patientBody })
 
-    let patientRow
-    let alreadyRegistered = false
-    if (registered.status === 201) {
+    if (patientRow) {
+      // found above
+    } else if (registered.status === 201) {
       patientRow = registered.body.data
     } else if (registered.status === 409 && registered.body?.code === 'PATIENT_EXISTS') {
       // Same phone + same date of birth is, by the guard's own definition, this

@@ -2,7 +2,9 @@ import { useEffect, useMemo, useState } from 'react'
 import { CheckCircle2, CalendarCheck, Download, Loader2, UserPlus } from 'lucide-react'
 import client from '@/api/client'
 import { Button } from '@/components/ui/button'
-import PatientDetailsFields, { NotesSection } from '@/components/common/PatientDetailsFields'
+import PatientDetailsFields, { NotesSection, FieldError } from '@/components/common/PatientDetailsFields'
+import PatientLookup from '@/components/common/PatientLookup'
+import { Label } from '@/components/ui/label'
 import AppointmentFields, { buildAppointmentPayload, format12Hour } from '@/components/common/AppointmentFields'
 import { patientDetailsSchema, patientFormSchema, issuesToFieldErrors } from '@/lib/schemas/patientFormSchema'
 import { drName } from '@/lib/utils'
@@ -63,6 +65,11 @@ export default function SelfRegisterPage() {
   const [submitting, setSubmitting] = useState(false)
   const [done, setDone] = useState(false)
   const [booked, setBooked] = useState(null) // { mrn, doctorName, date, time, alreadyRegistered }
+  // 'new' fills the registration form; 'existing' finds the patient's record
+  // (the counter's own PatientLookup) and goes straight to booking — someone
+  // already registered should never have to type their whole form again.
+  const [mode, setMode] = useState('new')
+  const [existingPatient, setExistingPatient] = useState(null)
   const [doctors, setDoctors] = useState([])
   const [departments, setDepartments] = useState([])
 
@@ -103,6 +110,40 @@ export default function SelfRegisterPage() {
   async function submit(e) {
     e.preventDefault()
     setFormError('')
+
+    if (mode === 'existing') {
+      const errors = {}
+      if (!existingPatient) errors.existingPatient = 'Find your record first'
+      if (!form.doctor) errors.doctor = 'Please select a doctor'
+      if (!form.appointmentDate) errors.appointmentDate = 'Appointment date is required'
+      if (Object.keys(errors).length) { setFieldErrors(errors); return }
+
+      setSubmitting(true)
+      try {
+        // The server checks again that the chosen patient is registered on this
+        // mobile number — an id from the page alone is never trusted.
+        const res = await client.post(`/public/org/${orgId}/book`, {
+          existing: { mobile: existingPatient.phonePrimary, patientId: existingPatient.id },
+          appointment: buildAppointmentPayload(form),
+        })
+        const doc = doctors.find((d) => d.id === form.doctor)
+        setBooked({
+          name: [existingPatient.firstName, existingPatient.lastName].filter(Boolean).join(' '),
+          mrn: res.data?.patient?.mrn,
+          alreadyRegistered: false,
+          doctorName: doc ? drName(doc.fullName) : '',
+          date: form.appointmentDate,
+          time: form.appointmentTime,
+          appointment: res.data?.appointment || null,
+        })
+        window.scrollTo({ top: 0, behavior: 'smooth' })
+      } catch (err) {
+        setFormError(err?.message || 'Could not book. Please try again.')
+      } finally {
+        setSubmitting(false)
+      }
+      return
+    }
 
     // Booking adds the counter's own rule: doctor and date required.
     const parsed = (form.bookAppointment ? patientFormSchema : patientDetailsSchema).safeParse(form)
@@ -181,20 +222,20 @@ export default function SelfRegisterPage() {
       <div className="flex min-h-screen items-center justify-center bg-slate-50 p-6">
         <div className="w-full max-w-sm rounded-2xl border border-slate-200 bg-white p-8 text-center shadow-sm">
           <CalendarCheck className="mx-auto h-16 w-16 text-green-500" />
-          <h1 className="mt-4 text-xl font-bold text-slate-800">Appointment booked!</h1>
+          <h1 className="mt-4 text-xl font-bold text-slate-800">Appointment Confirmed</h1>
           <p className="mt-2 text-slate-600">
-            Thank you, <span className="font-semibold">{form.firstName}</span>.
+            Thank you, <span className="font-semibold">{booked.name || form.firstName}</span>. Your appointment has been booked.
           </p>
-          <div className="mt-5 space-y-2 rounded-lg bg-slate-50 p-4 text-left text-sm text-slate-700">
-            {booked.mrn && <p><span className="text-slate-500">Your UHID:</span> <span className="font-mono font-semibold">{booked.mrn}</span></p>}
-            {booked.doctorName && <p><span className="text-slate-500">Doctor:</span> <span className="font-semibold">{booked.doctorName}</span></p>}
-            {when && <p><span className="text-slate-500">Date:</span> <span className="font-semibold">{when}</span></p>}
-            {booked.time && <p><span className="text-slate-500">Time:</span> <span className="font-semibold">{format12Hour(booked.time)}</span></p>}
-          </div>
-          <div className="mt-4 rounded-lg bg-blue-50 p-4 text-sm text-blue-800">
-            Please reach <span className="font-semibold">15 minutes early</span> and tell the reception counter your{' '}
-            <span className="font-semibold">UHID</span> or <span className="font-semibold">mobile number</span>.
-            {booked.alreadyRegistered && <> You were already registered with us, so your existing UHID is used.</>}
+          <dl className="mt-5 space-y-2 rounded-lg bg-slate-50 p-4 text-left text-sm text-slate-700">
+            {booked.mrn && <div className="flex justify-between gap-3"><dt className="text-slate-500">UHID</dt><dd className="font-mono font-semibold">{booked.mrn}</dd></div>}
+            {booked.doctorName && <div className="flex justify-between gap-3"><dt className="text-slate-500">Doctor</dt><dd className="text-right font-semibold">{booked.doctorName}</dd></div>}
+            {when && <div className="flex justify-between gap-3"><dt className="text-slate-500">Date</dt><dd className="text-right font-semibold">{when}</dd></div>}
+            {booked.time && <div className="flex justify-between gap-3"><dt className="text-slate-500">Time</dt><dd className="font-semibold">{format12Hour(booked.time)}</dd></div>}
+          </dl>
+          <div className="mt-4 rounded-lg bg-blue-50 p-4 text-left text-sm text-blue-800">
+            Please arrive <span className="font-semibold">15 minutes before</span> your appointment time and share your{' '}
+            <span className="font-semibold">UHID</span> or <span className="font-semibold">registered mobile number</span> at the reception counter.
+            {booked.alreadyRegistered && <> Your existing registration has been used.</>}
           </div>
           {booked.appointment && (
             <>
@@ -206,9 +247,9 @@ export default function SelfRegisterPage() {
                 className="mt-5 h-11 w-full"
                 onClick={() => printAppointmentCard(booked.appointment, { name: org?.name || 'Hospital' })}
               >
-                <Download className="mr-2 h-4 w-4" /> Download appointment card (PDF)
+                <Download className="mr-2 h-4 w-4" /> Download Appointment Card (PDF)
               </Button>
-              <p className="mt-2 text-xs text-slate-400">In the print window, choose &ldquo;Save as PDF&rdquo;.</p>
+              <p className="mt-2 text-xs text-slate-400">When the print window opens, select &ldquo;Save as PDF&rdquo;.</p>
             </>
           )}
         </div>
@@ -222,14 +263,14 @@ export default function SelfRegisterPage() {
       <div className="flex min-h-screen items-center justify-center bg-slate-50 p-6">
         <div className="max-w-sm rounded-2xl border border-slate-200 bg-white p-8 text-center shadow-sm">
           <CheckCircle2 className="mx-auto h-16 w-16 text-green-500" />
-          <h1 className="mt-4 text-xl font-bold text-slate-800">You&rsquo;re all set!</h1>
+          <h1 className="mt-4 text-xl font-bold text-slate-800">Details Received</h1>
           <p className="mt-2 text-slate-600">
-            Thank you, <span className="font-semibold">{form.firstName}</span>. Your details are saved.
+            Thank you, <span className="font-semibold">{form.firstName}</span>. Your registration details have been submitted.
           </p>
-          <div className="mt-5 rounded-lg bg-blue-50 p-4 text-sm text-blue-800">
-            Please go to the <span className="font-semibold">reception counter</span> and tell them your{' '}
-            <span className="font-semibold">name</span> or{' '}
-            <span className="font-semibold">mobile number</span> to finish. No need to fill anything again.
+          <div className="mt-5 rounded-lg bg-blue-50 p-4 text-left text-sm text-blue-800">
+            Please visit the <span className="font-semibold">reception counter</span> and share your{' '}
+            <span className="font-semibold">name</span> or <span className="font-semibold">mobile number</span> to complete
+            your registration. You will not need to fill in your details again.
           </div>
         </div>
       </div>
@@ -261,9 +302,9 @@ export default function SelfRegisterPage() {
             {org?.name || 'Patient Registration'}
           </h1>
           {org?.city && <p className="text-sm text-slate-500">{org.city}</p>}
-          <p className="mt-3 text-lg font-semibold text-slate-700">Patient Registration</p>
+          <p className="mt-4 text-lg font-semibold text-slate-700">Patient Registration &amp; Appointment Booking</p>
           <p className="mt-1 text-sm text-slate-500">
-            Fill your details here to save time at the counter — and book your appointment if you like.
+            Complete your registration or book an appointment online and save time at the reception counter.
           </p>
         </div>
 
@@ -272,14 +313,86 @@ export default function SelfRegisterPage() {
           className="space-y-4 [&_input:not([type=checkbox])]:h-11 [&_input:not([type=checkbox])]:text-[15px]"
           noValidate
         >
-          <PatientDetailsFields
-            patientForm={form}
-            setField={setField}
-            setNameField={setNameField}
-            setTextField={setTextField}
-            fieldErrors={fieldErrors}
-            showMedicoLegal={false}
-          />
+          {/* New or already registered — chosen first, so a returning patient
+              never faces the registration form at all. */}
+          <div>
+            <p className="mb-2 text-sm font-semibold text-slate-700">Have you visited this hospital before?</p>
+            <div className="grid grid-cols-2 gap-2" role="radiogroup" aria-label="Patient type">
+              {[
+                ['new', 'New Patient', 'First visit — register now'],
+                ['existing', 'Returning Patient', 'Already registered with us'],
+              ].map(([key, label, sub]) => (
+                <button
+                  key={key}
+                  type="button"
+                  role="radio"
+                  aria-checked={mode === key}
+                  onClick={() => {
+                    setMode(key)
+                    setFieldErrors({})
+                    setFormError('')
+                    // A returning patient is here to book.
+                    if (key === 'existing') setField('bookAppointment', true)
+                  }}
+                  className={`rounded-lg border p-3 text-left transition-colors ${mode === key
+                    ? 'border-blue-600 bg-blue-50 ring-1 ring-blue-600'
+                    : 'border-slate-200 bg-white hover:bg-slate-50'}`}
+                >
+                  <span className={`block text-sm font-semibold ${mode === key ? 'text-blue-700' : 'text-slate-800'}`}>{label}</span>
+                  <span className="mt-0.5 block text-xs text-slate-500">{sub}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {mode === 'existing' ? (
+            <section className="rounded-lg border bg-gray-50/60 p-4 space-y-3">
+              <div>
+                <h2 className="text-sm font-semibold text-gray-700">Find your registration</h2>
+                <p className="mt-1 text-sm text-slate-600">
+                  Enter the mobile number you registered with. Select your name from the list to continue.
+                </p>
+              </div>
+              <div>
+                <Label className="text-xs text-gray-600">Registered Mobile Number <span className="text-red-500">*</span></Label>
+                {/* The counter's own patient search, pointed at the hospital's
+                    public endpoint: it answers only a complete 10-digit mobile
+                    number, with names and UHIDs masked. */}
+                <PatientLookup
+                  className="mt-1"
+                  selectedPatient={existingPatient}
+                  onSelect={(p) => { setExistingPatient(p); setFieldErrors((prev) => ({ ...prev, existingPatient: undefined })) }}
+                  onClear={() => setExistingPatient(null)}
+                  placeholder="10-digit mobile number"
+                  showHint={false}
+                  allowAddNew={false}
+                  searchUrl={`/public/org/${orgId}/patients`}
+                  minSearchLength={10}
+                  minLengthHint="Enter all 10 digits of your mobile number."
+                  emptyText="No registration found for this mobile number."
+                />
+                <FieldError message={fieldErrors.existingPatient} />
+              </div>
+              {!existingPatient && (
+                <p className="text-xs text-slate-500">
+                  Not registered yet?{' '}
+                  <button type="button" className="font-semibold text-blue-600 underline" onClick={() => setMode('new')}>
+                    Register as a new patient
+                  </button>
+                </p>
+              )}
+            </section>
+          ) : (
+            <PatientDetailsFields
+              patientForm={form}
+              setField={setField}
+              setNameField={setNameField}
+              setTextField={setTextField}
+              fieldErrors={fieldErrors}
+              showMedicoLegal={false}
+            />
+          )}
+          {(mode === 'new' || existingPatient) && (
           <AppointmentFields
             patientForm={form}
             setField={setField}
@@ -290,22 +403,29 @@ export default function SelfRegisterPage() {
             departments={departments}
             timetableUrl={(doctorId) => `/public/org/${orgId}/doctor-timetable?doctorId=${encodeURIComponent(doctorId)}`}
             showPriority={false}
-            notBookingNote="Leave this unticked to just share your details — the reception counter will register you when you arrive."
+            notBookingNote={mode === 'existing'
+              ? 'Select this option to book your appointment.'
+              : 'Leave this unselected to submit your details only. The reception counter will complete your registration when you arrive.'}
           />
-          <NotesSection value={form.notes} setField={setField} />
+          )}
+          {mode === 'new' && <NotesSection value={form.notes} setField={setField} />}
 
           {formError && (
             <p className="rounded-lg bg-red-50 px-4 py-3 text-center text-sm font-medium text-red-700">{formError}</p>
           )}
 
           <div className="sticky bottom-0 -mx-4 bg-slate-50/80 px-4 py-3 backdrop-blur">
-            <Button type="submit" disabled={submitting || !org} className="h-12 w-full text-base">
+            <Button
+              type="submit"
+              disabled={submitting || !org || (mode === 'existing' && (!existingPatient || !form.bookAppointment))}
+              className="h-12 w-full text-base"
+            >
               {submitting
                 ? <><Loader2 className="mr-2 h-5 w-5 animate-spin" /> {form.bookAppointment ? 'Booking…' : 'Submitting…'}</>
-                : form.bookAppointment ? 'Book appointment' : 'Submit'}
+                : form.bookAppointment || mode === 'existing' ? 'Book appointment' : 'Submit'}
             </Button>
             <p className="mt-2 text-center text-xs text-slate-400">
-              <span className="text-red-500">*</span> marked fields are required. The rest are optional.
+              Fields marked <span className="text-red-500">*</span> are required.
             </p>
           </div>
         </form>

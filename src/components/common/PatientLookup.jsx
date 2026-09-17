@@ -107,6 +107,11 @@ const emptyNew = {
  * hidden, so the screen can link an existing patient but never mint a UHID.
  * Pre-Triage uses this — screening is not registration; a UHID is issued at
  * the registration counter only.
+ *
+ * `searchUrl` / `searchParams` point the same search at another endpoint with
+ * extra parameters. The patient's own QR page uses them to find their record
+ * through the hospital's public endpoint (which also needs a date of birth).
+ * Omitted everywhere else, so every screen still searches /patients as before.
  */
 export default function PatientLookup({
   selectedPatient,
@@ -116,6 +121,13 @@ export default function PatientLookup({
   className = '',
   showHint = true,
   allowAddNew = true,
+  searchUrl = '/patients',
+  searchParams,
+  // Characters typed before the search runs, and what to say until then. The QR
+  // page searches only a complete 10-digit mobile number.
+  minSearchLength = 2,
+  minLengthHint,
+  emptyText,
 }) {
   const [search, setSearch] = useState('')
   const [results, setResults] = useState([])
@@ -131,13 +143,17 @@ export default function PatientLookup({
 
   // Show spinner immediately when the user starts typing (optimistic UX)
   useEffect(() => {
-    if (search.length >= 2) setLoading(true)
+    if (search.length >= minSearchLength) setLoading(true)
     else { setLoading(false); setResults([]) }
   }, [search])
 
+  // A stable key for the extra parameters, so a changed value (e.g. the date of
+  // birth on the QR page) searches again without re-running on every render.
+  const extraKey = JSON.stringify(searchParams || {})
+
   // Fire the actual API call only after the debounced value settles
   useEffect(() => {
-    if (!debouncedSearch || debouncedSearch.length < 2) {
+    if (!debouncedSearch || debouncedSearch.length < minSearchLength) {
       setResults([])
       setLoading(false)
       return
@@ -146,8 +162,8 @@ export default function PatientLookup({
     const searchTerm = debouncedSearch
     ;(async () => {
       try {
-        const res = await client.get('/patients', {
-          params: { search: debouncedSearch, limit: 8, status: 'active' },
+        const res = await client.get(searchUrl, {
+          params: { search: debouncedSearch, limit: 8, status: 'active', ...JSON.parse(extraKey) },
         })
         if (!cancelled && searchTerm === debouncedSearch) {
           setResults(res.data ?? [])
@@ -160,7 +176,7 @@ export default function PatientLookup({
       }
     })()
     return () => { cancelled = true }
-  }, [debouncedSearch])
+  }, [debouncedSearch, searchUrl, extraKey, minSearchLength])
 
   const setNewField = (field, value) => {
     setNewForm(prev => ({ ...prev, [field]: value }))
@@ -469,21 +485,21 @@ export default function PatientLookup({
           placeholder={placeholder}
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          onFocus={() => search.length >= 2 && setOpen(true)}
+          onFocus={() => search.length >= minSearchLength && setOpen(true)}
         />
         {loading && (
           <Loader2 className="h-4 w-4 animate-spin text-gray-400 absolute right-3 top-1/2 -translate-y-1/2" />
         )}
       </div>
       {/* One character types nothing back and looks broken. Say why. */}
-      {search.length === 1 && (
-        <p className="text-xs text-gray-500">Keep typing — at least 2 characters.</p>
+      {search.length > 0 && search.length < minSearchLength && (
+        <p className="text-xs text-gray-500">{minLengthHint || `Keep typing — at least ${minSearchLength} characters.`}</p>
       )}
-      {open && search.length >= 2 && (
+      {open && search.length >= minSearchLength && (
         <div className="border rounded-md divide-y max-h-48 overflow-y-auto bg-white shadow-sm">
           {results.length === 0 && !loading ? (
             <div className="p-3 text-center">
-              <p className="text-sm text-gray-500 mb-2">No patients found for &ldquo;{search}&rdquo;</p>
+              <p className="text-sm text-gray-500 mb-2">{emptyText || <>No patients found for &ldquo;{search}&rdquo;</>}</p>
               {allowAddNew && (
               <Button type="button" size="sm" variant="outline" className="gap-1.5"
                 onClick={() => {
