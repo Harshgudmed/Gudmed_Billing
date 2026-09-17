@@ -1,6 +1,7 @@
 import { db } from '../config/db.js'
 import { getOrgId } from "../lib/reqContext.js";
 import { scopedDoctorId } from '../utils/scope.js'
+import { isOwned } from '../lib/tenant.js'
 import { round2 } from '../lib/money.js'
 import { assertValidShift, assertNoSelfOverlap } from '../lib/activeDoctor.js'
 import { roomIdsInTimetable } from '../lib/doctorTimetable.js'
@@ -204,6 +205,14 @@ export async function handlePost(req, res, next) {
     if (resource === 'config') {
       const { doctorId, commissionType, commissionRate, isActive, notes, consultationFee, followUpDays } = req.body
 
+      // The doctor must be this hospital's. Configs are keyed by doctorId alone
+      // and read that way at booking (appointmentController), so without this
+      // another hospital could set this hospital's doctor's commission rate —
+      // and every booking with that doctor would then pay it.
+      if (!(await isOwned('user', doctorId, ORG_ID))) {
+        return res.status(404).json({ success: false, error: 'Doctor not found' })
+      }
+
       // Validate commission settings before storing them. Previously `parseFloat(x) || 0`
       // silently coerced junk (NaN, negatives, 150%, 1e308, unknown types) into stored
       // values — a percentage of 150 or -10 makes no sense and Infinity/NaN corrupts every
@@ -240,6 +249,9 @@ export async function handlePost(req, res, next) {
       }
 
       const existing = await db.doctorCommissionConfig.findUnique({ where: { doctorId } })
+      if (existing && existing.organizationId !== ORG_ID) {
+        return res.status(404).json({ success: false, error: 'Doctor not found' })
+      }
       let config
       if (existing) {
         config = await db.doctorCommissionConfig.update({
@@ -256,6 +268,14 @@ export async function handlePost(req, res, next) {
 
     if (resource === 'commission') {
       const { doctorId, invoiceId, invoiceAmount, commissionRate, commissionType, commissionAmount } = req.body
+      // Both ids come from the body: a commission row in this hospital must not
+      // point at another hospital's doctor or invoice.
+      if (!(await isOwned('user', doctorId, ORG_ID))) {
+        return res.status(404).json({ success: false, error: 'Doctor not found' })
+      }
+      if (invoiceId && !(await isOwned('invoice', invoiceId, ORG_ID))) {
+        return res.status(404).json({ success: false, error: 'Invoice not found' })
+      }
       const commission = await db.doctorCommission.create({
         data: {
           organizationId: ORG_ID,

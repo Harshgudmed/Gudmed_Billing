@@ -201,7 +201,12 @@ export const getAll = async (req, res, next) => {
     }
 
     if (resource === 'reports') {
+      // This hospital's reports only. The list had no organizationId at all, so
+      // every hospital's admin saw every hospital's radiology reports — with the
+      // patient's name and the exam — the one list in this module that was not
+      // scoped (orders, exams and stats all were).
       const where = {
+        organizationId: ORGANIZATION_ID,
         ...(orderId ? { orderId } : {}),
       }
       const [data, total] = await Promise.all([

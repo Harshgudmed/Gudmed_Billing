@@ -109,6 +109,9 @@ export async function sendPrescriptionNotification(req, res) {
         await whatsapp.sendMessage(phone,
           `💊 *Would you like to purchase these medicines from our pharmacy?*\n\nReply *YES* to order now\nReply *NO* to skip`)
         await startPharmacySession(phone, {
+          // The hospital this prescription belongs to — the bot records the
+          // sale, invoice and payment there when the patient pays.
+          organizationId:  reqOrgId,
           prescriptionId:  prescription.id,
           consultationId:  prescription.consultationId,
           patientId:       prescription.patient?.id,

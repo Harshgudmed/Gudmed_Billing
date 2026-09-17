@@ -5,7 +5,13 @@ import { formatRupee as rupee } from '../lib/money.js'
 import { nextSeriesNumber, invoiceProbe } from '../lib/counters.js'
 import { consumeFromBatches, recordStockChange } from '../pharmacy/stockService.js'
 
-const ORG_ID = process.env.ORGANIZATION_ID || 'org-demo' // used in non-req helpers (bot callbacks)
+// WHICH HOSPITAL: a bot reply arrives from WhatsApp with no login, so the
+// hospital is carried in the conversation itself — startPharmacySession stores
+// the prescription's organizationId, and every step reads it from the session.
+// This used to be a single constant (ORGANIZATION_ID / 'org-demo'), so a patient
+// of any hospital paying on WhatsApp had their sale, invoice, payment, receipt
+// number and stock movement written into GudMed's books, and was sent GudMed's
+// UPI id to pay to.
 
 function normalisePhone(raw) {
   return String(raw || '').replace(/\D/g, '')
@@ -62,7 +68,7 @@ async function handlePharmacyReply(phone, reply, session) {
 async function handlePaymentChoice(phone, reply, session) {
   if (reply === '1' || reply.includes('UPI')) {
     setSession(phone, { state: 'AWAITING_UPI_REF', paymentMethod: 'UPI' })
-    const org = await getOrg()
+    const org = await getOrg(session.organizationId)
     const upiId = org.settings?.upiId || 'hospital@upi'
     await whatsapp.sendMessage(phone,
       `*UPI Payment*\n\nAmount: *${rupee(session.total)}*\n\nPay to UPI ID:\n*${upiId}*\n\nAfter payment, reply with your *UPI reference/transaction number* and we will confirm your order.`)
@@ -166,6 +172,14 @@ function receiptMsg(session, invoice, method, ref) {
 // ── DB helpers ───────────────────────────────────────────────────────────────
 
 async function createSaleAndInvoice(session, paymentMethod, reference) {
+  // No hospital on the conversation (a session started before this was stored)
+  // means nowhere correct to record the sale. Refuse it — the caller tells the
+  // patient to finish at the counter — rather than guess a hospital.
+  const ORG_ID = session.organizationId
+  if (!ORG_ID) {
+    console.error('[Bot] createSaleAndInvoice: session has no organizationId — not recording the sale')
+    return null
+  }
   try {
     return await db.$transaction(async (tx) => {
       // Create pharmacy sale
@@ -283,9 +297,10 @@ async function createSaleAndInvoice(session, paymentMethod, reference) {
   }
 }
 
-async function getOrg() {
+async function getOrg(organizationId) {
+  if (!organizationId) return {}
   try {
-    const org = await db.organization.findUnique({ where: { id: ORG_ID } })
+    const org = await db.organization.findUnique({ where: { id: organizationId } })
     if (!org) return {}
     const settings = typeof org.settings === 'string'
       ? (() => { try { return JSON.parse(org.settings) } catch { return {} } })()
@@ -295,9 +310,10 @@ async function getOrg() {
 }
 
 // ── Start bot session (called after prescription is sent) ────────────────────
-export async function startPharmacySession(phone, { prescriptionId, consultationId, patientId, patientName, items, total }) {
+export async function startPharmacySession(phone, { organizationId, prescriptionId, consultationId, patientId, patientName, items, total }) {
   setSession(phone, {
     state: 'AWAITING_PHARMACY',
+    organizationId,
     prescriptionId,
     consultationId,
     patientId,
