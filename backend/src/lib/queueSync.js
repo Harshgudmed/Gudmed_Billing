@@ -2,7 +2,7 @@ import { db } from '../config/db.js'
 import { nextQueueNumber } from '../utils/queueNumber.js'
 import { priorityRank } from './queuePriority.js'
 import { dayRange, ymdInZone, zonedDateTimeToUtc } from './dates.js'
-import { deriveVisitType, resolveRoom } from './queueDerivation.js'
+import { deriveVisitType, resolveRoom, deriveRoomAndVisitType } from './queueDerivation.js'
 import { parseTimetable } from './doctorTimetable.js'
 
 // Business rule from the client: there is NO check-in step. A patient who has an
@@ -39,6 +39,62 @@ export function chunk(arr, size) {
   const out = []
   for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size))
   return out
+}
+
+/**
+ * Put ONE appointment in the queue — the single way every path does it.
+ *
+ * Booking, checking in, rescheduling and the bulk check-in each used to write
+ * this row themselves, and they had drifted: booking stamped the appointment's
+ * own slot and priority, check-in stamped neither (so the patient sorted by the
+ * moment they were checked in), rescheduling wrote no row at all, and the bulk
+ * check-in wrote nothing either. One helper, so all four agree with the sync
+ * above — same room derivation, same `joinedQueueAt` (the appointment's slot,
+ * which is what orders the board by appointment time), same priority.
+ *
+ * `client` is a Prisma transaction (or the db itself), so the queue row commits
+ * with whatever change put it there.
+ *
+ * @param {boolean} requireRoom  refuse instead of writing a row with no room:
+ *   roomId=null shows on NO board, so the patient would wait unseen. Used at
+ *   check-in, where the patient is physically present and must be seated.
+ * @throws an Error with code NO_ROOM when requireRoom and no room resolves.
+ */
+export async function upsertQueueForAppointment(client, { organizationId, appointment, requireRoom = false }) {
+  const { roomId, visitType } = await deriveRoomAndVisitType({
+    doctorId: appointment.doctorId,
+    patientId: appointment.patientId,
+    // The room comes from the shift covering THIS appointment's slot.
+    appointmentDate: appointment.appointmentDate,
+    appointmentTime: appointment.appointmentTime,
+  })
+  if (requireRoom && !roomId) {
+    throw Object.assign(
+      new Error('This doctor has no room assigned — assign a room before checking in'),
+      { code: 'NO_ROOM' },
+    )
+  }
+  const priority = appointment.priority || 'normal'
+  return client.queueManagement.upsert({
+    where: { appointmentId: appointment.id },
+    create: {
+      organizationId,
+      patientId: appointment.patientId,
+      appointmentId: appointment.id,
+      assignedToId: appointment.doctorId,
+      roomId,
+      visitType,
+      serviceArea: 'opd',
+      queueNumber: await nextQueueNumber(client, organizationId, 'opd'),
+      status: 'waiting',
+      priority,
+      priorityRank: priorityRank(priority),
+      joinedQueueAt: zonedDateTimeToUtc(ymdInZone(appointment.appointmentDate), appointment.appointmentTime),
+    },
+    // Already queued (a re-check-in, or a concurrent sync got there first) —
+    // leave staff's own changes (called/priority) alone.
+    update: {},
+  })
 }
 
 /**

@@ -7,11 +7,9 @@ import { startOfDay, endOfDay, todayIST } from '../utils/dates.js'
 import { normalizeTimeHHMM, zonedDateTimeToUtc, ymdInZone } from '../lib/dates.js'
 import { isOnLeave } from '../lib/activeDoctor.js'
 import { parseTimetable } from '../lib/doctorTimetable.js'
-import { priorityRank } from '../lib/queuePriority.js'
 import { scopedDoctorId } from '../utils/scope.js'
 import { computeConsultationFee } from '../services/appointmentFees.js'
-import { nextQueueNumber } from '../utils/queueNumber.js'
-import { deriveRoomAndVisitType } from '../lib/queueDerivation.js'
+import { upsertQueueForAppointment } from '../lib/queueSync.js'
 import { PATIENT_NAME_SELECT } from '../lib/patientName.js'
 
 // Appointment status state-machine. `status` is a free string column, so before
@@ -45,6 +43,124 @@ export function statusTransitionError(from, to) {
   if (!allowed) return null // unknown source status — don't block
   if (allowed.includes(to)) return null
   return `Cannot change appointment status from '${from}' to '${to}'`
+}
+
+/**
+ * Every rule a date + time + doctor has to pass before an appointment may sit
+ * on it — booking, editing and rescheduling all ask this one function, so the
+ * three cannot drift apart. It answers `null` (fine) or the exact response to
+ * send back.
+ *
+ * Editing and rescheduling used to skip all of it: a PATCH could move a booking
+ * into the past, onto a doctor's leave day, or on top of another patient, and a
+ * reschedule could do the same plus put one patient with two doctors at once.
+ * Only the doctor's own slot was protected, by the database's unique index —
+ * which surfaced as "A record with this value already exists" instead of a
+ * usable message.
+ *
+ * @param {string}  [excludeAppointmentId]  the row being edited/moved, so it
+ *   does not clash with its own current slot.
+ */
+async function slotProblem({ organizationId, doctorId, patientId, date, time, excludeAppointmentId }) {
+  // `date` arrives as 'YYYY-MM-DD' from a request body and as a Date from a
+  // stored row; both have to name the same hospital day.
+  const ymd = typeof date === 'string' ? date.slice(0, 10) : ymdInZone(date)
+
+  // 1. Not in the past — the DAY and the TIME. At 11:00 a 10:00 slot today is
+  //    refused too (1-minute grace for a booking made in the current minute).
+  const instant = zonedDateTimeToUtc(ymd, time)
+  if (instant.getTime() < Date.now() - 60_000) {
+    return { status: 400, body: { success: false, error: 'Cannot book an appointment in the past — pick today or a future date and time.' } }
+  }
+
+  const day = startOfDay(date)
+  const notVoided = { notIn: ['cancelled', 'no_show', 'rescheduled'] }
+  const exclude = excludeAppointmentId ? { id: { not: excludeAppointmentId } } : {}
+
+  // 2. The doctor is not on leave that day (timetable exceptions are the source
+  //    of truth — lib/activeDoctor.js#isOnLeave).
+  if (doctorId) {
+    const doctor = await db.user.findFirst({
+      where: { id: doctorId, organizationId, role: 'doctor' },
+      select: { preferences: true },
+    })
+    const timetable = parseTimetable(doctor?.preferences)
+    if (timetable && isOnLeave(timetable, ymd)) {
+      return { status: 409, body: { success: false, error: 'This doctor is on leave on the selected date. Please choose another date or doctor.' } }
+    }
+  }
+
+  // 3. The doctor is free. Matched across the whole calendar DAY, because rows
+  //    written before dates were pinned to midnight carry a creation instant.
+  if (doctorId) {
+    const clash = await db.appointment.findFirst({
+      where: {
+        ...exclude,
+        organizationId,
+        doctorId,
+        appointmentDate: { gte: startOfDay(day), lte: endOfDay(day) },
+        appointmentTime: time,
+        status: notVoided,
+      },
+      select: { id: true },
+    })
+    if (clash) {
+      return {
+        status: 409,
+        body: { success: false, code: 'SLOT_TAKEN', error: `That doctor already has an appointment at ${time} on this date. Pick another slot.` },
+      }
+    }
+  }
+
+  // 4. The patient is free — with ANY doctor. A person cannot be in two rooms
+  //    at once, and the database has no patient-side index to catch it.
+  if (patientId) {
+    const clash = await db.appointment.findFirst({
+      where: {
+        ...exclude,
+        organizationId,
+        patientId,
+        appointmentDate: { gte: startOfDay(day), lte: endOfDay(day) },
+        appointmentTime: time,
+        status: notVoided,
+      },
+      select: { id: true },
+    })
+    if (clash) {
+      return {
+        status: 409,
+        body: { success: false, code: 'PATIENT_DOUBLE_BOOKED', error: `This patient already has an appointment at ${time} on this date. A patient cannot be booked with two doctors at the same time.` },
+      }
+    }
+  }
+
+  return null
+}
+
+// The doctor's slot is also guarded by a partial unique index
+// (migration 20260716100500_appointment_slot_unique), which is the real race
+// guard: two requests can both pass the read above within the same instant.
+// Prisma reports the FIELD names on this client, hence the appointmentTime
+// check — it is the only unique constraint on Appointment that mentions it.
+// What the consultation line on the invoice says. The line must name WHAT was
+// billed, so reception, the patient and an auditor can tell an OPD visit from a
+// follow-up on the receipt itself. Written once because both booking and an
+// edit that changes the doctor or the visit type have to produce it.
+const VISIT_LABEL = {
+  follow_up: 'Follow-up Consultation',
+  new_patient: 'OPD Consultation (New Patient)',
+  emergency: 'Emergency Consultation',
+}
+function consultationLineDescription(appointmentType, doctorFullName, fallbackServiceName) {
+  const type = appointmentType || 'OPD'
+  const visitLabel = VISIT_LABEL[type] || fallbackServiceName || `${type} Consultation`
+  return doctorFullName ? `${visitLabel} — ${drName(doctorFullName)}` : visitLabel
+}
+
+function isSlotConflict(err) {
+  const target = String(err.meta?.target || '')
+  return err.code === 'P2002'
+    && (target.includes('Appointment_doctor_active_slot_key') || target.includes('appointmentTime'))
 }
 
 export async function getAll(req, res, next) {
@@ -235,14 +351,16 @@ export async function create(req, res, next) {
     // and the stored value is string-sorted (see normalizeTimeHHMM).
     validatedData.appointmentTime = normalizeTimeHHMM(validatedData.appointmentTime)
 
-    // No booking in the past — the DATE and the TIME. At 11:00 a 10:00 slot today
-    // is rejected too, not just past dates. Combine day + time into the real
-    // instant in the hospital's timezone and compare with now (a 1-minute grace
-    // avoids rejecting a booking made for the current minute).
-    const apptInstant = zonedDateTimeToUtc(validatedData.appointmentDate, validatedData.appointmentTime)
-    if (apptInstant.getTime() < Date.now() - 60_000) {
-      return res.status(400).json({ success: false, error: 'Cannot book an appointment in the past — pick today or a future date and time.' })
-    }
+    // Not in the past, doctor not on leave, doctor's slot free, patient's slot
+    // free — the same four rules update() and reschedule() apply (slotProblem).
+    const problem = await slotProblem({
+      organizationId,
+      doctorId: validatedData.doctorId,
+      patientId: validatedData.patientId,
+      date: validatedData.appointmentDate,
+      time: validatedData.appointmentTime,
+    })
+    if (problem) return res.status(problem.status).json(problem.body)
 
     // Pin to midnight of the hospital's day. `appointmentDate` is the DAY; the
     // time of day lives in `appointmentTime`. The browser sends a full instant
@@ -280,59 +398,6 @@ export async function create(req, res, next) {
               : { type: 'new_patient' }
     }
 
-    // Prevent double-booking: no two live appointments for the SAME doctor at the
-    // same date + time slot. Cancelled appointments free the slot again.
-    //
-    // Matched across the whole calendar DAY rather than on `apptDate` exactly:
-    // every appointment written before the normalisation above carries a
-    // creation-instant date, so an equality test would miss all of them and
-    // happily double-book on top of existing rows. `rescheduled` is excluded to
-    // match the partial index's own WHERE clause — a superseded row must not
-    // keep holding the slot it was moved out of.
-    const slotClash = await db.appointment.findFirst({
-      where: {
-        organizationId,
-        doctorId: validatedData.doctorId,
-        appointmentDate: { gte: startOfDay(apptDate), lte: endOfDay(apptDate) },
-        appointmentTime: validatedData.appointmentTime,
-        status: { notIn: ['cancelled', 'no_show', 'rescheduled'] },
-      },
-      select: { id: true },
-    })
-    if (slotClash) {
-      return res.status(409).json({
-        success: false,
-        code: 'SLOT_TAKEN',
-        error: `That doctor already has an appointment at ${validatedData.appointmentTime} on this date. Pick another slot.`,
-      })
-    }
-
-    // Prevent the SAME patient being booked with two different doctors at the
-    // same date + time — a person cannot be in two rooms at once. The DB only
-    // has a doctor-side partial unique index, so nothing stops this at the
-    // database level yet. Mirror the doctor-side check across the whole calendar
-    // day, excluding voided/superseded rows, matching ANY doctor.
-    // FOLLOW-UP: add a partial unique index on
-    // (organizationId, patientId, appointmentDate, appointmentTime) — schema.prisma
-    // is owned by another engineer this round, so this app-level guard stands in.
-    const patientClash = await db.appointment.findFirst({
-      where: {
-        organizationId,
-        patientId: validatedData.patientId,
-        appointmentDate: { gte: startOfDay(apptDate), lte: endOfDay(apptDate) },
-        appointmentTime: validatedData.appointmentTime,
-        status: { notIn: ['cancelled', 'no_show', 'rescheduled'] },
-      },
-      select: { id: true },
-    })
-    if (patientClash) {
-      return res.status(409).json({
-        success: false,
-        code: 'PATIENT_DOUBLE_BOOKED',
-        error: `This patient already has an appointment at ${validatedData.appointmentTime} on this date. A patient cannot be booked with two doctors at the same time.`,
-      })
-    }
-
     // patientId is required, but nothing verified it pointed at a real patient in
     // THIS org: a bogus id sailed through to the create below and surfaced as a
     // raw Prisma foreign-key error (P2003) → HTTP 500. Validate it up front, the
@@ -356,22 +421,6 @@ export async function create(req, res, next) {
       })
       if (!dept) {
         return res.status(400).json({ success: false, error: 'Department not found' })
-      }
-    }
-
-    // A doctor on LEAVE on the selected date cannot be booked. The timetable's
-    // exceptions list is the source of truth (lib/activeDoctor.js#isOnLeave).
-    // The UI hides on-leave doctors, but the API never enforced it — a direct
-    // API call (or a stale client) could still book onto a leave day. Common
-    // sense at the source, not just the screen.
-    if (validatedData.doctorId) {
-      const docForLeave = await db.user.findFirst({
-        where: { id: validatedData.doctorId, organizationId, role: 'doctor' },
-        select: { preferences: true },
-      })
-      const timetable = parseTimetable(docForLeave?.preferences)
-      if (timetable && isOnLeave(timetable, ymdInZone(apptDate))) {
-        return res.status(409).json({ success: false, error: 'This doctor is on leave on the selected date. Please choose another date or doctor.' })
       }
     }
 
@@ -438,50 +487,14 @@ export async function create(req, res, next) {
       // created before this existed, for imported/seeded appointments, and for
       // slot or room changes. It upserts, so it simply finds this row already
       // present and leaves it alone.
-      const { roomId, visitType } = await deriveRoomAndVisitType({
-        doctorId: validatedData.doctorId,
-        patientId: validatedData.patientId,
-        appointmentDate: apptDate,
-        appointmentTime: validatedData.appointmentTime,
-      })
-      await tx.queueManagement.create({
-        data: {
-          organizationId,
-          patientId: validatedData.patientId,
-          appointmentId: appointment.id,
-          assignedToId: validatedData.doctorId,
-          roomId,
-          visitType,
-          serviceArea: 'opd',
-          queueNumber: await nextQueueNumber(tx, organizationId, 'opd'),
-          status: 'waiting',
-          priority: validatedData.priority || 'normal',
-          priorityRank: priorityRank(validatedData.priority || 'normal'),
-          // The appointment's own slot, not "now" — this is what orders the
-          // queue by appointment time rather than by booking time (see
-          // lib/queueSync.js).
-          joinedQueueAt: zonedDateTimeToUtc(ymdInZone(apptDate), validatedData.appointmentTime),
-        },
-      })
+      await upsertQueueForAppointment(tx, { organizationId, appointment })
 
       // Create draft invoice. unitPrice IS the appointment's stored consultationFee
       // (effectiveFee above) — same value, so the printed card and the invoice can
       // never disagree.
       const aptType = validatedData.appointmentType || 'OPD'
       const unitPrice = effectiveFee
-      // The line must say WHAT was billed, so reception/patient/audit can tell an
-      // OPD visit from a follow-up on the receipt itself. Naming the service
-      // alone ("OPD Consultation") made every appointment type — including
-      // follow-ups and emergencies — print the same line.
-      const VISIT_LABEL = {
-        follow_up: 'Follow-up Consultation',
-        new_patient: 'OPD Consultation (New Patient)',
-        emergency: 'Emergency Consultation',
-      }
-      const visitLabel = VISIT_LABEL[aptType] || opdService?.serviceName || `${aptType} Consultation`
-      const description = appointment.doctor?.fullName
-        ? `${visitLabel} — ${drName(appointment.doctor.fullName)}`
-        : visitLabel
+      const description = consultationLineDescription(aptType, appointment.doctor?.fullName, opdService?.serviceName)
       // Same atomic per-org/FY series the billing counter draws from, so an
       // appointment invoice and a counter invoice share one numbering scheme and
       // cannot collide on the @unique column when created in the same millisecond.
@@ -553,17 +566,9 @@ export async function create(req, res, next) {
       return { appointment, draftInvoiceNumber: invoice.invoiceNumber, commission }
       }))
     } catch (err) {
-      // P2002's `target` is the constraint NAME on some Prisma versions and the
-      // list of FIELD names on others — this Postgres client reports the fields
-      // ("organizationId,doctorId,appointmentDate,appointmentTime"), so matching
-      // only the index name never hit, and a taken slot would surface as a 500
-      // instead of SLOT_TAKEN. It went unnoticed because the index itself could
-      // never fire until appointmentDate stopped carrying a time-of-day (see
-      // create()'s startOfDay call). `appointmentTime` is unique to this index —
-      // it is the only unique constraint on Appointment that mentions it.
-      const target = String(err.meta?.target || '')
-      if (err.code === 'P2002'
-        && (target.includes('Appointment_doctor_active_slot_key') || target.includes('appointmentTime'))) {
+      // Two bookings for the same slot in the same instant: the loser hits the
+      // partial unique index. Answer it the way the pre-check would have.
+      if (isSlotConflict(err)) {
         return res.status(409).json({
           success: false,
           code: 'SLOT_TAKEN',
@@ -601,7 +606,13 @@ export async function update(req, res, next) {
     const scopeWhere = { id, organizationId }
     const myDoctorId = scopedDoctorId(req)
     if (myDoctorId) scopeWhere.doctorId = myDoctorId
-    const existing = await db.appointment.findFirst({ where: scopeWhere, select: { id: true, status: true } })
+    const existing = await db.appointment.findFirst({
+      where: scopeWhere,
+      select: {
+        id: true, status: true, doctorId: true, patientId: true, priority: true,
+        appointmentDate: true, appointmentTime: true, appointmentType: true, consultationFee: true,
+      },
+    })
     if (!existing) {
       return res.status(404).json({ success: false, error: 'Appointment not found' })
     }
@@ -647,6 +658,103 @@ export async function update(req, res, next) {
 
     if (body.reminderSent === true) updates.reminderSentAt = new Date()
 
+    // ── Moving the visit: same four rules as booking it ──────────────────────
+    // An edit that changes the slot or the doctor is a booking decision, so it
+    // passes exactly what create() passes. Without this a PATCH could put the
+    // visit in the past, on a doctor's leave day, or on top of another patient;
+    // only the doctor's own slot was caught, by the database, as the unreadable
+    // "A record with this value already exists".
+    //
+    // Only a REAL move is re-checked, not the mere presence of the field: the
+    // edit dialog posts the whole appointment back, date and time included, so
+    // treating "was sent" as "was moved" would refuse every edit to a past
+    // visit — a receptionist could not add a note to yesterday's appointment.
+    const nextDoctorId = updates.doctorId ?? existing.doctorId
+    const nextDate     = updates.appointmentDate ?? existing.appointmentDate
+    const nextTime     = updates.appointmentTime ?? existing.appointmentTime
+    const asYmd = (d) => (typeof d === 'string' ? d.slice(0, 10) : ymdInZone(d))
+    const movingSlot = asYmd(nextDate) !== asYmd(existing.appointmentDate)
+      || nextTime !== existing.appointmentTime
+      || nextDoctorId !== existing.doctorId
+    // A visit that is finished or voided is history — its timestamps may be
+    // corrected, but it is not re-booked (and re-checking those rules against a
+    // past date would refuse the correction).
+    const live = !['completed', 'cancelled', 'no_show', 'rescheduled'].includes(existing.status)
+
+    if (movingSlot && live) {
+      // The new doctor must be one of THIS hospital's doctors: doctorId comes
+      // straight from the body, and nothing checked it.
+      if (body.doctorId !== undefined && body.doctorId !== existing.doctorId) {
+        const doctor = await db.user.findFirst({
+          where: { id: body.doctorId, organizationId, role: 'doctor' },
+          select: { id: true },
+        })
+        if (!doctor) return res.status(404).json({ success: false, error: 'Doctor not found' })
+      }
+      const problem = await slotProblem({
+        organizationId,
+        doctorId: nextDoctorId,
+        patientId: existing.patientId,
+        date: nextDate,
+        time: nextTime,
+        excludeAppointmentId: id,
+      })
+      if (problem) return res.status(problem.status).json(problem.body)
+    }
+
+    // ── Changing WHO is seen, or WHAT the visit is: the money must follow ────
+    // create() derives the fee from the doctor's slabs and builds the draft
+    // invoice and the doctor's commission from it. Changing the doctor or the
+    // visit type afterwards used to leave all three behind: the appointment
+    // said Dr B while the invoice line still read "OPD Consultation — Dr A",
+    // was charged at Dr A's rate, and Dr A kept the commission for a patient
+    // they never saw.
+    //
+    // The rule: while the invoice is still an untouched draft, the invoice line
+    // and the commission are rebuilt to match the edit, in the same transaction
+    // as the edit itself. Once anyone has issued or taken money on that
+    // invoice, the visit is refused a doctor/type change — cancel and rebook,
+    // so the payment and the refund stay visible.
+    //
+    // The PRICE follows the doctor only. Fees are per doctor (their rate and
+    // this patient's history with them), so a new doctor is re-priced exactly
+    // as booking with them would be. A visit-type change does not move the
+    // price — computeConsultationFee never looked at the type — so correcting
+    // "new patient" to "follow-up" relabels the line and leaves the amount the
+    // patient was quoted alone.
+    const changingDoctor = body.doctorId !== undefined && body.doctorId !== existing.doctorId
+    const changingType = body.appointmentType !== undefined && body.appointmentType !== existing.appointmentType
+    const repriceNeeded = (changingDoctor || changingType) && live
+    let repricedFee = null
+    if (repriceNeeded) {
+      const touched = await db.invoice.findFirst({
+        where: {
+          organizationId,
+          appointmentId: id,
+          NOT: { status: 'draft', paymentStatus: 'unpaid' },
+        },
+        select: { id: true, invoiceNumber: true },
+      })
+      if (touched) {
+        return res.status(409).json({
+          success: false,
+          code: 'APPOINTMENT_BILLED',
+          error: `This appointment is already billed on invoice ${touched.invoiceNumber}. Cancel it and book a new appointment instead of changing the doctor or visit type.`,
+        })
+      }
+      if (changingDoctor && nextDoctorId) {
+        const fee = await computeConsultationFee({
+          organizationId,
+          doctorId: nextDoctorId,
+          patientId: existing.patientId,
+          date: startOfDay(nextDate),
+          excludeAppointmentId: id, // the appointment must not price against itself
+        })
+        if (fee.doctorMissing) return res.status(404).json({ success: false, error: 'Doctor not found' })
+        repricedFee = fee.fee
+      }
+    }
+
     // Checking in an appointment also creates (or reuses) its linked queue
     // entry, atomically with the status update — this is what actually
     // connects the Appointment and Queue modules (QueueManagement.appointmentId,
@@ -655,7 +763,7 @@ export async function update(req, res, next) {
     const appointment = await db.$transaction(async (tx) => {
       const updated = await tx.appointment.update({
         where: { id },
-        data: updates,
+        data: repricedFee === null ? updates : { ...updates, consultationFee: repricedFee },
         include: {
           patient: {
             select: { ...PATIENT_NAME_SELECT, phonePrimary: true, gender: true, dateOfBirth: true },
@@ -667,39 +775,75 @@ export async function update(req, res, next) {
       })
 
       if (body.status === 'checked_in') {
-        // Room + new-vs-follow-up are derived from the doctor/patient, not
-        // asked at check-in — see lib/queueDerivation.js.
-        const { roomId, visitType } = await deriveRoomAndVisitType({
-          doctorId: updated.doctorId,
-          patientId: updated.patientId,
-          // The room comes from the shift covering THIS appointment's slot, so
-          // the slot has to come along — see lib/queueDerivation.js.
-          appointmentDate: updated.appointmentDate,
-          appointmentTime: updated.appointmentTime,
+        // requireRoom: a queue row with no room shows on NO board and the
+        // patient waits unseen, so the check-in is refused instead (thrown
+        // inside the tx, so the status change rolls back with it; turned into a
+        // clean 400 in the catch below).
+        await upsertQueueForAppointment(tx, { organizationId, appointment: updated, requireRoom: true })
+      }
+
+      // The doctor or the visit type changed, so the money it generated is
+      // rebuilt to match: the invoice line names the doctor and the visit, its
+      // amount is the appointment's (re-derived) fee, and the commission goes
+      // to whoever is now seeing the patient, at THEIR rate. Only untouched
+      // drafts reach here — anything billed was refused above.
+      if (repriceNeeded) {
+        const drafts = await tx.invoice.findMany({
+          where: { organizationId, appointmentId: id, status: 'draft', paymentStatus: 'unpaid' },
+          select: { id: true },
         })
-        // No room means the queue row would carry roomId=null and appear on NO
-        // board — the patient would wait forever, unseen. Refuse the check-in so
-        // staff assign a room first, rather than silently creating an invisible
-        // queue row. Thrown here (inside the tx) so the status change rolls back
-        // too; translated to a clean 400 in the catch below.
-        if (!roomId) {
-          throw Object.assign(new Error('This doctor has no room assigned — assign a room before checking in'), { code: 'NO_ROOM' })
+        const fee = updated.consultationFee ?? 0
+        for (const draft of drafts) {
+          await tx.invoice.update({
+            where: { id: draft.id },
+            data: {
+              items: JSON.stringify([{
+                type: 'consultation',
+                description: consultationLineDescription(updated.appointmentType, updated.doctor?.fullName),
+                quantity: 1,
+                unitPrice: fee,
+                discount: 0,
+                tax: 0,
+                total: fee,
+              }]),
+              subtotal: fee,
+              totalAmount: fee,
+              balanceDue: fee,
+              notes: `Auto-voucher | Appointment: ${id} | Type: ${updated.appointmentType || 'OPD'}`,
+            },
+          })
         }
-        await tx.queueManagement.upsert({
-          where: { appointmentId: id },
-          create: {
-            organizationId,
-            patientId: updated.patientId,
-            appointmentId: id,
-            serviceArea: 'opd',
-            assignedToId: updated.doctorId,
-            roomId,
-            visitType,
-            status: 'waiting',
-            queueNumber: await nextQueueNumber(tx, organizationId, 'opd'),
-          },
-          update: {}, // already queued (e.g. re-check-in after an edit) — leave as-is
-        })
+        const invoiceIds = drafts.map((d) => d.id)
+        if (invoiceIds.length) {
+          // The old doctor's pending commission is withdrawn, not edited: it was
+          // for a consultation they are no longer giving.
+          await tx.doctorCommission.deleteMany({ where: { invoiceId: { in: invoiceIds }, status: 'pending' } })
+          if (updated.doctorId) {
+            const config = await tx.doctorCommissionConfig.findUnique({ where: { doctorId: updated.doctorId } })
+            if (config?.isActive) {
+              // Same rule as create(): a percentage doctor earns a share of what
+              // is charged, a fixed-per-consultation doctor earns it for seeing
+              // the patient at all.
+              const commissionAmount = config.commissionType === 'percentage'
+                ? (fee * config.commissionRate) / 100
+                : config.commissionRate
+              if (commissionAmount > 0) {
+                await tx.doctorCommission.create({
+                  data: {
+                    organizationId,
+                    doctorId: updated.doctorId,
+                    invoiceId: invoiceIds[0],
+                    invoiceAmount: fee,
+                    commissionRate: config.commissionRate,
+                    commissionType: config.commissionType,
+                    commissionAmount,
+                    status: 'pending',
+                  },
+                })
+              }
+            }
+          }
+        }
       }
 
       // Cancelling or no-showing an appointment must also drop the patient OUT of
@@ -758,6 +902,15 @@ export async function update(req, res, next) {
     if (err.code === 'NO_ROOM') {
       return res.status(400).json({ success: false, code: 'NO_ROOM', error: err.message })
     }
+    // Someone took the slot between the check above and this write. Same answer
+    // as booking gives, instead of the database's "a record already exists".
+    if (isSlotConflict(err)) {
+      return res.status(409).json({
+        success: false,
+        code: 'SLOT_TAKEN',
+        error: 'That doctor already has an appointment at that time on this date. Pick another slot.',
+      })
+    }
     next(err)
   }
 }
@@ -800,15 +953,36 @@ export async function reschedule(req, res, next) {
       return res.status(400).json({ success: false, error: `A ${original.status} appointment cannot be rescheduled` })
     }
 
-    // R6 — you cannot reschedule into the past. Compare on the hospital DAY so a
-    // same-day reschedule is still allowed.
-    if (startOfDay(appointmentDate) < startOfDay(new Date())) {
-      return res.status(400).json({ success: false, error: 'Cannot reschedule to a date in the past' })
-    }
+    // R6 — the new slot passes the same four rules as a fresh booking: not in
+    // the past (the DATE *and* the TIME — comparing days alone let a 14:00
+    // reschedule land on 10:00 this morning), the doctor is not on leave that
+    // day, the doctor's slot is free, and the patient is not already with
+    // another doctor at that moment. Only the doctor's own slot was guarded
+    // before, and only by the database's unique index.
+    const problem = await slotProblem({
+      organizationId,
+      doctorId: original.doctorId,
+      patientId: original.patientId,
+      date: appointmentDate,
+      time: appointmentTime,
+      excludeAppointmentId: original.id, // the row being moved does not block itself
+    })
+    if (problem) return res.status(problem.status).json(problem.body)
 
     let created
     try {
       created = await db.$transaction(async (tx) => {
+      // The old row is stood down FIRST. The slot's unique index counts every
+      // status except cancelled/no_show/rescheduled, so while the original was
+      // still 'scheduled' it held its own slot against its replacement: moving
+      // an appointment to the same time (a correction that changes nothing, or
+      // a same-slot move after an edit) was refused as "that doctor already has
+      // an appointment at that time" — their own.
+      await tx.appointment.update({
+        where: { id: original.id, organizationId },
+        data: { status: 'rescheduled' },
+      })
+
       const newAppointment = await tx.appointment.create({
         data: {
           organizationId,
@@ -832,8 +1006,14 @@ export async function reschedule(req, res, next) {
       })
       await tx.appointment.update({
         where: { id: original.id, organizationId },
-        data: { status: 'rescheduled', rescheduledToId: newAppointment.id },
+        data: { rescheduledToId: newAppointment.id },
       })
+
+      // The moved visit joins the queue at its new slot, exactly as a freshly
+      // booked one does. Without this the new appointment had no queue row at
+      // all until someone happened to open the Queue page (the sync backfills
+      // it), so the patient reception had just moved was missing from the board.
+      await upsertQueueForAppointment(tx, { organizationId, appointment: newAppointment })
 
       // R1 — the old appointment is now 'rescheduled', so it must not keep the
       // patient in the queue. If they were checked in, close that queue row;
@@ -862,9 +1042,7 @@ export async function reschedule(req, res, next) {
       // R4 — a reschedule onto a slot the doctor already has hits the partial
       // unique index and throws P2002. Translate it to the same clean SLOT_TAKEN
       // the create() path returns, instead of leaking a raw Prisma error.
-      const target = String(err.meta?.target || '')
-      if (err.code === 'P2002'
-        && (target.includes('Appointment_doctor_active_slot_key') || target.includes('appointmentTime'))) {
+      if (isSlotConflict(err)) {
         return res.status(409).json({
           success: false,
           code: 'SLOT_TAKEN',
@@ -915,6 +1093,23 @@ export async function bulkUpdateStatus(req, res, next) {
     const result = await db.$transaction(async (tx) => {
       const updated = await tx.appointment.updateMany({ where, data })
 
+      // Checking in here does what checking in one appointment does: each
+      // patient joins the queue, in the room their doctor is sitting in. Before
+      // this, bulk only stamped `checkedInAt`, so a receptionist selecting ten
+      // arrivals and pressing Check in put NONE of them on the board — while
+      // doing them one at a time worked. requireRoom keeps the two answers the
+      // same too: the whole batch is refused (the transaction rolls back) if a
+      // doctor has no room, rather than seating that patient nowhere.
+      if (status === 'checked_in') {
+        const rows = await tx.appointment.findMany({
+          where: { id: { in: targets.map((t) => t.id) } },
+          select: { id: true, patientId: true, doctorId: true, appointmentDate: true, appointmentTime: true, priority: true },
+        })
+        for (const appointment of rows) {
+          await upsertQueueForAppointment(tx, { organizationId, appointment, requireRoom: true })
+        }
+      }
+
       // Mirror the single-cancel money void (see update()): a bulk cancel must
       // also void the linked draft invoices + pending commissions and drop the
       // patients from the queue, or bulk becomes a way to leak phantom money and
@@ -947,6 +1142,11 @@ export async function bulkUpdateStatus(req, res, next) {
     })
     res.json({ success: true, count: result.count })
   } catch (err) {
+    // Same answer as a single check-in when a doctor has no room to seat the
+    // patient in — the batch wrote nothing.
+    if (err.code === 'NO_ROOM') {
+      return res.status(400).json({ success: false, code: 'NO_ROOM', error: err.message })
+    }
     next(err)
   }
 }
@@ -966,16 +1166,21 @@ export async function remove(req, res, next) {
       const appointment = await tx.appointment.findFirst({ where: deleteWhere, select: { id: true } })
       if (!appointment) return 0
 
-      // create() links its auto-voucher invoice to the appointment only via a
-      // text note (Invoice has no appointmentId FK) — clean it up here too, but
-      // only while it's still untouched (draft + unpaid), so a real invoice a
-      // staff member has since acted on is never silently deleted.
+      // create() links its auto-voucher invoice to the appointment with a real
+      // FK (Invoice.appointmentId) — match on that. The old note-text match is
+      // kept as a fallback for vouchers written before the column existed,
+      // whose only link is the appointment id inside `notes`. Either way only
+      // an untouched invoice (draft + unpaid) is removed, so one a staff member
+      // has since acted on is never silently deleted.
       const draftInvoice = await tx.invoice.findFirst({
         where: {
           organizationId,
           status: 'draft',
           paymentStatus: 'unpaid',
-          notes: { contains: appointment.id },
+          OR: [
+            { appointmentId: appointment.id },
+            { notes: { contains: appointment.id } },
+          ],
         },
         select: { id: true },
       })

@@ -21,8 +21,14 @@ export const FOLLOW_UP_RESET_DAYS = 30
  *             slab:object|null, reason:'new_patient'|'reset'|'slab'|'default',
  *             doctorMissing?:boolean }}
  */
-export async function computeConsultationFee({ organizationId, doctorId, patientId, date }) {
+export async function computeConsultationFee({ organizationId, doctorId, patientId, date, excludeAppointmentId }) {
   const targetDate = date ? new Date(date) : new Date()
+  // When an EXISTING appointment is being re-priced (its doctor changed), it
+  // must not count as the patient's own earlier visit: it sits on the target
+  // date with this patient, so the same-day rule below saw it and priced the
+  // visit at 0 — a booking re-priced itself free. Booking passes nothing here
+  // and is unaffected: its row does not exist yet.
+  const exclude = excludeAppointmentId ? { id: { not: excludeAppointmentId } } : {}
 
   const doctor = await db.user.findFirst({
     where: { id: doctorId, organizationId, role: 'doctor' },
@@ -44,6 +50,7 @@ export async function computeConsultationFee({ organizationId, doctorId, patient
   // and bills full again — double-charging one episode.
   const sameDayVisit = await db.appointment.findFirst({
     where: {
+      ...exclude,
       organizationId,
       patientId,
       doctorId,
@@ -58,6 +65,7 @@ export async function computeConsultationFee({ organizationId, doctorId, patient
 
   const lastNewVisit = await db.appointment.findFirst({
     where: {
+      ...exclude,
       organizationId,
       patientId,
       doctorId,
