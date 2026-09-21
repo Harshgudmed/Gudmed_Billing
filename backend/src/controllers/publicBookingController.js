@@ -2,8 +2,9 @@ import { db } from '../config/db.js'
 import { getDepartments, getUsers } from './settingsController.js'
 import { handleGet as doctorAccountabilityGet } from './doctorAccountabilityController.js'
 import { create as createPatient, getAll as searchPatients } from './patientController.js'
-import { create as createAppointment } from './appointmentController.js'
+import { create as createAppointment, checkSlot } from './appointmentController.js'
 import { createAppointmentSchema } from '../validations/appointment.validation.js'
+import { formatTime12h, formatDayMonth } from '../lib/dates.js'
 
 // The patient's own phone booking an appointment from the hospital's QR code.
 //
@@ -90,6 +91,23 @@ export async function publicDoctorTimetable(req, res, next) {
     if (!org) return
     const doctorId = String(req.query.doctorId || '')
     return doctorAccountabilityGet(only(req, org, { resource: 'timetable', doctorId }), res, next)
+  } catch (err) { next(err) }
+}
+
+/**
+ * GET /api/public/org/:orgId/check-slot?doctorId&date&time — whether the time a
+ * patient just picked is still bookable, so the page can say why in red under
+ * the Time field before they press Book. The counter's own check, narrowed to
+ * doctor + date + time: no patient id and no appointment id are passed on, so
+ * the answer can only ever be about the doctor's diary ("Dr. Sharma is already
+ * booked at 10:00 AM"), never about another patient.
+ */
+export async function publicCheckSlot(req, res, next) {
+  try {
+    const org = await hospitalFrom(req, res)
+    if (!org) return
+    const { doctorId = '', date = '', time = '' } = req.query
+    return checkSlot(only(req, org, { doctorId: String(doctorId), date: String(date), time: String(time) }), res, next)
   } catch (err) { next(err) }
 }
 
@@ -227,9 +245,21 @@ export async function publicRegisterAndBook(req, res, next) {
     const booked = await capture(createAppointment, { organizationId: org.id, validatedBody: parsed.data, body: parsed.data })
 
     if (booked.status !== 201) {
+      // The counter's refusal for a patient who is already booked at that time
+      // names them and their other doctor ("Rahul Verma already has an
+      // appointment with Dr. Mehta …") — right for reception, wrong for an
+      // anonymous phone: anyone holding a mobile number would learn the full
+      // name (which this page otherwise masks) and who they are seeing. The
+      // patient is told only what they need: they are already booked then.
+      const body = booked.body?.code === 'PATIENT_DOUBLE_BOOKED'
+        ? {
+          ...booked.body,
+          error: `You already have an appointment at ${formatTime12h(parsed.data.appointmentTime) || parsed.data.appointmentTime} on ${formatDayMonth(parsed.data.appointmentDate)}. Please choose another time.`,
+        }
+        : booked.body
       // The patient exists either way (as at the counter, where a failed booking
       // no longer undoes the registration). Say so, so the page can tell them.
-      return res.status(booked.status).json({ ...booked.body, patient: { id: patientRow.id, mrn: patientRow.mrn } })
+      return res.status(booked.status).json({ ...body, patient: { id: patientRow.id, mrn: patientRow.mrn } })
     }
 
     // Only what the patient's appointment card shows. The counter's response also

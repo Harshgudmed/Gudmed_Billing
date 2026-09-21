@@ -20,7 +20,7 @@
 import { db } from '../config/db.js'
 import crypto from 'node:crypto'
 import { PATIENT_NAME_SELECT, patientFullName } from '../lib/patientName.js'
-import { parseUserDate, normalizeTimeHHMM, dayRange } from '../lib/dates.js'
+import { parseUserDate, normalizeTimeHHMM, dayRange, formatTime12h } from '../lib/dates.js'
 
 // Statuses that are still going to happen, and those that are over. A cancelled
 // or no-show appointment appears in neither: the portal has no column for
@@ -57,17 +57,10 @@ function ddmmyyyy(date) {
   return `${p(d.getDate())}-${p(d.getMonth() + 1)}-${d.getFullYear()}`
 }
 
-// '10:15' → '10:15 AM'. The portal splits on the space, then on the colon, and
-// tests the modifier against 'PM' — so the space and the case both matter.
-function hhmmAmPm(time) {
-  const [h, m] = normalizeTimeHHMM(time).split(':')
-  const hour = Number(h)
-  const minute = Number(m)
-  if (!Number.isFinite(hour) || !Number.isFinite(minute)) return null
-  const modifier = hour >= 12 ? 'PM' : 'AM'
-  const twelve = hour % 12 === 0 ? 12 : hour % 12
-  return `${String(twelve).padStart(2, '0')}:${String(minute).padStart(2, '0')} ${modifier}`
-}
+// '10:15' → '10:15 AM', '9:00' → '09:00 AM'. The portal splits on the space,
+// then on the colon, and tests the modifier against 'PM' — so the space, the
+// case and the two-digit hour all matter (hence padHour).
+const hhmmAmPm = (time) => formatTime12h(time, { padHour: true })
 
 // The HMS has no end time — an appointment is a start and a duration. The
 // duration is per hospital, in its own settings blob, so a clinic running 15

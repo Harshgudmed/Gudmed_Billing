@@ -1,7 +1,8 @@
 import { db } from '../config/db.js'
 import { nextQueueNumber } from '../utils/queueNumber.js'
 import { priorityRank } from './queuePriority.js'
-import { dayRange, ymdInZone, zonedDateTimeToUtc } from './dates.js'
+import { dayRange, ymdInZone, zonedDateTimeToUtc, formatTime12h, formatDayMonth } from './dates.js'
+import { drName } from './drName.js'
 import { deriveVisitType, resolveRoom, deriveRoomAndVisitType } from './queueDerivation.js'
 import { parseTimetable } from './doctorTimetable.js'
 
@@ -69,8 +70,15 @@ export async function upsertQueueForAppointment(client, { organizationId, appoin
     appointmentTime: appointment.appointmentTime,
   })
   if (requireRoom && !roomId) {
+    // Name the doctor and the slot, so reception knows exactly whose timetable
+    // to open: "Dr. Patel has no consultation room for 10:00 AM on 22 Sep."
+    const doctor = appointment.doctorId
+      ? await db.user.findUnique({ where: { id: appointment.doctorId }, select: { fullName: true } })
+      : null
+    const who = doctor?.fullName ? drName(doctor.fullName) : 'This doctor'
+    const slot = `${formatTime12h(appointment.appointmentTime) || appointment.appointmentTime} on ${formatDayMonth(appointment.appointmentDate)}`
     throw Object.assign(
-      new Error('This doctor has no room assigned — assign a room before checking in'),
+      new Error(`${who} has no consultation room for ${slot}. Assign a room in the doctor's timetable, then check in again.`),
       { code: 'NO_ROOM' },
     )
   }

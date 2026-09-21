@@ -1,5 +1,5 @@
 import { Router } from 'express'
-import { getAll, getOne, getCalendarCounts, getStats, create, update, remove, reschedule, bulkUpdateStatus } from '../controllers/appointmentController.js'
+import { getAll, getOne, getCalendarCounts, getStats, checkSlot, create, update, remove, reschedule, bulkUpdateStatus } from '../controllers/appointmentController.js'
 import { validate } from '../middleware/validate.js'
 import { createAppointmentSchema, updateAppointmentSchema, bulkUpdateStatusSchema } from '../validations/appointment.validation.js'
 
@@ -8,6 +8,7 @@ const router = Router()
 router.get('/', getAll)
 router.get('/calendar-counts', getCalendarCounts)
 router.get('/stats', getStats)   // must be before '/:id' so "stats" isn't read as an id
+router.get('/check-slot', checkSlot)   // before '/:id' too — "check-slot" is not an id
 router.get('/:id', getOne)
 router.post('/', validate(createAppointmentSchema), create)
 router.post('/:id/reschedule', reschedule)

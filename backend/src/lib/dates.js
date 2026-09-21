@@ -129,6 +129,39 @@ export function normalizeTimeHHMM(timeStr) {
 }
 
 /**
+ * '10:15' → '10:15 AM', '09:00' → '9:00 AM' — a time as a person reads it, for
+ * messages shown to staff and patients.
+ *
+ * `padHour` keeps the hour two digits ('09:00 AM'): the partner portal parses
+ * this string back (split on the space, then the colon), so its output must not
+ * change shape. Returns null for a time that is not a time.
+ */
+export function formatTime12h(time, { padHour = false } = {}) {
+  const [h, m] = normalizeTimeHHMM(time).split(':')
+  const hour = Number(h)
+  const minute = Number(m)
+  if (!Number.isFinite(hour) || !Number.isFinite(minute)) return null
+  const modifier = hour >= 12 ? 'PM' : 'AM'
+  const twelve = hour % 12 === 0 ? 12 : hour % 12
+  return `${padHour ? String(twelve).padStart(2, '0') : twelve}:${String(minute).padStart(2, '0')} ${modifier}`
+}
+
+const SHORT_MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+
+/**
+ * A hospital day → '22 Sep'. Takes 'YYYY-MM-DD', a browser ISO instant or a
+ * stored Date, and reads each in the hospital's timezone — the same way
+ * startOfDay() decides which day an appointment is stored on.
+ * Built by hand rather than with Intl: en-GB now renders September as "Sept",
+ * which is not how anyone writes it on a hospital slip.
+ */
+export function formatDayMonth(date) {
+  const ymd = ymdInZone(new Date(date))
+  const [, m, d] = ymd.split('-').map(Number)
+  return `${d} ${SHORT_MONTHS[m - 1]}`
+}
+
+/**
  * A wall-clock 'YYYY-MM-DD' + 'H:MM' in the hospital's timezone → the real UTC
  * instant. Appointment times are stored as free-text and come through in both
  * '9:00' and '09:00' form, so the parts are parsed numerically rather than by

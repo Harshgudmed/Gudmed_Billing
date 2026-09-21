@@ -4,13 +4,13 @@ import { getOrgId } from "../lib/reqContext.js";
 import { drName } from "../lib/drName.js";
 import { nextSeriesNumber, invoiceProbe } from "../lib/counters.js";
 import { startOfDay, endOfDay, todayIST } from '../utils/dates.js'
-import { normalizeTimeHHMM, zonedDateTimeToUtc, ymdInZone } from '../lib/dates.js'
+import { normalizeTimeHHMM, zonedDateTimeToUtc, ymdInZone, formatTime12h, formatDayMonth } from '../lib/dates.js'
 import { isOnLeave } from '../lib/activeDoctor.js'
 import { parseTimetable } from '../lib/doctorTimetable.js'
 import { scopedDoctorId } from '../utils/scope.js'
 import { computeConsultationFee } from '../services/appointmentFees.js'
 import { upsertQueueForAppointment } from '../lib/queueSync.js'
-import { PATIENT_NAME_SELECT } from '../lib/patientName.js'
+import { PATIENT_NAME_SELECT, patientFullName } from '../lib/patientName.js'
 
 // Appointment status state-machine. `status` is a free string column, so before
 // this any PATCH could jump it to ANY value — cancelled → completed, a no-show
@@ -46,6 +46,80 @@ export function statusTransitionError(from, to) {
 }
 
 /**
+ * Every refusal from this controller is written for the person at the counter:
+ * a short `title` (the bold line of the toast) and one plain sentence in
+ * `error` that says what is wrong and what to do next — never a status code, a
+ * field name or a database phrase. `error` alone still reads as a complete
+ * message, for the screens that show one line (the QR page, Register Patient).
+ *
+ *   Time slot unavailable
+ *   Dr. Sharma is already booked at 10:00 AM on 22 Sep. Please choose another time.
+ */
+function refusal(title, error, code) {
+  return { success: false, ...(code ? { code } : {}), title, error }
+}
+
+// How a status reads in a sentence: "already checked in", "can't be changed to
+// a no-show".
+const STATUS_WORDS = {
+  scheduled: 'scheduled',
+  confirmed: 'confirmed',
+  checked_in: 'checked in',
+  in_progress: 'in consultation',
+  completed: 'completed',
+  cancelled: 'cancelled',
+  no_show: 'a no-show',
+  rescheduled: 'rescheduled',
+}
+const statusWords = (s) => STATUS_WORDS[s] || String(s || '').replace(/_/g, ' ')
+
+/**
+ * "This appointment is already completed, so its status can't be changed to
+ * checked in." — plus, for a visit that is over, what to do instead.
+ */
+function statusChangeRefusal(from, to) {
+  const over = ['completed', 'cancelled', 'no_show', 'rescheduled'].includes(from)
+  return refusal(
+    "Status can't be changed",
+    `This appointment is already ${statusWords(from)}, so its status can't be changed to ${statusWords(to)}.`
+      + (over ? ' Book a new appointment if the patient needs another visit.' : ''),
+    'INVALID_STATUS_TRANSITION',
+  )
+}
+
+const APPOINTMENT_GONE = refusal(
+  'Appointment not found',
+  'This appointment no longer exists — it may have been deleted. Please refresh the page.',
+)
+const DOCTOR_GONE = refusal(
+  'Doctor not available',
+  'This doctor could not be found in your hospital. Please choose another doctor.',
+  'DOCTOR_NOT_FOUND',
+)
+
+/** The time and day as a person reads them: "10:00 AM on 22 Sep". */
+const when = (date, time) => `${formatTime12h(time) || time} on ${formatDayMonth(date)}`
+
+async function doctorLabel(organizationId, doctorId) {
+  const doctor = doctorId
+    ? await db.user.findFirst({ where: { id: doctorId, organizationId }, select: { fullName: true } })
+    : null
+  return doctor?.fullName ? drName(doctor.fullName) : 'The doctor'
+}
+
+/**
+ * The doctor already has someone at that time. Built in one place so the
+ * pre-check and the database's race guard below say exactly the same thing.
+ */
+async function slotTakenBody({ organizationId, doctorId, date, time }) {
+  return refusal(
+    'Time slot unavailable',
+    `${await doctorLabel(organizationId, doctorId)} is already booked at ${when(date, time)}. Please choose another time.`,
+    'SLOT_TAKEN',
+  )
+}
+
+/**
  * Every rule a date + time + doctor has to pass before an appointment may sit
  * on it — booking, editing and rescheduling all ask this one function, so the
  * three cannot drift apart. It answers `null` (fine) or the exact response to
@@ -62,15 +136,23 @@ export function statusTransitionError(from, to) {
  *   does not clash with its own current slot.
  */
 async function slotProblem({ organizationId, doctorId, patientId, date, time, excludeAppointmentId }) {
-  // `date` arrives as 'YYYY-MM-DD' from a request body and as a Date from a
-  // stored row; both have to name the same hospital day.
-  const ymd = typeof date === 'string' ? date.slice(0, 10) : ymdInZone(date)
+  // `date` arrives as 'YYYY-MM-DD', as a browser ISO instant, or as a stored
+  // Date — and has to name the day the appointment is STORED on, which is what
+  // startOfDay() picks: the instant read in the hospital's timezone. Taking the
+  // first ten characters of an ISO string instead reads the UTC date, which
+  // between midnight and 05:30 IST is still yesterday: the New Appointment
+  // form's default date (`new Date()`) then had its leave and past-time checks
+  // run against the wrong day.
+  const ymd = ymdInZone(new Date(date))
 
   // 1. Not in the past — the DAY and the TIME. At 11:00 a 10:00 slot today is
   //    refused too (1-minute grace for a booking made in the current minute).
   const instant = zonedDateTimeToUtc(ymd, time)
   if (instant.getTime() < Date.now() - 60_000) {
-    return { status: 400, body: { success: false, error: 'Cannot book an appointment in the past — pick today or a future date and time.' } }
+    return {
+      status: 400,
+      body: refusal('This time has passed', `${when(ymd, time)} has already passed. Please choose a later time.`, 'SLOT_IN_PAST'),
+    }
   }
 
   const day = startOfDay(date)
@@ -82,11 +164,18 @@ async function slotProblem({ organizationId, doctorId, patientId, date, time, ex
   if (doctorId) {
     const doctor = await db.user.findFirst({
       where: { id: doctorId, organizationId, role: 'doctor' },
-      select: { preferences: true },
+      select: { preferences: true, fullName: true },
     })
     const timetable = parseTimetable(doctor?.preferences)
     if (timetable && isOnLeave(timetable, ymd)) {
-      return { status: 409, body: { success: false, error: 'This doctor is on leave on the selected date. Please choose another date or doctor.' } }
+      return {
+        status: 409,
+        body: refusal(
+          'Doctor on leave',
+          `${doctor?.fullName ? drName(doctor.fullName) : 'This doctor'} is on leave on ${formatDayMonth(ymd)}. Please choose another date or doctor.`,
+          'DOCTOR_ON_LEAVE',
+        ),
+      }
     }
   }
 
@@ -105,10 +194,7 @@ async function slotProblem({ organizationId, doctorId, patientId, date, time, ex
       select: { id: true },
     })
     if (clash) {
-      return {
-        status: 409,
-        body: { success: false, code: 'SLOT_TAKEN', error: `That doctor already has an appointment at ${time} on this date. Pick another slot.` },
-      }
+      return { status: 409, body: await slotTakenBody({ organizationId, doctorId, date: ymd, time }) }
     }
   }
 
@@ -124,12 +210,18 @@ async function slotProblem({ organizationId, doctorId, patientId, date, time, ex
         appointmentTime: time,
         status: notVoided,
       },
-      select: { id: true },
+      select: { patient: { select: PATIENT_NAME_SELECT }, doctor: { select: { fullName: true } } },
     })
     if (clash) {
+      const who = patientFullName(clash.patient) || 'This patient'
+      const withWhom = clash.doctor?.fullName ? ` with ${drName(clash.doctor.fullName)}` : ''
       return {
         status: 409,
-        body: { success: false, code: 'PATIENT_DOUBLE_BOOKED', error: `This patient already has an appointment at ${time} on this date. A patient cannot be booked with two doctors at the same time.` },
+        body: refusal(
+          'Patient already booked',
+          `${who} already has an appointment${withWhom} at ${when(ymd, time)}. Please choose another time.`,
+          'PATIENT_DOUBLE_BOOKED',
+        ),
       }
     }
   }
@@ -137,11 +229,6 @@ async function slotProblem({ organizationId, doctorId, patientId, date, time, ex
   return null
 }
 
-// The doctor's slot is also guarded by a partial unique index
-// (migration 20260716100500_appointment_slot_unique), which is the real race
-// guard: two requests can both pass the read above within the same instant.
-// Prisma reports the FIELD names on this client, hence the appointmentTime
-// check — it is the only unique constraint on Appointment that mentions it.
 // What the consultation line on the invoice says. The line must name WHAT was
 // billed, so reception, the patient and an auditor can tell an OPD visit from a
 // follow-up on the receipt itself. Written once because both booking and an
@@ -157,10 +244,100 @@ function consultationLineDescription(appointmentType, doctorFullName, fallbackSe
   return doctorFullName ? `${visitLabel} — ${drName(doctorFullName)}` : visitLabel
 }
 
+// The doctor's slot is also guarded by a partial unique index
+// (migration 20260716100500_appointment_slot_unique), which is the real race
+// guard: two requests can both pass the read above within the same instant.
+// Prisma reports the FIELD names on this client, hence the appointmentTime
+// check — it is the only unique constraint on Appointment that mentions it.
 function isSlotConflict(err) {
   const target = String(err.meta?.target || '')
   return err.code === 'P2002'
     && (target.includes('Appointment_doctor_active_slot_key') || target.includes('appointmentTime'))
+}
+
+/**
+ * GET /appointments/check-slot?doctorId&date&time[&patientId][&appointmentId][&keepCurrent=1]
+ *
+ * Would this slot be accepted? Asked by the booking forms the moment a time is
+ * picked, so the reason appears in red under the Time field straight away —
+ * not only as a toast after Save. It runs slotProblem(), the very rules
+ * booking, editing and rescheduling apply, so the red line and what Save does
+ * can never disagree.
+ *
+ * Always 200: "that slot is taken" is an answer, not a failed request.
+ *
+ * @query appointmentId  the appointment being edited or moved — it must not
+ *                       clash with its own current slot
+ * @query keepCurrent    '1' from the Edit form: leaving the time as it was is
+ *                       fine, exactly as update() only re-checks a real move
+ */
+export async function checkSlot(req, res, next) {
+  try {
+    const organizationId = getOrgId(req)
+    const { doctorId, patientId, date, appointmentId, keepCurrent } = req.query
+    const time = normalizeTimeHHMM(req.query.time)
+    const ok = () => res.json({ success: true, data: { ok: true } })
+
+    // Nothing complete to check yet — the form is still being filled in.
+    if (!doctorId || !date || !/^([01]\d|2[0-3]):[0-5]\d$/.test(time) || Number.isNaN(new Date(date).getTime())) {
+      return ok()
+    }
+
+    if (appointmentId && keepCurrent === '1') {
+      const current = await db.appointment.findFirst({
+        where: { id: String(appointmentId), organizationId },
+        select: { doctorId: true, appointmentDate: true, appointmentTime: true, status: true },
+      })
+      const unchanged = current
+        && current.doctorId === doctorId
+        && ymdInZone(current.appointmentDate) === ymdInZone(new Date(date))
+        && current.appointmentTime === time
+      const over = current && ['completed', 'cancelled', 'no_show', 'rescheduled'].includes(current.status)
+      if (unchanged || over) return ok()
+    }
+
+    const answer = (body) => res.json({
+      success: true,
+      data: { ok: false, code: body.code, title: body.title, message: body.error },
+    })
+
+    const problem = await slotProblem({
+      organizationId,
+      doctorId: String(doctorId),
+      patientId: patientId ? String(patientId) : undefined,
+      date: String(date),
+      time,
+      excludeAppointmentId: appointmentId ? String(appointmentId) : undefined,
+    })
+    if (problem) return answer(problem.body)
+
+    // Save also refuses a doctor or patient that is not this hospital's (a
+    // doctor removed while the form was open, a patient deleted) — checked in
+    // the same order create() does, after the slot rules, so the red line and
+    // Save give the same answer. "Not found" either way: it reveals nothing
+    // about whether the id exists at another hospital.
+    const doctor = await db.user.findFirst({
+      where: { id: String(doctorId), organizationId, role: 'doctor' },
+      select: { id: true },
+    })
+    if (!doctor) return answer(DOCTOR_GONE)
+    if (patientId) {
+      const patient = await db.patient.findFirst({
+        where: { id: String(patientId), organizationId },
+        select: { id: true },
+      })
+      if (!patient) {
+        return answer(refusal(
+          'Patient not found',
+          "This patient's record could not be found. Please search for the patient again.",
+          'PATIENT_NOT_FOUND',
+        ))
+      }
+    }
+    return ok()
+  } catch (err) {
+    next(err)
+  }
 }
 
 export async function getAll(req, res, next) {
@@ -334,7 +511,7 @@ export async function getOne(req, res, next) {
     })
 
     if (!appointment) {
-      return res.status(404).json({ success: false, error: 'Appointment not found' })
+      return res.status(404).json(APPOINTMENT_GONE)
     }
 
     res.json({ success: true, data: appointment })
@@ -385,7 +562,7 @@ export async function create(req, res, next) {
         date: apptDate,
       })
       if (result.doctorMissing) {
-        return res.status(404).json({ success: false, error: 'Doctor not found' })
+        return res.status(404).json(DOCTOR_GONE)
       }
       consultationFee = result.fee
       appliedSlabInfo =
@@ -408,7 +585,11 @@ export async function create(req, res, next) {
       select: { id: true },
     })
     if (!patient) {
-      return res.status(404).json({ success: false, error: 'Patient not found' })
+      return res.status(404).json(refusal(
+        'Patient not found',
+        "This patient's record could not be found. Please search for the patient again.",
+        'PATIENT_NOT_FOUND',
+      ))
     }
 
     // departmentId is optional, but if supplied it must be a real department in
@@ -420,7 +601,10 @@ export async function create(req, res, next) {
         select: { id: true },
       })
       if (!dept) {
-        return res.status(400).json({ success: false, error: 'Department not found' })
+        return res.status(400).json(refusal(
+          'Department not found',
+          'This department no longer exists. Please choose another department.',
+        ))
       }
     }
 
@@ -569,11 +753,12 @@ export async function create(req, res, next) {
       // Two bookings for the same slot in the same instant: the loser hits the
       // partial unique index. Answer it the way the pre-check would have.
       if (isSlotConflict(err)) {
-        return res.status(409).json({
-          success: false,
-          code: 'SLOT_TAKEN',
-          error: `That doctor already has an appointment at ${validatedData.appointmentTime} on this date. Pick another slot.`,
-        })
+        return res.status(409).json(await slotTakenBody({
+          organizationId,
+          doctorId: validatedData.doctorId,
+          date: validatedData.appointmentDate,
+          time: validatedData.appointmentTime,
+        }))
       }
       throw err
     }
@@ -614,16 +799,15 @@ export async function update(req, res, next) {
       },
     })
     if (!existing) {
-      return res.status(404).json({ success: false, error: 'Appointment not found' })
+      return res.status(404).json(APPOINTMENT_GONE)
     }
 
     // Enforce the status state-machine: reject illegal jumps (e.g. a cancelled
     // or completed appointment being moved to any other status) with a clean 400
     // instead of silently corrupting the record and its linked money.
     if (body.status !== undefined) {
-      const transitionError = statusTransitionError(existing.status, body.status)
-      if (transitionError) {
-        return res.status(400).json({ success: false, code: 'INVALID_STATUS_TRANSITION', error: transitionError })
+      if (statusTransitionError(existing.status, body.status)) {
+        return res.status(400).json(statusChangeRefusal(existing.status, body.status))
       }
     }
 
@@ -672,7 +856,7 @@ export async function update(req, res, next) {
     const nextDoctorId = updates.doctorId ?? existing.doctorId
     const nextDate     = updates.appointmentDate ?? existing.appointmentDate
     const nextTime     = updates.appointmentTime ?? existing.appointmentTime
-    const asYmd = (d) => (typeof d === 'string' ? d.slice(0, 10) : ymdInZone(d))
+    const asYmd = (d) => ymdInZone(new Date(d))
     const movingSlot = asYmd(nextDate) !== asYmd(existing.appointmentDate)
       || nextTime !== existing.appointmentTime
       || nextDoctorId !== existing.doctorId
@@ -689,7 +873,7 @@ export async function update(req, res, next) {
           where: { id: body.doctorId, organizationId, role: 'doctor' },
           select: { id: true },
         })
-        if (!doctor) return res.status(404).json({ success: false, error: 'Doctor not found' })
+        if (!doctor) return res.status(404).json(DOCTOR_GONE)
       }
       const problem = await slotProblem({
         organizationId,
@@ -736,11 +920,11 @@ export async function update(req, res, next) {
         select: { id: true, invoiceNumber: true },
       })
       if (touched) {
-        return res.status(409).json({
-          success: false,
-          code: 'APPOINTMENT_BILLED',
-          error: `This appointment is already billed on invoice ${touched.invoiceNumber}. Cancel it and book a new appointment instead of changing the doctor or visit type.`,
-        })
+        return res.status(409).json(refusal(
+          'Invoice already generated',
+          `Invoice ${touched.invoiceNumber} has already been issued for this visit, so the ${changingDoctor ? 'doctor' : 'visit type'} can't be changed. Cancel this appointment and book a new one instead.`,
+          'APPOINTMENT_BILLED',
+        ))
       }
       if (changingDoctor && nextDoctorId) {
         const fee = await computeConsultationFee({
@@ -750,7 +934,7 @@ export async function update(req, res, next) {
           date: startOfDay(nextDate),
           excludeAppointmentId: id, // the appointment must not price against itself
         })
-        if (fee.doctorMissing) return res.status(404).json({ success: false, error: 'Doctor not found' })
+        if (fee.doctorMissing) return res.status(404).json(DOCTOR_GONE)
         repricedFee = fee.fee
       }
     }
@@ -893,6 +1077,17 @@ export async function update(req, res, next) {
       }
 
       return updated
+    }).catch(async (err) => {
+      // Someone took the slot between the check above and this write. Same
+      // answer as booking gives, instead of the database's "a record already
+      // exists" — and it needs the doctor and the day, which live here.
+      if (isSlotConflict(err)) {
+        throw Object.assign(new Error('slot taken'), {
+          code: 'SLOT_TAKEN',
+          body: await slotTakenBody({ organizationId, doctorId: nextDoctorId, date: nextDate, time: nextTime }),
+        })
+      }
+      throw err
     })
 
     res.json({ success: true, data: appointment })
@@ -900,16 +1095,10 @@ export async function update(req, res, next) {
     // Check-in was refused because the doctor has no room to seat the patient in
     // (see the NO_ROOM guard above). Surface it as a clean, actionable 400.
     if (err.code === 'NO_ROOM') {
-      return res.status(400).json({ success: false, code: 'NO_ROOM', error: err.message })
+      return res.status(400).json(refusal('Room not assigned', err.message, 'NO_ROOM'))
     }
-    // Someone took the slot between the check above and this write. Same answer
-    // as booking gives, instead of the database's "a record already exists".
-    if (isSlotConflict(err)) {
-      return res.status(409).json({
-        success: false,
-        code: 'SLOT_TAKEN',
-        error: 'That doctor already has an appointment at that time on this date. Pick another slot.',
-      })
+    if (err.code === 'SLOT_TAKEN' && err.body) {
+      return res.status(409).json(err.body)
     }
     next(err)
   }
@@ -929,13 +1118,13 @@ export async function reschedule(req, res, next) {
     const appointmentTime = normalizeTimeHHMM(req.body.appointmentTime)
 
     if (!appointmentDate || !appointmentTime) {
-      return res.status(400).json({ success: false, error: 'appointmentDate and appointmentTime are required' })
+      return res.status(400).json(refusal('Choose a date and time', 'Please choose both a new date and a new time.'))
     }
     if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(appointmentTime)) {
-      return res.status(400).json({ success: false, error: 'Time must be HH:mm between 00:00 and 23:59' })
+      return res.status(400).json(refusal('Invalid time', 'Please choose a valid time from the list.'))
     }
     if (Number.isNaN(new Date(appointmentDate).getTime())) {
-      return res.status(400).json({ success: false, error: 'Invalid appointmentDate' })
+      return res.status(400).json(refusal('Invalid date', 'Please choose a valid date.'))
     }
 
     const scopeWhere = { id, organizationId }
@@ -943,14 +1132,17 @@ export async function reschedule(req, res, next) {
     if (myDoctorId) scopeWhere.doctorId = myDoctorId
     const original = await db.appointment.findFirst({ where: scopeWhere })
     if (!original) {
-      return res.status(404).json({ success: false, error: 'Appointment not found' })
+      return res.status(404).json(APPOINTMENT_GONE)
     }
 
     // R5 — a finished or voided visit is not a thing you move. Only a live
     // upcoming appointment can be rescheduled; a cancelled/no-show/completed/
     // already-rescheduled one must not spawn a fresh live appointment.
     if (['cancelled', 'no_show', 'completed', 'rescheduled'].includes(original.status)) {
-      return res.status(400).json({ success: false, error: `A ${original.status} appointment cannot be rescheduled` })
+      return res.status(400).json(refusal(
+        "Can't reschedule",
+        `This appointment is already ${statusWords(original.status)}, so it can't be rescheduled. Please book a new appointment instead.`,
+      ))
     }
 
     // R6 — the new slot passes the same four rules as a fresh booking: not in
@@ -1043,11 +1235,12 @@ export async function reschedule(req, res, next) {
       // unique index and throws P2002. Translate it to the same clean SLOT_TAKEN
       // the create() path returns, instead of leaking a raw Prisma error.
       if (isSlotConflict(err)) {
-        return res.status(409).json({
-          success: false,
-          code: 'SLOT_TAKEN',
-          error: `That doctor already has an appointment at ${appointmentTime} on this date. Pick another slot.`,
-        })
+        return res.status(409).json(await slotTakenBody({
+          organizationId,
+          doctorId: original.doctorId,
+          date: appointmentDate,
+          time: appointmentTime,
+        }))
       }
       throw err
     }
@@ -1082,10 +1275,16 @@ export async function bulkUpdateStatus(req, res, next) {
     const targets = await db.appointment.findMany({ where, select: { id: true, status: true } })
     const offenders = targets.filter((a) => statusTransitionError(a.status, status))
     if (offenders.length) {
+      // Name the states that are in the way ("2 are already completed, 1 is
+      // cancelled"), so the receptionist knows which rows to untick.
+      const byStatus = offenders.reduce((m, a) => m.set(a.status, (m.get(a.status) || 0) + 1), new Map())
+      const which = [...byStatus].map(([s, n]) => `${n} ${n === 1 ? 'is' : 'are'} already ${statusWords(s)}`).join(', ')
       return res.status(400).json({
-        success: false,
-        code: 'INVALID_STATUS_TRANSITION',
-        error: `${offenders.length} appointment(s) cannot move to '${status}' from their current status`,
+        ...refusal(
+          'Nothing was updated',
+          `${offenders.length} of the selected appointments can't be changed to ${statusWords(status)} (${which}). Untick ${offenders.length === 1 ? 'it' : 'them'} and try again.`,
+          'INVALID_STATUS_TRANSITION',
+        ),
         offenders: offenders.map((a) => ({ id: a.id, from: a.status })),
       })
     }
@@ -1143,9 +1342,13 @@ export async function bulkUpdateStatus(req, res, next) {
     res.json({ success: true, count: result.count })
   } catch (err) {
     // Same answer as a single check-in when a doctor has no room to seat the
-    // patient in — the batch wrote nothing.
+    // patient in — and it says plainly that the batch wrote nothing.
     if (err.code === 'NO_ROOM') {
-      return res.status(400).json({ success: false, code: 'NO_ROOM', error: err.message })
+      return res.status(400).json(refusal(
+        'No patients checked in',
+        `${err.message} None of the selected patients were checked in.`,
+        'NO_ROOM',
+      ))
     }
     next(err)
   }
@@ -1194,7 +1397,7 @@ export async function remove(req, res, next) {
     })
 
     if (count === 0) {
-      return res.status(404).json({ success: false, error: 'Appointment not found' })
+      return res.status(404).json(APPOINTMENT_GONE)
     }
 
     res.json({ success: true, message: 'Appointment deleted' })

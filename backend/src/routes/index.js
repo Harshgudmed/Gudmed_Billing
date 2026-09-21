@@ -34,7 +34,7 @@ import partnerRoutes from './partnerRoutes.js'
 import otRoutes from './otRoutes.js'
 import otClinicalRoutes from './otClinicalRoutes.js'
 import { createPreRegistration, getPublicOrg } from '../controllers/preRegistrationController.js'
-import { publicDepartments, publicDoctors, publicDoctorTimetable, publicFindPatient, publicRegisterAndBook } from '../controllers/publicBookingController.js'
+import { publicDepartments, publicDoctors, publicDoctorTimetable, publicCheckSlot, publicFindPatient, publicRegisterAndBook } from '../controllers/publicBookingController.js'
 import { rateLimit } from '../middleware/rateLimit.js'
 
 export const router = Router()
@@ -94,6 +94,7 @@ const publicBookPhoneLimit = rateLimit({
 router.get('/public/org/:orgId/departments',      publicReadLimit, publicDepartments)
 router.get('/public/org/:orgId/doctors',          publicReadLimit, publicDoctors)
 router.get('/public/org/:orgId/doctor-timetable', publicReadLimit, publicDoctorTimetable)
+router.get('/public/org/:orgId/check-slot',       publicReadLimit, publicCheckSlot)
 // Finding one's own record needs a complete mobile number; the tighter
 // per-address limit keeps anyone from walking through numbers.
 const publicFindLimit = rateLimit({
