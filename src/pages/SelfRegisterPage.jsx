@@ -439,6 +439,7 @@ export default function SelfRegisterPage() {
             doctors={doctors}
             departments={departments}
             timetableUrl={(doctorId) => `/public/org/${orgId}/doctor-timetable?doctorId=${encodeURIComponent(doctorId)}`}
+            slotCheckUrl={`/public/org/${orgId}/check-slot`}
             showPriority={false}
             notBookingNote={mode === 'existing'
               ? 'Select this option to book your appointment.'

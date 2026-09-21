@@ -65,6 +65,7 @@ client.interceptors.response.use(
     err.status    = status
     err.code      = data?.code || data?.errorCode
     err.details   = data?.details
+    err.title     = data?.title // a short heading for the toast, when the server sends one
     return Promise.reject(err)
   }
 )

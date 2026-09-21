@@ -12,6 +12,8 @@ import { SearchableSelect } from "@/components/ui/searchable-select";
 import { STATUS_CONFIG } from "./appointmentConstants";
 import { getPatientFullName } from "./appointmentHelpers";
 import { useDoctorTimetable } from "@/components/common/hooks/useDoctorTimetable";
+import { useSlotCheck } from "@/components/common/hooks/useSlotCheck";
+import { FieldError } from "@/components/common/PatientDetailsFields";
 import { formatTime12h } from "@/lib/format";
 
 export default function AppointmentFormDialog({
@@ -47,6 +49,19 @@ export default function AppointmentFormDialog({
   const appointmentDate = form.watch("appointmentDate");
   const currentTime = form.watch("appointmentTime");
   const { availableTimeSlots, timetableLoading } = useDoctorTimetable(doctorId, appointmentDate);
+
+  // The moment a time is picked, the server says whether Save would accept it,
+  // and the reason goes in red under the Time field. Editing: the appointment
+  // must not clash with its own slot, and leaving the time as it was is fine.
+  const patientId = form.watch("patientId");
+  const { problem: slotIssue } = useSlotCheck({
+    doctorId,
+    date: appointmentDate,
+    time: currentTime,
+    patientId,
+    appointmentId: isEdit ? editingAppointment?.id : undefined,
+    keepCurrent: isEdit,
+  });
 
   // Keep the appointment's own time selectable even when it falls outside the
   // doctor's current timetable, so editing an old appointment never blanks the field.
@@ -232,7 +247,7 @@ export default function AppointmentFormDialog({
                       disabled={!doctorId || !appointmentDate || timetableLoading}
                     >
                       <FormControl>
-                        <SelectTrigger>
+                        <SelectTrigger className={slotIssue ? "border-red-500" : undefined}>
                           <SelectValue placeholder={
                             !doctorId ? "Select a doctor first"
                               : !appointmentDate ? "Select a date first"
@@ -247,6 +262,7 @@ export default function AppointmentFormDialog({
                       </SelectContent>
                     </Select>
                     <FormMessage />
+                    <FieldError message={slotIssue?.message} />
                   </FormItem>
                 )}
               />

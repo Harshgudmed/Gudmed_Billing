@@ -20,6 +20,8 @@ import { format } from "date-fns";
 import { Loader2 } from "lucide-react";
 import { parseDate, getPatientFullName } from "./appointmentHelpers";
 import { useDoctorTimetable } from "@/components/common/hooks/useDoctorTimetable";
+import { useSlotCheck } from "@/components/common/hooks/useSlotCheck";
+import { FieldError } from "@/components/common/PatientDetailsFields";
 import { formatTime12h } from "@/lib/format";
 
 export default function RescheduleAppointmentDialog({
@@ -42,6 +44,16 @@ export default function RescheduleAppointmentDialog({
     appointment?.doctorId,
     date ? format(date, "yyyy-MM-dd") : "",
   );
+
+  // Whether the new slot would be accepted — the reason shows in red under
+  // New Time as soon as it is picked, not only as a toast after Reschedule.
+  const { problem: slotIssue } = useSlotCheck({
+    doctorId: appointment?.doctorId,
+    date,
+    time,
+    patientId: appointment?.patientId,
+    appointmentId: appointment?.id, // the visit being moved does not block itself
+  });
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -82,7 +94,7 @@ export default function RescheduleAppointmentDialog({
                 onValueChange={onTimeChange}
                 disabled={!date || timetableLoading}
               >
-                <SelectTrigger>
+                <SelectTrigger className={slotIssue ? "border-red-500" : undefined}>
                   <SelectValue placeholder={
                     !date ? "Pick a date first"
                       : timetableLoading ? "Loading slots…"
@@ -98,6 +110,7 @@ export default function RescheduleAppointmentDialog({
                   ))}
                 </SelectContent>
               </Select>
+              <FieldError message={slotIssue?.message} />
             </div>
           </div>
         </div>

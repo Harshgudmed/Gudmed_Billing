@@ -5,6 +5,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { SearchableSelect } from '@/components/ui/searchable-select'
 import { cn, drName } from '@/lib/utils'
 import { useDoctorTimetable } from './hooks/useDoctorTimetable'
+import { useSlotCheck } from './hooks/useSlotCheck'
 import { FieldError } from './PatientDetailsFields'
 
 // "Book an appointment now" — the checkbox and the booking fields under it.
@@ -78,6 +79,9 @@ export function buildAppointmentPayload(form) {
  * @param {Array}    doctors          lean doctor list ({ id, fullName, specialization, departmentId, consultationFee })
  * @param {Array}    departments
  * @param {function} [timetableUrl]   (doctorId) => URL of that doctor's timetable
+ * @param {string}   [slotCheckUrl]   where to ask whether a picked time is still
+ *                   bookable — the QR page's public endpoint; the counter's own
+ *                   (/appointments/check-slot) when left out
  * @param {boolean}  [showPriority]   the priority picker. Defaults to true (the
  *                   counter's form); a patient cannot mark their own visit urgent,
  *                   so the QR page hides it and the booking goes in as Routine.
@@ -92,6 +96,7 @@ export default function AppointmentFields({
   doctors = [],
   departments = [],
   timetableUrl,
+  slotCheckUrl,
   showPriority = true,
   notBookingNote = 'The patient will be registered and given a UHID. Book the appointment later from Appointments.',
 }) {
@@ -104,6 +109,16 @@ export default function AppointmentFields({
     },
     { url: timetableUrl },
   )
+
+  // Whether the picked time would be accepted — the reason goes in red under
+  // Time straight away. Only while booking is ticked (the fields are hidden
+  // otherwise); the QR page asks through its public endpoint.
+  const { problem: slotIssue } = useSlotCheck({
+    doctorId: patientForm.bookAppointment ? patientForm.doctor : '',
+    date: patientForm.appointmentDate,
+    time: patientForm.appointmentTime,
+    ...(slotCheckUrl ? { url: slotCheckUrl } : {}),
+  })
 
   const doctorDeptIds = new Set(doctors.map(d => d.departmentId).filter(Boolean))
   const departmentOptions = departments.filter(
@@ -231,7 +246,7 @@ export default function AppointmentFields({
             onValueChange={v => setField('appointmentTime', v)}
             disabled={!patientForm.appointmentDate || availableTimeSlots.length === 0}
           >
-            <SelectTrigger className="mt-1">
+            <SelectTrigger className={cn('mt-1', (fieldErrors.appointmentTime || slotIssue) && 'border-red-500')}>
               <SelectValue placeholder={
                 !patientForm.doctor
                   ? "Select doctor first"
@@ -248,7 +263,7 @@ export default function AppointmentFields({
               ))}
             </SelectContent>
           </Select>
-          <FieldError message={fieldErrors.appointmentTime} />
+          <FieldError message={fieldErrors.appointmentTime || slotIssue?.message} />
         </div>
       </div>
 

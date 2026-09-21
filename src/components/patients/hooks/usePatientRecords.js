@@ -1,6 +1,7 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { toast } from 'sonner';
 import client from '@/api/client';
+import { showApiError } from '@/lib/apiRequest';
 
 export function usePatientRecords(selectedPatient, isPollingEnabled = false) {
   const [records, setRecords] = useState({
@@ -48,7 +49,9 @@ export function usePatientRecords(selectedPatient, isPollingEnabled = false) {
         toast.error(res.error || 'Failed to cancel');
       }
     } catch (err) {
-      toast.error('Failed to cancel appointment');
+      // Same readable reason as the Appointments screen gives (e.g. "Status
+      // can't be changed — this appointment is already completed").
+      showApiError(err, "Couldn't cancel appointment");
     } finally {
       setCancellingId(null);
     }

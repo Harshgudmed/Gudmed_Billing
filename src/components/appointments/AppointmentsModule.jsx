@@ -13,6 +13,11 @@ import {
   addDays,
 } from "date-fns";
 import { toast } from "sonner";
+// Every failed action here says WHY and what to do next ("Time slot
+// unavailable — Dr. Sharma is already booked at 10:00 AM on 22 Sep. Please
+// choose another time.") instead of "Failed to …", which left reception
+// pressing Save on the same thing again.
+import { showApiError } from "@/lib/apiRequest";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import client from "@/api/client";
@@ -703,8 +708,8 @@ export default function AppointmentsModule() {
       try {
         await updateAppointment(appointment.id, { status });
         toast.success(successMessage);
-      } catch {
-        toast.error("Failed to update appointment");
+      } catch (err) {
+        showApiError(err, "Couldn't update appointment");
       }
     },
     [updateAppointment]
@@ -748,8 +753,8 @@ export default function AppointmentsModule() {
       });
       closeDialog();
       toast.success("Appointment cancelled");
-    } catch {
-      toast.error("Failed to cancel appointment");
+    } catch (err) {
+      showApiError(err, "Couldn't cancel appointment");
     } finally {
       setLoading("submitting", false);
     }
@@ -768,8 +773,8 @@ export default function AppointmentsModule() {
       });
       closeDialog();
       toast.success("Appointment rescheduled");
-    } catch {
-      toast.error("Failed to reschedule appointment");
+    } catch (err) {
+      showApiError(err, "Couldn't reschedule appointment");
     } finally {
       setLoading("submitting", false);
     }
@@ -812,8 +817,8 @@ export default function AppointmentsModule() {
       });
       closeDialog();
       toast.success("Appointment updated successfully");
-    } catch {
-      toast.error("Failed to update appointment");
+    } catch (err) {
+      showApiError(err, "Couldn't update appointment");
     } finally {
       setLoading("editSubmitting", false);
       isEditSubmittingRef.current = false;
@@ -845,8 +850,10 @@ export default function AppointmentsModule() {
       toast.success(
         `${count} appointment${count > 1 ? "s" : ""} marked as ${status.replace("_", " ")}`,
       );
-    } catch {
-      toast.error("Failed to update some appointments");
+    } catch (err) {
+      // All-or-nothing on the server: a refusal means NONE were changed, which
+      // "Failed to update some appointments" used to hide.
+      showApiError(err, "Nothing was updated");
     }
   }, [selectedAppointmentIds, bulkUpdateStatus]);
 
@@ -909,8 +916,8 @@ export default function AppointmentsModule() {
       } else {
         toast.success(`Appointment created for ${patientName}`);
       }
-    } catch {
-      toast.error("Failed to create appointment");
+    } catch (err) {
+      showApiError(err, "Couldn't book appointment");
     } finally {
       setLoading("submitting", false);
     }
