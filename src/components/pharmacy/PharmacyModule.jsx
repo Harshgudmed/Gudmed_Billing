@@ -33,6 +33,8 @@ import MedicineNameAutocomplete from "./MedicineNameAutocomplete";
 import PosDrugCombo from './PosDrugCombo';
 import { printPharmacyReceipt } from "@/components/billing/utils/printBilling";
 import PatientLookup from "@/components/common/PatientLookup";
+import CancelActionDialog from "@/components/common/CancelActionDialog";
+import { useCancelAction } from "@/components/common/hooks/useCancelAction";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -338,6 +340,16 @@ export default function PharmacyModule() {
       toast.error("Failed to adjust stock");
     }
   };
+
+  // Closing a prescription the patient did not collect here (bought outside, or
+  // never came) — the shared cancel dialog + hook Billing and Radiology use, in
+  // its no-money mode: a doctor's prescription was never paid for. The server
+  // refuses anything already dispensed or paid at Billing, and says why.
+  const cancelRx = useCancelAction({
+    cancel: (rx, c) => client.patch(`/pharmacy/prescriptions/${rx.id}`, { status: "cancelled", cancellationReason: c.reason }),
+    onDone: () => { rxPage.refresh(); pendingRxPage.refresh(); fetchStats(); },
+    messages: { cancelled: () => "Prescription cancelled — nothing was dispensed" },
+  });
 
   const openDispenseDialog = async (rx) => {
     let items = [];
@@ -713,6 +725,7 @@ ${rx.notes ? `<div class="note-bar"><strong>Notes:</strong> ${escapeHtml(rx.note
           totalPages={rxPage.totalPages}
           openDispenseDialog={openDispenseDialog}
           handlePrintLabel={handlePrintLabel}
+          onCancel={cancelRx.start}
         />
 
         <BatchesTab
@@ -1861,6 +1874,15 @@ ${rx.notes ? `<div class="note-bar"><strong>Notes:</strong> ${escapeHtml(rx.note
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* ── CANCEL PRESCRIPTION (patient did not take it here) ── */}
+      <CancelActionDialog
+        {...cancelRx.dialogProps}
+        module="prescription"
+        settlesMoney={false}
+        title={cancelRx.record?.patient ? getFullName(cancelRx.record.patient) : ""}
+        subtitle={cancelRx.record?.doctor?.fullName ? `Prescribed by ${drName(cancelRx.record.doctor.fullName)}` : ""}
+      />
 
       {/* ── DELETE DRUG CONFIRM ── */}
       <Dialog

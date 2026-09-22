@@ -54,6 +54,12 @@ export const CANCEL_MODULES = {
     // Anything past 'pending' means the tube was drawn — the reagent is spent.
     workStarted: (r) => r?.status !== 'pending',
   },
+  prescription: {
+    label: 'Prescription',
+    reschedule: false,
+    // Anything past 'pending' means medicine already left the shelf.
+    workStarted: (r) => r?.status !== 'pending',
+  },
 }
 
 export default function CancelActionDialog({
@@ -66,9 +72,16 @@ export default function CancelActionDialog({
   subtitle,
   onConfirm,
   isSubmitting = false,
+  // false: the thing being cancelled was never paid for — a doctor's order the
+  // patient did not take here (bought the medicine outside, did not come for the
+  // test). There is no money to settle and nothing to reschedule, so the dialog
+  // is just a reason and a Cancel button. Default true keeps Billing and
+  // Radiology exactly as they were.
+  settlesMoney = true,
 }) {
   const cfg = CANCEL_MODULES[module] ?? CANCEL_MODULES.billing
   const { orgInfo } = useOrgSettings()
+  const offerReschedule = settlesMoney && cfg.reschedule
 
   const [action, setAction] = useState('refund')
   const [reason, setReason] = useState('')
@@ -79,11 +92,11 @@ export default function CancelActionDialog({
   // reason is written onto the record, so it would be attributed to the wrong one.
   useEffect(() => {
     if (open) {
-      setAction(cfg.reschedule ? 'reschedule' : 'refund')
+      setAction(!settlesMoney ? 'cancel' : cfg.reschedule ? 'reschedule' : 'refund')
       setReason('')
       setDate('')
     }
-  }, [open, cfg.reschedule])
+  }, [open, cfg.reschedule, settlesMoney])
 
   const workStarted = cfg.workStarted(record)
   const { charge, refund, chargePct } = calcRefund({ amount, workStarted, settings: orgInfo })
@@ -95,6 +108,10 @@ export default function CancelActionDialog({
 
   const submit = () => {
     if (!canConfirm) return
+    if (!settlesMoney) {
+      onConfirm({ action: 'cancel', reason: reason.trim() })
+      return
+    }
     onConfirm(action === 'reschedule'
       ? { action: 'reschedule', reason: reason.trim(), date }
       : { action: 'refund', reason: reason.trim(), amount, charge, refund, chargePct, instant })
@@ -106,9 +123,11 @@ export default function CancelActionDialog({
         <DialogHeader>
           <DialogTitle>Cancel {cfg.label}</DialogTitle>
           <DialogDescription>
-            {cfg.reschedule
-              ? 'Move this to a new date, or cancel it and settle the money.'
-              : 'This cannot be rescheduled — cancelling settles the money.'}
+            {!settlesMoney
+              ? 'Use this when the patient did not take it here — they went elsewhere or did not come. Nothing is deleted; it moves to Cancelled.'
+              : cfg.reschedule
+                ? 'Move this to a new date, or cancel it and settle the money.'
+                : 'This cannot be rescheduled — cancelling settles the money.'}
           </DialogDescription>
         </DialogHeader>
 
@@ -120,7 +139,7 @@ export default function CancelActionDialog({
             </div>
           )}
 
-          {cfg.reschedule && (
+          {offerReschedule && (
             <div className="flex gap-2">
               {[
                 { key: 'reschedule', Icon: CalendarClock, text: cfg.rescheduleVerb ?? 'Reschedule' },
@@ -141,7 +160,7 @@ export default function CancelActionDialog({
             </div>
           )}
 
-          {action === 'reschedule' ? (
+          {!settlesMoney ? null : action === 'reschedule' ? (
             <div className="space-y-2">
               <div>
                 <Label>New date *</Label>
@@ -189,7 +208,7 @@ export default function CancelActionDialog({
             <Textarea
               id="cancel-reason"
               rows={2}
-              placeholder="Why is this being cancelled?"
+              placeholder={settlesMoney ? 'Why is this being cancelled?' : 'e.g. Patient bought the medicine outside'}
               value={reason}
               onChange={(e) => setReason(e.target.value)}
             />
@@ -212,7 +231,9 @@ export default function CancelActionDialog({
             disabled={!canConfirm}
           >
             {isSubmitting && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
-            {action === 'reschedule' ? (cfg.rescheduleVerb ?? 'Reschedule') : `Cancel & refund ${formatMoney(refund)}`}
+            {!settlesMoney
+              ? `Cancel ${cfg.label}`
+              : action === 'reschedule' ? (cfg.rescheduleVerb ?? 'Reschedule') : `Cancel & refund ${formatMoney(refund)}`}
           </Button>
         </DialogFooter>
       </DialogContent>

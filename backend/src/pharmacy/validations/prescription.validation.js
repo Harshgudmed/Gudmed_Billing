@@ -18,4 +18,7 @@ export const updatePrescriptionSchema = z.object({
   isRefill: z.boolean().optional(),
   refillsAllowed: z.number().int().min(0).optional(),
   refillsRemaining: z.number().int().min(0).optional(),
+  // Why a prescription was closed without dispensing (the patient bought it
+  // elsewhere, or never came). Not a column: update() writes it into `notes`.
+  cancellationReason: z.string().optional(),
 })

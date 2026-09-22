@@ -7,6 +7,7 @@ import { getPagination, paginationMeta, handleServiceError, makeError } from '..
 import { recordStockChange, consumeFromBatches, findShortages, insufficientStockError } from '../stockService.js'
 import { PATIENT_NAME_SELECT } from '../../lib/patientName.js'
 import { patientSearchWhere } from '../../lib/patientSearch.js'
+import { invoiceOfPrescription } from '../../lib/invoiceFulfillment.js'
 
 const SORTABLE_FIELDS = ['prescriptionDate', 'status', 'createdAt']
 
@@ -128,6 +129,12 @@ export async function dispense(req, res, next) {
       if (rx.status === 'fully_dispensed') {
         throw makeError('Prescription already fully dispensed', 409, 'ALREADY_DISPENSED')
       }
+      // A cancelled prescription — closed because the patient did not collect it,
+      // or voided with its bill at Billing — must not hand medicine out. The
+      // screen hides Dispense for it; this stops a stale screen or a direct call.
+      if (rx.status === 'cancelled') {
+        throw makeError('This prescription was cancelled, so it cannot be dispensed', 409, 'PRESCRIPTION_CANCELLED')
+      }
 
       let items = []
       try { items = JSON.parse(rx.items || '[]') } catch { items = [] }
@@ -240,7 +247,57 @@ export async function update(req, res, next) {
     })
     if (!existing) throw makeError('Prescription not found', 404, 'PRESCRIPTION_NOT_FOUND')
 
-    const updateData = { ...parsed }
+    const { cancellationReason, ...updateData } = parsed
+
+    // Closing a prescription the patient never collected (bought it outside, or
+    // did not come). Checked here, not only on the screen:
+    //  - only while nothing has been handed over — once any medicine left the
+    //    shelf the stock ledger and the sale exist, and "cancelled" would lie;
+    //  - never a prescription paid at Billing (billing tags it [INV:<number>] in
+    //    notes, lib/invoiceFulfillment.js): cancelling it here would keep the
+    //    patient's money for medicine they never got — that is Billing's cancel,
+    //    which refunds;
+    //  - with a reason, added to notes after anything already there, so the
+    //    [INV:…] tag and earlier notes survive. Nothing is deleted.
+    if (updateData.status === 'cancelled' && existing.status !== 'cancelled') {
+      if (existing.status !== 'pending') {
+        return res.status(409).json({
+          success: false,
+          title: "Can't cancel this prescription",
+          error: 'Medicine has already been handed over from this prescription, so it can no longer be cancelled.',
+        })
+      }
+      const paidOn = invoiceOfPrescription(existing.notes)
+      if (paidOn) {
+        return res.status(409).json({
+          success: false,
+          title: 'Paid at Billing',
+          error: `This prescription was paid on invoice ${paidOn}. Cancel it from Billing so the patient is refunded.`,
+        })
+      }
+      const reason = String(cancellationReason || '').trim()
+      if (!reason) {
+        return res.status(400).json({ success: false, title: 'Reason needed', error: 'Please give a reason for cancelling this prescription.' })
+      }
+      // Compare-and-set: a pharmacist dispensing in the same instant wins.
+      const { count } = await db.prescription.updateMany({
+        where: { id: existing.id, organizationId: ORGANIZATION_ID, status: 'pending' },
+        data: {
+          status: 'cancelled',
+          notes: [existing.notes, `Not dispensed: ${reason}`].filter(Boolean).join('\n'),
+        },
+      })
+      if (count === 0) {
+        return res.status(409).json({
+          success: false,
+          title: "Can't cancel this prescription",
+          error: 'Medicine has already been handed over from this prescription, so it can no longer be cancelled.',
+        })
+      }
+      const data = await db.prescription.findFirst({ where: { id: existing.id, organizationId: ORGANIZATION_ID } })
+      return res.json({ success: true, data, message: 'Prescription cancelled' })
+    }
+
     if (updateData.dispensedAt) updateData.dispensedAt = new Date(updateData.dispensedAt)
     if (updateData.items && Array.isArray(updateData.items)) {
       updateData.items = JSON.stringify(updateData.items)

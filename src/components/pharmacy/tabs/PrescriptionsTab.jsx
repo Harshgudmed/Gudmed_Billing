@@ -12,7 +12,7 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
-import { CheckCircle, Printer, Loader2, Search } from "lucide-react";
+import { CheckCircle, Printer, Loader2, Search, XCircle } from "lucide-react";
 import { format } from "date-fns";
 import { statusBadge } from "../pharmacyHelpers";
 import { Pagination } from "@/components/common/Pagination";
@@ -30,6 +30,7 @@ export default function PrescriptionsTab({
   handlePrintLabel,
   search = "",     // searched on the server: patient name / UHID / phone, doctor
   setSearch,
+  onCancel,        // close a pending prescription the patient did not collect here
 }) {
   return (
     <TabsContent value="prescriptions" className="space-y-4">
@@ -129,6 +130,17 @@ export default function PrescriptionsTab({
                             >
                               <CheckCircle className="h-4 w-4 mr-1" />
                               Dispense
+                            </Button>
+                          )}
+                          {rx.status === "pending" && onCancel && (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              title="The patient did not take this medicine here"
+                              onClick={() => onCancel(rx)}
+                            >
+                              <XCircle className="h-4 w-4 mr-1" />
+                              Cancel
                             </Button>
                           )}
                           <Button

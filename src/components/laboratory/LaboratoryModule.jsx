@@ -6,7 +6,9 @@ import { Input } from '@/components/ui/input'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { FlaskConical, Plus, Eye, Edit, Trash2, Clock, User, FileText, AlertTriangle, CheckCircle, Search, Printer, Send, ChevronDown, Save, AlertCircle, Activity, TestTube, RefreshCw, Microscope, Beaker, Droplet, ClipboardList, FileBarChart, Play, CheckSquare, Loader2, Receipt, Upload } from 'lucide-react'
+import { FlaskConical, Plus, Eye, Edit, Trash2, Clock, User, FileText, AlertTriangle, CheckCircle, Search, Printer, Send, ChevronDown, Save, AlertCircle, Activity, TestTube, RefreshCw, Microscope, Beaker, Droplet, ClipboardList, FileBarChart, Play, CheckSquare, Loader2, Receipt, Upload, XCircle } from 'lucide-react'
+import CancelActionDialog from '@/components/common/CancelActionDialog'
+import { useCancelAction } from '@/components/common/hooks/useCancelAction'
 import { format, formatDistanceToNow } from 'date-fns'
 import { toast } from 'sonner'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
@@ -685,6 +687,21 @@ export default function LaboratoryModule() {
       toast.error('Failed to update order status')
     }
   }
+
+  // Closing an order the patient never came for (went to another lab, or did
+  // not return). The shared cancel dialog + hook Billing and Radiology use, in
+  // its no-money mode: a doctor's order was never paid for. The server refuses
+  // once the sample is collected or if the order was paid at Billing, and says
+  // why — that message is what the toast shows.
+  const cancelOrder = useCancelAction({
+    cancel: (order, c) => labApi.updateOrder(order.id, { status: 'cancelled', rejectionReason: c.reason }),
+    onDone: () => {
+      fetchOrders()
+      fetchStats()
+      ordersTable.refresh()
+    },
+    messages: { cancelled: () => 'Lab order cancelled — no sample was taken' },
+  })
 
   const handleStartProcessing = async (orderId) => {
     try {
@@ -1372,6 +1389,17 @@ export default function LaboratoryModule() {
                                     >
                                       <TestTube className="h-4 w-4 mr-1" />
                                       Collect
+                                    </Button>
+                                  )}
+                                  {order.status === 'pending' && (
+                                    <Button
+                                      size="sm"
+                                      variant="ghost"
+                                      title="The patient did not take this test here"
+                                      onClick={() => cancelOrder.start(order)}
+                                    >
+                                      <XCircle className="h-4 w-4 mr-1" />
+                                      Cancel
                                     </Button>
                                   )}
                                   {order.status === 'sample_collected' && (
@@ -2454,6 +2482,15 @@ export default function LaboratoryModule() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Cancel an order the patient did not take here — no money involved. */}
+      <CancelActionDialog
+        {...cancelOrder.dialogProps}
+        module="laboratory"
+        settlesMoney={false}
+        title={cancelOrder.record?.orderNumber || ''}
+        subtitle={cancelOrder.record?.patientName || ''}
+      />
     </div>
   )
 }

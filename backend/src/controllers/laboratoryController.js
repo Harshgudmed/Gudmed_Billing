@@ -356,10 +356,62 @@ export const update = async (req, res, next) => {
       // printed on the tube was never the number stored against the order.
 
       // Tenant guard: only touch an order that belongs to this org.
-      const owned = await db.labOrder.findFirst({ where: { id, organizationId: ORGANIZATION_ID }, select: { id: true } })
+      const owned = await db.labOrder.findFirst({
+        where: { id, organizationId: ORGANIZATION_ID },
+        select: { id: true, status: true, orderNumber: true },
+      })
       if (!owned) return res.status(404).json({ success: false, error: 'Lab order not found' })
 
+      // Closing an order the patient never came for (they went elsewhere, or did
+      // not return). Three rules, checked here and not only on the screen:
+      //  - only while nothing has been done: once the sample is drawn the work
+      //    exists, and cancelling would drop a real result off the worklist;
+      //  - never an order paid at Billing (billing names it LAB-<invoice number>,
+      //    see lib/invoiceFulfillment.js): cancelling it here would leave the
+      //    patient's money taken for nothing — that is Billing's cancel, which
+      //    refunds;
+      //  - with a reason, kept on the order (rejectionReason), so the record says
+      //    why it was closed. Nothing is deleted.
+      if (updates.status === 'cancelled') {
+        if (owned.status !== 'pending') {
+          return res.status(409).json({
+            success: false,
+            title: "Can't cancel this order",
+            error: 'The sample has already been collected for this order, so it can no longer be cancelled.',
+          })
+        }
+        const paidOn = owned.orderNumber?.startsWith('LAB-')
+          ? await db.invoice.findFirst({
+            where: { organizationId: ORGANIZATION_ID, invoiceNumber: owned.orderNumber.slice(4) },
+            select: { invoiceNumber: true },
+          })
+          : null
+        if (paidOn) {
+          return res.status(409).json({
+            success: false,
+            title: 'Paid at Billing',
+            error: `This order was paid on invoice ${paidOn.invoiceNumber}. Cancel it from Billing so the patient is refunded.`,
+          })
+        }
+        if (!String(updates.rejectionReason || '').trim()) {
+          return res.status(400).json({ success: false, title: 'Reason needed', error: 'Please give a reason for cancelling this order.' })
+        }
+      }
+
       const data = await db.$transaction(async (tx) => {
+        // Cancel only if the order is STILL pending at the moment of writing — a
+        // technician collecting the sample in the same instant must win, not be
+        // silently overwritten by a cancel read a moment earlier.
+        if (updates.status === 'cancelled') {
+          const { count } = await tx.labOrder.updateMany({
+            where: { id, organizationId: ORGANIZATION_ID, status: 'pending' },
+            data: { status: 'cancelled', rejectionReason: String(updates.rejectionReason).trim() },
+          })
+          if (count === 0) {
+            throw Object.assign(new Error('The sample has already been collected for this order, so it can no longer be cancelled.'), { status: 409 })
+          }
+          return tx.labOrder.findFirst({ where: { id, organizationId: ORGANIZATION_ID } })
+        }
         // First collection only. Re-collecting, or any later status change, must
         // not renumber a tube that is already on a rack in the lab.
         if (updates.status === 'sample_collected') {
