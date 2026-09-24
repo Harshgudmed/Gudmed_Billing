@@ -59,8 +59,13 @@ const invoiceSchema = z.object({
   consultationId: z.string().optional(),
   items: z.array(invoiceItemSchema).min(1),
   discountAmount: z.number().nonnegative().default(0),
-  discountPercentage: z.number().nonnegative().default(0),
-  taxPercentage: z.number().nonnegative().default(0),
+  // A percentage is a share of something, so it cannot pass 100. Without the
+  // upper bound a typed "500" in the GST box was accepted and stored: the bill
+  // charged five times the treatment in tax, and a 500% discount would have
+  // handed money back. The amount is checked separately below (it may not
+  // exceed the subtotal), but the two boxes on screen are percentages.
+  discountPercentage: z.number().nonnegative().max(100, 'Discount cannot be more than 100%').default(0),
+  taxPercentage: z.number().nonnegative().max(100, 'GST cannot be more than 100%').default(0),
   notes: z.string().optional(),
   idempotencyKey: z.string().min(1).optional(),
 })

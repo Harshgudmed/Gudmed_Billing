@@ -2,6 +2,7 @@ import { createContext, useContext, useEffect, useState, useCallback } from 'rea
 import client from '@/api/client'
 import { clearOrgCache } from '@/lib/orgSettings'
 import { clearBookingSourceCache } from '@/components/common/hooks/useBookingSource'
+import { resetRealtime } from '@/lib/realtimeSocket'
 
 // Auth state for the web app. Restores the session from the httpOnly cookie via
 // /auth/me on mount, and exposes login/logout. The login response token is also
@@ -15,6 +16,10 @@ import { clearBookingSourceCache } from '@/components/common/hooks/useBookingSou
 function forgetHospital() {
   clearOrgCache()
   clearBookingSourceCache()
+  // Including which hospital's live updates this browser is listening to. Left
+  // behind, the next person to sign in here kept receiving the previous
+  // hospital's socket room, so their own screens stopped updating by themselves.
+  resetRealtime()
 }
 
 const AuthContext = createContext(null)

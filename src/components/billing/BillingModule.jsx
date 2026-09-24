@@ -10,7 +10,7 @@ import PatientLookup from '@/components/common/PatientLookup'
 import RefundApprovalsTab from './RefundApprovalsTab'
 // ReceiptIndianRupee, not Receipt: the plain one carries a dollar sign, which is
 // the wrong currency on every screen in this hospital.
-import { ReceiptIndianRupee, RefreshCw, Plus, Search, Trash2, Shield, Eye, Printer, Download, TrendingUp, Clock, AlertCircle, Pencil, X, XCircle } from 'lucide-react'
+import { ReceiptIndianRupee, Plus, Search, Trash2, Shield, Eye, Printer, Download, TrendingUp, Clock, AlertCircle, Pencil, X, XCircle } from 'lucide-react'
 import CancelActionDialog from '@/components/common/CancelActionDialog'
 import { useCancelAction } from '@/components/common/hooks/useCancelAction'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
@@ -30,6 +30,36 @@ import { appointmentSchema } from '@/components/appointments/appointmentSchema'
 import AppointmentFormDialog from '@/components/appointments/AppointmentFormDialog'
 import { useBookingSource } from '@/components/common/hooks/useBookingSource'
 import { useDateFilter } from '@/components/common/DateFilter'
+import { FilterBar, FilterSelect } from '@/components/common/FilterBar'
+import { useLiveData } from '@/lib/useLiveData'
+import { percentBox } from '@/lib/billing'
+
+// The filter row's dropdowns, written once each.
+const INVOICE_STATUS_OPTIONS = [
+  { value: 'all', label: 'All' },
+  { value: 'paid', label: 'Paid' },
+  { value: 'partial', label: 'Partial' },
+  { value: 'pending', label: 'Pending' },
+  { value: 'cancelled', label: 'Cancelled' },
+  { value: 'refunded', label: 'Refunded' },
+]
+const INVOICE_TYPE_OPTIONS = [
+  { value: 'all', label: 'All types' },
+  { value: 'opd', label: 'OPD' },
+  { value: 'pharmacy', label: 'Pharmacy' },
+  { value: 'lab', label: 'Laboratory' },
+  { value: 'radiology', label: 'Radiology' },
+  { value: 'procedure', label: 'Procedure' },
+  { value: 'vaccine', label: 'Vaccine' },
+]
+const CLAIM_STATUS_OPTIONS = [
+  { value: 'all', label: 'All' },
+  { value: 'submitted', label: 'Submitted' },
+  { value: 'pending', label: 'Pending' },
+  { value: 'approved', label: 'Approved' },
+  { value: 'settled', label: 'Settled' },
+  { value: 'rejected', label: 'Rejected' },
+]
 
 // ── Catalogue ─────────────────────────────────────────────────────────────────
 const CATALOGUE = {
@@ -650,6 +680,12 @@ export default function BillingModule({ onBack }) {
     fetchClaims()
   }, [fetchBills, fetchServices, fetchStats, fetchClaims])
 
+  // Live over the app's WebSocket: the server announces every write in this
+  // hospital (middleware/liveUpdates.js), so a payment taken at another counter,
+  // or a bill raised by pharmacy or the lab, lands here on its own — no Refresh
+  // button to press, and the day's totals move with it.
+  useLiveData(['billing', 'payments', 'pharmacy', 'laboratory', 'radiology'], fetchAll)
+
   // The invoice list is the only one of the four that reads what the user types.
   // Bundled with the other three in one effect, its changing identity — it closes
   // over page, search, status, type and date — re-ran all four, so a single
@@ -1258,7 +1294,7 @@ export default function BillingModule({ onBack }) {
           <p className="text-gray-500">Invoice management and payment collection</p>
         </div>
         <div className="flex gap-2">
-          <Button variant="outline" onClick={fetchAll}><RefreshCw className="h-4 w-4 mr-1" />Refresh</Button>
+          {/* No Refresh button: this screen is live (useLiveData below). */}
           <Button variant="outline" onClick={() => setActiveTab('new-invoice')}><Plus className="h-4 w-4 mr-1" />New Invoice</Button>
           <Button onClick={() => setActiveTab('catalog')} className="bg-gray-900 hover:bg-gray-800"><Plus className="h-4 w-4 mr-1" />Add Service</Button>
         </div>
@@ -1292,41 +1328,18 @@ export default function BillingModule({ onBack }) {
             ))}
           </div>
 
-          <div className="flex flex-wrap gap-3">
-            <div className="relative flex-1 min-w-48">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
-              <Input className="pl-9" placeholder="Search patient or invoice #..." value={invoiceSearch} onChange={e => setInvoiceSearch(e.target.value)} />
-            </div>
-            <Select value={invoiceFilter} onValueChange={setInvoiceFilter}>
-              <SelectTrigger className="w-36"><SelectValue placeholder="All" /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All</SelectItem>
-                <SelectItem value="paid">Paid</SelectItem>
-                <SelectItem value="partial">Partial</SelectItem>
-                <SelectItem value="pending">Pending</SelectItem>
-                <SelectItem value="cancelled">Cancelled</SelectItem>
-                <SelectItem value="refunded">Refunded</SelectItem>
-              </SelectContent>
-            </Select>
-            <Select value={invoiceType} onValueChange={setInvoiceType}>
-              <SelectTrigger className="w-40"><SelectValue placeholder="All types" /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All types</SelectItem>
-                <SelectItem value="opd">OPD</SelectItem>
-                <SelectItem value="pharmacy">Pharmacy</SelectItem>
-                <SelectItem value="lab">Laboratory</SelectItem>
-                <SelectItem value="radiology">Radiology</SelectItem>
-                <SelectItem value="procedure">Procedure</SelectItem>
-                <SelectItem value="vaccine">Vaccine</SelectItem>
-              </SelectContent>
-            </Select>
+          {/* The shared filter row (components/common/FilterBar). */}
+          <FilterBar
+            search={invoiceSearch}
+            onSearchChange={setInvoiceSearch}
+            placeholder="Search patient or invoice #..."
+            active={invoiceFiltersActive}
+            onClear={clearInvoiceFilters}
+          >
+            <FilterSelect value={invoiceFilter} onChange={setInvoiceFilter} className="w-36" options={INVOICE_STATUS_OPTIONS} />
+            <FilterSelect value={invoiceType} onChange={setInvoiceType} options={INVOICE_TYPE_OPTIONS} />
             {dateFilter.control}
-            {invoiceFiltersActive && (
-              <Button variant="ghost" size="sm" className="text-gray-500" onClick={clearInvoiceFilters}>
-                <X className="h-4 w-4 mr-1" />Clear all
-              </Button>
-            )}
-          </div>
+          </FilterBar>
           <Card>
             <CardContent className="p-0">
               {billsLoading ? (
@@ -1543,14 +1556,19 @@ export default function BillingModule({ onBack }) {
                       {/* Totals */}
                       <div className="bg-gray-50 rounded-lg p-3 space-y-2 border border-gray-200">
                         <div className="flex justify-between text-sm text-gray-600"><span>Subtotal</span><span className="font-medium">{fmt(subtotal)}</span></div>
+                        {/* `max="100"` on its own does nothing here: these boxes
+                            are not inside a <form>, so nothing ever validates
+                            them and a typed 500 went straight into the bill.
+                            percentBox keeps them between 0 and 100 as they are
+                            typed, and the server refuses anything else too. */}
                         <div className="flex items-center gap-2">
                           <span className="text-sm text-gray-600 w-24">Discount %</span>
-                          <Input type="number" min="0" max="100" className="h-7 w-20 text-sm text-center" placeholder= "0" value={form.discount} onChange={e => { const v = parseFloat(e.target.value); setForm(f => ({ ...f, discount: e.target.value === '' ? '' : (Number.isNaN(v) ? 0 : v) })) }} />
+                          <Input type="number" min="0" max="100" className="h-7 w-20 text-sm text-center" placeholder= "0" value={form.discount} onChange={e => setForm(f => ({ ...f, discount: percentBox(e.target.value) }))} />
                           {discountAmt > 0 && <span className="text-sm text-green-600 font-medium">− {fmt(discountAmt)}</span>}
                         </div>
                         <div className="flex items-center gap-2">
                           <span className="text-sm text-gray-600 w-24">GST %</span>
-                          <Input type="number" min="0" max="100" className="h-7 w-20 text-sm text-center" placeholder="0" value={form.gstPct} onChange={e => { const v = parseFloat(e.target.value); setForm(f => ({ ...f, gstPct: e.target.value === '' ? '' : (Number.isNaN(v) ? 0 : v) })) }} />
+                          <Input type="number" min="0" max="100" className="h-7 w-20 text-sm text-center" placeholder="0" value={form.gstPct} onChange={e => setForm(f => ({ ...f, gstPct: percentBox(e.target.value) }))} />
                           {gstAmt > 0 && <span className="text-sm text-gray-600 font-medium">+ {fmt(gstAmt)}</span>}
                         </div>
                         {/* Home collection — Laboratory only (sample pickup). Doesn't apply
@@ -1722,23 +1740,15 @@ export default function BillingModule({ onBack }) {
             </CardContent>
           </Card>
 
-          <div className="flex flex-wrap gap-3">
-            <div className="relative flex-1 min-w-48">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
-              <Input className="pl-9" placeholder="Search claim #, patient, insurer or policy..." value={claimSearch} onChange={e => setClaimSearch(e.target.value)} />
-            </div>
-            <Select value={claimStatusFilter} onValueChange={setClaimStatusFilter}>
-              <SelectTrigger className="w-40"><SelectValue placeholder="All" /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All</SelectItem>
-                <SelectItem value="submitted">Submitted</SelectItem>
-                <SelectItem value="pending">Pending</SelectItem>
-                <SelectItem value="approved">Approved</SelectItem>
-                <SelectItem value="settled">Settled</SelectItem>
-                <SelectItem value="rejected">Rejected</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
+          <FilterBar
+            search={claimSearch}
+            onSearchChange={setClaimSearch}
+            placeholder="Search claim #, patient, insurer or policy..."
+            active={!!claimSearch || claimStatusFilter !== 'all'}
+            onClear={() => { setClaimSearch(''); setClaimStatusFilter('all') }}
+          >
+            <FilterSelect value={claimStatusFilter} onChange={setClaimStatusFilter} options={CLAIM_STATUS_OPTIONS} />
+          </FilterBar>
 
           <Card>
             <CardContent className="p-0">

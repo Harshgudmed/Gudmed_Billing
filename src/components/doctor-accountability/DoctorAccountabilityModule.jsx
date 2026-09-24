@@ -13,17 +13,41 @@ import { toast } from 'sonner'
 import { format } from 'date-fns'
 import {
   UserCog, IndianRupee, CheckCircle2, BarChart3,
-  Search, Plus, Edit2, Trash2, RefreshCw,
+  Search, Plus, Edit2, Trash2,
   Users, Clock, Wallet, Printer, FileDown, CheckCheck, ChevronLeft, ChevronRight,
   Eye, EyeOff,
 } from 'lucide-react'
 import client from '@/api/client'
 import DoctorTiming from './DoctorTiming'
 import { drName } from '@/lib/utils'
+import { useDebounce } from '@/lib/useDebounce'
+import { useLiveData } from '@/lib/useLiveData'
+import { dateRangeFor } from '@/components/common/DateFilter'
+import { FilterBar, FilterSelect, DATE_MODES } from '@/components/common/FilterBar'
+
+// The filter rows' dropdowns, written once each.
+const DOCTOR_SETUP_OPTIONS = [
+  { value: 'all', label: 'All Status' },
+  { value: 'active', label: 'Active' },
+  { value: 'setup-needed', label: 'Setup needed' },
+]
+const COMMISSION_STATUS_OPTIONS = [
+  { value: 'all', label: 'All Status' },
+  { value: 'pending', label: 'Pending' },
+  { value: 'settled', label: 'Settled' },
+]
+const REPORT_STATUS_OPTIONS = [
+  { value: 'all', label: 'All Status' },
+  { value: 'active', label: 'Active' },
+  { value: 'inactive', label: 'Inactive' },
+]
 
 // formatMoney also survives null/undefined — the old local `fmt` threw on them.
 import { formatMoney as fmt } from '@/lib/format'
 import { useOrgSettings } from '@/lib/useOrgSettings'
+// Clinical text is typed by people and printed into a same-origin window, so
+// every field goes through the shared escaper.
+import { escapeHtml } from '@/lib/printTemplate'
 
 function printViaIframe(html) {
   const iframe = document.createElement('iframe')
@@ -92,6 +116,11 @@ function DoctorsTab() {
 
   useEffect(() => { load() }, [load])
   useEffect(() => { setSetupPage(1) }, [search, filterStatus, filterSpecialization])
+
+  // A commission rate saved here, or a fee slab added on the next tab, changes
+  // what this list calls "ready". Both arrive live, so there is no Refresh
+  // button to press — 'settings' covers a doctor added by the administrator.
+  useLiveData(['doctor-accountability', 'fee-slabs', 'settings'], load)
 
   async function openConfigure(doc) {
     setCfgDoctor(doc)
@@ -207,28 +236,22 @@ function DoctorsTab() {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center gap-3">
-        <div className="relative flex-1 max-w-xs">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
-          <Input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search doctor by name..." className="pl-9" />
-        </div>
-        <Select value={filterStatus} onValueChange={setFilterStatus}>
-          <SelectTrigger className="w-40"><SelectValue placeholder="Status" /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Status</SelectItem>
-            <SelectItem value="active">Active</SelectItem>
-            <SelectItem value="setup-needed">Setup needed</SelectItem>
-          </SelectContent>
-        </Select>
-        <Select value={filterSpecialization} onValueChange={setFilterSpecialization}>
-          <SelectTrigger className="w-48"><SelectValue placeholder="Specialization" /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Specializations</SelectItem>
-            {specializations.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}
-          </SelectContent>
-        </Select>
-        <Button variant="outline" size="sm" onClick={load}><RefreshCw className="h-4 w-4 mr-1" />Refresh</Button>
-      </div>
+      {/* The shared filter row (components/common/FilterBar). */}
+      <FilterBar
+        search={search}
+        onSearchChange={setSearch}
+        placeholder="Search doctor by name or specialization..."
+        active={!!search || filterStatus !== 'all' || filterSpecialization !== 'all'}
+        onClear={() => { setSearch(''); setFilterStatus('all'); setFilterSpecialization('all') }}
+      >
+        <FilterSelect value={filterStatus} onChange={setFilterStatus} options={DOCTOR_SETUP_OPTIONS} />
+        <FilterSelect
+          value={filterSpecialization}
+          onChange={setFilterSpecialization}
+          className="w-48"
+          options={[{ value: 'all', label: 'All Specializations' }, ...specializations.map(s => ({ value: s, label: s }))]}
+        />
+      </FilterBar>
 
       {loading ? (
         <div className="text-center py-12 text-gray-400">Loading doctors...</div>
@@ -419,6 +442,8 @@ function CommissionsTab({ openAddSignal }) {
   const [commissions, setCommissions] = useState([])
   const [doctors, setDoctors] = useState([])
   const [loading, setLoading] = useState(true)
+  const [search, setSearch] = useState('')
+  const debouncedSearch = useDebounce(search, 300)
   const [filterDoctor, setFilterDoctor] = useState('all')
   const [filterStatus, setFilterStatus] = useState('all')
   const [filterDate, setFilterDate] = useState('all')
@@ -468,6 +493,12 @@ function CommissionsTab({ openAddSignal }) {
     const params = new URLSearchParams({ resource: 'commissions', limit: String(ITEMS_PER_PAGE), offset: String(offset) })
     if (filterDoctor !== 'all') params.set('doctorId', filterDoctor)
     if (filterStatus !== 'all') params.set('status', filterStatus)
+    // Search and date now filter in the database, so they reach every page
+    // instead of the ten rows on screen.
+    if (debouncedSearch) params.set('search', debouncedSearch)
+    const range = dateRangeFor({ mode: filterDate })
+    if (range.startDate) params.set('startDate', range.startDate)
+    if (range.endDate) params.set('endDate', range.endDate)
     try {
       const [cRes, dRes] = await Promise.all([
         client.get(`/doctor-accountability?${params}`),
@@ -483,9 +514,13 @@ function CommissionsTab({ openAddSignal }) {
     } finally {
       setLoading(false)
     }
-  }, [filterDoctor, filterStatus, commissionsPage])
+  }, [filterDoctor, filterStatus, commissionsPage, debouncedSearch, filterDate])
 
   useEffect(() => { load() }, [load])
+
+  // A commission is earned when billing raises the invoice, so this list moves
+  // on its own — 'billing' as well as the commission's own topic.
+  useLiveData(['doctor-accountability', 'billing'], load)
 
   // Open the Add Commission dialog when triggered from the module header button
   useEffect(() => {
@@ -499,27 +534,19 @@ function CommissionsTab({ openAddSignal }) {
     setSelected(new Map())
   }, [filterDoctor, filterStatus, filterDate])
 
-  // ── Client-side date filter ────────────────────────────────────────────────
-  // Doctor/status page on the server; date does NOT — `resource=commissions` has
-  // no date-range param — so this only narrows the page already fetched. The
-  // banner below says so, because a filter that looks global but is per-page had
-  // the table showing every row while the empty-state claimed there were none.
-  const now = new Date()
-  const displayed = commissions.filter(c => {
-    if (filterDate === 'all') return true
-    const d = new Date(c.createdAt)
-    if (filterDate === 'today') {
-      return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth() && d.getDate() === now.getDate()
-    }
-    if (filterDate === 'week') {
-      const weekStart = new Date(now.getFullYear(), now.getMonth(), now.getDate() - now.getDay())
-      return d >= weekStart
-    }
-    if (filterDate === 'month') {
-      return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth()
-    }
-    return true
-  })
+  // Search, doctor, status and date all filter in the DATABASE now (see load()
+  // above and doctorAccountabilityController), so the page on screen is already
+  // the filtered page — there is nothing left to narrow here. The date used to
+  // be applied to the ten fetched rows only, which is why this tab carried an
+  // amber note explaining that older matches sat on later pages.
+  const displayed = commissions
+
+  // Options for the shared filter row.
+  const doctorFilterOptions = [
+    // Only when there is a choice — see OpdModule.
+    ...(doctors.length > 1 ? [{ value: 'all', label: 'All Doctors' }] : []),
+    ...doctors.map(d => ({ value: d.id, label: drName(d.fullName) })),
+  ]
 
   // ── Add commission ─────────────────────────────────────────────────────────
   async function addCommission() {
@@ -646,9 +673,9 @@ function CommissionsTab({ openAddSignal }) {
 .footer{font-size:8pt;color:#94a3b8;text-align:center;margin-top:20px;border-top:1px solid #e2e8f0;padding-top:10px}
 @media print{body{padding:12px}}</style></head><body>
 <div class="hosp-header">
-  <div class="hosp-name">${orgInfo.name}</div>
+  <div class="hosp-name">${escapeHtml(orgInfo.name)}</div>
   <div class="hosp-info">
-    <div><strong>Address:</strong> ${orgInfo.address}</div>
+    <div><strong>Address:</strong> ${escapeHtml(orgInfo.address)}</div>
     <div><strong>Phone:</strong> ${orgInfo.phone}</div>
     <div><strong>Email:</strong> ${orgInfo.email}</div>
   </div>
@@ -696,50 +723,32 @@ function CommissionsTab({ openAddSignal }) {
   return (
     <div className="space-y-4">
       {/* Filters */}
-      <div className="flex flex-wrap items-center gap-3">
-        <Select value={filterDoctor} onValueChange={setFilterDoctor}>
-          <SelectTrigger className="w-44"><SelectValue placeholder="All Doctors" /></SelectTrigger>
-          <SelectContent>
-            {/* Only when there is a choice — see OpdModule. */}
-            {doctors.length > 1 && <SelectItem value="all">All Doctors</SelectItem>}
-            {doctors.map(d => <SelectItem key={d.id} value={d.id}>{drName(d.fullName)}</SelectItem>)}
-          </SelectContent>
-        </Select>
-        <Select value={filterStatus} onValueChange={setFilterStatus}>
-          <SelectTrigger className="w-36"><SelectValue placeholder="All Status" /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Status</SelectItem>
-            <SelectItem value="pending">Pending</SelectItem>
-            <SelectItem value="settled">Settled</SelectItem>
-          </SelectContent>
-        </Select>
-        {/* Date range filter */}
-        <Select value={filterDate} onValueChange={setFilterDate}>
-          <SelectTrigger className="w-36"><SelectValue placeholder="Created Date" /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Time</SelectItem>
-            <SelectItem value="today">Today</SelectItem>
-            <SelectItem value="week">This Week</SelectItem>
-            <SelectItem value="month">This Month</SelectItem>
-          </SelectContent>
-        </Select>
-        <div className="ml-auto flex gap-2">
-          {/* Named for what it actually does: `displayed` is this page, not the whole
-              filtered set — "Export CSV" read as a full ledger export and wasn't. */}
-          <Button size="sm" variant="outline" onClick={exportCSV} title="Export the commissions shown on this page">
-            <FileDown className="h-4 w-4 mr-1" />Export This Page
-          </Button>
-          <Button size="sm" onClick={() => setAddDialog(true)}>
-            <Plus className="h-4 w-4 mr-1" />Add Commission
-          </Button>
-        </div>
-      </div>
-
-      {filterDate !== 'all' && (
-        <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
-          The date filter narrows only the {ITEMS_PER_PAGE} entries on this page — older entries matching it sit on later pages.
-        </p>
-      )}
+      {/* The shared filter row (components/common/FilterBar). The search box is
+          new, and the date filter now runs in the database — it used to narrow
+          only the ten rows on screen, which the tab had to warn about. */}
+      <FilterBar
+        search={search}
+        onSearchChange={setSearch}
+        placeholder="Search doctor or invoice ID..."
+        active={!!search || filterDoctor !== 'all' || filterStatus !== 'all' || filterDate !== 'all'}
+        onClear={() => { setSearch(''); setFilterDoctor('all'); setFilterStatus('all'); setFilterDate('all') }}
+        actions={
+          <>
+            {/* Named for what it actually does: `displayed` is this page, not the
+                whole filtered set — "Export CSV" read as a full ledger export. */}
+            <Button variant="outline" onClick={exportCSV} title="Export the commissions shown on this page">
+              <FileDown className="h-4 w-4 mr-1" />Export This Page
+            </Button>
+            <Button onClick={() => setAddDialog(true)}>
+              <Plus className="h-4 w-4 mr-1" />Add Commission
+            </Button>
+          </>
+        }
+      >
+        <FilterSelect value={filterDoctor} onChange={setFilterDoctor} className="w-44" options={doctorFilterOptions} placeholder="All Doctors" />
+        <FilterSelect value={filterStatus} onChange={setFilterStatus} className="w-36" options={COMMISSION_STATUS_OPTIONS} />
+        <FilterSelect value={filterDate} onChange={setFilterDate} className="w-36" options={DATE_MODES} />
+      </FilterBar>
 
       {/* Bulk settle bar */}
       {selected.size > 0 && (
@@ -1243,6 +1252,11 @@ function ReportsTab() {
   useEffect(() => { load() }, [load])
   useEffect(() => { setReportsPage(1) }, [search, filterStatus])
 
+  // Earnings per doctor move with every invoice, so this page stays current
+  // while it is open. Stats are a heavier query than a list: a 2-second quiet
+  // window keeps a busy billing counter from re-running it per invoice.
+  useLiveData(['doctor-accountability', 'billing'], load, { quietMs: 2000 })
+
   const filteredStats = stats.filter(s => {
     const matchesSearch = drName(s.doctorName).toLowerCase().includes(search.toLowerCase())
     const matchesStatus = filterStatus === 'all' || (filterStatus === 'active' ? s.isActive : !s.isActive)
@@ -1287,25 +1301,21 @@ function ReportsTab() {
         <StatCard icon={CheckCircle2} label="Total Settled" value={fmt(totalSettled)} color="bg-green-500" />
         <StatCard icon={Wallet} label="Total Earned" value={fmt(totalPending + totalSettled)} color="bg-purple-500" />
       </div>
-      <div className="flex flex-wrap gap-3 items-center justify-between">
-        <div className="flex flex-wrap gap-3 items-center flex-1">
-          <div className="relative w-64">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
-            <Input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search doctor by name..." className="pl-9" />
-          </div>
-          <Select value={filterStatus} onValueChange={setFilterStatus}>
-            <SelectTrigger className="w-40"><SelectValue placeholder="Status" /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Status</SelectItem>
-              <SelectItem value="active">Active</SelectItem>
-              <SelectItem value="inactive">Inactive</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
-        <Button size="sm" variant="outline" onClick={exportReportCSV}>
-          <FileDown className="h-4 w-4 mr-1" />Export Report CSV
-        </Button>
-      </div>
+      {/* The shared filter row (components/common/FilterBar). */}
+      <FilterBar
+        search={search}
+        onSearchChange={setSearch}
+        placeholder="Search doctor by name..."
+        active={!!search || filterStatus !== 'all'}
+        onClear={() => { setSearch(''); setFilterStatus('all') }}
+        actions={
+          <Button variant="outline" onClick={exportReportCSV}>
+            <FileDown className="h-4 w-4 mr-1" />Export Report CSV
+          </Button>
+        }
+      >
+        <FilterSelect value={filterStatus} onChange={setFilterStatus} options={REPORT_STATUS_OPTIONS} />
+      </FilterBar>
       {loading ? (
         <div className="text-center py-8 text-gray-400">Loading stats...</div>
       ) : filteredStats.length === 0 ? (

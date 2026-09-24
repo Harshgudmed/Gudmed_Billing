@@ -17,11 +17,42 @@ export async function recordStockChange(
   tx,
   { organizationId, drugId, batchId = null, changeType, quantityDelta, reference = null, note = null, createdById = null }
 ) {
-  const drug = await tx.pharmacyDrug.update({
-    where: { id: drugId },
-    data: { quantityInStock: { increment: quantityDelta } },
-    select: { quantityInStock: true },
-  })
+  // Taking stock out is a claim on a shelf that must never be granted twice.
+  // The callers check the count and then write, which two counters selling the
+  // last strip at the same moment both pass — proven with two simultaneous
+  // sales: both succeeded and quantityInStock went to -1. A batch-tracked
+  // medicine was saved by the batch guard below; one entered with opening stock
+  // and no batch had nothing holding it.
+  //
+  // So the guard lives HERE, in the one place every movement passes through:
+  // the row is decremented only while it still holds enough, and losing that
+  // race is a plain refusal rather than a negative number on the shelf.
+  let drug
+  if (quantityDelta < 0) {
+    const needed = -quantityDelta
+    const { count } = await tx.pharmacyDrug.updateMany({
+      where: {
+        id: drugId,
+        ...(organizationId ? { organizationId } : {}),
+        quantityInStock: { gte: needed },
+      },
+      data: { quantityInStock: { decrement: needed } },
+    })
+    if (count === 0) {
+      throw makeError(
+        'That quantity is no longer in stock — someone else took it a moment ago. Check the stock and try again.',
+        409,
+        'STOCK_CHANGED',
+      )
+    }
+    drug = await tx.pharmacyDrug.findUnique({ where: { id: drugId }, select: { quantityInStock: true } })
+  } else {
+    drug = await tx.pharmacyDrug.update({
+      where: { id: drugId },
+      data: { quantityInStock: { increment: quantityDelta } },
+      select: { quantityInStock: true },
+    })
+  }
 
   await tx.stockLedger.create({
     data: {

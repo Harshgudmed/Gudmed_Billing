@@ -2,6 +2,9 @@ import { useState, useEffect, useCallback, useRef, lazy, Suspense } from 'react'
 import CancelActionDialog from '@/components/common/CancelActionDialog'
 import { useCancelAction } from '@/components/common/hooks/useCancelAction'
 import { useDebounce } from '@/lib/useDebounce'
+import { useLatestRequest } from '@/lib/useLatestRequest'
+import { useLiveData } from '@/lib/useLiveData'
+import { FilterBar, FilterSelect, DATE_MODES, statusOptions } from '@/components/common/FilterBar'
 import { dateRangeFor } from '@/components/common/DateFilter'
 import { getOrgSettings } from '@/lib/orgSettings'
 import { sendRadiologyNotification } from '@/lib/whatsapp'
@@ -12,7 +15,7 @@ import PaymentFields from '@/components/billing/PaymentFields'
 import { createInvoiceWithPayment, fetchOrderInvoicePayments } from '@/lib/billing'
 import {
   Scan, Plus, Edit, Trash2, Search, Eye, CheckCircle, XCircle,
-  RefreshCw, FileText, Printer, AlertTriangle, Upload, X, ChevronLeft, ChevronRight,
+  FileText, Printer, AlertTriangle, Upload, X, ChevronLeft, ChevronRight,
 } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -33,6 +36,10 @@ import PatientLookup from '@/components/common/PatientLookup'
 const BulkImportDialog = lazy(() => import('@/components/common/BulkImportDialog'))
 import client from '@/api/client'
 import { getFullName, calcAge } from "@/lib/patient";
+// Names, complaints and clinical notes are typed by people and printed into a
+// window that shares this app's origin — any HTML in them would run there, so
+// every text field goes through the shared escaper.
+import { escapeHtml } from '@/lib/printTemplate'
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -62,6 +69,15 @@ const emptyReport = {
   comparedWithPrevious: false, comparisonNotes: '',
   dicomStudyUid: '', templateUsed: '',
 }
+
+// The filter row's dropdowns, written once each instead of inline per tab.
+const ORDER_STATUS_OPTIONS = statusOptions(
+  ['pending', 'scheduled', 'in_progress', 'completed', 'reported', 'cancelled'],
+  { allLabel: 'All Status' },
+)
+const REPORT_STATUS_OPTIONS = statusOptions(['draft', 'preliminary', 'final'], { allLabel: 'All Status' })
+const MODALITY_OPTIONS = statusOptions(EXAM_CATEGORIES, { allLabel: 'All Modality', label: (c) => c.toUpperCase() })
+const CATEGORY_OPTIONS = statusOptions(EXAM_CATEGORIES, { allLabel: 'All Categories', label: (c) => c.toUpperCase() })
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -113,12 +129,27 @@ export default function RadiologyModule() {
   const [stats, setStats] = useState({ pending: 0, inProgress: 0, completedToday: 0, criticalFindings: 0, totalExams: 0 })
 
   // Filters — applied by the server, not on the loaded page
-  const [searchQuery, setSearchQuery] = useState('')
-  const debouncedSearch = useDebounce(searchQuery, 300)
+  // Two searches, not one. Orders and Worklist show the same order list, so they
+  // share one; the Exam Catalog is a different list with its own. A single
+  // shared value meant a patient name typed in Orders also filtered the exam
+  // catalogue ("No exams in catalog") and vice versa.
+  const [orderSearch, setOrderSearch] = useState('')
+  const [examSearch, setExamSearch] = useState('')
+  const debouncedOrderSearch = useDebounce(orderSearch, 300)
+  const debouncedExamSearch = useDebounce(examSearch, 300)
   const [statusFilter, setStatusFilter] = useState('all')
   const [modalityFilter, setModalityFilter] = useState('all')
   const [categoryFilter, setCategoryFilter] = useState('all')
   const [dateFilter, setDateFilter] = useState('all')
+  // Reports had no search or filter of its own — only page numbers — so finding
+  // one patient's report meant paging through every report in the hospital. Its
+  // own filters, sent to the server, so they reach every page and not just the
+  // ten rows on screen.
+  const [reportSearch, setReportSearch] = useState('')
+  const debouncedReportSearch = useDebounce(reportSearch, 300)
+  const [reportStatusFilter, setReportStatusFilter] = useState('all')
+  const [reportCriticalOnly, setReportCriticalOnly] = useState(false)
+  const [reportDateFilter, setReportDateFilter] = useState('all')
 
   // Pagination
   const [examsPage, setExamsPage] = useState(1)
@@ -126,9 +157,10 @@ export default function RadiologyModule() {
   const [reportsPage, setReportsPage] = useState(1)
 
   // A narrower filter has fewer pages, so page 3 could land past the new end.
-  useEffect(() => {
-    setExamsPage(1); setOrdersPage(1)
-  }, [debouncedSearch, statusFilter, modalityFilter, categoryFilter, dateFilter])
+  // Each list goes back to page 1 only when ITS OWN filters change.
+  useEffect(() => { setExamsPage(1) }, [debouncedExamSearch, categoryFilter])
+  useEffect(() => { setOrdersPage(1) }, [debouncedOrderSearch, statusFilter, modalityFilter, dateFilter])
+  useEffect(() => { setReportsPage(1) }, [debouncedReportSearch, reportStatusFilter, reportCriticalOnly, reportDateFilter])
 
   // Pagination metadata from backend
   const [examsMeta, setExamsMeta] = useState({ total: 0, limit: 10, offset: 0 })
@@ -185,53 +217,69 @@ export default function RadiologyModule() {
   //
   // Split, each list refetches only when something it actually sends has changed.
   // Reports takes no filters at all, so it now moves only when its own page does.
+  // Only the newest request per list may fill it. Typing a search on page 2
+  // sends "page 2 + search" and then "page 1 + search"; on a slow connection the
+  // page-2 answer ("nothing here") could arrive last and replace the right one,
+  // so a patient who was there showed "No orders found". See useLatestRequest.
+  const beginExamsRequest = useLatestRequest()
+  const beginOrdersRequest = useLatestRequest()
+
   const fetchExams = useCallback(async () => {
+    const isLatest = beginExamsRequest()
     try {
       const res = await client.get('/radiology', { params: {
         resource: 'exams',
         limit: RADIOLOGY_ITEMS_PER_PAGE,
         offset: (examsPage - 1) * RADIOLOGY_ITEMS_PER_PAGE,
-        search: debouncedSearch || undefined,
+        search: debouncedExamSearch || undefined,
         examCategory: categoryFilter === 'all' ? undefined : categoryFilter,
       } })
-      if (res.success) {
+      if (res.success && isLatest()) {
         setExams(res.data || [])
         if (res.meta) setExamsMeta(res.meta)
       }
     } catch { /* silent */ }
-  }, [examsPage, debouncedSearch, categoryFilter])
+  }, [examsPage, debouncedExamSearch, categoryFilter, beginExamsRequest])
 
   const fetchOrders = useCallback(async () => {
+    const isLatest = beginOrdersRequest()
     try {
       const res = await client.get('/radiology', { params: {
         resource: 'orders',
         limit: RADIOLOGY_ITEMS_PER_PAGE,
         offset: (ordersPage - 1) * RADIOLOGY_ITEMS_PER_PAGE,
-        search: debouncedSearch || undefined,
+        search: debouncedOrderSearch || undefined,
         status: statusFilter === 'all' ? undefined : statusFilter,
         examCategory: modalityFilter === 'all' ? undefined : modalityFilter,
         ...dateRangeFor({ mode: dateFilter }),
       } })
-      if (res.success) {
+      if (res.success && isLatest()) {
         setOrders(res.data || [])
         if (res.meta) setOrdersMeta(res.meta)
       }
     } catch { /* silent */ }
-  }, [ordersPage, debouncedSearch, statusFilter, modalityFilter, dateFilter])
+  }, [ordersPage, debouncedOrderSearch, statusFilter, modalityFilter, dateFilter, beginOrdersRequest])
+
+  const beginReportsRequest = useLatestRequest()
 
   const fetchReports = useCallback(async () => {
+    const isLatest = beginReportsRequest()
     try {
       const res = await client.get('/radiology', { params: {
         resource: 'reports',
         limit: RADIOLOGY_ITEMS_PER_PAGE,
         offset: (reportsPage - 1) * RADIOLOGY_ITEMS_PER_PAGE,
+        search: debouncedReportSearch || undefined,
+        status: reportStatusFilter === 'all' ? undefined : reportStatusFilter,
+        critical: reportCriticalOnly ? 'true' : undefined,
+        ...dateRangeFor({ mode: reportDateFilter }),
       } })
-      if (res.success) {
+      if (res.success && isLatest()) {
         setReports(res.data || [])
         if (res.meta) setReportsMeta(res.meta)
       }
     } catch { /* silent */ }
-  }, [reportsPage])
+  }, [reportsPage, debouncedReportSearch, reportStatusFilter, reportCriticalOnly, reportDateFilter, beginReportsRequest])
 
   // Still one call for the paths that genuinely change all three — saving an exam
   // can create an order, and reporting on an order moves it between two of the
@@ -246,6 +294,16 @@ export default function RadiologyModule() {
       if (res.success) setStats(res.data)
     } catch { /* silent */ }
   }, [])
+
+  // Live over the app's WebSocket: the server announces every write in this
+  // hospital (middleware/liveUpdates.js) and this screen re-reads itself, so a
+  // scan started by a technician or an order raised from Billing turns up on its
+  // own. That is why there is no Refresh button any more. The counts on the
+  // cards move with it.
+  const reloadAll = useCallback(async () => {
+    await Promise.all([fetchAll(), fetchStats()])
+  }, [fetchAll, fetchStats])
+  useLiveData(['radiology', 'billing'], reloadAll)
 
   // `loading` is cleared by the ORDERS fetch, not by fetchAll. Splitting the three
   // lists apart left setLoading(false) inside fetchAll, which nothing calls on
@@ -516,7 +574,7 @@ export default function RadiologyModule() {
     const printDate = format(new Date(), 'dd MMM yyyy HH:mm')
     const reportedDate = report.reportedAt ? format(new Date(report.reportedAt), 'dd MMM yyyy HH:mm') : '—'
     const verifiedDate = report.verifiedAt ? format(new Date(report.verifiedAt), 'dd MMM yyyy HH:mm') : null
-    const html = `<!DOCTYPE html><html><head><title>Radiology Report — ${order.orderNumber}</title><style>
+    const html = `<!DOCTYPE html><html><head><title>Radiology Report — ${escapeHtml(order.orderNumber)}</title><style>
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:'Times New Roman',Times,serif;font-size:11pt;color:#000}
 .page{max-width:210mm;margin:0 auto;padding:14mm 14mm 10mm 14mm}
@@ -547,19 +605,19 @@ body{font-family:'Times New Roman',Times,serif;font-size:11pt;color:#000}
 </style></head><body><div class="page">
 <div class="hosp-header">
   <div><div class="hosp-name">${orgInfo.name}</div><div style="font-size:9pt;color:#555">Radiology &amp; Imaging Department</div></div>
-  <div style="font-size:8.5pt;color:#555;text-align:right">Order #: <strong>${order.orderNumber}</strong><br/>Report Date: ${reportedDate}<br/>Print: ${printDate}</div>
+  <div style="font-size:8.5pt;color:#555;text-align:right">Order #: <strong>${escapeHtml(order.orderNumber)}</strong><br/>Report Date: ${reportedDate}<br/>Print: ${printDate}</div>
 </div>
 <div class="banner">RADIOLOGY REPORT</div>
 <div style="margin-bottom:8px">
   <span class="status-badge ${report.status === 'final' ? 'status-final' : 'status-draft'}">${(report.status || 'draft').toUpperCase()}</span>
   ${report.hasCriticalFindings ? '&nbsp;&nbsp;<span style="color:#dc2626;font-weight:bold">&#9888; CRITICAL VALUES PRESENT</span>' : ''}
 </div>
-${report.hasCriticalFindings ? `<div class="critical-banner"><div style="font-weight:bold;color:#dc2626">&#9888; CRITICAL FINDINGS — IMMEDIATE NOTIFICATION REQUIRED</div><div style="font-size:10.5pt;margin-top:4px">${report.criticalFindings || 'See findings section'}</div></div>` : ''}
+${report.hasCriticalFindings ? `<div class="critical-banner"><div style="font-weight:bold;color:#dc2626">&#9888; CRITICAL FINDINGS — IMMEDIATE NOTIFICATION REQUIRED</div><div style="font-size:10.5pt;margin-top:4px">${escapeHtml(report.criticalFindings || 'See findings section')}</div></div>` : ''}
 <div class="info-box">
   <div class="info-box-hdr">Patient Information</div>
   <div class="info-grid">
-    <div class="info-cell"><div class="info-label">Patient Name</div><div class="info-value"><strong>${patientName}</strong></div></div>
-    <div class="info-cell"><div class="info-label">UHID</div><div class="info-value">${order.patient?.mrn || '—'}</div></div>
+    <div class="info-cell"><div class="info-label">Patient Name</div><div class="info-value"><strong>${escapeHtml(patientName)}</strong></div></div>
+    <div class="info-cell"><div class="info-label">UHID</div><div class="info-value">${escapeHtml(order.patient?.mrn || '—')}</div></div>
     <div class="info-cell"><div class="info-label">Urgency</div><div class="info-value" style="text-transform:uppercase">${order.urgency || 'routine'}</div></div>
     <div class="info-cell"><div class="info-label">Order Date</div><div class="info-value">${order.orderDate ? format(new Date(order.orderDate), 'dd MMM yyyy') : '—'}</div></div>
   </div>
@@ -571,15 +629,15 @@ ${report.hasCriticalFindings ? `<div class="critical-banner"><div style="font-we
     <div class="info-cell"><div class="info-label">Verified By</div><div class="info-value">${verifiedDate ? 'Dr. Verifier' : '—'}</div></div>
   </div>
 </div>
-${order.clinicalIndication ? `<div class="section"><div class="section-header">Clinical Indication</div><div class="section-body">${order.clinicalIndication}</div></div>` : ''}
-${report.technique ? `<div class="section"><div class="section-header">Technique</div><div class="section-body">${report.technique}</div></div>` : ''}
+${order.clinicalIndication ? `<div class="section"><div class="section-header">Clinical Indication</div><div class="section-body">${escapeHtml(order.clinicalIndication)}</div></div>` : ''}
+${report.technique ? `<div class="section"><div class="section-header">Technique</div><div class="section-body">${escapeHtml(report.technique)}</div></div>` : ''}
 ${report.comparedWithPrevious ? `<div class="section"><div class="section-header">Comparison</div><div class="section-body">Compared with previous study. ${report.comparisonNotes || ''}</div></div>` : ''}
-<div class="section"><div class="section-header">Findings</div><div class="section-body">${report.findings || '—'}</div></div>
+<div class="section"><div class="section-header">Findings</div><div class="section-body">${escapeHtml(report.findings || '—')}</div></div>
 <div class="impression-box">
   <div style="font-weight:bold;font-size:11pt;color:#1e3a5f;text-transform:uppercase;margin-bottom:6px">Impression</div>
-  <div style="font-size:11pt;line-height:1.7">${report.impression || '—'}</div>
+  <div style="font-size:11pt;line-height:1.7">${escapeHtml(report.impression || '—')}</div>
 </div>
-${report.recommendations ? `<div style="border-left:4px solid #1e3a5f;padding:8px 12px;background:#f8fafc;margin-bottom:12px"><strong style="color:#1e3a5f">Recommendations:</strong><div style="margin-top:4px">${report.recommendations}</div></div>` : ''}
+${report.recommendations ? `<div style="border-left:4px solid #1e3a5f;padding:8px 12px;background:#f8fafc;margin-bottom:12px"><strong style="color:#1e3a5f">Recommendations:</strong><div style="margin-top:4px">${escapeHtml(report.recommendations)}</div></div>` : ''}
 <div class="sig-section">
   <div><div class="sig-line"></div><div class="sig-label"><strong>Reported By:</strong> Dr. Radiologist<br/>Date &amp; Time: ${reportedDate}</div></div>
   <div><div class="sig-line"></div><div class="sig-label"><strong>Verified By:</strong> ${verifiedDate ? 'Dr. Verifier' : '—'}<br/>Date &amp; Time: ${verifiedDate || 'Not yet verified'}</div></div>
@@ -603,7 +661,7 @@ ${report.recommendations ? `<div style="border-left:4px solid #1e3a5f;padding:8p
     const patientName = order.patient ? getFullName(order.patient) : '—'
     const printDate = format(new Date(), 'dd MMM yyyy HH:mm')
     const orderDate = order.orderDate ? format(new Date(order.orderDate), 'dd MMM yyyy HH:mm') : '—'
-    const html = `<!DOCTYPE html><html><head><title>Radiology Report — ${order.orderNumber}</title><style>
+    const html = `<!DOCTYPE html><html><head><title>Radiology Report — ${escapeHtml(order.orderNumber)}</title><style>
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:'Times New Roman',Times,serif;font-size:11pt;padding:30px}
 .hosp-header{display:flex;justify-content:space-between;border-bottom:3px double #1e3a5f;padding-bottom:10px;margin-bottom:10px}
@@ -629,19 +687,19 @@ body{font-family:'Times New Roman',Times,serif;font-size:11pt;padding:30px}
 </style></head><body>
 <div class="hosp-header">
   <div><div class="hosp-name">${orgInfo.name}</div><div style="font-size:9pt;color:#555">Radiology &amp; Imaging Department</div></div>
-  <div style="font-size:8.5pt;color:#555;text-align:right">Order #: <strong>${order.orderNumber}</strong><br/>Accession: ${reportAccession || '—'}<br/>Date: ${orderDate}<br/>Print: ${printDate}</div>
+  <div style="font-size:8.5pt;color:#555;text-align:right">Order #: <strong>${escapeHtml(order.orderNumber)}</strong><br/>Accession: ${reportAccession || '—'}<br/>Date: ${orderDate}<br/>Print: ${printDate}</div>
 </div>
 <div class="banner">RADIOLOGY REPORT</div>
 <div class="info-box">
   <div class="info-box-hdr">Patient &amp; Study Information</div>
   <div class="info-grid">
-    <div class="info-cell"><div class="info-label">Patient Name</div><div class="info-value"><strong>${patientName}</strong></div></div>
-    <div class="info-cell"><div class="info-label">UHID</div><div class="info-value">${order.patient?.mrn || '—'}</div></div>
+    <div class="info-cell"><div class="info-label">Patient Name</div><div class="info-value"><strong>${escapeHtml(patientName)}</strong></div></div>
+    <div class="info-cell"><div class="info-label">UHID</div><div class="info-value">${escapeHtml(order.patient?.mrn || '—')}</div></div>
     <div class="info-cell"><div class="info-label">Exam</div><div class="info-value">${order.exam?.examName || '—'}</div></div>
     <div class="info-cell"><div class="info-label">Radiologist</div><div class="info-value">${reportRadiologist || '—'}</div></div>
   </div>
 </div>
-${order.clinicalIndication ? `<div class="section"><div class="section-header">Clinical Indication</div><div class="section-body">${order.clinicalIndication}</div></div>` : ''}
+${order.clinicalIndication ? `<div class="section"><div class="section-header">Clinical Indication</div><div class="section-body">${escapeHtml(order.clinicalIndication)}</div></div>` : ''}
 <div class="section">
   <div class="section-header">Findings</div>
   <div class="section-body">${reportNotes || ''}</div>
@@ -685,9 +743,7 @@ ${order.clinicalIndication ? `<div class="section"><div class="section-header">C
           </div>
         </div>
         <div className="flex gap-2">
-          <Button variant="outline" onClick={fetchAll}>
-            <RefreshCw className="h-4 w-4 mr-1" />Refresh
-          </Button>
+          {/* No Refresh button: this screen is live (useLiveData below). */}
           <Button onClick={() => setShowOrderDialog(true)}>
             <Plus className="h-4 w-4 mr-1" />New Order
           </Button>
@@ -744,36 +800,17 @@ ${order.clinicalIndication ? `<div class="section"><div class="section-header">C
 
       {/* ── Worklist ── */}
       {activeTab === 'worklist' && <div className="space-y-4">
-          <div className="flex flex-wrap gap-3">
-            <div className="relative flex-1 min-w-48">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
-              <Input className="pl-9" placeholder="Search patient, order #..." value={searchQuery} onChange={e => setSearchQuery(e.target.value)} />
-            </div>
-            <Select value={modalityFilter} onValueChange={setModalityFilter}>
-              <SelectTrigger className="w-36"><SelectValue placeholder="Modality" /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Modality</SelectItem>
-                {EXAM_CATEGORIES.map(c => <SelectItem key={c} value={c}>{c.toUpperCase()}</SelectItem>)}
-              </SelectContent>
-            </Select>
-            <Select value={statusFilter} onValueChange={setStatusFilter}>
-              <SelectTrigger className="w-40"><SelectValue placeholder="Status" /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Status</SelectItem>
-                {['pending', 'scheduled', 'in_progress', 'completed', 'reported', 'cancelled'].map(s =>
-                  <SelectItem key={s} value={s}>{s.replace('_', ' ')}</SelectItem>
-                )}
-              </SelectContent>
-            </Select>
-            <Select value={dateFilter} onValueChange={setDateFilter}>
-              <SelectTrigger className="w-36"><SelectValue placeholder="Date" /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Time</SelectItem>
-                <SelectItem value="today">Today</SelectItem>
-                <SelectItem value="week">This Week</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
+          <FilterBar
+            search={orderSearch}
+            onSearchChange={setOrderSearch}
+            placeholder="Search patient, order #..."
+            active={!!orderSearch || modalityFilter !== 'all' || statusFilter !== 'all' || dateFilter !== 'all'}
+            onClear={() => { setOrderSearch(''); setModalityFilter('all'); setStatusFilter('all'); setDateFilter('all') }}
+          >
+            <FilterSelect value={modalityFilter} onChange={setModalityFilter} className="w-36" options={MODALITY_OPTIONS} />
+            <FilterSelect value={statusFilter} onChange={setStatusFilter} options={ORDER_STATUS_OPTIONS} />
+            <FilterSelect value={dateFilter} onChange={setDateFilter} className="w-36" options={DATE_MODES} />
+          </FilterBar>
 
           <Card><CardContent className="p-0">
             <Table>
@@ -862,24 +899,20 @@ ${order.clinicalIndication ? `<div class="section"><div class="section-header">C
 
       {/* ── Exam Catalog ── */}
       {activeTab === 'exams' && <div className="space-y-4">
-          <div className="flex gap-3 justify-between">
-            <div className="flex gap-3 flex-1">
-              <div className="relative flex-1">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
-                <Input className="pl-9" placeholder="Search exams..." value={searchQuery} onChange={e => setSearchQuery(e.target.value)} />
-              </div>
-              <Select value={categoryFilter} onValueChange={setCategoryFilter}>
-                <SelectTrigger className="w-44"><SelectValue placeholder="All Categories" /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Categories</SelectItem>
-                  {EXAM_CATEGORIES.map(c => <SelectItem key={c} value={c}>{c.toUpperCase()}</SelectItem>)}
-                </SelectContent>
-              </Select>
-            </div>
-            <Button onClick={() => { setEditingExamId(null); setExamForm(emptyExam); setShowExamDialog(true) }}>
-              <Plus className="h-4 w-4 mr-1" />Add Test
-            </Button>
-          </div>
+          <FilterBar
+            search={examSearch}
+            onSearchChange={setExamSearch}
+            placeholder="Search exams..."
+            active={!!examSearch || categoryFilter !== 'all'}
+            onClear={() => { setExamSearch(''); setCategoryFilter('all') }}
+            actions={
+              <Button onClick={() => { setEditingExamId(null); setExamForm(emptyExam); setShowExamDialog(true) }}>
+                <Plus className="h-4 w-4 mr-1" />Add Test
+              </Button>
+            }
+          >
+            <FilterSelect value={categoryFilter} onChange={setCategoryFilter} className="w-44" options={CATEGORY_OPTIONS} />
+          </FilterBar>
 
           <Card><CardContent className="p-0">
             <Table>
@@ -949,6 +982,28 @@ ${order.clinicalIndication ? `<div class="section"><div class="section-header">C
 
       {/* ── Reports ── */}
       {activeTab === 'reports' && <div className="space-y-4">
+          {/* The shared filter row (components/common/FilterBar), same as every
+              other list screen. "Critical only" rides along as an extra button. */}
+          <FilterBar
+            search={reportSearch}
+            onSearchChange={setReportSearch}
+            placeholder="Search patient, UHID, phone or order #..."
+            active={!!reportSearch || reportStatusFilter !== 'all' || reportDateFilter !== 'all' || reportCriticalOnly}
+            onClear={() => { setReportSearch(''); setReportStatusFilter('all'); setReportDateFilter('all'); setReportCriticalOnly(false) }}
+            actions={
+              <Button
+                variant={reportCriticalOnly ? 'default' : 'outline'}
+                onClick={() => setReportCriticalOnly(v => !v)}
+                aria-pressed={reportCriticalOnly}
+                className={reportCriticalOnly ? 'bg-red-600 hover:bg-red-700' : 'text-red-600'}
+              >
+                <AlertTriangle className="h-4 w-4 mr-1" />Critical only
+              </Button>
+            }
+          >
+            <FilterSelect value={reportStatusFilter} onChange={setReportStatusFilter} className="w-36" options={REPORT_STATUS_OPTIONS} />
+            <FilterSelect value={reportDateFilter} onChange={setReportDateFilter} className="w-36" options={DATE_MODES} />
+          </FilterBar>
           <Card><CardContent className="p-0">
             <Table>
               <TableHeader>
@@ -964,7 +1019,13 @@ ${order.clinicalIndication ? `<div class="section"><div class="section-header">C
               </TableHeader>
               <TableBody>
                 {reports.length === 0 ? (
-                  <TableRow><TableCell colSpan={7} className="text-center py-8 text-gray-400">No reports yet</TableCell></TableRow>
+                  <TableRow><TableCell colSpan={7} className="text-center py-8 text-gray-400">
+                    {/* "No reports yet" while a filter is on reads as "this hospital
+                        has none", which is a different thing entirely. */}
+                    {reportSearch || reportStatusFilter !== 'all' || reportDateFilter !== 'all' || reportCriticalOnly
+                      ? 'No report matches these filters'
+                      : 'No reports yet'}
+                  </TableCell></TableRow>
                 ) : reports.map(r => {
                   const ord = r.order || orders.find(o => o.id === r.orderId)
                   return (
@@ -1013,19 +1074,15 @@ ${order.clinicalIndication ? `<div class="section"><div class="section-header">C
 
       {/* ── Orders Tab ── */}
       {activeTab === 'orders' && <div className="space-y-4">
-        <div className="flex gap-3">
-          <div className="relative flex-1">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
-            <Input className="pl-9" placeholder="Search orders..." value={searchQuery} onChange={e => setSearchQuery(e.target.value)} />
-          </div>
-          <Select value={statusFilter} onValueChange={setStatusFilter}>
-            <SelectTrigger className="w-36"><SelectValue placeholder="All Status" /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Status</SelectItem>
-              {['pending','scheduled','in_progress','completed','reported','cancelled'].map(s => <SelectItem key={s} value={s}>{s.replace('_',' ')}</SelectItem>)}
-            </SelectContent>
-          </Select>
-        </div>
+        <FilterBar
+          search={orderSearch}
+          onSearchChange={setOrderSearch}
+          placeholder="Search orders..."
+          active={!!orderSearch || statusFilter !== 'all'}
+          onClear={() => { setOrderSearch(''); setStatusFilter('all') }}
+        >
+          <FilterSelect value={statusFilter} onChange={setStatusFilter} className="w-36" options={ORDER_STATUS_OPTIONS} />
+        </FilterBar>
         <Card><CardContent className="p-0">
           <Table>
             <TableHeader><TableRow>

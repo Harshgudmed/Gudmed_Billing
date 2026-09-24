@@ -6,6 +6,7 @@ import { nextSeriesNumber, invoiceProbe } from "../lib/counters.js";
 import { startOfDay, endOfDay, todayIST } from '../utils/dates.js'
 import { normalizeTimeHHMM, zonedDateTimeToUtc, ymdInZone, formatTime12h, formatDayMonth } from '../lib/dates.js'
 import { isOnLeave } from '../lib/activeDoctor.js'
+import { commissionFor } from '../lib/money.js'
 import { parseTimetable } from '../lib/doctorTimetable.js'
 import { scopedDoctorId } from '../utils/scope.js'
 import { computeConsultationFee } from '../services/appointmentFees.js'
@@ -726,9 +727,7 @@ export async function create(req, res, next) {
           // amount (not on unitPrice) gives both: fixed pays out at ₹0 fee,
           // percentage stays zero. The old `unitPrice > 0` guard silently
           // withheld the fixed doctor's fee on every free follow-up.
-          const commissionAmount = commissionConfig.commissionType === 'percentage'
-            ? (unitPrice * commissionConfig.commissionRate) / 100
-            : commissionConfig.commissionRate
+          const commissionAmount = commissionFor(unitPrice, commissionConfig)
 
           if (commissionAmount > 0) {
           commission = await tx.doctorCommission.create({
@@ -1005,12 +1004,10 @@ export async function update(req, res, next) {
           if (updated.doctorId) {
             const config = await tx.doctorCommissionConfig.findUnique({ where: { doctorId: updated.doctorId } })
             if (config?.isActive) {
-              // Same rule as create(): a percentage doctor earns a share of what
-              // is charged, a fixed-per-consultation doctor earns it for seeing
-              // the patient at all.
-              const commissionAmount = config.commissionType === 'percentage'
-                ? (fee * config.commissionRate) / 100
-                : config.commissionRate
+              // Same rule as create(), and as IPD and the Commissions tab — it
+              // lives in lib/money.js so a payout cannot differ by where it was
+              // worked out, and it is rounded to paisa.
+              const commissionAmount = commissionFor(fee, config)
               if (commissionAmount > 0) {
                 await tx.doctorCommission.create({
                   data: {

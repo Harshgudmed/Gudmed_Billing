@@ -12,8 +12,23 @@ import { toast } from 'sonner'
 import client from '@/api/client'
 import { useServerPagination } from '@/lib/useServerPagination'
 import { PaginatedTable } from '@/components/common/PaginatedTable'
+import { FilterBar, FilterSelect } from '@/components/common/FilterBar'
+import { useLiveData } from '@/lib/useLiveData'
 import DeathCertificateForm from './DeathCertificateForm'
 import { getFullName } from "@/lib/patient";
+// Names, complaints and clinical notes are typed by people and printed into a
+// window that shares this app's origin — any HTML in them would run there, so
+// every text field goes through the shared escaper.
+import { escapeHtml } from '@/lib/printTemplate'
+
+const PLACE_OPTIONS = [
+  { value: 'all', label: 'All Locations' },
+  { value: 'inpatient', label: 'Inpatient' },
+  { value: 'emergency', label: 'Emergency Room' },
+  { value: 'doa', label: 'DOA' },
+  { value: 'home', label: 'Home' },
+  { value: 'other', label: 'Other' },
+]
 
 const ITEMS_PER_PAGE = 10
 
@@ -36,6 +51,10 @@ export default function DeathCertificateModule() {
 
   useEffect(() => { getOrgSettings().then(setOrgInfo) }, [])
 
+  // Live: a certificate drafted on the ward and issued at the records desk are
+  // two different screens — each sees the other's change without a Refresh.
+  useLiveData('death-certificates', certificatesPagination.refresh)
+
   function handlePrint(id) {
     const cert = certificates.find(c => c.id === id)
     if (!cert) return
@@ -49,7 +68,7 @@ export default function DeathCertificateModule() {
       cert.ageAtDeathMonths && `${cert.ageAtDeathMonths} months`,
       cert.ageAtDeathDays && `${cert.ageAtDeathDays} days`,
     ].filter(Boolean).join(', ') || '—'
-    const html = `<!DOCTYPE html><html><head><title>Death Certificate ${cert.certificateNumber}</title>
+    const html = `<!DOCTYPE html><html><head><title>Death Certificate ${escapeHtml(cert.certificateNumber)}</title>
       <style>body{font-family:'Times New Roman',serif;margin:30px;color:#000;}
       .border-box{border:3px double #000;padding:20px;}.header{text-align:center;margin-bottom:20px;}
       h1{font-size:22px;margin:0;}h2{font-size:16px;margin:4px 0;}.sub{font-size:13px;color:#444;}
@@ -65,36 +84,36 @@ export default function DeathCertificateModule() {
       @media print{body{margin:10px;}}</style>
       </head><body>
       <div class="border-box">
-      <div class="cert-num">Certificate No: <strong>${cert.certificateNumber}</strong></div>
-      <div class="header"><h1>CERTIFICATE OF DEATH</h1><h2>${orgInfo.name}</h2><div class="sub">Official Medical Death Certificate</div></div>
+      <div class="cert-num">Certificate No: <strong>${escapeHtml(cert.certificateNumber)}</strong></div>
+      <div class="header"><h1>CERTIFICATE OF DEATH</h1><h2>${escapeHtml(orgInfo.name)}</h2><div class="sub">Official Medical Death Certificate</div></div>
       <div class="section"><div class="section-title">Deceased Information</div>
       <div class="grid">
-        <div class="field"><div class="label">Full Name</div><div class="value">${patientName}</div></div>
-        <div class="field"><div class="label">Sex</div><div class="value">${cert.sex}</div></div>
-        <div class="field"><div class="label">Age at Death</div><div class="value">${age}</div></div>
-        <div class="field"><div class="label">Marital Status</div><div class="value">${cert.maritalStatus || '—'}</div></div>
-        <div class="field"><div class="label">Occupation</div><div class="value">${cert.occupation || '—'}</div></div>
-        <div class="field"><div class="label">Address</div><div class="value">${cert.address || '—'}</div></div>
+        <div class="field"><div class="label">Full Name</div><div class="value">${escapeHtml(patientName)}</div></div>
+        <div class="field"><div class="label">Sex</div><div class="value">${escapeHtml(cert.sex)}</div></div>
+        <div class="field"><div class="label">Age at Death</div><div class="value">${escapeHtml(age)}</div></div>
+        <div class="field"><div class="label">Marital Status</div><div class="value">${escapeHtml(cert.maritalStatus || '—')}</div></div>
+        <div class="field"><div class="label">Occupation</div><div class="value">${escapeHtml(cert.occupation || '—')}</div></div>
+        <div class="field"><div class="label">Address</div><div class="value">${escapeHtml(cert.address || '—')}</div></div>
       </div></div>
       <div class="section"><div class="section-title">Death Information</div>
       <div class="grid">
         <div class="field"><div class="label">Date of Death</div><div class="value">${dod}</div></div>
-        <div class="field"><div class="label">Time of Death</div><div class="value">${cert.timeOfDeath || '—'}</div></div>
-        <div class="field"><div class="label">Place of Death</div><div class="value">${cert.placeOfDeath}</div></div>
-        <div class="field"><div class="label">Manner of Death</div><div class="value">${cert.mannerOfDeath}</div></div>
+        <div class="field"><div class="label">Time of Death</div><div class="value">${escapeHtml(cert.timeOfDeath || '—')}</div></div>
+        <div class="field"><div class="label">Place of Death</div><div class="value">${escapeHtml(cert.placeOfDeath)}</div></div>
+        <div class="field"><div class="label">Manner of Death</div><div class="value">${escapeHtml(cert.mannerOfDeath)}</div></div>
       </div></div>
       <div class="section"><div class="section-title">Cause of Death</div>
-      <div class="cause"><strong>I(a) Immediate Cause:</strong> ${cert.immediateCause}</div>
-      ${cert.antecedentCauseB ? `<div class="cause"><strong>I(b):</strong> ${cert.antecedentCauseB}</div>` : ''}
-      ${cert.otherConditions ? `<div class="cause"><strong>II. Other conditions:</strong> ${cert.otherConditions}</div>` : ''}
+      <div class="cause"><strong>I(a) Immediate Cause:</strong> ${escapeHtml(cert.immediateCause)}</div>
+      ${cert.antecedentCauseB ? `<div class="cause"><strong>I(b):</strong> ${escapeHtml(cert.antecedentCauseB)}</div>` : ''}
+      ${cert.otherConditions ? `<div class="cause"><strong>II. Other conditions:</strong> ${escapeHtml(cert.otherConditions)}</div>` : ''}
       </div>
       <div class="sig-box">
         <div><div style="height:40px;"></div>
-        <div class="sig-line">Certifying Physician<br/>${cert.certifiedBy?.fullName || '—'}<br/>${cert.certifierQualification || ''}</div></div>
+        <div class="sig-line">Certifying Physician<br/>${escapeHtml(cert.certifiedBy?.fullName || '—')}<br/>${escapeHtml(cert.certifierQualification || '')}</div></div>
         <div><div style="height:40px;"></div><div class="sig-line">Date of Certification<br/>${certDate}</div></div>
       </div>
       </div>
-      <div class="footer">This is an official medical death certificate issued by ${orgInfo.name}</div>
+      <div class="footer">This is an official medical death certificate issued by ${escapeHtml(orgInfo.name)}</div>
       </body></html>`
     win.document.write(html)
     win.document.close()
@@ -187,31 +206,21 @@ export default function DeathCertificateModule() {
         </Card>
       </div>
 
+      {/* The shared filter row (components/common/FilterBar) — it used to sit in
+          the card header, where the search box was a quarter of its width. */}
+      <FilterBar
+        search={searchQuery}
+        onSearchChange={setSearchQuery}
+        placeholder="Search #, Name, UHID..."
+        active={!!searchQuery || placeFilter !== 'all'}
+        onClear={() => { setSearchQuery(''); setPlaceFilter('all') }}
+      >
+        <FilterSelect value={placeFilter} onChange={setPlaceFilter} className="w-[180px]" options={PLACE_OPTIONS} />
+      </FilterBar>
+
       <Card>
         <CardHeader>
-          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-            <CardTitle>Certificate Directory</CardTitle>
-            <div className="flex flex-wrap items-center gap-2">
-              <div className="relative w-full md:w-64">
-                <Search className="h-4 w-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
-                <Input placeholder="Search #, Name, UHID..." className="pl-9" value={searchQuery} onChange={e => setSearchQuery(e.target.value)} />
-              </div>
-              <Select value={placeFilter} onValueChange={setPlaceFilter}>
-                <SelectTrigger className="w-[180px]">
-                  <Filter className="mr-2 h-4 w-4" />
-                  <SelectValue placeholder="Place of Death" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Locations</SelectItem>
-                  <SelectItem value="inpatient">Inpatient</SelectItem>
-                  <SelectItem value="emergency">Emergency Room</SelectItem>
-                  <SelectItem value="doa">DOA</SelectItem>
-                  <SelectItem value="home">Home</SelectItem>
-                  <SelectItem value="other">Other</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
+          <CardTitle>Certificate Directory</CardTitle>
         </CardHeader>
         <CardContent>
           <PaginatedTable

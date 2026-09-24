@@ -8,7 +8,7 @@
 
 import { db } from '../config/db.js'
 import { resolvePrice } from './tariffService.js'
-import { round2 as r2 } from '../lib/money.js'
+import { round2 as r2, commissionFor } from '../lib/money.js'
 
 /**
  * Called inside a transaction when IpdConsultation.status → COMPLETED.
@@ -114,9 +114,9 @@ export async function billConsultation(tx, orgId, consult, actor) {
   }).catch(() => null)
 
   if (config?.isActive && lineTotal > 0) {
-    const commAmount = config.commissionType === 'percentage'
-      ? r2(lineTotal * config.commissionRate / 100)
-      : r2(config.commissionRate)  // fixed_per_consultation
+    // One rule for what a doctor earns, shared with booking and the
+    // Commissions tab (lib/money.js) — it used to be written out here too.
+    const commAmount = commissionFor(lineTotal, config)
 
     const now    = new Date()
     const period = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`

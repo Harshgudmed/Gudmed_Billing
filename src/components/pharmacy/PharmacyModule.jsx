@@ -2,6 +2,8 @@ import { useState, useEffect, useCallback, useMemo, lazy, Suspense } from "react
 import { useOrgSettings } from '@/lib/useOrgSettings'
 import { useServerPagination } from '@/lib/useServerPagination'
 import { useDebounce } from '@/lib/useDebounce'
+import { useLiveData } from '@/lib/useLiveData'
+import { dateRangeFor } from '@/components/common/DateFilter'
 import { format, addDays, startOfDay, startOfWeek, startOfMonth } from "date-fns";
 import { toast } from "sonner";
 import { ChevronLeft, ChevronRight, ScanLine } from "lucide-react";
@@ -16,7 +18,6 @@ import {
   ShoppingCart,
   CheckCircle,
   XCircle,
-  RefreshCw,
   Printer,
   Package,
   Eye,
@@ -65,6 +66,8 @@ import {
 } from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
 import client from "@/api/client";
+import { createInvoiceWithPayment } from "@/lib/billing";
+import { showApiError } from "@/lib/apiRequest";
 import { drName } from "@/lib/utils";
 import {
   DRUG_CATEGORIES,
@@ -103,11 +106,27 @@ export default function PharmacyModule() {
     params: { search: debouncedDrugSearch, category: categoryFilter },
   });
   const [lowStockPage, setLowStockPage] = useState(1);
-  const batchPage = useServerPagination("/pharmacy/batches", { perPage: PHARMACY_BATCHES_PER_PAGE });
+  // Batches, Purchase Orders and Sales had no search or date filter at all.
+  // All three filter in the DATABASE, so they reach every page.
+  const [batchSearch, setBatchSearch] = useState("");
+  const [batchDate, setBatchDate] = useState("all");
+  const debouncedBatchSearch = useDebounce(batchSearch, 300);
+  const batchPage = useServerPagination("/pharmacy/batches", {
+    perPage: PHARMACY_BATCHES_PER_PAGE,
+    // The batch date filter is on EXPIRY — "what expires this month".
+    params: { search: debouncedBatchSearch, ...dateRangeFor({ mode: batchDate }) },
+  });
   const [poStatusFilter, setPoStatusFilter] = useState("all");
+  const [poSearch, setPoSearch] = useState("");
+  const [poDate, setPoDate] = useState("all");
+  const debouncedPoSearch = useDebounce(poSearch, 300);
   const poPage = useServerPagination("/pharmacy/purchase-orders", {
     perPage: PHARMACY_PO_PER_PAGE,
-    params: { status: poStatusFilter === "all" ? "" : poStatusFilter }
+    params: {
+      status: poStatusFilter === "all" ? "" : poStatusFilter,
+      search: debouncedPoSearch,
+      ...dateRangeFor({ mode: poDate }),
+    }
   });
   const [prescriptionFilter, setPrescriptionFilter] = useState("all");
   const [salesPeriod, setSalesPeriod] = useState("month");
@@ -137,9 +156,11 @@ export default function PharmacyModule() {
           : startOfMonth(new Date());
     return format(d, "yyyy-MM-dd");
   }, [salesPeriod]);
+  const [saleSearch, setSaleSearch] = useState("");
+  const debouncedSaleSearch = useDebounce(saleSearch, 300);
   const salePage = useServerPagination("/pharmacy/sales", {
     perPage: PHARMACY_SALES_PER_PAGE,
-    params: { startDate: saleStartDate },
+    params: { startDate: saleStartDate, search: debouncedSaleSearch },
   });
 
   const [stats, setStats] = useState(null);
@@ -149,6 +170,18 @@ export default function PharmacyModule() {
       if (res.success) setStats(res.data);
     } catch { /* ignore */ }
   }, []);
+
+  // Live over the app's WebSocket: the server announces every write in this
+  // hospital (middleware/liveUpdates.js) and every list here re-reads itself —
+  // a doctor's prescription, a sale at the counter, stock received by a
+  // colleague. That is why this screen has no Refresh button. Consultations and
+  // Billing raise prescriptions, so their writes count too.
+  const reloadAll = useCallback(() => {
+    drugPage.refresh(); batchPage.refresh(); poPage.refresh();
+    rxPage.refresh(); pendingRxPage.refresh(); salePage.refresh();
+    fetchStats();
+  }, [drugPage.refresh, batchPage.refresh, poPage.refresh, rxPage.refresh, pendingRxPage.refresh, salePage.refresh, fetchStats]); // eslint-disable-line react-hooks/exhaustive-deps
+  useLiveData(["pharmacy", "consultations", "billing"], reloadAll);
 
   const [showDrugDialog, setShowDrugDialog] = useState(false);
   const [drugForm, setDrugForm] = useState(emptyDrug);
@@ -286,6 +319,12 @@ export default function PharmacyModule() {
       return;
     }
     setSavingDrug(true);
+    // Opening stock that comes with a batch number is added BY creating that
+    // batch — batch create books it into the medicine's total through the stock
+    // ledger. The medicine used to be created holding the same quantity as well,
+    // so "100, batch B-1" showed 200 in Drug Inventory and 100 in Batches.
+    const openingQty = parseInt(drugForm.initialQty) || 0;
+    const openingBatch = !editingDrugId && openingQty > 0 && drugForm.batchNumber && drugForm.expiryDate;
     try {
       const payload = {
         drugName: drugForm.name,
@@ -302,20 +341,36 @@ export default function PharmacyModule() {
         reorderLevel: parseInt(drugForm.minStock) || 10,
         barcode: drugForm.barcode?.trim() || undefined,
         drugCode: editingDrugId ? undefined : `DRG${Date.now()}`,
-        quantityInStock: editingDrugId ? undefined : parseInt(drugForm.initialQty) || 0,
+        quantityInStock: editingDrugId ? undefined : (openingBatch ? 0 : openingQty),
         requiresPrescription: drugForm.scheduleType !== "none",
         description: [drugForm.scheduleType !== "none" ? `SCH:${drugForm.scheduleType}` : "", drugForm.scheme ? `Scheme: ${drugForm.scheme}` : ""].filter(Boolean).join(" | ") || undefined,
       };
       const res = editingDrugId ? await client.patch(`/pharmacy/drugs/${editingDrugId}`, payload) : await client.post("/pharmacy/drugs", payload);
       if (res.success) {
-        if (!editingDrugId && drugForm.batchNumber && drugForm.expiryDate && parseInt(drugForm.initialQty) > 0) {
-          await client.post("/pharmacy/batches", { drugId: res.data.id, batchNumber: drugForm.batchNumber, expiryDate: drugForm.expiryDate, manufactureDate: drugForm.manufacturingDate || undefined, quantityReceived: parseInt(drugForm.initialQty), costPricePerUnit: parseFloat(drugForm.rate) || 0 });
+        // The medicine now exists either way. If its batch is refused, say so
+        // plainly — this used to fall through to "Failed to save drug" for a
+        // drug that had in fact been saved.
+        let batchError = null;
+        if (openingBatch) {
+          try {
+            await client.post("/pharmacy/batches", { drugId: res.data.id, batchNumber: drugForm.batchNumber, expiryDate: drugForm.expiryDate, manufactureDate: drugForm.manufacturingDate || undefined, quantityReceived: openingQty, costPricePerUnit: parseFloat(drugForm.rate) || 0 });
+          } catch (err) {
+            batchError = err;
+          }
         }
-        toast.success(editingDrugId ? "Drug updated" : "Drug added");
+        if (batchError) {
+          toast.warning(`Drug added, but its opening batch was not saved (${batchError.message}). Add the batch from the Batches tab.`, { duration: 10000 });
+        } else {
+          toast.success(editingDrugId ? "Drug updated" : "Drug added");
+        }
         setShowDrugDialog(false);
         setDrugForm(emptyDrug);
         setEditingDrugId(null);
+        // A new medicine's opening batch shows in Batches and in the dashboard
+        // counts too — refresh them with the list, not on the next page load.
         drugPage.refresh();
+        batchPage.refresh();
+        fetchStats();
       } else toast.error(res.error || "Failed to save");
     } catch {
       toast.error("Failed to save drug");
@@ -335,6 +390,7 @@ export default function PharmacyModule() {
         setSelectedDrug(null);
         setStockAdjust({ type: "add", amount: 0 });
         drugPage.refresh();
+        fetchStats(); // the Low / Out of Stock cards move with it
       } else toast.error(res.error || "Failed");
     } catch {
       toast.error("Failed to adjust stock");
@@ -441,8 +497,29 @@ ${rx.notes ? `<div class="note-bar"><strong>Notes:</strong> ${escapeHtml(rx.note
     const totalCost = items.reduce((s, i) => s + (i.unitPrice || 0) * i.quantity, 0);
     if (rx.patientId && totalCost > 0) {
       try {
-        await client.post("/billing", { resource: "invoice", patientId: rx.patientId, items: items.map((i) => ({ type: "pharmacy", description: i.drugName, quantity: i.quantity, unitPrice: i.unitPrice || 0, total: (i.unitPrice || 0) * i.quantity })) })
-      } catch (err) { console.error(err); }
+        // Through the shared biller (lib/billing.js), like Lab and Radiology.
+        // This used to be a hand-written POST that sent each line as
+        // `description`, while the server requires `serviceName` — so EVERY
+        // dispense was rejected with a 400, the error was swallowed by the catch
+        // below, and the label printed under a green "Prescription dispensed".
+        // Medicines left the counter with no bill and nobody was told.
+        await createInvoiceWithPayment({
+          patientId: rx.patientId,
+          items: items.map((i) => ({
+            serviceName: i.drugName,
+            quantity: i.quantity,
+            unitPrice: i.unitPrice || 0,
+            total: (i.unitPrice || 0) * i.quantity,
+            tax: 0,
+            type: "pharmacy",
+          })),
+          notes: `Pharmacy dispense — Rx ${String(rx.id || "").slice(-8).toUpperCase()}`,
+        });
+      } catch (err) {
+        // Now it is said out loud: the drugs are dispensed either way, but the
+        // counter must know the bill did not go through.
+        showApiError(err, "Dispensed, but the invoice could not be created — please raise it in Billing");
+      }
     }
     handlePrintLabel(rx);
     setShowDispenseDialog(false);
@@ -486,7 +563,11 @@ ${rx.notes ? `<div class="note-bar"><strong>Notes:</strong> ${escapeHtml(rx.note
         setShowBatchDialog(false);
         setBatchForm(emptyBatch);
         setEditingBatchId(null);
+        // A batch changes the medicine's total too; Drug Inventory kept showing
+        // the old number until the page was reloaded.
         batchPage.refresh();
+        drugPage.refresh();
+        fetchStats();
       } else toast.error(res.error || "Failed");
     } catch { toast.error("Failed to save batch"); }
     setSavingBatch(false);
@@ -516,6 +597,8 @@ ${rx.notes ? `<div class="note-bar"><strong>Notes:</strong> ${escapeHtml(rx.note
         setShowDeleteBatchConfirm(false);
         setSelectedBatch(null);
         batchPage.refresh();
+        drugPage.refresh();
+        fetchStats();
       } else toast.error(res.error || "Failed");
     } catch { toast.error("Failed to remove batch"); }
   };
@@ -631,9 +714,7 @@ ${rx.notes ? `<div class="note-bar"><strong>Notes:</strong> ${escapeHtml(rx.note
           <p className="text-gray-500">Drug inventory, prescriptions &amp; dispensing</p>
         </div>
         <div className="flex gap-2">
-          <Button variant="outline" onClick={() => { drugPage.refresh(); batchPage.refresh(); poPage.refresh(); rxPage.refresh(); pendingRxPage.refresh(); salePage.refresh(); fetchStats(); }}>
-            <RefreshCw className="h-4 w-4 mr-1" /> Refresh
-          </Button>
+          {/* No Refresh button: this screen is live (useLiveData below). */}
           <Button variant="outline" onClick={() => setShowSaleDialog(true)}>
             <ShoppingCart className="h-4 w-4 mr-1" /> Direct Sale
           </Button>
@@ -729,6 +810,10 @@ ${rx.notes ? `<div class="note-bar"><strong>Notes:</strong> ${escapeHtml(rx.note
         />
 
         <BatchesTab
+          search={batchSearch}
+          setSearch={setBatchSearch}
+          dateMode={batchDate}
+          setDateMode={setBatchDate}
           batches={batchPage.rows}
           loading={batchPage.loading}
           page={batchPage.page}
@@ -744,6 +829,10 @@ ${rx.notes ? `<div class="note-bar"><strong>Notes:</strong> ${escapeHtml(rx.note
         <PurchaseOrdersTab
           poStatusFilter={poStatusFilter}
           setPoStatusFilter={setPoStatusFilter}
+          search={poSearch}
+          setSearch={setPoSearch}
+          dateMode={poDate}
+          setDateMode={setPoDate}
           purchaseOrders={poPage.rows}
           loading={poPage.loading}
           page={poPage.page}
@@ -761,6 +850,8 @@ ${rx.notes ? `<div class="note-bar"><strong>Notes:</strong> ${escapeHtml(rx.note
         <SalesReportsTab
           salesPeriod={salesPeriod}
           setSalesPeriod={setSalesPeriod}
+          search={saleSearch}
+          setSearch={setSaleSearch}
           sales={salePage.rows}
           loading={salePage.loading}
           page={salePage.page}

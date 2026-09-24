@@ -2,6 +2,7 @@ import { db } from '../config/db.js'
 import { getOrgId } from "../lib/reqContext.js";
 import { listResponse } from "../lib/pagination.js";
 import bcrypt from 'bcryptjs'
+import { forgetAccount } from '../middleware/auth.js'
 
 function parseOrg(org) {
   if (!org) return org
@@ -269,6 +270,8 @@ export async function toggleUserStatus(req, res, next) {
     if (!existing) return res.status(404).json({ success: false, error: 'User not found' })
 
     const user = await db.user.update({ where: { id }, data: { isActive } })
+    // Take effect now, not when the cached account check next expires.
+    forgetAccount(id)
     // Never return the hash to the client (mirror the sibling user handlers).
     const { passwordHash, ...safe } = user
     res.json({ success: true, data: safe })

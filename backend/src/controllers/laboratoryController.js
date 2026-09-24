@@ -5,10 +5,11 @@ import { stripIdentity } from '../lib/stripIdentity.js'
 import { patientSearchWhere } from '../lib/patientSearch.js'
 import { nextSeriesNumber } from "../lib/counters.js";
 import { resolveRequestedById } from '../lib/requestedBy.js'
-import { todayRange } from '../lib/dates.js'
+import { todayRange, dayRange } from '../lib/dates.js'
 import { listResponse } from '../lib/pagination.js'
 import { z } from 'zod'
 import { PATIENT_SNAPSHOT_SELECT } from '../utils/patientSnapshot.js'
+import { auditIpd } from '../inpatient/audit.js'
 
 // ── Zod schemas ────────────────────────────────────────────────────────────────
 
@@ -89,7 +90,7 @@ async function signerId(client, organizationId, req) {
 export const getAll = async (req, res, next) => {
   try {
     const ORGANIZATION_ID = getOrgId(req)
-    const { resource, testCategory, status, priority, orderId, search } = req.query
+    const { resource, testCategory, status, priority, orderId, search, startDate, endDate, dateOn } = req.query
 
     // Pagination. NOTE: a second `Math.min(limit, 1000)` used to sit below this and
     // silently overrode the 2000 cap, so `?limit=2000` returned only 1000 rows and
@@ -135,6 +136,12 @@ export const getAll = async (req, res, next) => {
         { orderNumber: { contains: term, mode: 'insensitive' } },
       ])
       if (searchWhere) Object.assign(where, searchWhere)
+      // Whole days in the hospital's timezone (the shared dayRange), on the date
+      // the screen is actually about: Orders asks when it was ordered, the
+      // Reports tab (completed orders) asks when the result went out.
+      if (startDate || endDate) {
+        where[dateOn === 'completed' ? 'resultsReportedAt' : 'orderDate'] = dayRange(startDate, endDate)
+      }
       const body = await listResponse(db.labOrder, {
         where,
         include: {
@@ -304,23 +311,40 @@ export const create = async (req, res, next) => {
       })
       if (!ownedTest) return res.status(404).json({ success: false, error: 'Lab test not found' })
 
-      const data = await db.labResult.create({
-        data: {
-          organizationId: getOrgId(req),
-          orderId,
-          testId,
-          resultValue,
-          resultUnit,
-          isAbnormal,
-          isCritical,
-          flag,
-          comment,
-          // Taken from the session, never from the body: a lab report is a signed
-          // clinical document, and until now nobody's name was recorded against
-          // the value at all, so the printout said "Lab Technologist".
-          enteredById: await signerId(db, getOrgId(req), req),
-        },
+      // One value per test per order. Saving a draft and coming back to finish
+      // it posted a SECOND row for the same test: the report then carried two
+      // haemoglobins, and which one printed depended on which the query found
+      // first. There is no unique index to lean on yet (existing data would have
+      // to be de-duplicated before one could be added), so the rule is enforced
+      // here — the second save updates the first row instead of adding to it.
+      const fields = {
+        resultValue,
+        resultUnit,
+        isAbnormal,
+        isCritical,
+        flag,
+        comment,
+        // Taken from the session, never from the body: a lab report is a signed
+        // clinical document, and until now nobody's name was recorded against
+        // the value at all, so the printout said "Lab Technologist".
+        enteredById: await signerId(db, getOrgId(req), req),
+      }
+      const existingResult = await db.labResult.findFirst({
+        where: { organizationId: getOrgId(req), orderId, testId },
+        select: { id: true, verifiedAt: true },
       })
+      if (existingResult?.verifiedAt) {
+        return res.status(409).json({
+          success: false,
+          error: 'This test has already been verified. Amend the verified result instead of entering it again.',
+          code: 'RESULT_ALREADY_VERIFIED',
+        })
+      }
+      const data = existingResult
+        ? await db.labResult.update({ where: { id: existingResult.id }, data: fields })
+        : await db.labResult.create({
+            data: { organizationId: getOrgId(req), orderId, testId, ...fields },
+          })
       return res.json({ success: true, data })
     }
 
@@ -436,7 +460,10 @@ export const update = async (req, res, next) => {
         return res.status(400).json({ success: false, error: 'Validation error', details: parsed.error.issues })
       }
 
-      const { id, resource: _r, ...updates } = parsed.data
+      // `amendmentReason` is WHY the change is being made, not a column on the
+      // result — it belongs in the audit trail. The schema is .passthrough(), so
+      // left in it would reach Prisma as an unknown field and fail the write.
+      const { id, resource: _r, amendmentReason: _reason, ...updates } = parsed.data
 
       // Strip identity/tenant fields so a passthrough body can't reattach this
       // result to another org's order or corrupt its identity via `...updates`.
@@ -447,17 +474,49 @@ export const update = async (req, res, next) => {
       // tampering with clinical result values.
       const owned = await db.labResult.findFirst({
         where: { id, order: { organizationId: ORGANIZATION_ID } },
-        select: { id: true },
+        select: {
+          id: true, verifiedAt: true, resultValue: true, resultUnit: true,
+          isAbnormal: true, isCritical: true, flag: true, comment: true,
+        },
       })
       if (!owned) return res.status(404).json({ success: false, error: 'Lab result not found' })
 
       // Whoever signs it off is the logged-in user, not whatever the body claims.
       if (updates.verifiedAt) updates.verifiedById = await signerId(db, ORGANIZATION_ID, req)
 
+      // A verified result is a signed clinical document. Changing one was a
+      // plain update: a critical value could be turned normal and nothing on the
+      // record said it had ever been anything else. An amendment is allowed —
+      // results are corrected in real labs — but it must be asked for, and it
+      // must say why.
+      const CLINICAL = ['resultValue', 'resultUnit', 'isAbnormal', 'isCritical', 'flag', 'comment']
+      const changed = CLINICAL.filter((f) => updates[f] !== undefined && updates[f] !== owned[f])
+      const reason = String(req.body?.amendmentReason || '').trim()
+      if (owned.verifiedAt && changed.length && !reason) {
+        return res.status(409).json({
+          success: false,
+          error: 'This result is already verified. To change it, give the reason for the amendment.',
+          code: 'AMENDMENT_REASON_REQUIRED',
+        })
+      }
+
       const data = await db.labResult.update({
         where: { id },
         data: { ...updates },
       })
+
+      // Every change to a verified result leaves a trace — who, when, from what
+      // to what, and why. Uses the shared audit writer (inpatient/audit.js),
+      // which OT already borrows; this is not an IPD-only concern.
+      if (owned.verifiedAt && changed.length) {
+        await auditIpd(req, ORGANIZATION_ID, {
+          action: 'amend',
+          entityType: 'lab.result',
+          entityId: id,
+          before: Object.fromEntries(changed.map((f) => [f, owned[f]])),
+          after: { ...Object.fromEntries(changed.map((f) => [f, data[f]])), amendmentReason: reason },
+        })
+      }
       return res.json({ success: true, data })
     }
 

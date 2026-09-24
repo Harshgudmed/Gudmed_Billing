@@ -9,7 +9,7 @@ import { format } from 'date-fns'
 import {
   History, Plus, Search, Thermometer,
   ArrowRight, CheckCircle, Clock, Activity,
-  RefreshCw, Loader2, Eye, Pencil, Printer,
+  Loader2, Eye, Pencil, Printer,
 } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -20,33 +20,59 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form'
 import client from '@/api/client'
+import { showApiError } from '@/lib/apiRequest'
 import { useServerPagination } from '@/lib/useServerPagination'
 import { Pagination } from '@/components/common/Pagination'
 import PatientLookup, { calculatePatientAge, getPatientFullName } from '@/components/common/PatientLookup'
 import { useDateFilter } from '@/components/common/DateFilter'
+import { FilterBar } from '@/components/common/FilterBar'
+import { useLiveData } from '@/lib/useLiveData'
 import { getFullName } from "@/lib/patient";
+// Names, complaints and clinical notes are typed by people and printed into a
+// window that shares this app's origin — any HTML in them would run there, so
+// every text field goes through the shared escaper.
+import { escapeHtml } from '@/lib/printTemplate'
 
 // ── Schema ───────────────────────────────────────────────────────────────────
+// A number box left empty — or cleared while editing — arrives as ''. That means
+// "not measured", never 0. z.coerce.number() turned it into 0, so clearing BP or
+// pulse on Edit was refused by the server ("Failed to update screening", no
+// reason given) and clearing SpO₂ saved 0% as if it had been measured.
+// Same rule and same limits as the server's optionalNum
+// (backend/src/validations/preTriage.validation.js), so a value the server would
+// refuse is named under its own box here instead of failing on Save.
+const reading = (label, min, max, { int = false, unit = '' } = {}) => {
+  const range = `${label} must be between ${min} and ${max}${unit}`
+  let n = z.number({ invalid_type_error: `${label} must be a number` }).min(min, range).max(max, range)
+  if (int) n = n.int(`${label} must be a whole number`)
+  return z.preprocess((v) => (v === '' || v === null || v === undefined ? null : Number(v)), n.nullable())
+}
+
 const screeningSchema = z.object({
   patientId: z.string().optional(),
   firstName: z.string().optional().or(z.literal('')),
   lastName: z.string().optional().or(z.literal('')),
-  age: z.coerce.number().optional().nullable(),
+  age: reading('Age', 0, 150, { int: true }),
   gender: z.string().optional(),
   phone: z.string().optional(),
-  chiefComplaint: z.string().min(5, 'Chief complaint is required'),
+  // The rule was always 5 characters, but the message said "required" — so
+  // "Cold" was refused as if the box were empty. Spaces alone don't count.
+  chiefComplaint: z.string().trim()
+    .min(1, 'Chief complaint is required')
+    .min(5, 'Chief complaint must be at least 5 characters'),
   briefHistory: z.string().optional(),
-  temperature: z.coerce.number().optional().nullable(),
-  bloodPressureSystolic: z.coerce.number().optional().nullable(),
-  bloodPressureDiastolic: z.coerce.number().optional().nullable(),
-  pulseRate: z.coerce.number().optional().nullable(),
-  respiratoryRate: z.coerce.number().optional().nullable(),
-  spo2: z.coerce.number().min(0).max(100).optional().nullable(),
-  weight: z.coerce.number().min(0).optional().nullable(),
-  height: z.coerce.number().min(0).optional().nullable(),
-  bmi: z.coerce.number().optional().nullable(),
-  fbs: z.coerce.number().optional().nullable(),
-  ppbs: z.coerce.number().optional().nullable(),
+  // Typed in °F; the server's 20–45 °C is 68–113 °F.
+  temperature: reading('Temperature', 68, 113, { unit: ' °F' }),
+  bloodPressureSystolic: reading('BP systolic', 1, 400, { int: true }),
+  bloodPressureDiastolic: reading('BP diastolic', 1, 400, { int: true }),
+  pulseRate: reading('Pulse', 1, 400, { int: true }),
+  respiratoryRate: reading('Respiratory rate', 1, 200, { int: true }),
+  spo2: reading('SpO₂', 0, 100, { unit: '%' }),
+  weight: reading('Weight', 0, 700, { unit: ' kg' }),
+  height: reading('Height', 0, 300, { unit: ' cm' }),
+  bmi: reading('BMI', 0, 200),
+  fbs: reading('FBS', 0, 2000, { unit: ' mg/dL' }),
+  ppbs: reading('PPBS', 0, 2000, { unit: ' mg/dL' }),
   routedTo: z.string().optional(),
 })
 
@@ -83,7 +109,7 @@ function printSlip(s, orgInfo = { name: 'Hospital', address: '', phone: '', emai
   const html = `<!DOCTYPE html>
 <html>
 <head>
-  <title>Pre-Triage Slip — ${s.screeningNumber}</title>
+  <title>Pre-Triage Slip — ${escapeHtml(s.screeningNumber)}</title>
   <style>
     *{box-sizing:border-box;margin:0;padding:0}
     body{font-family:Arial,sans-serif;font-size:12px;color:#000;padding:20px}
@@ -105,19 +131,19 @@ function printSlip(s, orgInfo = { name: 'Hospital', address: '', phone: '', emai
 </head>
 <body>
   <div class="header">
-    <div class="hosp">${orgInfo.name}</div>
+    <div class="hosp">${escapeHtml(orgInfo.name)}</div>
     <div class="slip-title">Pre-Triage Screening Slip</div>
-    <div class="scr-no">${s.screeningNumber}</div>
+    <div class="scr-no">${escapeHtml(s.screeningNumber)}</div>
     <div>Screened: ${screenedAt}</div>
   </div>
 
   <div class="section">
     <div class="sec-title">Patient Information</div>
     <div class="grid">
-      <div class="field"><div class="label">Name</div><div class="value">${getFullName(s)}</div></div>
-      <div class="field"><div class="label">Age / Gender</div><div class="value">${s.age ?? '—'}y / ${s.gender || '—'}</div></div>
-      <div class="field"><div class="label">Phone</div><div class="value">${s.phone || '—'}</div></div>
-      <div class="field"><div class="label">Chief Complaint</div><div class="value">${s.chiefComplaint || '—'}</div></div>
+      <div class="field"><div class="label">Name</div><div class="value">${escapeHtml(getFullName(s))}</div></div>
+      <div class="field"><div class="label">Age / Gender</div><div class="value">${s.age ?? '—'}y / ${escapeHtml(s.gender || '—')}</div></div>
+      <div class="field"><div class="label">Phone</div><div class="value">${escapeHtml(s.phone || '—')}</div></div>
+      <div class="field"><div class="label">Chief Complaint</div><div class="value">${escapeHtml(s.chiefComplaint || '—')}</div></div>
     </div>
   </div>
 
@@ -155,11 +181,11 @@ function printSlip(s, orgInfo = { name: 'Hospital', address: '', phone: '', emai
     <div class="sec-title">Routing</div>
     <div class="grid">
       <div class="field"><div class="label">Status</div><div><span class="badge">${s.status?.replace(/_/g, ' ') || '—'}</span></div></div>
-      <div class="field"><div class="label">Routed To</div><div class="value">${routedTo}</div></div>
+      <div class="field"><div class="label">Routed To</div><div class="value">${escapeHtml(routedTo)}</div></div>
     </div>
   </div>
 
-  <div class="footer">Printed: ${printedAt} &bull; ${orgInfo.name}</div>
+  <div class="footer">Printed: ${printedAt} &bull; ${escapeHtml(orgInfo.name)}</div>
   <script>window.onload = function(){ window.print() }</script>
 </body>
 </html>`
@@ -339,6 +365,10 @@ export default function PreTriageModule() {
       endDate: dateFilter.range.endDate,
     },
   })
+  // Live over the app's WebSocket (middleware/liveUpdates.js): a screening
+  // recorded at another desk, or one routed to triage, turns up on its own.
+  useLiveData('pre-triage', screeningsPagination.refresh)
+
   const screenings = screeningsPagination.rows
   const stats = screeningsPagination.summary || { total: 0, pending: 0, routed: 0, registered: 0 }
   const [showFormDialog,  setShowFormDialog]  = useState(false)
@@ -453,8 +483,10 @@ export default function PreTriageModule() {
       }
       closeFormDialog()
       screeningsPagination.refresh()
-    } catch {
-      toast.error(editingScreening ? 'Failed to update screening' : 'Failed to record screening')
+    } catch (err) {
+      // Say WHY — the server names the field it refused. A bare "Failed to
+      // update screening" left the nurse guessing which box to fix.
+      showApiError(err, editingScreening ? "Couldn't update screening" : "Couldn't record screening")
     } finally {
       setIsSubmitting(false)
     }
@@ -478,9 +510,8 @@ export default function PreTriageModule() {
           <p className="text-gray-500">Rapid assessment and routing for incoming patients</p>
         </div>
         <div className="flex gap-2">
-          <Button variant="outline" onClick={screeningsPagination.refresh}>
-            <RefreshCw className="h-4 w-4 mr-2" /> Refresh
-          </Button>
+          {/* No Refresh button: this list is live (useLiveData below), so a
+              screening recorded at another desk appears on its own. */}
           <Button onClick={openNewDialog}>
             <Plus className="mr-2 h-4 w-4" /> New Screening
           </Button>
@@ -587,19 +618,21 @@ export default function PreTriageModule() {
                   }`}>{stats.registered}</span>
                 </button>
               </div>
-              {/* Search */}
-              <div className="relative w-64">
-                <Search className="h-4 w-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
-                <Input
-                  placeholder="Search name, UHID, phone..."
-                  className="pl-9"
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                />
-              </div>
-              {dateFilter.control}
             </div>
           </div>
+          {/* Its own full-width row under the heading — squeezed in beside the
+              status tabs, the search box was a third of its width and the date
+              dropdown was clipped. Same shape as every other list now. */}
+          <FilterBar
+            className="mt-3"
+            search={searchQuery}
+            onSearchChange={setSearchQuery}
+            placeholder="Search name, UHID, phone..."
+            active={!!searchQuery || activeFilter !== 'all' || dateFilter.active}
+            onClear={() => { setSearchQuery(''); setActiveFilter('all'); dateFilter.reset() }}
+          >
+            {dateFilter.control}
+          </FilterBar>
         </CardHeader>
         <CardContent>
           <Table>
@@ -869,6 +902,10 @@ export default function PreTriageModule() {
                             )}
                           </div>
                         </FormControl>
+                        {/* Worked out from weight and height; an impossible pair
+                            (e.g. height 1 cm) must say so here, not block Save
+                            with nothing marked. */}
+                        <FormMessage />
                       </FormItem>
                     )} />
                   </div>

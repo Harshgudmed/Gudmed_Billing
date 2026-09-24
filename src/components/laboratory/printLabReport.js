@@ -1,5 +1,11 @@
 import { format } from 'date-fns'
 import { toast } from 'sonner'
+// Every value below is typed by someone — a patient's name, a doctor's note, a
+// result comment. Written into the print window raw, a name carrying an HTML
+// tag runs as script in a page that shares this app's origin, so it could read
+// the signed-in session. escapeHtml is the same helper the prescription and
+// appointment printers already use.
+import { escapeHtml as esc } from '@/lib/printTemplate'
 
 export const printLabReport = (order, results, orgInfo, drName) => {
   const win = window.open('', '_blank', 'width=900,height=780')
@@ -21,16 +27,16 @@ export const printLabReport = (order, results, orgInfo, drName) => {
         const flagStyle = r.flag === 'H' ? 'color:#b45309;font-weight:bold' : r.flag === 'L' ? 'color:#1d4ed8;font-weight:bold' : r.isCritical ? 'color:#dc2626;font-weight:bold' : ''
         const valStyle = r.isAbnormal || r.isCritical ? 'font-weight:bold;color:' + (r.isCritical ? '#dc2626' : '#b45309') : 'font-weight:bold'
         return `<tr class="${rowClass}">
-          <td>${r.testName || '—'}</td>
-          <td style="${valStyle}">${r.resultValue ?? '—'}</td>
-          <td>${r.resultUnit || '—'}</td>
-          <td>${refRange}</td>
-          <td style="${flagStyle}">${r.isCritical ? '⚠ CRITICAL' : r.flag || 'N'}</td>
+          <td>${esc(r.testName || '—')}</td>
+          <td style="${valStyle}">${esc(r.resultValue ?? '—')}</td>
+          <td>${esc(r.resultUnit || '—')}</td>
+          <td>${esc(refRange)}</td>
+          <td style="${flagStyle}">${r.isCritical ? '⚠ CRITICAL' : esc(r.flag || 'N')}</td>
           <td>${r.status === 'verified' ? '✓ Verified' : r.status === 'final' ? '✓ Final' : 'Reported'}</td>
         </tr>`
       }).join('')
     : (order.tests || []).map(t => `<tr>
-          <td>${t.testName}</td>
+          <td>${esc(t.testName)}</td>
           <td colspan="4" style="color:#888;font-style:italic">Result pending</td>
           <td>—</td>
         </tr>`).join('')
@@ -40,7 +46,7 @@ export const printLabReport = (order, results, orgInfo, drName) => {
   const verifiedAt = verifiedResults.length > 0 && verifiedResults[0].verifiedAt ? format(new Date(verifiedResults[0].verifiedAt), 'dd MMM yyyy HH:mm') : null
   const enteredBy = orderResults.length > 0 ? orderResults[0].enteredBy : null
 
-  const html = `<!DOCTYPE html><html><head><title>Laboratory Report — ${order.orderNumber}</title>
+  const html = `<!DOCTYPE html><html><head><title>Laboratory Report — ${esc(order.orderNumber)}</title>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:Arial,Helvetica,sans-serif;font-size:10pt;color:#000;background:#fff}
@@ -76,14 +82,14 @@ tr:nth-child(even) td{background:#f9f9f9}
 <div class="page">
   <div class="hosp-header">
     <div>
-      ${orgInfo.logoUrl ? `<img src="${orgInfo.logoUrl}" alt="" style="height:46px;max-width:170px;object-fit:contain;margin-bottom:4px"/>` : ''}
-      <div class="hosp-name">${orgInfo.name}</div>
+      ${orgInfo.logoUrl ? `<img src="${esc(orgInfo.logoUrl)}" alt="" style="height:46px;max-width:170px;object-fit:contain;margin-bottom:4px"/>` : ''}
+      <div class="hosp-name">${esc(orgInfo.name)}</div>
       <div class="hosp-sub">Laboratory &amp; Pathology Department</div>
       <div class="hosp-sub">Accredited Clinical Laboratory Services</div>
     </div>
     <div class="hosp-contact">
-      Order #: <strong>${order.orderNumber}</strong><br/>
-      ${order.accessionNumber ? `Accession #: <strong>${order.accessionNumber}</strong><br/>` : ''}
+      Order #: <strong>${esc(order.orderNumber)}</strong><br/>
+      ${order.accessionNumber ? `Accession #: <strong>${esc(order.accessionNumber)}</strong><br/>` : ''}
       Printed: ${printDate}
     </div>
   </div>
@@ -93,23 +99,23 @@ tr:nth-child(even) td{background:#f9f9f9}
   <div class="info-box">
     <div class="info-box-hdr">Patient Information</div>
     <div class="info-grid">
-     <div class="info-cell"><div class="info-label">UHID</div><div class="info-value">${order.patientMrn}</div></div>
+     <div class="info-cell"><div class="info-label">UHID</div><div class="info-value">${esc(order.patientMrn)}</div></div>
     
-      <div class="info-cell"><div class="info-label">Patient Name</div><div class="info-value"><strong>${order.patientName}</strong></div></div>
-       <div class="info-cell"><div class="info-label">Age / Sex</div><div class="info-value">${order.patientAge} yrs / ${order.patientGender ? order.patientGender.charAt(0).toUpperCase() + order.patientGender.slice(1) : ''}</div></div>
-      <div class="info-cell"><div class="info-label">Requesting Physician</div><div class="info-value">${order.requestingDoctor ? drName(order.requestingDoctor) : '—'}</div></div>
+      <div class="info-cell"><div class="info-label">Patient Name</div><div class="info-value"><strong>${esc(order.patientName)}</strong></div></div>
+       <div class="info-cell"><div class="info-label">Age / Sex</div><div class="info-value">${esc(order.patientAge)} yrs / ${order.patientGender ? order.patientGender.charAt(0).toUpperCase() + order.patientGender.slice(1) : ''}</div></div>
+      <div class="info-cell"><div class="info-label">Requesting Physician</div><div class="info-value">${esc(order.requestingDoctor ? drName(order.requestingDoctor) : '—')}</div></div>
     </div>
     <div class="info-box-hdr2">Order Details</div>
     <div class="info-grid">
       <div class="info-cell"><div class="info-label">Order Date</div><div class="info-value">${orderDate}</div></div>
       <div class="info-cell"><div class="info-label">Collection Date</div><div class="info-value">${collectedDate}</div></div>
-      <div class="info-cell"><div class="info-label">Priority</div><div class="info-value" style="text-transform:uppercase;color:${order.priority==='stat'?'#dc2626':order.priority==='urgent'?'#d97706':'#333'};font-weight:bold">${order.priority || 'routine'}</div></div>
+      <div class="info-cell"><div class="info-label">Priority</div><div class="info-value" style="text-transform:uppercase;color:${order.priority==='stat'?'#dc2626':order.priority==='urgent'?'#d97706':'#333'};font-weight:bold">${esc(order.priority || 'routine')}</div></div>
       <div class="info-cell"><div class="info-label">Report Status</div><div class="info-value" style="color:#065f46;font-weight:bold">COMPLETED</div></div>
     </div>
   </div>
 
-  ${order.clinicalIndication ? `<div class="clinical-bar"><strong>Clinical Indication:</strong> ${order.clinicalIndication}</div>` : ''}
-  ${order.provisionalDiagnosis ? `<div class="clinical-bar"><strong>Provisional Diagnosis:</strong> ${order.provisionalDiagnosis}</div>` : ''}
+  ${order.clinicalIndication ? `<div class="clinical-bar"><strong>Clinical Indication:</strong> ${esc(order.clinicalIndication)}</div>` : ''}
+  ${order.provisionalDiagnosis ? `<div class="clinical-bar"><strong>Provisional Diagnosis:</strong> ${esc(order.provisionalDiagnosis)}</div>` : ''}
 
   ${hasAbnormal ? `<div class="critical-note">⚠ This report contains abnormal/critical values. Please review highlighted results and contact the laboratory for clarification if needed.</div>` : ''}
 
@@ -129,27 +135,27 @@ tr:nth-child(even) td{background:#f9f9f9}
 
   ${hasAbnormal ? `<div class="abnormal-legend"><strong>Flag Legend:</strong> &nbsp; H = High &nbsp; L = Low &nbsp; N = Normal &nbsp; A = Abnormal &nbsp; ⚠ CRITICAL = Requires immediate attention</div>` : ''}
 
-  ${order.notes ? `<div class="clinical-bar" style="margin-bottom:10px"><strong>Notes:</strong> ${order.notes}</div>` : ''}
+  ${order.notes ? `<div class="clinical-bar" style="margin-bottom:10px"><strong>Notes:</strong> ${esc(order.notes)}</div>` : ''}
 
   <div class="sig-section">
     <div>
       <div class="sig-line"></div>
       <div class="sig-label">
-        <strong>Reported By:</strong> ${enteredBy || 'Lab Technologist'}<br/>
+        <strong>Reported By:</strong> ${esc(enteredBy || 'Lab Technologist')}<br/>
         Report Date: ${printDate}
       </div>
     </div>
     <div>
       <div class="sig-line"></div>
       <div class="sig-label">
-        <strong>Verified By:</strong> ${verifiedBy || '—'}<br/>
+        <strong>Verified By:</strong> ${esc(verifiedBy || '—')}<br/>
         ${verifiedAt ? `Verification Date: ${verifiedAt}` : 'Not yet verified'}
       </div>
     </div>
   </div>
 
   <div class="footer">
-    ${orgInfo.name} — Laboratory &amp; Pathology Department &nbsp;|&nbsp;
+    ${esc(orgInfo.name)} — Laboratory &amp; Pathology Department &nbsp;|&nbsp;
     This report is confidential and intended solely for the requesting physician &nbsp;|&nbsp;
     Printed: ${printDate}
   </div>

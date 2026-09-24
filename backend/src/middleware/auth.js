@@ -1,5 +1,6 @@
 import jwt from 'jsonwebtoken'
 import { JWT_SECRET } from '../config/security.js'
+import { db } from '../config/db.js'
 
 // Access-control master switch.
 // FAIL-CLOSED IN PRODUCTION (C7): in production the API is enforced UNLESS you
@@ -22,7 +23,44 @@ const DEFAULT_ORG = process.env.ORGANIZATION_ID || 'org-demo'
  * - AUTH_ENFORCED on: a valid token is required, otherwise 401. The hospital is
  *   taken strictly from the token (no demo-org fallback).
  */
-export function authenticate(req, res, next) {
+/**
+ * Is this staff account still allowed in, and in what role?
+ *
+ * A token said everything: it was signed for eight hours and nothing looked at
+ * the account again. Turning someone off in Settings, or moving them out of an
+ * admin role, changed nothing until their token expired — a dismissed employee
+ * kept full access for the rest of the day.
+ *
+ * So the account is re-read, and the answer is cached briefly: a busy screen
+ * fires several requests a second, and a database round-trip on each of them
+ * would be paid by every user to catch a rare event. The cache is deliberately
+ * short — being locked out takes effect within a few seconds, not a shift.
+ */
+const ACCOUNT_TTL_MS = 15_000
+const accountCache = new Map() // userId → { at, isActive, role }
+
+async function currentAccount(userId) {
+  const hit = accountCache.get(userId)
+  if (hit && Date.now() - hit.at < ACCOUNT_TTL_MS) return hit
+  const user = await db.user.findUnique({
+    where: { id: userId },
+    select: { isActive: true, role: true },
+  }).catch(() => null)
+  // A lookup that fails (database blip) must not lock the hospital out; the
+  // token alone carries the request through, exactly as it used to.
+  if (!user) return null
+  const fresh = { at: Date.now(), isActive: user.isActive, role: user.role }
+  accountCache.set(userId, fresh)
+  if (accountCache.size > 5000) accountCache.clear()
+  return fresh
+}
+
+/** Drop a user from the cache so a change to their account applies at once. */
+export function forgetAccount(userId) {
+  if (userId) accountCache.delete(userId)
+}
+
+export async function authenticate(req, res, next) {
   const token = req.cookies?.token || req.headers.authorization?.split(' ')[1]
 
   if (!token) {
@@ -39,6 +77,21 @@ export function authenticate(req, res, next) {
     req.organizationId = decoded.organizationId || (AUTH_ENFORCED ? undefined : DEFAULT_ORG)
     if (AUTH_ENFORCED && !req.organizationId) {
       return res.status(401).json({ success: false, error: 'Session is missing a hospital. Please sign in again.', code: 'NO_ORG' })
+    }
+    // Staff only: a patient-portal session has no staff row to re-read.
+    const staffId = decoded.role !== 'patient' ? (decoded.id || decoded.userId) : null
+    if (staffId) {
+      const account = await currentAccount(staffId)
+      if (account && !account.isActive) {
+        return res.status(401).json({
+          success: false,
+          error: 'This account has been deactivated. Please contact your administrator.',
+          code: 'ACCOUNT_DISABLED',
+        })
+      }
+      // The role comes from the account, not from the token — a demotion has to
+      // take hold without waiting for the old token to run out.
+      if (account && account.role && account.role !== decoded.role) req.user.role = account.role
     }
     return next()
   } catch {

@@ -1,5 +1,22 @@
 import client from '@/api/client'
 
+/**
+ * What a percentage box may hold while somebody is typing in it.
+ *
+ * `min`/`max` on an <input type="number"> are only enforced by a form's own
+ * validation, and these boxes sit outside any <form> — so a typed 500 went
+ * straight into a bill as 500% GST. Empty stays empty (the box must be
+ * clearable), anything unreadable is 0, and the rest is held between 0 and 100.
+ * The server refuses out-of-range percentages too; this just stops the screen
+ * from showing a total nobody will honour.
+ */
+export function percentBox(raw) {
+  if (raw === '') return ''
+  const n = parseFloat(raw)
+  if (Number.isNaN(n)) return 0
+  return Math.min(100, Math.max(0, n))
+}
+
 // ── Shared billing helpers (Lab / Radiology / OPD / Procedure / …) ────────────
 // One place for the "create an invoice for this order + record what was paid" and
 // "find that order's invoice + its payment ledger" flows, so every module bills

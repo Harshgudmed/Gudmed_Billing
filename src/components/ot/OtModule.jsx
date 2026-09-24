@@ -7,12 +7,14 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { StatusBadge } from '@/components/common/StatusBadge'
+import { FilterBar, FilterSelect, statusOptions } from '@/components/common/FilterBar'
 import { useDateFilter } from '@/components/common/DateFilter'
 import { useDebounce } from '@/lib/useDebounce'
+import { useLiveData } from '@/lib/useLiveData'
 import { getFullName } from '@/lib/patient'
 import { formatDateTime } from '@/lib/format'
 import {
-  Stethoscope, Plus, Search, Loader2, AlertCircle, RefreshCw, LayoutGrid, List,
+  Stethoscope, Plus, Search, Loader2, AlertCircle, LayoutGrid, List,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { otApi, OT_STATUSES } from '@/api/otApi'
@@ -32,6 +34,7 @@ import { OT_STATUS_COLORS, OT_PRIORITY_COLORS, formatSlot, formatDuration } from
 // the filters and the data both views read.
 
 const labelize = (value) => (value || '').replace(/_/g, ' ')
+const OT_STATUS_OPTIONS = statusOptions(OT_STATUSES, { label: labelize })
 
 export default function OtModule() {
   const [bookings, setBookings] = useState([])
@@ -114,6 +117,11 @@ export default function OtModule() {
 
   const refreshAll = () => { loadTheatres(); loadBookings() }
 
+  // The theatre board is a shared wall: the anaesthetist marks a case In
+  // Theatre, the coordinator books an emergency. Both now land on every open
+  // board over the WebSocket, without a Refresh button.
+  useLiveData('ot', refreshAll)
+
   const openBooking = (theatre) => {
     setBookingFor(theatre ?? null)
     setBookingOpen(true)
@@ -124,6 +132,12 @@ export default function OtModule() {
   const visibleTheatres = useMemo(
     () => (theatreFilter === 'all' ? theatres : theatres.filter((t) => t.id === theatreFilter)),
     [theatres, theatreFilter],
+  )
+
+  // Options for the shared filter row's theatre dropdown.
+  const theatreOptions = useMemo(
+    () => [{ value: 'all', label: 'All Theatres' }, ...theatres.map((t) => ({ value: t.id, label: t.name }))],
+    [theatres],
   )
 
   const summary = useMemo(() => ({
@@ -184,43 +198,22 @@ export default function OtModule() {
             </TabsTrigger>
           </TabsList>
 
-          <div className="flex flex-wrap items-center gap-2">
-            <div className="relative w-full md:w-64">
-              <Search className="h-4 w-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
-              <Input
-                placeholder="Search patient, procedure, case no..."
-                className="pl-9"
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-              />
-            </div>
-
+          {/* The shared filter row (components/common/FilterBar) — it sits beside
+              the Board / List tabs here, so it keeps its own width. No Refresh
+              button: the board is live (useLiveData above), so a case booked or
+              moved by a colleague appears on its own. */}
+          <FilterBar
+            className="flex-1"
+            search={search}
+            onSearchChange={setSearch}
+            placeholder="Search patient, procedure, case no..."
+            active={!!search || statusFilter !== 'all' || theatreFilter !== 'all' || dateFilter.active}
+            onClear={() => { setSearch(''); setStatusFilter('all'); setTheatreFilter('all'); dateFilter.reset() }}
+          >
             {dateFilter.control}
-
-            <Select value={statusFilter} onValueChange={setStatusFilter}>
-              <SelectTrigger className="w-[160px]"><SelectValue /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Statuses</SelectItem>
-                {OT_STATUSES.map((s) => (
-                  <SelectItem key={s} value={s}>{labelize(s)}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-
-            <Select value={theatreFilter} onValueChange={setTheatreFilter}>
-              <SelectTrigger className="w-[160px]"><SelectValue /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Theatres</SelectItem>
-                {theatres.map((t) => (
-                  <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-
-            <Button variant="outline" size="icon" onClick={refreshAll} title="Refresh">
-              <RefreshCw className="h-4 w-4" />
-            </Button>
-          </div>
+            <FilterSelect value={statusFilter} onChange={setStatusFilter} options={OT_STATUS_OPTIONS} />
+            <FilterSelect value={theatreFilter} onChange={setTheatreFilter} options={theatreOptions} />
+          </FilterBar>
         </div>
 
         {/* One loading / error / empty treatment for both views, so they can

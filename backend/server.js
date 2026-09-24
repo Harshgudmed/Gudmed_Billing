@@ -9,6 +9,8 @@ import path from 'path'
 import { fileURLToPath } from 'url'
 import { router } from './src/routes/index.js'
 import { errorHandler } from './src/middleware/errorHandler.js'
+import { liveUpdates } from './src/middleware/liveUpdates.js'
+import { router as uploadRoutes } from './src/routes/uploadRoutes.js'
 import { assertSecurityConfig } from './src/config/security.js'
 import { startAllListeners } from './src/integration/hl7Listener.js'
 import { initRealtime } from './src/lib/realtime.js'
@@ -80,8 +82,12 @@ app.use('/api/payments/webhook', express.raw({ type: '*/*', limit: '1mb' }))
 app.use(express.json({ limit: '50mb' }))
 app.use(express.urlencoded({ extended: true, limit: '50mb' }))
 
-// Serve uploaded files statically
-app.use('/uploads', express.static(path.join(__dirname, 'uploads')))
+// Uploaded files. NOT express.static: everything under /uploads is a patient
+// document, so each one is served only to this hospital's staff or to the
+// patient it belongs to (see routes/uploadRoutes.js). A static mount here sat
+// in front of every login check and handed a patient's scans to anyone holding
+// the link.
+app.use('/uploads', uploadRoutes)
 
 // ── Routes ───────────────────────────────────────────────────────────────────
 app.get('/health', (_req, res) => res.json({
@@ -90,7 +96,10 @@ app.get('/health', (_req, res) => res.json({
   version: '1.0.0',
   time:    new Date(),
 }))
-app.use('/api', router)
+// Announce every successful write to this hospital's open screens (one place,
+// every module — see middleware/liveUpdates.js), so the lists update themselves
+// instead of carrying a Refresh button.
+app.use('/api', liveUpdates, router)
 
 // ── Error Handler ─────────────────────────────────────────────────────────────
 app.use(errorHandler)

@@ -2,9 +2,10 @@ import { db } from '../config/db.js'
 import { getOrgId } from "../lib/reqContext.js";
 import { scopedDoctorId } from '../utils/scope.js'
 import { isOwned } from '../lib/tenant.js'
-import { round2 } from '../lib/money.js'
+import { round2, commissionFor } from '../lib/money.js'
 import { assertValidShift, assertNoSelfOverlap } from '../lib/activeDoctor.js'
 import { roomIdsInTimetable } from '../lib/doctorTimetable.js'
+import { dayRange } from '../lib/dates.js'
 
 // Accepts an ISO calendar date (YYYY-MM-DD) or a full ISO datetime whose date
 // part is a real calendar date, and returns the canonical YYYY-MM-DD string.
@@ -26,7 +27,7 @@ function normalizeIsoDate(raw) {
 export async function handleGet(req, res, next) {
   try {
     const ORG_ID = getOrgId(req)
-    const { resource, doctorId, status, period } = req.query
+    const { resource, doctorId, status, period, search, startDate, endDate } = req.query
 
     // A logged-in doctor only ever sees their own accountability data.
     const myDoctorId = scopedDoctorId(req)
@@ -90,6 +91,16 @@ export async function handleGet(req, res, next) {
       if (period) where.period = period
       // Force a doctor's own id regardless of any doctorId query param.
       if (myDoctorId) where.doctorId = myDoctorId
+      // The Commissions tab had no search box, and its date filter narrowed only
+      // the ten rows on screen (the tab said so in an amber note). Both belong in
+      // the database so they reach every page.
+      if (search) {
+        where.OR = [
+          { doctor: { fullName: { contains: search, mode: 'insensitive' } } },
+          { invoiceId: { contains: search, mode: 'insensitive' } },
+        ]
+      }
+      if (startDate || endDate) where.createdAt = dayRange(startDate, endDate)
 
       const [commissions, total] = await Promise.all([
         db.doctorCommission.findMany({
@@ -276,15 +287,21 @@ export async function handlePost(req, res, next) {
       if (invoiceId && !(await isOwned('invoice', invoiceId, ORG_ID))) {
         return res.status(404).json({ success: false, error: 'Invoice not found' })
       }
+      // The payout is worked out HERE, from the amount and the rate, through the
+      // shared rule (lib/money.js). The dialog sends a commissionAmount it
+      // calculated for display; taking that number would make a doctor's pay
+      // whatever the browser posted — and it arrived unrounded, to ten decimals.
+      const amount = round2(parseFloat(invoiceAmount) || 0)
+      const rate = parseFloat(commissionRate) || 0
       const commission = await db.doctorCommission.create({
         data: {
           organizationId: ORG_ID,
           doctorId,
           invoiceId: invoiceId || null,
-          invoiceAmount: parseFloat(invoiceAmount) || 0,
-          commissionRate: parseFloat(commissionRate) || 0,
+          invoiceAmount: amount,
+          commissionRate: rate,
           commissionType,
-          commissionAmount: parseFloat(commissionAmount) || 0,
+          commissionAmount: commissionFor(amount, { commissionType, commissionRate: rate }),
           status: 'pending',
         },
         include: {
@@ -491,9 +508,7 @@ export async function handlePatch(req, res, next) {
       // Computed HERE from the stored rate and type. The dialog also sends a
       // commissionAmount it worked out itself; that is a display value and is
       // ignored — the server does not take a payout figure from the browser.
-      const commissionAmount = existing.commissionType === 'percentage'
-        ? round2((invoiceAmount * existing.commissionRate) / 100)
-        : round2(existing.commissionRate)
+      const commissionAmount = commissionFor(invoiceAmount, existing)
 
       // Compare-and-set on status: if a settle lands between the read above and
       // this write, the count is 0 and the edit is refused instead of rewriting

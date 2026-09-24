@@ -8,6 +8,7 @@ import { z } from 'zod'
 import { PATIENT_SNAPSHOT_SELECT } from '../utils/patientSnapshot.js'
 import { patientSearchWhere } from '../lib/patientSearch.js'
 import { isOwned } from '../lib/tenant.js'
+import { auditIpd } from '../inpatient/audit.js'
 
 // ── Zod Schemas ────────────────────────────────────────────────────────────────
 
@@ -108,7 +109,7 @@ const patientSelect = PATIENT_SNAPSHOT_SELECT
 export const getAll = async (req, res, next) => {
   try {
     const ORGANIZATION_ID = getOrgId(req)
-    const { resource, status, urgency, examCategory, orderId, search, startDate, endDate } = req.query
+    const { resource, status, urgency, examCategory, orderId, search, startDate, endDate, critical } = req.query
 
     // Pagination. NOTE: a second `Math.min(limit, 1000)` used to sit below this and
     // silently overrode the 2000 cap, so `?limit=2000` returned only 1000 rows and
@@ -208,7 +209,24 @@ export const getAll = async (req, res, next) => {
       const where = {
         organizationId: ORGANIZATION_ID,
         ...(orderId ? { orderId } : {}),
+        // draft / preliminary / final — the same values the Verify button sets.
+        ...(status ? { status } : {}),
+        ...(critical === 'true' ? { hasCriticalFindings: true } : {}),
       }
+      // The Reports tab had no search or filter at all — only page numbers — so
+      // finding one patient's report meant paging through every report in the
+      // hospital. Same rule as the Orders list above (patientSearchWhere plus the
+      // order number), one level deeper: a report reaches the patient through its
+      // order, so the whole clause sits under `order`.
+      const searchWhere = patientSearchWhere(search, 'patient', (term) => [
+        { orderNumber: { contains: term, mode: 'insensitive' } },
+      ])
+      if (searchWhere) where.order = { ...(where.order || {}), ...searchWhere }
+      if (examCategory) where.order = { ...(where.order || {}), exam: { examCategory } }
+      // "Reported on", in the hospital's days (the shared dayRange). Every
+      // report has this date — a draft carries the moment it was started — so a
+      // date range never silently drops the drafts.
+      if (startDate || endDate) where.reportedAt = dayRange(startDate, endDate)
       const [data, total] = await Promise.all([
         db.radiologyReport.findMany({
           where,
@@ -459,14 +477,48 @@ export const update = async (req, res, next) => {
       // nullable). Blocks cross-tenant tampering with radiology report content.
       const owned = await db.radiologyReport.findFirst({
         where: { id, order: { organizationId: ORGANIZATION_ID } },
-        select: { id: true },
+        select: {
+          id: true, verifiedAt: true, findings: true, impression: true,
+          recommendations: true, hasCriticalFindings: true, criticalFindings: true,
+        },
       })
       if (!owned) return res.status(404).json({ success: false, error: 'Radiology report not found' })
+
+      // A verified report is signed. It may be amended — radiologists do correct
+      // reports — but the change has to say why, and the record has to keep both
+      // versions. The schema has carried amendmentReason / amendedAt / amendedById
+      // since the table was written; nothing had ever filled them in.
+      const CLINICAL = ['findings', 'impression', 'recommendations', 'hasCriticalFindings', 'criticalFindings']
+      const changed = CLINICAL.filter((f) => fields[f] !== undefined && fields[f] !== owned[f])
+      const reason = String(req.body?.amendmentReason || '').trim()
+      if (owned.verifiedAt && changed.length && !reason) {
+        return res.status(409).json({
+          success: false,
+          error: 'This report is already verified. To change it, give the reason for the amendment.',
+          code: 'AMENDMENT_REASON_REQUIRED',
+        })
+      }
+      if (owned.verifiedAt && changed.length) {
+        fields.amendmentReason = reason
+        fields.amendedAt = new Date()
+        fields.amendedById = getActor(req).id || null
+      }
 
       const data = await db.radiologyReport.update({
         where: { id },
         data: fields,
       })
+
+      // …and a trace of who changed what, through the shared audit writer.
+      if (owned.verifiedAt && changed.length) {
+        await auditIpd(req, ORGANIZATION_ID, {
+          action: 'amend',
+          entityType: 'radiology.report',
+          entityId: id,
+          before: Object.fromEntries(changed.map((f) => [f, owned[f]])),
+          after: { ...Object.fromEntries(changed.map((f) => [f, data[f]])), amendmentReason: reason },
+        })
+      }
       return res.json({ success: true, data })
     }
 
