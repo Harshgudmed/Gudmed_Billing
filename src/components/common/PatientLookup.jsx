@@ -13,7 +13,7 @@ import { cn } from '@/lib/utils'
 import { z } from 'zod'
 import {
   requiredNameSchema, optionalTextSchema, requiredMobileSchema, optionalMobileSchema,
-  optionalEmailSchema, pincodeSchema, requiredDateSchema, issuesToFieldErrors,
+  optionalEmailSchema, pincodeSchema, dateOfBirthSchema, dobInputBounds, issuesToFieldErrors,
   requiredCitySchema, requiredStateSchema,
 } from '@/lib/schemas/patientFormSchema'
 import { PhoneInput } from './PhoneInput'
@@ -25,7 +25,7 @@ const walkInPatientSchema = z.object({
   firstName: requiredNameSchema('First name'),
   middleName: optionalTextSchema,
   lastName: requiredNameSchema('Last name'),
-  dateOfBirth: requiredDateSchema('Date of birth'),
+  dateOfBirth: dateOfBirthSchema('Date of birth'),
   gender: z.enum(['male', 'female', 'other']),
   maritalStatus: optionalTextSchema,
   referredBy: optionalTextSchema,
@@ -286,7 +286,10 @@ export default function PatientLookup({
             </div>
             <div>
               <Label className="text-xs">Date of Birth *</Label>
+              {/* min/max keep the calendar itself inside the allowed range; the
+                  shared dateOfBirthSchema still checks a typed-in date on save. */}
               <Input className={cn('mt-1', newFormErrors.dateOfBirth && 'border-red-500')} type="date"
+                min={dobInputBounds().min} max={dobInputBounds().max}
                 value={newForm.dateOfBirth} onChange={(e) => setNewField('dateOfBirth', e.target.value)} />
               <FieldError message={newFormErrors.dateOfBirth} />
             </div>

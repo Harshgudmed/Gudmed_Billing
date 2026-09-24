@@ -1,6 +1,7 @@
 import { db } from '../../config/db.js'
 import { getOrgId } from "../../lib/reqContext.js";
-import { createDrugSchema, updateDrugSchema } from '../validations/drug.validation.js'
+import { createDrugSchema, updateDrugSchema, adjustStockSchema } from '../validations/drug.validation.js'
+import { recordStockChange, consumeFromBatches } from '../stockService.js'
 import { getPagination, paginationMeta, handleServiceError, makeError } from '../utils.js'
 import { externalBarcodeLookup } from '../barcodeProvider.js'
 
@@ -176,6 +177,49 @@ export async function update(req, res, next) {
 
     const data = await db.pharmacyDrug.update({ where: { id: req.params.id }, data: parsed })
     res.json({ success: true, data, message: 'Drug updated successfully' })
+  } catch (err) {
+    if (handleServiceError(res, err)) return
+    next(err)
+  }
+}
+
+/**
+ * POST /pharmacy/drugs/:id/adjust — take stock out by hand (damaged, expired,
+ * lost, count correction).
+ *
+ * This used to be a PATCH that overwrote quantityInStock: the total moved but no
+ * batch did and no ledger row was written, so Drug Inventory and Batches showed
+ * different quantities for the same medicine and nobody could say why. Now it
+ * goes the way a sale does — out of the soonest-expiring batches first, then
+ * through the ledger, whose guard refuses to take more than is on the shelf.
+ * (Putting stock IN is done by adding a batch, so every unit has one.)
+ */
+export async function adjustStock(req, res, next) {
+  try {
+    const ORGANIZATION_ID = getOrgId(req)
+    const { quantity, reason } = adjustStockSchema.parse(req.body)
+
+    const data = await db.$transaction(async (tx) => {
+      const drug = await tx.pharmacyDrug.findFirst({
+        where: { id: req.params.id, organizationId: ORGANIZATION_ID },
+        select: { id: true, drugName: true, quantityInStock: true },
+      })
+      if (!drug) throw makeError('Drug not found', 404, 'DRUG_NOT_FOUND')
+      if (drug.quantityInStock < quantity) {
+        throw makeError(`Only ${drug.quantityInStock} of "${drug.drugName}" in stock — cannot take out ${quantity}`, 422, 'INSUFFICIENT_STOCK')
+      }
+      await consumeFromBatches(tx, { drugId: drug.id, quantity })
+      const quantityInStock = await recordStockChange(tx, {
+        organizationId: ORGANIZATION_ID,
+        drugId: drug.id,
+        changeType: 'adjustment',
+        quantityDelta: -quantity,
+        note: reason ? `Stock adjusted out: ${reason}` : 'Stock adjusted out',
+        createdById: req.user?.userId ?? null,
+      })
+      return { id: drug.id, quantityInStock }
+    })
+    res.json({ success: true, data, message: 'Stock adjusted' })
   } catch (err) {
     if (handleServiceError(res, err)) return
     next(err)

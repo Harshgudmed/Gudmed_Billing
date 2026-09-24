@@ -30,4 +30,14 @@ export const createDrugSchema = z.object({
 })
 
 // Whitelisted fields for PATCH — organizationId, isActive, createdAt, updatedAt are NOT here
-export const updateDrugSchema = createDrugSchema.partial()
+// quantityInStock is NOT editable through an update. Writing it straight onto
+// the drug moved the medicine's total with no ledger row and no batch touched,
+// so the Drug Inventory and Batches tabs disagreed. Stock now moves only through
+// POST /drugs/:id/adjust (take out, FIFO from batches) or a new batch (put in);
+// if anything still sends the field here, zod drops it.
+export const updateDrugSchema = createDrugSchema.omit({ quantityInStock: true }).partial()
+
+export const adjustStockSchema = z.object({
+  quantity: z.number().int().min(1, 'Enter how many to take out'),
+  reason: z.string().trim().max(200).optional(),
+})

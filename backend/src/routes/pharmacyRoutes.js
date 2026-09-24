@@ -21,6 +21,7 @@ router.get('/drugs/lookup', drugCtrl.lookupByBarcode) // must precede /drugs/:id
 router.get('/drugs/:id',  drugCtrl.getById)
 router.post('/drugs',     drugCtrl.create)
 router.patch('/drugs/:id', drugCtrl.update)
+router.post('/drugs/:id/adjust', drugCtrl.adjustStock)
 router.delete('/drugs/:id', drugCtrl.remove)
 
 // ── Batches ────────────────────────────────────────────────────────────────────

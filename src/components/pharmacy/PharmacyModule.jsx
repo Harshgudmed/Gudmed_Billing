@@ -378,22 +378,42 @@ export default function PharmacyModule() {
     setSavingDrug(false);
   };
 
+  // Adjust Stock used to overwrite quantityInStock directly — no batch moved and
+  // no ledger row was written, so Drug Inventory and Batches showed different
+  // numbers for the same medicine. Now both directions go through batches:
+  //   Add    → a real batch (number + expiry), the same path as Batches → Add
+  //   Remove → out of the soonest-expiring batches first, through the ledger
   const onAdjustStock = async () => {
     if (!selectedDrug) return;
-    const current = selectedDrug.quantityInStock || 0;
-    const newStock = stockAdjust.type === "add" ? current + (parseInt(stockAdjust.amount) || 0) : Math.max(0, current - (parseInt(stockAdjust.amount) || 0));
+    const qty = parseInt(stockAdjust.amount) || 0;
+    if (qty < 1) { toast.error("Enter a quantity of at least 1"); return; }
+    if (stockAdjust.type === "add" && (!stockAdjust.batchNumber?.trim() || !stockAdjust.expiryDate)) {
+      toast.error("Batch number and expiry date are needed to add stock");
+      return;
+    }
     try {
-      const res = await client.patch(`/pharmacy/drugs/${selectedDrug.id}`, { quantityInStock: newStock });
+      const res = stockAdjust.type === "add"
+        ? await client.post("/pharmacy/batches", {
+            drugId: selectedDrug.id,
+            batchNumber: stockAdjust.batchNumber.trim(),
+            expiryDate: stockAdjust.expiryDate,
+            quantityReceived: qty,
+          })
+        : await client.post(`/pharmacy/drugs/${selectedDrug.id}/adjust`, {
+            quantity: qty,
+            reason: stockAdjust.reason?.trim() || undefined,
+          });
       if (res.success) {
         toast.success(`Stock updated`);
         setShowStockDialog(false);
         setSelectedDrug(null);
         setStockAdjust({ type: "add", amount: 0 });
         drugPage.refresh();
+        batchPage.refresh();
         fetchStats(); // the Low / Out of Stock cards move with it
       } else toast.error(res.error || "Failed");
-    } catch {
-      toast.error("Failed to adjust stock");
+    } catch (err) {
+      showApiError(err, "Could not adjust stock");
     }
   };
 
@@ -1747,6 +1767,42 @@ ${rx.notes ? `<div class="note-bar"><strong>Notes:</strong> ${escapeHtml(rx.note
                 />
               </div>
             </div>
+            {/* Stock always belongs to a batch, so Drug Inventory and Batches
+                show the same number: adding needs the batch it arrived in,
+                taking out comes from the soonest-expiring batches first. */}
+            {stockAdjust.type === "add" ? (
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <Label>Batch Number *</Label>
+                  <Input
+                    className="mt-1"
+                    placeholder="e.g. B2409"
+                    value={stockAdjust.batchNumber || ""}
+                    onChange={(e) => setStockAdjust((p) => ({ ...p, batchNumber: e.target.value }))}
+                  />
+                </div>
+                <div>
+                  <Label>Expiry Date *</Label>
+                  <Input
+                    type="date"
+                    className="mt-1"
+                    value={stockAdjust.expiryDate || ""}
+                    onChange={(e) => setStockAdjust((p) => ({ ...p, expiryDate: e.target.value }))}
+                  />
+                </div>
+              </div>
+            ) : (
+              <div>
+                <Label>Reason</Label>
+                <Input
+                  className="mt-1"
+                  placeholder="e.g. damaged, expired, count correction"
+                  value={stockAdjust.reason || ""}
+                  onChange={(e) => setStockAdjust((p) => ({ ...p, reason: e.target.value }))}
+                />
+                <p className="text-xs text-gray-500 mt-1">Taken from the batches that expire first.</p>
+              </div>
+            )}
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowStockDialog(false)}>

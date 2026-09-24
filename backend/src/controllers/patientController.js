@@ -64,7 +64,15 @@ const patientSchema = z.object({
   dateOfBirth: z.string().refine((v) => {
     const d = new Date(v)
     return !Number.isNaN(d.getTime()) && d.getTime() <= Date.now()
-  }, { message: 'Date of birth must be a valid date in the past' }),
+  }, { message: 'Date of birth must be a valid date in the past' })
+    // …and not an impossible age. 1850 for 1950 is a typing slip; stored, it
+    // prints a 176-year-old on every report. Same limit as the forms
+    // (src/lib/schemas/patientFormSchema.js MAX_AGE_YEARS).
+    .refine((v) => {
+      const oldest = new Date()
+      oldest.setFullYear(oldest.getFullYear() - 130)
+      return new Date(v).getTime() >= oldest.getTime() - 864e5
+    }, { message: 'Date of birth cannot be more than 130 years ago' }),
   gender: z.enum(['male', 'female', 'other']),
   // Normalised + validated on the way in — see lib/phone.js. Previously
   // `z.string()`, which accepted anything and let country codes ("919876543210")

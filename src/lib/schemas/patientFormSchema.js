@@ -89,6 +89,30 @@ export const requiredStateSchema = (label = 'State') =>
 
 export const requiredDateSchema = (label) => z.string().min(1, `${label} is required`)
 
+// Oldest date of birth we accept. Nobody alive is older than this; an older
+// date is a typing slip (1850 for 1950) that would print a 176-year-old on
+// every report. Same limit as the server (backend patientController.js).
+export const MAX_AGE_YEARS = 130
+
+/** 'YYYY-MM-DD' for today and for the oldest allowed birth date — for <input type="date" min/max>. */
+export function dobInputBounds() {
+  const iso = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+  const today = new Date()
+  const oldest = new Date(today.getFullYear() - MAX_AGE_YEARS, today.getMonth(), today.getDate())
+  return { min: iso(oldest), max: iso(today) }
+}
+
+// A date of birth: required, a real date, not in the future, and not more than
+// MAX_AGE_YEARS ago. Every form that creates a patient uses this one rule, so
+// the lookup's "Add new" and the full registration form cannot disagree.
+export const dateOfBirthSchema = (label = 'Date of birth') =>
+  z
+    .string()
+    .min(1, `${label} is required`)
+    .refine((v) => !Number.isNaN(new Date(v + 'T00:00:00').getTime()), `${label} is not a valid date`)
+    .refine((v) => v <= dobInputBounds().max, `${label} cannot be in the future`)
+    .refine((v) => v >= dobInputBounds().min, `${label} cannot be more than ${MAX_AGE_YEARS} years ago`)
+
 // Builds a local Date from a 'YYYY-MM-DD' date and an 'HH:mm' time (time
 // defaults to midnight when omitted) — used to compare an appointment
 // instant against "now" the same way the backend does.
@@ -113,7 +137,7 @@ export const patientDetailsSchema = z.object({
   firstName: requiredNameSchema('First name'),
   middleName: optionalNameSchema('Middle name'),
   lastName: requiredNameSchema('Last name'),
-  dateOfBirth: requiredDateSchema('Date of birth'),
+  dateOfBirth: dateOfBirthSchema('Date of birth'),
   gender: z.enum(['male', 'female', 'other']),
   maritalStatus: optionalTextSchema,
   referredBy: optionalNameSchema('Referred by'),
