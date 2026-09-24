@@ -38,4 +38,22 @@ export function emitDisplayRefresh(orgId, screenId = null) {
   else io.to(`org:${orgId}`).emit('display:refresh', payload)
 }
 
+/**
+ * "Something in <topic> changed in this hospital — re-read it."
+ *
+ * The staff screens used to sit on whatever they loaded when they were opened,
+ * which is why nearly every module carried a Refresh button: a lab order raised
+ * at the counter did not appear on the lab's own screen until somebody pressed
+ * it. This is the same push the display boards already use, with a topic so a
+ * screen only re-reads when ITS data moved (see middleware/liveUpdates.js, which
+ * fires it after every successful write, and the client's useLiveData).
+ *
+ * The payload carries no data — just the topic — so it is safe on the same
+ * per-organization room the boards use.
+ */
+export function emitDataChanged(orgId, topic) {
+  if (!io || !orgId || !topic) return
+  io.to(`org:${orgId}`).emit('data:changed', { topic, at: Date.now() })
+}
+
 export const getIO = () => io
