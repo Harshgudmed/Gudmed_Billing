@@ -142,11 +142,8 @@ export const getAll = async (req, res, next) => {
       // the screen is actually about: Orders asks when it was ordered, the
       // Reports tab (completed orders) asks when the result went out.
       if ((startDate || endDate) && dateOn === 'scheduled') {
-        // "Who is due on these days": the booked day, or — for an order with
-        // none (made before the column existed) — the day it was ordered.
-        const range = dayRange(startDate, endDate)
-        const due = { OR: [{ scheduledDate: range }, { scheduledDate: null, orderDate: range }] }
-        where.AND = [...(where.AND || []), due]
+        // "Who is due on these days" — every order stores its day (see schema).
+        where.scheduledDate = dayRange(startDate, endDate)
       } else if (startDate || endDate) {
         where[dateOn === 'completed' ? 'resultsReportedAt' : 'orderDate'] = dayRange(startDate, endDate)
       }
@@ -254,7 +251,8 @@ export const create = async (req, res, next) => {
 
       const { patientId, consultationId, tests, clinicalIndication, provisionalDiagnosis, priority, notes } =
         parsed.data
-      const scheduledDate = parsed.data.scheduledDate ? parseScheduleDay(parsed.data.scheduledDate) : null
+      // Blank → undefined, so the column's database default (now) applies.
+      const scheduledDate = parsed.data.scheduledDate ? parseScheduleDay(parsed.data.scheduledDate) : undefined
 
       const actorId = getActor(req).id
       // The order number is drawn from the atomic per-org counter inside the same
@@ -394,7 +392,7 @@ export const update = async (req, res, next) => {
       // Tenant guard: only touch an order that belongs to this org.
       const owned = await db.labOrder.findFirst({
         where: { id, organizationId: ORGANIZATION_ID },
-        select: { id: true, status: true, orderNumber: true, scheduledDate: true, orderDate: true },
+        select: { id: true, status: true, orderNumber: true, scheduledDate: true },
       })
       if (!owned) return res.status(404).json({ success: false, error: 'Lab order not found' })
 
@@ -425,7 +423,7 @@ export const update = async (req, res, next) => {
           action: 'reschedule',
           entityType: 'lab.order',
           entityId: id,
-          before: { scheduledDate: owned.scheduledDate || owned.orderDate },
+          before: { scheduledDate: owned.scheduledDate },
           after: { scheduledDate, rescheduleReason: String(rescheduleReason).trim() },
         })
         const data = await db.labOrder.findFirst({ where: { id, organizationId: ORGANIZATION_ID } })

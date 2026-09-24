@@ -2373,8 +2373,10 @@ model LabOrder {
   status               String    @default("pending")
   // The day the patient is expected for sample collection. Billed today does
   // not mean tested today — the patient may come later, or be rescheduled.
-  // Null on orders from before this column: read as the orderDate.
-  scheduledDate        DateTime?
+  // Defaults to the moment the order is made, in the database, so every path
+  // that creates an order (Lab, Billing, a doctor's consultation) has one;
+  // older rows were back-filled from orderDate.
+  scheduledDate        DateTime? @default(now())
   sampleCollectedAt    DateTime?
   sampleCollectedById  String?
   // Also per-hospital: the only lookup (integration/queueProcessor.js, matching

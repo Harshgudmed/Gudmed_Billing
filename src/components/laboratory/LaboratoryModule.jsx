@@ -120,7 +120,7 @@ function transformApiOrder(apiOrder) {
     priority: apiOrder.priority || 'routine',
     status: apiOrder.status || 'pending',
     orderDate: new Date(apiOrder.orderDate),
-    // The day the patient is due; null on older orders (due the day ordered).
+    // The day the patient is due — stored on every order by the server.
     scheduledDate: apiOrder.scheduledDate ? new Date(apiOrder.scheduledDate) : null,
     requestingDoctor: apiOrder.requestedBy?.fullName || '',
     sampleCollectedAt: apiOrder.sampleCollectedAt ? new Date(apiOrder.sampleCollectedAt) : null,
@@ -1423,6 +1423,7 @@ export default function LaboratoryModule() {
                     { header: 'Priority' },
                     { header: 'Status' },
                     { header: 'Order Time' },
+                    { header: 'Scheduled Date' },
                     { header: 'Actions', className: 'w-40' },
                   ]}
                   renderRow={(order) => (
@@ -1466,10 +1467,15 @@ export default function LaboratoryModule() {
                               <TableCell className="text-sm">
                                 <span>{format(new Date(order.orderDate), 'dd MMM yyyy')}</span>
                                 <p className="text-xs text-gray-500">{format(new Date(order.orderDate), 'HH:mm')}</p>
-                                {/* Shown only when it differs from the day it was ordered. */}
-                                {order.scheduledDate && format(order.scheduledDate, 'yyyy-MM-dd') !== format(new Date(order.orderDate), 'yyyy-MM-dd') && (
-                                  <p className="text-xs font-medium text-amber-700">Due {format(order.scheduledDate, 'dd MMM yyyy')}</p>
-                                )}
+                              </TableCell>
+                              {/* The day the patient is due, as stored on the order.
+                                  Amber when it is not the day it was ordered. */}
+                              <TableCell className="text-sm">
+                                {order.scheduledDate ? (
+                                  <span className={format(order.scheduledDate, 'yyyy-MM-dd') !== format(new Date(order.orderDate), 'yyyy-MM-dd') ? 'font-medium text-amber-700' : ''}>
+                                    {format(order.scheduledDate, 'dd MMM yyyy')}
+                                  </span>
+                                ) : '—'}
                               </TableCell>
                               <TableCell>
                                 <div className="flex gap-1">
