@@ -29,6 +29,7 @@ import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form'
 import client from '@/api/client'
+import { showApiError } from '@/lib/apiRequest'
 import { useServerPagination } from '@/lib/useServerPagination'
 import { useLiveData } from '@/lib/useLiveData'
 import { useDebounce } from '@/lib/useDebounce'
@@ -258,7 +259,12 @@ export default function SettingsModule() {
         }}))
         window.dispatchEvent(new CustomEvent('organizationSettingsChange', { detail: orgForm }))
       } else toast.error(res.error || 'Failed to save')
-    } catch { toast.error('Failed to save organization settings') }
+    } catch (err) {
+      // The server now checks every field and says which one is wrong ("Enter a
+      // valid email address", "Closing time must be after opening time") —
+      // show that, not a generic "Failed".
+      showApiError(err, 'Could not save organization settings')
+    }
     finally { setSavingOrg(false) }
   }
 

@@ -64,6 +64,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { SearchableSelect } from "@/components/ui/searchable-select";
 import { Checkbox } from "@/components/ui/checkbox";
 import client from "@/api/client";
 import { createInvoiceWithPayment } from "@/lib/billing";
@@ -905,7 +906,19 @@ ${rx.notes ? `<div class="note-bar"><strong>Notes:</strong> ${escapeHtml(rx.note
             </div>
             <div>
               <Label>Dosage Form *</Label>
-              <Input placeholder="Tablet, Syrup, Injection..." value={drugForm.form} onChange={(e) => setDrugForm((p) => ({ ...p, form: e.target.value }))} />
+              {/* Picked from the shared DRUG_FORMS list (Tablet, Syrup,
+                  Injection…), so the same form is always spelled the same way.
+                  allowCustom keeps a rarer form typeable, and shows a value an
+                  older record already has even if it is not in the list. */}
+              <SearchableSelect
+                className="mt-1 w-full"
+                options={DRUG_FORMS.map((f) => ({ value: f, label: f }))}
+                value={drugForm.form}
+                onChange={(v) => setDrugForm((p) => ({ ...p, form: v }))}
+                placeholder="Select dosage form"
+                searchPlaceholder="Search or type a form..."
+                allowCustom
+              />
             </div>
             <div>
               <Label>Strength</Label>
@@ -1817,7 +1830,10 @@ ${rx.notes ? `<div class="note-bar"><strong>Notes:</strong> ${escapeHtml(rx.note
 
       {/* ── DIRECT SALE ── */}
       <Dialog open={showSaleDialog} onOpenChange={setShowSaleDialog}>
-        <DialogContent className="max-w-lg">
+        {/* Capped at the screen height and scrolls inside. "Patient not in
+            records? Add new" opens a tall form in here; without the cap the
+            dialog grew past the viewport and its fields could not be reached. */}
+        <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Direct Sale (OTC)</DialogTitle>
           </DialogHeader>

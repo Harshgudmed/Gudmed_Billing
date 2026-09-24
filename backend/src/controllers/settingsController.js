@@ -1,4 +1,5 @@
 import { db } from '../config/db.js'
+import { z } from 'zod'
 import { getOrgId } from "../lib/reqContext.js";
 import { listResponse } from "../lib/pagination.js";
 import bcrypt from 'bcryptjs'
@@ -29,13 +30,61 @@ const ORG_UPDATABLE_FIELDS = [
   'primaryColor', 'secondaryColor', 'region', 'country',
 ]
 
+// What each organisation field may hold. The Organization tab saved whatever
+// was typed: a one-letter hospital name, "abc" as the email, letters as the
+// phone number, "javascript:…" as the logo URL, an opening time after the
+// closing time. Every field is optional (the Modules tab saves modulesEnabled
+// alone), but a field that IS sent must be sensible.
+const blankOr = (schema) => z.union([z.literal(''), schema])
+const orgFieldsSchema = z.object({
+  name: z.string().trim().min(2, 'Hospital name must be at least 2 characters').max(120, 'Hospital name is too long').optional(),
+  email: blankOr(z.string().trim().email('Enter a valid email address')).optional(),
+  // A hospital's number may be a landline (020-2612 3456) — so digits with the
+  // usual separators, 8 to 15 digits in all, not the 10-digit mobile rule.
+  phone: blankOr(z.string().trim().regex(/^\+?[\d\s\-()]+$/, 'Phone can contain only digits, spaces, +, - and brackets')
+    .refine((v) => { const n = v.replace(/\D/g, '').length; return n >= 8 && n <= 15 }, 'Phone must have 8 to 15 digits')).optional(),
+  // A link to an image, or an image stored inline (GudMed's own logo is saved as
+  // data:image/png;base64,…). Anything else — "javascript:…", plain words — is refused.
+  logoUrl: blankOr(z.string().trim().regex(
+    /^(https?:\/\/\S+|data:image\/(png|jpe?g|gif|webp|svg\+xml);base64,[A-Za-z0-9+/=]+)$/i,
+    'Logo must be an image link starting with http:// or https://',
+  )).optional(),
+  primaryColor: blankOr(z.string().regex(/^#([0-9a-f]{3}|[0-9a-f]{6})$/i, 'Colour must be a hex code like #2563eb')).optional(),
+  secondaryColor: blankOr(z.string().regex(/^#([0-9a-f]{3}|[0-9a-f]{6})$/i, 'Colour must be a hex code like #2563eb')).optional(),
+  address: z.string().max(300, 'Address is too long').optional(),
+  city: z.string().max(80, 'City is too long').optional(),
+  region: z.string().max(80).optional(),
+  country: z.string().max(80).optional(),
+})
+const HHMM = /^([01]\d|2[0-3]):[0-5]\d$/
+function settingsProblem(settings) {
+  if (!settings || typeof settings !== 'object') return null
+  const wh = settings.workingHours
+  if (wh) {
+    if (!HHMM.test(wh.start || '') || !HHMM.test(wh.end || '')) return 'Opening and closing time must be valid times'
+    if (wh.start >= wh.end) return 'Closing time must be after opening time'
+  }
+  if (settings.appointmentDuration !== undefined) {
+    const d = Number(settings.appointmentDuration)
+    if (!Number.isInteger(d) || d < 5 || d > 240) return 'Appointment duration must be between 5 and 240 minutes'
+  }
+  return null
+}
+
 export async function updateOrganization(req, res, next) {
   try {
     const ORG_ID = getOrgId(req)
-    const data = {}
+    const picked = {}
     for (const field of ORG_UPDATABLE_FIELDS) {
-      if (req.body[field] !== undefined) data[field] = req.body[field]
+      if (req.body[field] !== undefined) picked[field] = req.body[field]
     }
+    const checked = orgFieldsSchema.safeParse(picked)
+    if (!checked.success) {
+      return res.status(400).json({ success: false, error: checked.error.issues[0]?.message || 'Invalid organisation details' })
+    }
+    const problem = settingsProblem(req.body.settings)
+    if (problem) return res.status(400).json({ success: false, error: problem })
+    const data = { ...checked.data }
     if (req.body.settings && typeof req.body.settings === 'object') {
       data.settings = JSON.stringify(req.body.settings)
     }

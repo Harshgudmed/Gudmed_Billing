@@ -737,8 +737,9 @@ export default function OpdModule() {
               )
             })()}
             <DialogFooter>
+              {/* View is read-only: no Edit here. Editing stays one click away on
+                  the consultation's own row in the list. */}
               <Button variant="outline" onClick={() => setViewing(null)}>Close</Button>
-              {viewing && <Button variant="outline" onClick={() => { openEdit(viewing); setViewing(null) }}><Edit className="h-4 w-4 mr-1" />Edit</Button>}
               {viewing && <Button className="bg-[#2E4168] hover:bg-[#24344f]" onClick={() => { const c = viewing; printPrescription(c, c.patient ? getFullName(c.patient) : 'Unknown', c.patient?.mrn || '—', c.patient?.dateOfBirth ? getAge(c.patient.dateOfBirth) : 0, c.patient?.gender || '', c.doctor?.fullName ? drName(c.doctor.fullName) : '—', orgInfo) }}><Printer className="h-4 w-4 mr-1" />Print</Button>}
             </DialogFooter>
           </DialogContent>

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef, lazy, Suspense } from 'react'
+import { Fragment, useState, useEffect, useCallback, useRef, lazy, Suspense } from 'react'
 import CancelActionDialog from '@/components/common/CancelActionDialog'
 import { useCancelAction } from '@/components/common/hooks/useCancelAction'
 import { useDebounce } from '@/lib/useDebounce'
@@ -114,6 +114,38 @@ function urgencyBadge(urgency) {
 function categoryBadge(category) {
   const map = { 'ct': 'bg-orange-500 text-white', 'mri': 'bg-purple-500 text-white', 'ultrasound': 'bg-blue-500 text-white', 'x-ray': 'bg-green-500 text-white', 'mammography': 'bg-pink-500 text-white' }
   return <Badge className={map[category] || 'bg-gray-500 text-white'}>{(category || '').toUpperCase()}</Badge>
+}
+
+// A radiology order holds a single exam, so a patient sent for three scans has
+// three orders and the list read as three unrelated patients. Display-only:
+// orders on the page are gathered under their visit — the Billing invoice they
+// were raised from when there is one, else the same patient on the same day.
+// Nothing is stored; each order is still started, reported and printed alone.
+function groupByVisit(orders) {
+  const groups = new Map()
+  for (const o of orders) {
+    const invoiceNo = String(o.notes || '').match(/billing invoice (\S+)/)?.[1]
+    const day = o.orderDate ? format(new Date(o.orderDate), 'yyyy-MM-dd') : ''
+    const key = invoiceNo ? `inv:${invoiceNo}` : `pd:${o.patientId || o.patient?.id}:${day}`
+    if (!groups.has(key)) groups.set(key, { key, invoiceNo, orders: [] })
+    groups.get(key).orders.push(o)
+  }
+  return [...groups.values()]
+}
+
+// The heading row over a visit with more than one exam.
+function VisitHeaderRow({ group, colSpan }) {
+  const first = group.orders[0]
+  return (
+    <TableRow className="bg-slate-50 hover:bg-slate-50">
+      <TableCell colSpan={colSpan} className="py-1.5 text-xs text-slate-600">
+        <span className="font-semibold text-slate-800">{getFullName(first.patient)}</span>
+        {first.patient?.mrn && <span> · {first.patient.mrn}</span>}
+        <span> · {group.invoiceNo ? `Invoice ${group.invoiceNo}` : (first.orderDate ? format(new Date(first.orderDate), 'dd MMM yyyy') : 'Same visit')}</span>
+        <span> · {group.orders.length} exams</span>
+      </TableCell>
+    </TableRow>
+  )
 }
 
 // ── Main Component ────────────────────────────────────────────────────────────
@@ -831,7 +863,10 @@ ${order.clinicalIndication ? `<div class="section"><div class="section-header">C
                   <TableRow><TableCell colSpan={8} className="text-center py-8">Loading...</TableCell></TableRow>
                 ) : filteredOrders.length === 0 ? (
                   <TableRow><TableCell colSpan={8} className="text-center py-8 text-gray-400">No orders found</TableCell></TableRow>
-                ) : filteredOrders.map(o => (
+                ) : groupByVisit(filteredOrders).map(g => (
+                  <Fragment key={g.key}>
+                  {g.orders.length > 1 && <VisitHeaderRow group={g} colSpan={8} />}
+                  {g.orders.map(o => (
                   <TableRow key={o.id}>
                     <TableCell className="font-mono text-sm">{o.orderNumber}</TableCell>
                     <TableCell>
@@ -879,6 +914,8 @@ ${order.clinicalIndication ? `<div class="section"><div class="section-header">C
                       </div>
                     </TableCell>
                   </TableRow>
+                  ))}
+                  </Fragment>
                 ))}
               </TableBody>
             </Table>
@@ -1094,7 +1131,10 @@ ${order.clinicalIndication ? `<div class="section"><div class="section-header">C
             <TableBody>
               {filteredOrders.length === 0 ? (
                 <TableRow><TableCell colSpan={7} className="text-center py-8 text-gray-400">No orders found</TableCell></TableRow>
-              ) : orders.map(o => (
+              ) : groupByVisit(orders).map(g => (
+                <Fragment key={g.key}>
+                {g.orders.length > 1 && <VisitHeaderRow group={g} colSpan={7} />}
+                {g.orders.map(o => (
                 <TableRow key={o.id}>
                   <TableCell className="font-mono text-xs">{o.orderNumber}</TableCell>
                   <TableCell>
@@ -1119,6 +1159,8 @@ ${order.clinicalIndication ? `<div class="section"><div class="section-header">C
                     </div>
                   </TableCell>
                 </TableRow>
+                ))}
+                </Fragment>
               ))}
             </TableBody>
           </Table>

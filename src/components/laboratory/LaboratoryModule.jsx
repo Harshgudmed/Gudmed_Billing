@@ -885,34 +885,81 @@ export default function LaboratoryModule() {
     let clinic = {}
     try { clinic = JSON.parse(localStorage.getItem('gudmed-clinic-profile') || '{}') } catch { clinic = {} }
     const now = new Date()
-    const items = order.tests.map(t => {
-      const def = tests.find(td => td.id === t.testId)
-      const price = def?.price || 0
-      const tat = def?.turnaroundTime || 24
-      return {
-        code: def?.testCode || t.testCode || (t.testName || 'TEST').substring(0, 6).toUpperCase(),
-        name: t.testName || 'Test',
-        price,
-        eta: format(new Date(now.getTime() + tat * 3600 * 1000), 'dd-MM-yyyy HH:mm'),
-      }
-    })
-    const orderValue = items.reduce((s2, i) => s2 + i.price, 0)
-    // Home-collection: from the order (tagged as [HCC:150] in notes when the order
-    // was booked) → else the hospital's default from Settings → else 0.
-    const hccTag = String(order.notes || '').match(/\[HCC:(\d+(?:\.\d+)?)\]/)
-    const home = payInfo.homeCollection !== undefined
-      ? Number(payInfo.homeCollection)
-      : (hccTag ? Number(hccTag[1]) : Number(orgInfo.homeCollectionCharge || 0))
-    // Payments live on the auto-created Invoice (tagged with this order number in
-    // its notes), not on the lab order. Shared helper fetches that invoice's payment
-    // ledger so the receipt's Payment table shows date/time, receipt & method.
-    const { payments, amountPaid: invoicePaid } = await fetchOrderInvoicePayments({
+    const etaFor = (testId) => {
+      const tat = tests.find(td => td.id === testId)?.turnaroundTime || 24
+      return format(new Date(now.getTime() + tat * 3600 * 1000), 'dd-MM-yyyy HH:mm')
+    }
+    // An order raised from a Billing invoice is numbered "LAB-<invoice number>"
+    // and says so in its notes — that names the invoice it came from.
+    const fromInvoice = String(order.notes || '').match(/billing invoice (\S+)/)?.[1]
+      || String(order.orderNumber || '').match(/^LAB-(.+)$/)?.[1]
+    // Payments live on the order's Invoice, not on the lab order. The shared
+    // helper finds that invoice either way round (see lib/billing.js).
+    const { invoice, payments, amountPaid: invoicePaid } = await fetchOrderInvoicePayments({
       patientId: order.patientId || order.patient?.id,
       orderNumber: order.orderNumber,
+      invoiceNumber: fromInvoice,
     })
 
-    const disc = Number(payInfo.discount || 0)
-    const net = orderValue + home - disc
+    let items, orderValue, home, disc, gstAmt, net
+    const invLines = invoice
+      ? (typeof invoice.items === 'string' ? (() => { try { return JSON.parse(invoice.items) } catch { return [] } })() : invoice.items) || []
+      : []
+    if (invLines.length) {
+      // The invoice is the bill of record, so the receipt shows what was
+      // CHARGED — its lines, quantities, GST and discount — not the catalogue's
+      // price today. Re-pricing here is what made Laboratory and Billing show
+      // different amounts and test counts for the same invoice.
+      const isHome = (l) => /^home collection/i.test(l.serviceName || '')
+      const isLab = (l) => l.sourceType === 'lab' || l.type === 'lab'
+      // Lines tagged as lab when the invoice has any; an older untagged invoice
+      // was made for this order alone, so all its non-home lines are the tests.
+      const hasTagged = invLines.some(isLab)
+      const labLines = invLines.filter((l) => !isHome(l) && (!hasTagged || isLab(l)))
+      items = labLines.map((l) => {
+        // Lines booked from this screen carry no test id — match those by name.
+        const def = tests.find(td => td.id === l.sourceId) || tests.find(td => td.testName === l.serviceName)
+        const qty = Number(l.quantity || 1)
+        return {
+          code: def?.testCode || (l.serviceName || 'TEST').substring(0, 6).toUpperCase(),
+          name: qty > 1 ? `${l.serviceName} × ${qty}` : (l.serviceName || 'Test'),
+          price: Number(l.total || 0),
+          eta: etaFor(def?.id),
+        }
+      })
+      orderValue = labLines.reduce((s, l) => s + Number(l.total || 0), 0)
+      home = invLines.filter(isHome).reduce((s, l) => s + Number(l.total || 0), 0)
+      gstAmt = labLines.reduce((s, l) => s + Number(l.tax || 0), 0)
+      const subtotal = invLines.reduce((s, l) => s + Number(l.total || 0), 0)
+      // All of the invoice is this lab work → its own totals, to the paisa.
+      // A mixed invoice (lab + consultation …) → the lab share of its discount.
+      const allLab = labLines.length + invLines.filter(isHome).length === invLines.length
+      disc = allLab
+        ? Number(invoice.discountAmount || 0)
+        : Math.round((Number(invoice.discountAmount || 0) * (orderValue + home)) / (subtotal || 1) * 100) / 100
+      net = allLab ? Number(invoice.totalAmount || 0) : orderValue + home + gstAmt - disc
+    } else {
+      // No invoice yet (an order not billed) — price it from the catalogue.
+      items = order.tests.map(t => {
+        const def = tests.find(td => td.id === t.testId)
+        return {
+          code: def?.testCode || t.testCode || (t.testName || 'TEST').substring(0, 6).toUpperCase(),
+          name: t.testName || 'Test',
+          price: def?.price || 0,
+          eta: etaFor(t.testId),
+        }
+      })
+      orderValue = items.reduce((s2, i) => s2 + i.price, 0)
+      // Home-collection: from the order (tagged as [HCC:150] in notes when the order
+      // was booked) → else the hospital's default from Settings → else 0.
+      const hccTag = String(order.notes || '').match(/\[HCC:(\d+(?:\.\d+)?)\]/)
+      home = payInfo.homeCollection !== undefined
+        ? Number(payInfo.homeCollection)
+        : (hccTag ? Number(hccTag[1]) : Number(orgInfo.homeCollectionCharge || 0))
+      disc = Number(payInfo.discount || 0)
+      gstAmt = 0
+      net = orderValue + home - disc
+    }
     const paid = payInfo.paid !== undefined ? Number(payInfo.paid)
       : (invoicePaid !== undefined ? invoicePaid : payments.reduce((s, p) => s + Number(p.amount || 0), 0))
     printLabReceipt({
@@ -926,7 +973,7 @@ export default function LaboratoryModule() {
       dateTime: format(now, 'dd MMM yyyy, hh:mm aa'),
       refDoctor: order.requestingDoctor ? drName(order.requestingDoctor) : 'self',
       mode: payInfo.mode,
-      items, orderValue, homeCollection: home, discount: disc, netPayable: net, paid, balance: net - paid,
+      items, orderValue, homeCollection: home, discount: disc, gstAmt, netPayable: net, paid, balance: net - paid,
       payments,
     }, orgInfo, clinic)
   }

@@ -172,7 +172,12 @@ export default function RegisterPatientForm({ onSuccess, onCancel, initialData }
         </DialogTitle>
         <DialogDescription>Enter the patient's details. Book the first appointment now, or clear the box and book it later.</DialogDescription>
       </DialogHeader>
+      {/* noValidate: the fields carry `required`, and without this the browser
+          stopped the submit with its own grey bubbles before handleRegisterPatient
+          ran — so the app's own messages under each box never appeared. The zod
+          schema below (and the server) do the checking. */}
       <form
+        noValidate
         onSubmit={handleRegisterPatient}
         className="min-w-0 space-y-5 [&_input:not([type=checkbox])]:h-11 [&_input:not([type=checkbox])]:text-[15px] [&_button]:h-11"
       >

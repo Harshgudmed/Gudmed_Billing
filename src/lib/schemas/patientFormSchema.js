@@ -76,6 +76,9 @@ export const pincodeSchema = z
   .trim()
   .min(1, 'PIN code is required')
   .regex(/^\d{6}$/, 'PIN code must be 6 digits')
+  // An Indian PIN never starts with 0 — 000000 is a placeholder someone typed
+  // to get past the box, not an address. Same rule on the server.
+  .regex(/^[1-9]/, 'Enter a valid PIN code (it cannot start with 0)')
 
 export const requiredCitySchema = (label = 'City') =>
   z

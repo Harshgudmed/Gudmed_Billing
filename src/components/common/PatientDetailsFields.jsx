@@ -7,6 +7,7 @@ import { cn } from '@/lib/utils'
 import { PhoneInput } from './PhoneInput'
 import { sanitizeTextInput, sanitizeMultilineInput } from './textFieldUtils'
 import { BLOOD_GROUPS } from '@/components/patients/utils/patientUtils'
+import { dobInputBounds } from '@/lib/schemas/patientFormSchema'
 
 // The patient half of registration — who the person is, how to reach them,
 // where they live, who to call, and their insurance. Nothing else: no doctor,
@@ -44,15 +45,10 @@ export const INSURANCE_PROVIDERS = [
 
 export const MARITAL_STATUSES = ['Single', 'Married', 'Divorced', 'Widowed', 'Other']
 
-// The range the date-of-birth picker opens in: nobody is born tomorrow, and
-// 120 years covers the oldest patient a hospital will register. Read at render,
-// not at import: a screen left open overnight would otherwise still cap the
-// date at yesterday, and reject a baby registered after midnight.
-const dobMax = () => {
-  const d = new Date()
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
-}
-const dobMin = () => `${new Date().getFullYear() - 120}-01-01`
+// The date-of-birth picker's range comes from the shared dobInputBounds() —
+// the same limit the schema and the server enforce (it used to be a separate
+// 120-year copy here). Read at render, not at import: a screen left open
+// overnight would otherwise still cap the date at yesterday.
 
 // The stored value is lowercase (the API and the patient list filter on it);
 // the label is what the patient reads.
@@ -206,11 +202,11 @@ export default function PatientDetailsFields({
               // its edge, and the picker opens within a sensible range instead
               // of at today — a birth date is never in the future, and the year
               // list starts at a plausible one rather than scrolling from 2026.
-              // Reception is unchanged: it does not pass patientFilling, and
-              // types dates rather than picking them.
+              // The range applies to reception too, so a picked date can never
+              // be out of range; a typed one is caught by the schema on save.
+              min={dobInputBounds().min}
+              max={dobInputBounds().max}
               {...(patientFilling ? {
-                max: dobMax(),
-                min: dobMin(),
                 onClick: e => { try { e.currentTarget.showPicker?.() } catch { /* not allowed here — the icon still works */ } },
               } : {})}
             />

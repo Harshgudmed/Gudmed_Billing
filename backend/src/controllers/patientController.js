@@ -90,7 +90,9 @@ const patientSchema = z.object({
   city: z.string().trim().min(2, 'City must be at least 2 characters'),
   district: z.string().optional(),
   state: z.string().trim().min(1, 'State is required'),
-  pincode: z.string().regex(/^\d{6}$/, 'PIN code must be 6 digits'),
+  // 6 digits, and never starting with 0 — no Indian PIN does, and 000000 is a
+  // placeholder typed to get past the box. Same rule as the forms.
+  pincode: z.string().regex(/^[1-9]\d{5}$/, 'Enter a valid 6-digit PIN code (it cannot start with 0)'),
   emergencyContactName: z.string().optional(),
   emergencyContactPhone: optionalMobileSchema(z, 'Emergency contact phone'),
   emergencyContactRelationship: z.string().optional(),

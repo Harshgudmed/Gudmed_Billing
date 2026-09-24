@@ -52,13 +52,23 @@ export async function createInvoiceWithPayment({ patientId, items, notes, amount
 // notes) and return its payment ledger — each row stamped with the invoice number
 // for the receipt's Payment table. Always resolves (never throws); missing data
 // comes back as empty so callers can print the receipt regardless.
-export async function fetchOrderInvoicePayments({ patientId, orderNumber }) {
+// The link runs one of two ways:
+//   - order booked in Lab/Radiology → its invoice's notes carry the ORDER number;
+//   - invoice raised in Billing → the order was made FROM it (order number
+//     "LAB-<invoice number>", notes "Auto-raised from billing invoice …"), and
+//     that invoice's notes do not mention the order at all.
+// Only the first was searched, so a Billing-raised order never found its invoice
+// and the lab receipt re-priced everything on its own — the #10 mismatch.
+// `invoiceNumber` (optional) covers the second; existing callers are unchanged.
+export async function fetchOrderInvoicePayments({ patientId, orderNumber, invoiceNumber }) {
   const empty = { invoice: null, payments: [], amountPaid: undefined, discountAmount: undefined }
-  if (!patientId || !orderNumber) return empty
+  if (!patientId || (!orderNumber && !invoiceNumber)) return empty
   try {
     const res = await client.get('/billing', { params: { resource: 'invoices', patientId, limit: 100 } })
     if (!res?.success) return empty
-    const invoice = (res.data || []).find((i) => String(i.notes || '').includes(orderNumber))
+    const invoice = (res.data || []).find((i) =>
+      (invoiceNumber && i.invoiceNumber === invoiceNumber) ||
+      (orderNumber && String(i.notes || '').includes(orderNumber)))
     if (!invoice) return empty
     return {
       invoice,
