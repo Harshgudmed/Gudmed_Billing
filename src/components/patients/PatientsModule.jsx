@@ -17,7 +17,15 @@ import { Users, Plus, Search, RefreshCw, AlertTriangle, ChevronLeft, ChevronRigh
 
 // Common Components
 import RegisterPatientForm from '@/components/common/RegisterPatientForm';
+import { FilterBar, FilterSelect } from '@/components/common/FilterBar';
+import { useLiveData } from '@/lib/useLiveData';
 import { useDateFilter } from '@/components/common/DateFilter';
+
+const PATIENT_STATUS_OPTIONS = [
+  { value: 'all', label: 'All Patients' },
+  { value: 'active', label: 'Active' },
+  { value: 'inactive', label: 'Inactive' },
+];
 
 // Extracted Patients Components & Hooks
 import { getFullName, patientSchema } from './utils/patientUtils';
@@ -61,6 +69,11 @@ export default function PatientsModule() {
     patients, total, loading, error, search, setSearch,
     status, setStatus, offset, setOffset, limit, refresh: fetchPatients
   } = usePatients({ dfStart, dfEnd, limit: 10 });
+
+  // Live over the app's WebSocket: the server announces every write in this
+  // hospital (middleware/liveUpdates.js), so a registration done at another desk
+  // — or a patient confirmed from their own QR form — appears here on its own.
+  useLiveData(['patients', 'pre-registration'], fetchPatients);
 
   // Dialog states
   const [showRegDialog, setShowRegDialog] = useState(false);
@@ -180,9 +193,8 @@ export default function PatientsModule() {
           <p className="text-gray-500">Manage patient records and registrations</p>
         </div>
         <div className="flex gap-2">
-          <Button variant="outline" onClick={fetchPatients}>
-            <RefreshCw className="h-4 w-4 mr-2" />Refresh
-          </Button>
+          {/* No Refresh button: this list is live (useLiveData below), so a
+              patient registered at another desk appears on its own. */}
           <Dialog open={showRegDialog} onOpenChange={(open) => { setShowRegDialog(open); if (!open) form.reset(); }}>
             <DialogTrigger asChild>
               <Button><Plus className="h-4 w-4 mr-2" />Register Patient</Button>
@@ -220,27 +232,18 @@ export default function PatientsModule() {
         })}
       </div>
 
-      {/* Filters */}
-      <div className="flex flex-wrap gap-3">
-        <div className="relative flex-1 min-w-[200px]">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
-          <Input
-            className="pl-10"
-            placeholder="Search by name, UHID, phone..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-          />
-        </div>
-        <Select value={status} onValueChange={setStatus}>
-          <SelectTrigger className="w-[140px]"><SelectValue /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Patients</SelectItem>
-            <SelectItem value="active">Active</SelectItem>
-            <SelectItem value="inactive">Inactive</SelectItem>
-          </SelectContent>
-        </Select>
+      {/* The shared filter row (components/common/FilterBar). The date control
+          is this screen's existing useDateFilter, dropped in beside the rest. */}
+      <FilterBar
+        search={search}
+        onSearchChange={setSearch}
+        placeholder="Search by name, UHID, phone..."
+        active={!!search || status !== 'all' || dateFilter.active}
+        onClear={() => { setSearch(''); setStatus('all'); dateFilter.reset() }}
+      >
+        <FilterSelect value={status} onChange={setStatus} options={PATIENT_STATUS_OPTIONS} />
         {dateFilter.control}
-      </div>
+      </FilterBar>
 
       {/* Table */}
       <Card>

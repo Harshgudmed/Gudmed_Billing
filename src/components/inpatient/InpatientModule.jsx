@@ -1,4 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
+import { useDebounce } from '@/lib/useDebounce'
+import { useLiveData } from '@/lib/useLiveData'
 import { format } from 'date-fns'
 import { PatientTimeline } from '@/components/inpatient/PatientTimeline'
 import { getOrgSettings } from '@/lib/orgSettings'
@@ -149,6 +151,31 @@ export default function InpatientModule() {
     }
   }, [patientHistoryPage])
 
+  // Patient History: discharged admissions only, searched and paged by the
+  // server, so the search reaches every record instead of the page on screen.
+  const [historySearch, setHistorySearch] = useState('')
+  const debouncedHistorySearch = useDebounce(historySearch, 300)
+  const [dischargedList, setDischargedList] = useState([])
+  const [dischargedMeta, setDischargedMeta] = useState({ total: 0, page: 1, totalPages: 1, hasMore: false })
+  useEffect(() => { setPatientHistoryPage(1) }, [debouncedHistorySearch])
+  const fetchDischargedPage = useCallback(async () => {
+    try {
+      const res = await inpatientApi.getAdmissions({
+        status: 'discharged',
+        search: debouncedHistorySearch || undefined,
+        limit: ADMISSIONS_PER_PAGE,
+        offset: (patientHistoryPage - 1) * ADMISSIONS_PER_PAGE,
+      })
+      if (res.success) {
+        setDischargedList(res.data || [])
+        if (res.meta) setDischargedMeta(res.meta)
+      }
+    } catch (err) {
+      toast.error(err.message || 'Failed to load the discharge history')
+    }
+  }, [patientHistoryPage, debouncedHistorySearch])
+  useEffect(() => { fetchDischargedPage() }, [fetchDischargedPage])
+
   // Wards, the live admitted list, staff and departments. None of these paginate
   // or filter — they change when somebody admits, discharges or transfers, which
   // is exactly when a write path below calls fetchAll.
@@ -192,10 +219,11 @@ export default function InpatientModule() {
   }, [fetchStandingData])
   useEffect(() => { fetchAdmissionsPage() }, [fetchAdmissionsPage])
   useEffect(() => { getOrgSettings().then(setOrgInfo) }, [])
-  useEffect(() => {
-    const interval = setInterval(fetchAll, 60000)
-    return () => clearInterval(interval)
-  }, [fetchAll])
+  // Was a 60-second poll: a bed freed at 10:00:01 showed up at 10:01. The ward
+  // is now live over the WebSocket — an admission, a transfer or a discharge
+  // recorded anywhere in the hospital lands here in about a second, and the
+  // hook still keeps a slow poll as a fallback if the socket is blocked.
+  useLiveData(['inpatient', 'rooms', 'billing'], fetchAll)
 
   useEffect(() => {
     setPatientHistoryPage(1)
@@ -396,8 +424,10 @@ export default function InpatientModule() {
   // Currently-admitted = the dedicated full fetch (NOT the paginated `admissions`,
   // which only holds one 10-row page). This feeds Nursing/Discharge/Dashboard/etc.
   const currentAdmitted = admittedAll.filter(a => (a.status || '').toLowerCase() === 'admitted')
-  // Discharged list stays on the paginated `admissions` (drives the Patient History page).
-  const dischargedList = admissions.filter(a => (a.status || '').toLowerCase() === 'discharged')
+  // Patient History has its own query (below): it asks the server for DISCHARGED
+  // admissions only. It used to pick the discharged rows out of the current
+  // 10-row `admissions` page, so "3 discharge records" meant "3 on this page",
+  // and a search could never reach the rest.
 
   // Transfers keep status='admitted'. Movement comes from the backend `transferNotes`
   // (ClinicalNote table, noteType='transfer') — no more JSON parsing on the client.
@@ -570,6 +600,9 @@ export default function InpatientModule() {
         {activeTab === 'patient-history' && (
           <PatientHistoryTab
             dischargedList={dischargedList}
+            meta={dischargedMeta}
+            search={historySearch}
+            setSearch={setHistorySearch}
             wards={wards}
             patientHistoryPage={patientHistoryPage}
             setPatientHistoryPage={setPatientHistoryPage}

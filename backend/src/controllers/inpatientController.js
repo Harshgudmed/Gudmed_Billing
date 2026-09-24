@@ -1,6 +1,7 @@
 import { db } from "../config/db.js";
 import { getOrgId, getActor, svcErr, safeMoney } from "../lib/reqContext.js";
 import { todayRange } from "../lib/dates.js";
+import { patientSearchWhere } from "../lib/patientSearch.js";
 import { round2 as r2 } from "../lib/money.js";
 import { z } from "zod";
 import {
@@ -301,10 +302,19 @@ async function getBeds(req, res, context) {
 
 async function getAdmissions(req, res, context) {
   const { orgId, limit, offset } = context;
-  const { status } = req.query;
+  const { status, search } = req.query;
 
   const where = { organizationId: orgId };
   if (status) where.status = status;
+  // Patient History had no search at all — finding one discharge meant paging
+  // through every admission. Same shared rule as every other list (patient name,
+  // UHID or phone), plus the admission number shown on screen: that label is
+  // built from the row id ("ADM-" + its last 8 characters, see
+  // lib/inpatientHelpers.js), so the number is matched against the id itself.
+  const searchWhere = patientSearchWhere(search, "patient", (term) => [
+    { id: { contains: term.replace(/^adm-/i, "").toLowerCase() } },
+  ]);
+  if (searchWhere) Object.assign(where, searchWhere);
   // Doctor portal: `mine=true` limits to the logged-in doctor's own patients
   // (attending or admitting). Scopes "see only my patients" without new endpoints.
   if (req.query.mine === "true" && req.user?.id) {

@@ -1,7 +1,7 @@
 import { useState, useMemo } from 'react'
-import { Search, IndianRupee } from 'lucide-react'
+import { IndianRupee } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
-import { Input } from '@/components/ui/input'
+import { FilterBar } from '@/components/common/FilterBar'
 import BillScreen from '@/components/inpatient/BillScreen'
 import { drName } from '@/lib/utils'
 import { getFullName } from "@/lib/patient";
@@ -30,15 +30,15 @@ export default function BillingWorkspace({ admissions, orgInfo }) {
             <IndianRupee className="h-5 w-5 text-emerald-600" />
             IPD Billing
           </h2>
-          <div className="relative">
-            <Search className="h-4 w-4 absolute left-3 top-2.5 text-gray-400" />
-            <Input 
-              placeholder="Search patients..." 
-              className="pl-9 bg-gray-50"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-            />
-          </div>
+          {/* The shared filter row (components/common/FilterBar) — this one is a
+              narrow side panel, so it carries the search box alone. */}
+          <FilterBar
+            search={searchQuery}
+            onSearchChange={setSearchQuery}
+            placeholder="Search patients..."
+            active={!!searchQuery}
+            onClear={() => setSearchQuery('')}
+          />
         </div>
 
         <div className="flex-1 overflow-y-auto p-2 space-y-2">

@@ -1,6 +1,7 @@
 import { db } from '../../config/db.js'
 import { getOrgId, safeMoney } from "../../lib/reqContext.js";
 import { dayRange } from '../../lib/dates.js'
+import { patientSearchWhere } from '../../lib/patientSearch.js'
 import { createSaleSchema } from '../validations/sale.validation.js'
 import { getPagination, paginationMeta, handleServiceError, makeError } from '../utils.js'
 import { recordStockChange, consumeFromBatches } from '../stockService.js'
@@ -13,7 +14,7 @@ const SORTABLE_FIELDS = ['saleDate', 'totalAmount', 'paymentStatus', 'createdAt'
 export async function list(req, res, next) {
   try {
     const ORGANIZATION_ID = getOrgId(req)
-    const { startDate, endDate, patientId, paymentStatus, sortBy, sortOrder } = req.query
+    const { startDate, endDate, patientId, paymentStatus, search, sortBy, sortOrder } = req.query
     const { page, limit, skip } = getPagination(req.query)
 
     const where = { organizationId: ORGANIZATION_ID }
@@ -24,6 +25,16 @@ export async function list(req, res, next) {
     if (startDate || endDate) {
       where.createdAt = dayRange(startDate, endDate)
     }
+    // Sales & Reports had no search at all — finding one receipt meant paging.
+    // The shared patient rule (name / UHID / phone), plus the receipt number and
+    // the walk-in buyer's own name and phone, which are kept on the sale itself.
+    const searchWhere = patientSearchWhere(search, 'patient', (term) => [
+      { receiptNumber: { contains: term, mode: 'insensitive' } },
+      { customerName: { contains: term, mode: 'insensitive' } },
+      { phone: { contains: term, mode: 'insensitive' } },
+      { uhid: { contains: term, mode: 'insensitive' } },
+    ])
+    if (searchWhere) Object.assign(where, searchWhere)
 
     const orderBy = SORTABLE_FIELDS.includes(sortBy)
       ? { [sortBy]: sortOrder === 'asc' ? 'asc' : 'desc' }

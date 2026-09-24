@@ -2,6 +2,7 @@ import { db } from '../config/db.js'
 import { z } from 'zod'
 import { getOrgId } from '../lib/reqContext.js'
 import { getPagination, paginationMeta } from '../lib/pagination.js'
+import { emitDataChanged } from '../lib/realtime.js'
 
 // Self-service pre-registration: a patient fills their own details via the
 // hospital's QR code before reaching the counter. Two audiences, two trust
@@ -67,6 +68,12 @@ export async function createPreRegistration(req, res, next) {
       },
       select: { id: true, firstName: true, lastName: true, createdAt: true },
     })
+
+    // Tell reception at once. The shared liveUpdates middleware cannot do it for
+    // this route: the form is filled by the patient with no login, so the request
+    // carries no organization — the hospital is only known here, from the id the
+    // QR code put in the URL and that we just verified above.
+    emitDataChanged(org.id, 'pre-registration')
 
     res.status(201).json({
       success: true,

@@ -8,8 +8,11 @@ import { Textarea } from '@/components/ui/textarea'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import PatientLookup from '@/components/common/PatientLookup'
+import { FilterBar, FilterSelect } from '@/components/common/FilterBar'
+import { useLiveData } from '@/lib/useLiveData'
+import { useDebounce } from '@/lib/useDebounce'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
-import { ShieldCheck, Plus, Search, Trash2, Loader2, AlertCircle, FileText, Users, Clock } from 'lucide-react'
+import { ShieldCheck, Plus, Trash2, Loader2, AlertCircle, FileText, Users, Clock } from 'lucide-react'
 import { toast } from 'sonner'
 import client from '@/api/client'
 
@@ -21,6 +24,12 @@ const CLAIM_STYLES = {
   approved: 'bg-green-100 text-green-700', rejected: 'bg-red-100 text-red-700', settled: 'bg-emerald-100 text-emerald-700',
 }
 
+const PAYER_OPTIONS = [
+  { value: 'all', label: 'All Payers' },
+  { value: 'INSURANCE', label: 'Insurance' },
+  { value: 'TPA', label: 'TPA' },
+]
+
 const EMPTY_CASE = { patientId: '', payerType: 'INSURANCE', insurerName: '', tpaName: '', policyNumber: '', coverageLimit: '', status: 'Active', notes: '' }
 const EMPTY_CLAIM = { claimAmount: '', approvedAmount: '', status: 'pending', diagnosis: '', remarks: '' }
 
@@ -31,6 +40,7 @@ export default function InsuranceModule() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [search, setSearch] = useState('')
+  const debouncedSearch = useDebounce(search, 300)
   const [payerFilter, setPayerFilter] = useState('all')
   const [pendingClaimsOnly, setPendingClaimsOnly] = useState(false)
 
@@ -46,7 +56,7 @@ export default function InsuranceModule() {
     setLoading(true); setError(null)
     try {
       const params = new URLSearchParams()
-      if (search) params.set('search', search)
+      if (debouncedSearch) params.set('search', debouncedSearch)
       if (payerFilter !== 'all') params.set('payerType', payerFilter)
       const res = await client.get(`/insurance?${params}`)
       if (res.success) { setCases(res.data || []); if (res.stats) setStats(res.stats) }
@@ -54,7 +64,13 @@ export default function InsuranceModule() {
     } catch (e) { setError(e.message) } finally { setLoading(false) }
   }
 
-  useEffect(() => { fetchCases() }, [search, payerFilter])
+  // Debounced, like every other search in the app: typing a name was one
+  // request per letter, and the answers could arrive out of order.
+  useEffect(() => { fetchCases() }, [debouncedSearch, payerFilter])
+
+  // Live: a claim raised or settled elsewhere lands here on its own — and the
+  // open claims dialog follows it, through the effect just below.
+  useLiveData(['insurance', 'billing'], fetchCases)
 
   // Keep the open claims dialog in sync with refreshed data.
   useEffect(() => {
@@ -149,25 +165,20 @@ export default function InsuranceModule() {
         </Card>
       </div>
 
+      {/* The shared filter row (components/common/FilterBar). */}
+      <FilterBar
+        search={search}
+        onSearchChange={setSearch}
+        placeholder="Search name, insurer, policy..."
+        active={!!search || payerFilter !== 'all'}
+        onClear={() => { setSearch(''); setPayerFilter('all') }}
+      >
+        <FilterSelect value={payerFilter} onChange={setPayerFilter} className="w-40" options={PAYER_OPTIONS} />
+      </FilterBar>
+
       <Card>
         <CardHeader>
-          <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
-            <CardTitle className="flex items-center gap-2"><ShieldCheck className="h-5 w-5 text-blue-600" /> TPA &amp; Insurance Cases</CardTitle>
-            <div className="flex flex-wrap items-center gap-2">
-              <div className="relative w-full md:w-64">
-                <Search className="h-4 w-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
-                <Input placeholder="Search name, insurer, policy..." className="pl-9" value={search} onChange={e => setSearch(e.target.value)} />
-              </div>
-              <Select value={payerFilter} onValueChange={setPayerFilter}>
-                <SelectTrigger className="w-[150px]"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Payers</SelectItem>
-                  <SelectItem value="INSURANCE">Insurance</SelectItem>
-                  <SelectItem value="TPA">TPA</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
+          <CardTitle className="flex items-center gap-2"><ShieldCheck className="h-5 w-5 text-blue-600" /> TPA &amp; Insurance Cases</CardTitle>
         </CardHeader>
         <CardContent>
           {loading && cases.length === 0 ? (

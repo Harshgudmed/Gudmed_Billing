@@ -13,11 +13,21 @@ import { Plus, Eye, XCircle } from "lucide-react";
 import { format } from "date-fns";
 import { statusBadge } from "../pharmacyHelpers";
 import { Pagination } from "@/components/common/Pagination";
+import { FilterBar, FilterSelect, DATE_MODES, statusOptions } from "@/components/common/FilterBar";
 import { formatMoney } from "@/lib/format";
+
+const PO_STATUS_OPTIONS = statusOptions(
+  ["draft", "submitted", "approved", "received", "cancelled"],
+  { label: (v) => v.replace(/^\w/, (c) => c.toUpperCase()) },
+);
 
 export default function PurchaseOrdersTab({
   poStatusFilter,
   setPoStatusFilter,
+  search = "",
+  setSearch,
+  dateMode = "all",
+  setDateMode,
   purchaseOrders,
   loading,
   page,
@@ -36,34 +46,35 @@ export default function PurchaseOrdersTab({
   const rows = purchaseOrders || [];
   return (
     <TabsContent value="purchase-orders" className="space-y-4">
-      <div className="flex items-center justify-between gap-3">
-        <Select value={poStatusFilter} onValueChange={setPoStatusFilter}>
-          <SelectTrigger className="w-44"><SelectValue /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Statuses</SelectItem>
-            <SelectItem value="draft">Draft</SelectItem>
-            <SelectItem value="submitted">Submitted</SelectItem>
-            <SelectItem value="approved">Approved</SelectItem>
-            <SelectItem value="received">Received</SelectItem>
-            <SelectItem value="cancelled">Cancelled</SelectItem>
-          </SelectContent>
-        </Select>
-        <Button
-          onClick={() => {
-            setPoForm({
-              supplierName: "",
-              supplierContact: "",
-              expectedDeliveryDate: "",
-              notes: "",
-            });
-            setPoItems([]);
-            setShowPoDialog(true);
-          }}
-        >
-          <Plus className="h-4 w-4 mr-1" />
-          New PO
-        </Button>
-      </div>
+      {/* This tab had only a status dropdown. Search and the order-date filter
+          both run in the database (pharmacy/controllers/purchaseOrder.controller.js). */}
+      <FilterBar
+        search={search}
+        onSearchChange={setSearch}
+        placeholder="Search PO # or supplier..."
+        active={!!search || poStatusFilter !== "all" || dateMode !== "all"}
+        onClear={() => { setSearch(""); setPoStatusFilter("all"); setDateMode("all") }}
+        actions={
+          <Button
+            onClick={() => {
+              setPoForm({
+                supplierName: "",
+                supplierContact: "",
+                expectedDeliveryDate: "",
+                notes: "",
+              });
+              setPoItems([]);
+              setShowPoDialog(true);
+            }}
+          >
+            <Plus className="h-4 w-4 mr-1" />
+            New PO
+          </Button>
+        }
+      >
+        <FilterSelect value={poStatusFilter} onChange={setPoStatusFilter} className="w-44" options={PO_STATUS_OPTIONS} />
+        <FilterSelect value={dateMode} onChange={setDateMode} className="w-36" options={DATE_MODES} />
+      </FilterBar>
       <Card>
         <CardContent className="p-0">
           <Table>

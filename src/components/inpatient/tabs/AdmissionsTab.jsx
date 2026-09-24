@@ -8,7 +8,13 @@ import { Badge } from '@/components/ui/badge'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { admissionLabel, getWardName, emptyDischarge } from '@/lib/inpatientHelpers'
+import { FilterBar, FilterSelect, statusOptions } from '@/components/common/FilterBar'
 import { getFullName } from "@/lib/patient";
+
+const ADMISSION_STATUS_OPTIONS = statusOptions(['admitted', 'discharged', 'transferred'], {
+  allLabel: 'All Status',
+  label: (v) => v.replace(/^\w/, (c) => c.toUpperCase()),
+})
 
 // Admissions tab — searchable/filterable table of admissions (paginated server-side).
 // Discharge action opens the shared dialog owned by InpatientModule.
@@ -20,28 +26,21 @@ export default function AdmissionsTab({
 }) {
   return (
           <div className="space-y-4">
-            <div className="flex gap-3">
-              <div className="relative flex-1">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
-                <Input className="pl-9" placeholder="Search by patient, UHID, admission #..." value={searchQuery} onChange={e => setSearchQuery(e.target.value)} />
-              </div>
-              <Select value={wardFilter} onValueChange={setWardFilter}>
-                <SelectTrigger className="w-40"><SelectValue placeholder="All Wards" /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Wards</SelectItem>
-                  {wards.map(w => <SelectItem key={w.id} value={w.id}>{w.name}</SelectItem>)}
-                </SelectContent>
-              </Select>
-              <Select value={statusFilter} onValueChange={setStatusFilter}>
-                <SelectTrigger className="w-36"><SelectValue placeholder="All Status" /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Status</SelectItem>
-                  <SelectItem value="admitted">Admitted</SelectItem>
-                  <SelectItem value="discharged">Discharged</SelectItem>
-                  <SelectItem value="transferred">Transferred</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
+            {/* The shared filter row (components/common/FilterBar). */}
+            <FilterBar
+              search={searchQuery}
+              onSearchChange={setSearchQuery}
+              placeholder="Search by patient, UHID, admission #..."
+              active={!!searchQuery || wardFilter !== 'all' || statusFilter !== 'all'}
+              onClear={() => { setSearchQuery(''); setWardFilter('all'); setStatusFilter('all') }}
+            >
+              <FilterSelect
+                value={wardFilter}
+                onChange={setWardFilter}
+                options={[{ value: 'all', label: 'All Wards' }, ...wards.map(w => ({ value: w.id, label: w.name }))]}
+              />
+              <FilterSelect value={statusFilter} onChange={setStatusFilter} className="w-36" options={ADMISSION_STATUS_OPTIONS} />
+            </FilterBar>
             <Card>
               <CardContent className="p-0">
                 <Table>

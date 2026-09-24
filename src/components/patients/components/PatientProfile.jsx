@@ -9,8 +9,9 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { Loader2, RefreshCw, Users, CalendarDays, Microscope, ScanLine, BedDouble, FileText, IndianRupee, Clock, XCircle, FlaskConical, Scan, AlertCircle, Printer, Eye, Edit } from 'lucide-react';
+import { Loader2, Users, CalendarDays, Microscope, ScanLine, BedDouble, FileText, IndianRupee, Clock, XCircle, FlaskConical, Scan, AlertCircle, Printer, Eye, Edit } from 'lucide-react';
 import { getFullName, calculateAge, initials } from '../utils/patientUtils';
+import { useLiveData } from '@/lib/useLiveData';
 import { toast } from 'sonner';
 
 // The strip was a 6-column grid, so every tab got the same 115px whatever its
@@ -42,6 +43,18 @@ export default function PatientProfile({
   openEdit,
   orgInfo
 }) {
+  // The profile is a live view of one patient while it is open: a lab report
+  // filed, a bill raised or an appointment booked at another desk appears in
+  // its tab on its own, which is why the header has no Refresh button. The
+  // topic list is empty when the dialog is shut, so a closed profile listens
+  // for nothing.
+  useLiveData(
+    showViewDialog && selectedPatient
+      ? ['appointments', 'consultations', 'laboratory', 'radiology', 'billing', 'inpatient', 'pharmacy']
+      : [],
+    () => { if (selectedPatient) fetchRecords(selectedPatient.id); },
+  );
+
   const handlePrintLabReport = (order) => {
     const results = order.results || [];
     
@@ -196,9 +209,6 @@ body{font-family:Arial,Helvetica,sans-serif;font-size:10.5pt;color:#000;backgrou
                 <p className="text-lg font-bold">{getFullName(selectedPatient)}</p>
                 <p className="text-sm text-gray-500">UHID: {selectedPatient.mrn}</p>
               </div>
-              <Button variant="outline" size="sm" onClick={() => fetchRecords(selectedPatient.id)}>
-                <RefreshCw className="h-3.5 w-3.5 mr-1" />Refresh
-              </Button>
             </div>
 
             <Tabs value={viewTab} onValueChange={setViewTab}>

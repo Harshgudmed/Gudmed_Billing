@@ -9,7 +9,10 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import PatientLookup from '@/components/common/PatientLookup'
-import { Ambulance, Plus, Search, Trash2, Loader2, AlertCircle } from 'lucide-react'
+import { FilterBar, FilterSelect, statusOptions } from '@/components/common/FilterBar'
+import { useLiveData } from '@/lib/useLiveData'
+import { useDebounce } from '@/lib/useDebounce'
+import { Ambulance, Plus, Trash2, Loader2, AlertCircle } from 'lucide-react'
 import { format } from 'date-fns'
 import { toast } from 'sonner'
 import client from '@/api/client'
@@ -33,6 +36,13 @@ const STATUS_STYLES = {
 import { formatMoney as inr } from '@/lib/format'
 import { getFullName } from "@/lib/patient";
 
+// The filter row's dropdowns, built from the lists this screen already has.
+const TRIP_TYPE_OPTIONS = statusOptions(TYPES.map(t => t.value), { allLabel: 'All Types', label: (v) => v })
+const TRIP_STATUS_OPTIONS = statusOptions(
+  ['active', 'scheduled', 'enroute', 'completed', 'cancelled'],
+  { label: (v) => (v === 'enroute' ? 'En Route' : v.replace(/^\w/, (c) => c.toUpperCase())) },
+)
+
 const EMPTY = {
   patientId: '', ambulanceType: 'ALS', fromLocation: '', toLocation: 'Hospital',
   distanceKm: '', charge: '', status: 'completed', driverName: '', vehicleNumber: '', contactPhone: '', notes: '',
@@ -44,6 +54,9 @@ export default function AmbulanceModule() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [search, setSearch] = useState('')
+  // Debounced, like every other search in the app — this fired one request per
+  // letter typed.
+  const debouncedSearch = useDebounce(search, 300)
   const [typeFilter, setTypeFilter] = useState('all')
   const [statusFilter, setStatusFilter] = useState('all')
   const [saving, setSaving] = useState(false)
@@ -54,14 +67,23 @@ export default function AmbulanceModule() {
     setLoading(true); setError(null)
     try {
       const params = new URLSearchParams()
-      if (search) params.set('search', search)
+      if (debouncedSearch) params.set('search', debouncedSearch)
       const res = await client.get(`/ambulance?${params}`)
       if (res.success) setTrips(res.data || [])
       else setError(res.error || 'Failed to load')
     } catch (e) { setError(e.message) } finally { setLoading(false) }
   }
 
-  useEffect(() => { fetchTrips() }, [search])
+  useEffect(() => { fetchTrips() }, [debouncedSearch])
+
+  // Live: a trip logged or closed by the driver's desk appears on this screen
+  // by itself — no Refresh button to press.
+  useLiveData('ambulance', fetchTrips)
+
+  // Type and status stay client-side on purpose: the stat cards above
+  // (Total / Active / Completed / Revenue) are counted from this same list, so
+  // sending these to the server — which does support them — would quietly turn
+  // those cards into "of the filtered set".
 
   const filteredTrips = useMemo(() => trips.filter(t =>
     (typeFilter === 'all' || t.ambulanceType === typeFilter) &&
@@ -138,39 +160,28 @@ export default function AmbulanceModule() {
         <Card className="border-l-4 border-l-blue-500"><CardHeader className="py-4"><CardTitle className="text-sm font-medium text-gray-500">Revenue</CardTitle></CardHeader><CardContent><div className="text-2xl font-bold">{inr(stats.revenue)}</div></CardContent></Card>
       </div>
 
+      {/* The shared filter row (components/common/FilterBar) — one shape for
+          every list in the app. */}
+      <FilterBar
+        search={search}
+        onSearchChange={setSearch}
+        placeholder="Search trip, patient, location..."
+        active={!!search || typeFilter !== 'all' || statusFilter !== 'all'}
+        onClear={() => { setSearch(''); setTypeFilter('all'); setStatusFilter('all') }}
+        actions={
+          <Button className="bg-green-600 hover:bg-green-700" onClick={() => setFormOpen(true)}>
+            <Plus className="h-4 w-4 mr-2" /> New Ambulance Trip
+          </Button>
+        }
+      >
+        <FilterSelect value={typeFilter} onChange={setTypeFilter} options={TRIP_TYPE_OPTIONS} />
+        <FilterSelect value={statusFilter} onChange={setStatusFilter} options={TRIP_STATUS_OPTIONS} />
+      </FilterBar>
+
       {/* Billing table */}
       <Card>
         <CardHeader>
-            <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
-              <CardTitle className="flex items-center gap-2"><Ambulance className="h-5 w-5 text-blue-600" /> Ambulance Billing</CardTitle>
-              <div className="flex flex-col sm:flex-row gap-2 w-full md:w-auto">
-                <Button className="bg-green-600 hover:bg-green-700 shrink-0" onClick={() => setFormOpen(true)}>
-                  <Plus className="h-4 w-4 mr-2" /> New Ambulance Trip
-                </Button>
-                <div className="relative w-full sm:w-56">
-                  <Search className="h-4 w-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
-                  <Input placeholder="Search trip, patient, location..." className="pl-9" value={search} onChange={e => setSearch(e.target.value)} />
-                </div>
-                <Select value={typeFilter} onValueChange={setTypeFilter}>
-                  <SelectTrigger className="w-full sm:w-[140px]"><SelectValue placeholder="Type" /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">All Types</SelectItem>
-                    {TYPES.map(t => <SelectItem key={t.value} value={t.value}>{t.value}</SelectItem>)}
-                  </SelectContent>
-                </Select>
-                <Select value={statusFilter} onValueChange={setStatusFilter}>
-                  <SelectTrigger className="w-full sm:w-[140px]"><SelectValue placeholder="Status" /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">All Statuses</SelectItem>
-                    <SelectItem value="active">Active</SelectItem>
-                    <SelectItem value="scheduled">Scheduled</SelectItem>
-                    <SelectItem value="enroute">En Route</SelectItem>
-                    <SelectItem value="completed">Completed</SelectItem>
-                    <SelectItem value="cancelled">Cancelled</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
+            <CardTitle className="flex items-center gap-2"><Ambulance className="h-5 w-5 text-blue-600" /> Ambulance Billing</CardTitle>
           </CardHeader>
           <CardContent>
             {loading && trips.length === 0 ? (

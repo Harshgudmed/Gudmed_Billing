@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import client from "@/api/client";
+import { useLatestRequest } from "@/lib/useLatestRequest";
 
 // Server-side pagination: fetches ONE page from the backend, so it works on
 // tables with hundreds of thousands / millions of rows (the DB does the
@@ -28,7 +29,13 @@ export function useServerPagination(endpoint, { perPage = 15, params = {}, pollM
   // changes (not on every parent re-render that rebuilds the params object).
   const paramKey = JSON.stringify(params);
 
+  // A filter change on page 2 fires two requests (page 2 + filter, then page 1
+  // + filter), and typing fires one per pause; only the newest may fill the
+  // table, or a slow stale answer shows "nothing found" (see useLatestRequest).
+  const beginRequest = useLatestRequest();
+
   const fetchPage = useCallback(async () => {
+    const isLatest = beginRequest();
     setLoading(true);
     const qs = new URLSearchParams({
       ...JSON.parse(paramKey),
@@ -41,17 +48,21 @@ export function useServerPagination(endpoint, { perPage = 15, params = {}, pollM
     }
     try {
       const res = await client.get(`${endpoint}?${qs.toString()}`);
+      if (!isLatest()) return;
       setRows(res.data ?? []);
       setTotal(res.pagination?.totalRecords ?? res.meta?.total ?? 0);
       setSummary(res.summary ?? null);
     } catch {
+      if (!isLatest()) return;
       setRows([]);
       setTotal(0);
       setSummary(null);
     } finally {
-      setLoading(false);
+      // The newer request owns the spinner; an outdated one must not clear it
+      // while that request is still on its way.
+      if (isLatest()) setLoading(false);
     }
-  }, [endpoint, page, perPage, paramKey]);
+  }, [endpoint, page, perPage, paramKey, beginRequest]);
 
   useEffect(() => {
     fetchPage();

@@ -28,6 +28,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { formatTime12h } from "@/lib/format";
+import { FilterBar, FilterSelect } from "@/components/common/FilterBar";
 import {
   CalendarDays,
   Plus,
@@ -92,76 +93,48 @@ export default function AppointmentsListView({
   // the backend); `total` is the full match count used for pagination.
   const totalPages = Math.ceil(total / APPOINTMENTS_LIST_PER_PAGE);
 
+  // Options for the shared filter row. The "all" entries appear only where they
+  // did before: a doctor's own login sees just their own name and department.
+  const statusFilterOptions = [
+    { value: "all", label: "All Status" },
+    ...Object.entries(STATUS_CONFIG).map(([key, value]) => ({ value: key, label: value.label })),
+  ];
+  const departmentFilterOptions = [
+    ...(filterDoctors.length !== 1 ? [{ value: "all", label: "All Departments" }] : []),
+    ...uniqueDepartments.map((d) => ({ value: d.name, label: d.name })),
+  ];
+  const doctorFilterOptions = [
+    ...(filterDoctors.length > 1 ? [{ value: "all", label: "All Doctors" }] : []),
+    ...filterDoctors.map((d) => ({ value: d.id, label: drName(d.fullName) })),
+  ];
+
   return (
     <>
-      <Card>
-        <CardContent className="p-4">
-          <div className="flex flex-wrap gap-4">
-            <div className="flex-1 min-w-[200px] relative">
-              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
-              <Input
-                placeholder="Search by patient, doctor, UHID..."
-                className="pl-10"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-              />
-            </div>
-            <Input
-              type="date"
-              className="w-[180px]"
-              value={format(selectedDate, "yyyy-MM-dd")}
-              onChange={(e) =>
-                e.target.value && setSelectedDate(new Date(e.target.value))
-              }
-            />
-            <Select value={statusFilter} onValueChange={setStatusFilter}>
-              <SelectTrigger className="w-[150px]">
-                <SelectValue placeholder="All Status" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Status</SelectItem>
-                {Object.entries(STATUS_CONFIG).map(([key, value]) => (
-                  <SelectItem key={key} value={key}>
-                    {value.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            {/* A single doctor (a doctor's own login) is offered only their own
-                department, with no "all" — see AppointmentsModule. With no
-                department at all there is nothing to choose, so no dropdown. */}
-            {(filterDoctors.length !== 1 || uniqueDepartments.length > 0) && (
-              <Select value={departmentFilter} onValueChange={setDepartmentFilter}>
-                <SelectTrigger className="w-[180px]">
-                  <SelectValue placeholder="All Departments" />
-                </SelectTrigger>
-                <SelectContent>
-                  {filterDoctors.length !== 1 && <SelectItem value="all">All Departments</SelectItem>}
-                  {uniqueDepartments.map((department) => (
-                    <SelectItem key={department.id} value={department.name}>
-                      {department.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            )}
-            <Select value={doctorFilter} onValueChange={setDoctorFilter}>
-              <SelectTrigger className="w-[180px]">
-                <SelectValue placeholder="All Doctors" />
-              </SelectTrigger>
-              <SelectContent>
-                {/* See DoctorSlotsView: no "all" when there is only one name. */}
-                {filterDoctors.length > 1 && <SelectItem value="all">All Doctors</SelectItem>}
-                {filterDoctors.map((doctor) => (
-                  <SelectItem key={doctor.id} value={doctor.id}>
-                    {drName(doctor.fullName)}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-        </CardContent>
-      </Card>
+      {/* The shared filter row (components/common/FilterBar) — same shape as
+          every other list in the app. The day picker stays a date box because
+          this screen is always about one day. */}
+      <FilterBar
+        search={searchQuery}
+        onSearchChange={setSearchQuery}
+        placeholder="Search by patient, doctor, UHID..."
+        active={!!searchQuery || statusFilter !== 'all' || departmentFilter !== 'all' || doctorFilter !== 'all'}
+        onClear={() => { setSearchQuery(''); setStatusFilter('all'); setDepartmentFilter('all'); setDoctorFilter('all') }}
+      >
+        <Input
+          type="date"
+          className="w-[180px]"
+          value={format(selectedDate, "yyyy-MM-dd")}
+          onChange={(e) => e.target.value && setSelectedDate(new Date(e.target.value))}
+        />
+        <FilterSelect value={statusFilter} onChange={setStatusFilter} className="w-[150px]" options={statusFilterOptions} />
+        {/* A single doctor (a doctor's own login) is offered only their own
+            department, with no "all" — see AppointmentsModule. With no
+            department at all there is nothing to choose, so no dropdown. */}
+        {(filterDoctors.length !== 1 || uniqueDepartments.length > 0) && (
+          <FilterSelect value={departmentFilter} onChange={setDepartmentFilter} className="w-[180px]" options={departmentFilterOptions} placeholder="All Departments" />
+        )}
+        <FilterSelect value={doctorFilter} onChange={setDoctorFilter} className="w-[180px]" options={doctorFilterOptions} placeholder="All Doctors" />
+      </FilterBar>
       <Card>
         <CardContent className="p-0">
           {total === 0 ? (

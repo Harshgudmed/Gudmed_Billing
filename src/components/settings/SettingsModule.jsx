@@ -30,8 +30,10 @@ import { zodResolver } from '@hookform/resolvers/zod'
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form'
 import client from '@/api/client'
 import { useServerPagination } from '@/lib/useServerPagination'
+import { useLiveData } from '@/lib/useLiveData'
 import { useDebounce } from '@/lib/useDebounce'
 import { Pagination } from '@/components/common/Pagination'
+import { FilterBar, FilterSelect } from '@/components/common/FilterBar'
 import IntegrationsHub from './IntegrationsHub'
 import RoomsManager from './RoomsManager'
 // lazy: the display-board manager is a module in its own right, sitting in one
@@ -52,6 +54,12 @@ const ROLE_LABELS = {
   billing_clerk: 'Billing Clerk',
   inventory_manager: 'Inventory Manager',
 }
+
+// The Users filter row's role dropdown, from the same list the form uses.
+const ROLE_FILTER_OPTIONS = [
+  { value: 'all', label: 'All Roles' },
+  ...Object.entries(ROLE_LABELS).map(([value, label]) => ({ value, label })),
+]
 
 const INDIAN_STATES = [
   'Andhra Pradesh', 'Arunachal Pradesh', 'Assam', 'Bihar', 'Chhattisgarh',
@@ -117,10 +125,13 @@ export default function SettingsModule() {
   // matches on fullName and email (settingsController.getUsers), so the search
   // just had to be handed to it. Debounced so a name is one request, not eight.
   const [userSearch, setUserSearch] = useState('')
+  const [roleFilter, setRoleFilter] = useState('all')
   const debouncedUserSearch = useDebounce(userSearch, 300)
   const usersPagination = useServerPagination('/settings', {
+    // `role` is filtered in the DB (settingsController.getUsers), so it narrows
+    // every page — not only the ten rows on screen.
     perPage: ITEMS_PER_PAGE,
-    params: { resource: 'users', search: debouncedUserSearch },
+    params: { resource: 'users', search: debouncedUserSearch, role: roleFilter === 'all' ? '' : roleFilter },
   })
 
   const [orgForm, setOrgForm] = useState({
@@ -188,6 +199,14 @@ export default function SettingsModule() {
   }
 
   useEffect(() => { fetchAll() }, [])
+
+  // The staff list is live: a user added or deactivated by another administrator
+  // shows up here on its own, which is why there is no Refresh button.
+  //
+  // Deliberately NOT fetchAll: that re-reads the organisation into orgForm, and
+  // a push arriving while somebody is typing in these boxes would throw their
+  // half-finished edit away. A form is not a list.
+  useLiveData('settings', usersPagination.refresh)
 
 
   useEffect(() => {
@@ -333,7 +352,6 @@ export default function SettingsModule() {
           </h1>
           <p className="text-gray-500">Configure your hospital management system</p>
         </div>
-        <Button variant="outline" onClick={fetchAll}><RefreshCw className="h-4 w-4 mr-2" />Refresh</Button>
       </div>
 
       <Tabs value={activeTab} onValueChange={setActiveTab}>
@@ -614,20 +632,24 @@ export default function SettingsModule() {
 
         {/* Users Tab */}
         <TabsContent value="users" className="space-y-4">
+          {/* The shared filter row (components/common/FilterBar). The role
+              dropdown is new: searching "doctor" found nobody, because the box
+              matches names and emails — the server has always accepted a role
+              filter, the screen just never offered one. */}
+          <FilterBar
+            search={userSearch}
+            onSearchChange={setUserSearch}
+            placeholder="Search by name or email…"
+            active={!!userSearch || roleFilter !== 'all'}
+            onClear={() => { setUserSearch(''); setRoleFilter('all') }}
+          >
+            <FilterSelect value={roleFilter} onChange={setRoleFilter} className="w-48" options={ROLE_FILTER_OPTIONS} />
+          </FilterBar>
           <Card>
             <CardHeader className="flex flex-row items-center justify-between gap-4">
               <div>
                 <CardTitle>User Management</CardTitle>
                 <CardDescription>Add, edit, and manage user accounts</CardDescription>
-              </div>
-              <div className="relative w-full max-w-xs ml-auto">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
-                <Input
-                  className="pl-9"
-                  placeholder="Search by name or email…"
-                  value={userSearch}
-                  onChange={(e) => setUserSearch(e.target.value)}
-                />
               </div>
               <Dialog open={showUserDialog} onOpenChange={open => { setShowUserDialog(open); if (!open) setEditingUser(null) }}>
                 <DialogTrigger asChild>

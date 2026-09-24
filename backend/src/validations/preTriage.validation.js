@@ -30,8 +30,18 @@ const vitalsShape = {
 
 const age = optionalNum(0, 150, { int: true })
 
+// A walk-in has no registered patient, and the form says so with patientId ''.
+// To the database '' is not "no patient" — it is a link to a patient whose id is
+// '', which does not exist — so every walk-in screening was refused with
+// "Invalid reference: a linked record does not exist". Blank means none, the
+// same way the vitals above and `status` below treat an empty value.
+const optionalPatientId = z.preprocess(
+  (v) => (v === '' || v === null || v === undefined ? undefined : v),
+  z.string().optional()
+)
+
 export const createPreTriageSchema = z.object({
-  patientId: z.string().optional(),
+  patientId: optionalPatientId,
   firstName: z.string().optional(),
   lastName: z.string().optional(),
   age,

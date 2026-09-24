@@ -4,11 +4,13 @@ import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { admissionLabel, getWardName } from '@/lib/inpatientHelpers'
+import { FilterBar } from '@/components/common/FilterBar'
 import { getFullName } from "@/lib/patient";
 
 // Patient Discharge History tab — paginated cards of past (discharged) admissions.
 export default function PatientHistoryTab({
-  dischargedList, wards, patientHistoryPage, setPatientHistoryPage,
+  dischargedList, meta = {}, search = '', setSearch,
+  wards, patientHistoryPage, setPatientHistoryPage,
   openViewAdmission, handlePrintDischargeSummary,
 }) {
   return (
@@ -18,19 +20,31 @@ export default function PatientHistoryTab({
                 <h2 className="text-base font-semibold">Patient Discharge History</h2>
                 <p className="text-xs text-blue-600">All past admissions, discharge summaries, and records</p>
               </div>
-              <span className="text-xs text-gray-500">{dischargedList.length} discharge records</span>
+              {/* The server's count of every discharge, not the rows on screen. */}
+              <span className="text-xs text-gray-500">{meta.total ?? dischargedList.length} discharge records</span>
             </div>
+            {/* The shared filter row (components/common/FilterBar). This tab had
+                no search at all. */}
+            {setSearch && (
+              <FilterBar
+                className="mb-4"
+                search={search}
+                onSearchChange={setSearch}
+                placeholder="Search patient, UHID, phone or admission #..."
+                active={!!search}
+                onClear={() => setSearch('')}
+              />
+            )}
             {dischargedList.length === 0 ? (
-              <Card><CardContent className="py-10 text-center text-gray-400">No discharge records yet</CardContent></Card>
+              <Card><CardContent className="py-10 text-center text-gray-400">
+                {search ? 'No discharge matches this search' : 'No discharge records yet'}
+              </CardContent></Card>
             ) : (
               <div>
                 <div className="space-y-3">
                   {(() => {
-                    const ITEMS_PER_PAGE = 10
-                    const startIdx = (patientHistoryPage - 1) * ITEMS_PER_PAGE
-                    const endIdx = startIdx + ITEMS_PER_PAGE
-                    const paginatedData = dischargedList.slice(startIdx, endIdx)
-                    return paginatedData.map(a => {
+                    // One page, exactly as the server returned it.
+                    return dischargedList.map(a => {
                       const days = (a.admissionDate && a.dischargeDate) ? differenceInDays(new Date(a.dischargeDate), new Date(a.admissionDate)) : 0
                       const initials = (a.patient?.firstName?.[0] || '') + (a.patient?.lastName?.[0] || '')
                       return (
@@ -94,8 +108,7 @@ export default function PatientHistoryTab({
                   })()}
                 </div>
                 {(() => {
-                  const ITEMS_PER_PAGE = 10
-                  const totalPages = Math.ceil(dischargedList.length / ITEMS_PER_PAGE)
+                  const totalPages = meta.totalPages || 1
                   return totalPages > 1 ? (
                     <div className="flex items-center justify-end gap-2 p-4 border-t mt-4">
                       <Button variant="outline" size="sm" onClick={() => setPatientHistoryPage(p => Math.max(1, p - 1))} disabled={patientHistoryPage === 1}>

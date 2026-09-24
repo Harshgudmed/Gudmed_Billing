@@ -3,10 +3,11 @@ import { toast } from 'sonner'
 import { Loader2, Stethoscope } from 'lucide-react'
 import client from '@/api/client'
 import NotesAndOrders from '@/components/inpatient/NotesAndOrders'
+import { useLiveData } from '@/lib/useLiveData'
 
 // Doctor portal — "Clinical Orders" for the logged-in doctor's OWN admitted patients.
 // Reuses the ward ClinicalOrdersTab (search → order → timeline). Orders placed here
-// appear on the ward/nursing dashboard within ~10s (both poll the same data).
+// reach the ward/nursing dashboard in about a second, over the hospital's socket.
 export default function DoctorClinicalOrders() {
   const [admitted, setAdmitted] = useState([])
   const [loading, setLoading] = useState(true)
@@ -20,8 +21,9 @@ export default function DoctorClinicalOrders() {
   }, [])
 
   useEffect(() => { load() }, [load])
-  // refresh the patient list periodically (new admissions assigned to me)
-  useEffect(() => { const t = setInterval(load, 20000); return () => clearInterval(t) }, [load])
+  // A patient admitted under me appears in this list straight away — over the
+  // hospital's socket, in place of the 20-second poll this used to run.
+  useLiveData('inpatient', load)
 
   return (
     <div className="p-6 space-y-5">

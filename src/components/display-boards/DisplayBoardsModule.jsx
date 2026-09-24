@@ -10,6 +10,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogD
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Badge } from '@/components/ui/badge'
 import DoctorTiming from '../doctor-accountability/DoctorTiming'
+import { FilterBar } from '@/components/common/FilterBar'
+import { useLiveData } from '@/lib/useLiveData'
 import ScreenHealth from './ScreenHealth'
 
 // The hospital's OWN brand colours (Settings → Organization → colour picker),
@@ -120,6 +122,10 @@ export default function DisplayBoardsModule() {
   useEffect(() => {
     fetchData()
   }, [])
+
+  // Live: a screen or a room set up by another administrator appears here on
+  // its own, so this page carries no Refresh button.
+  useLiveData(['screens', 'rooms'], fetchData)
 
   // Defaults the filter to the first floor once floors load, so the dialog
   // never opens showing every room in the hospital unfiltered.
@@ -323,22 +329,16 @@ export default function DisplayBoardsModule() {
         </div>
       )}
 
-      {/* Finds a screen by name OR by any room number it holds — with 20+
-          screens, scrolling to answer "which TV has room 145?" doesn't scale. */}
-      <div className="relative max-w-sm">
-        <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-gray-400" />
-        <Input
-          value={boardSearch}
-          onChange={e => setBoardSearch(e.target.value)}
-          placeholder="Search by screen name or room number..."
-          className="pl-8"
-        />
-        {boardSearch && (
-          <button onClick={() => setBoardSearch('')} className="absolute right-2.5 top-2.5 text-gray-400 hover:text-gray-600">
-            <X className="h-4 w-4" />
-          </button>
-        )}
-      </div>
+      {/* The shared filter row (components/common/FilterBar). Finds a screen by
+          name OR by any room number it holds — with 20+ screens, scrolling to
+          answer "which TV has room 145?" doesn't scale. */}
+      <FilterBar
+        search={boardSearch}
+        onSearchChange={setBoardSearch}
+        placeholder="Search by screen name or room number..."
+        active={!!boardSearch}
+        onClear={() => setBoardSearch('')}
+      />
 
       {screenGroups.length === 0 && boardSearch && (
         <div className="rounded-lg border border-dashed p-8 text-center text-sm text-gray-400">

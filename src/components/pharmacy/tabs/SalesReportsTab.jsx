@@ -10,11 +10,20 @@ import {
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
-import { RefreshCw, Loader2, Printer, XCircle } from "lucide-react";
+import { Loader2, Printer, XCircle } from "lucide-react";
 import { format } from "date-fns";
 import { statusBadge } from "../pharmacyHelpers";
 import { Pagination } from "@/components/common/Pagination";
+import { FilterBar, FilterSelect } from "@/components/common/FilterBar";
 import { formatMoney } from "@/lib/format";
+
+// This screen's periods run today → all time (the others start at "All Time").
+const SALES_PERIOD_OPTIONS = [
+  { value: "today", label: "Today" },
+  { value: "week", label: "This Week" },
+  { value: "month", label: "This Month" },
+  { value: "all", label: "All Time" },
+];
 import { printPharmacyReceipt } from "@/components/billing/utils/printBilling";
 import { getFullName } from "@/lib/patient";
 
@@ -36,6 +45,8 @@ function itemCount(s) {
 export default function SalesReportsTab({
   salesPeriod,
   setSalesPeriod,
+  search = "",
+  setSearch,
   sales,        // current page only (server-paged)
   loading,
   page,
@@ -49,29 +60,28 @@ export default function SalesReportsTab({
 }) {
   return (
     <TabsContent value="sales" className="space-y-4">
-      <div className="flex items-center justify-between gap-3">
-        <div className="flex items-center gap-3">
-          <Select value={salesPeriod} onValueChange={setSalesPeriod}>
-            <SelectTrigger className="w-36"><SelectValue /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="today">Today</SelectItem>
-              <SelectItem value="week">This Week</SelectItem>
-              <SelectItem value="month">This Month</SelectItem>
-              <SelectItem value="all">All Time</SelectItem>
-            </SelectContent>
-          </Select>
-          {salesCount > 0 && (
-            <span className="text-sm text-gray-600">
-              <span className="font-semibold">{salesCount}</span> sales ·{" "}
-              <span className="font-semibold text-green-700">{formatMoney(salesTotal)}</span>
-            </span>
-          )}
-        </div>
-        <Button variant="outline" onClick={refresh}>
-          <RefreshCw className="h-4 w-4 mr-1" />
-          Refresh
-        </Button>
-      </div>
+      {/* This tab had a period dropdown and nothing else — no way to find one
+          receipt. The search runs in the database (pharmacy/controllers/sale.controller.js)
+          and covers receipt number, patient name / UHID / phone, and a walk-in
+          buyer's own name. */}
+      <FilterBar
+        search={search}
+        onSearchChange={setSearch}
+        placeholder="Search receipt #, patient, UHID or phone..."
+        active={!!search || salesPeriod !== "month"}
+        onClear={() => { setSearch(""); setSalesPeriod("month") }}
+        /* No Refresh button: the Pharmacy screen is live (useLiveData in
+           PharmacyModule), so a sale made at another counter shows up on its own. */
+      >
+        <FilterSelect value={salesPeriod} onChange={setSalesPeriod} className="w-36" options={SALES_PERIOD_OPTIONS} />
+      </FilterBar>
+      {salesCount > 0 && (
+        <p className="text-sm text-gray-600">
+          {/* Both counted by the DB across the whole filtered period, not this page. */}
+          <span className="font-semibold">{salesCount}</span> sales ·{" "}
+          <span className="font-semibold text-green-700">{formatMoney(salesTotal)}</span>
+        </p>
+      )}
       <Card>
         <CardContent className="p-0">
           <Table>

@@ -1,5 +1,7 @@
-import { ArrowRight, RefreshCw, ChevronLeft, ChevronRight } from 'lucide-react'
+import { useState } from 'react'
+import { ArrowRight, ChevronLeft, ChevronRight } from 'lucide-react'
 import { format } from 'date-fns'
+import { FilterBar } from '@/components/common/FilterBar'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -11,6 +13,16 @@ const TRANSFERS_PER_PAGE = 15
 // Patient Movement History tab — ward transfers recorded during active admissions.
 // Presentational: all data + page state come from InpatientModule via props.
 export default function MovementTab({ transferEventList, admissions, transferHistoryPage, setTransferHistoryPage, fetchAll }) {
+  // This tab had no search. The transfers are already in the browser (they come
+  // with the admitted patients), so it narrows them here — the stat cards above
+  // keep counting every transfer, not the search.
+  const [search, setSearch] = useState('')
+  const q = search.trim().toLowerCase()
+  const shown = q
+    ? transferEventList.filter(ev =>
+        `${getFullName(ev.patient)} ${ev.patient?.mrn || ''} ${ev.currentWard || ''} ${ev.currentBed || ''} ${ev.note || ''} ${ev.by || ''}`
+          .toLowerCase().includes(q))
+    : transferEventList
   return (
           <div className="space-y-4">
             {/* Header */}
@@ -28,9 +40,9 @@ export default function MovementTab({ transferEventList, admissions, transferHis
                 <Badge className="bg-blue-100 text-blue-800">
                   {transferEventList.length} transfer{transferEventList.length !== 1 ? 's' : ''}
                 </Badge>
-                <Button variant="outline" size="sm" onClick={fetchAll}>
-                  <RefreshCw className="h-3.5 w-3.5 mr-1" />Refresh
-                </Button>
+                {/* No Refresh button: the inpatient screens reload themselves
+                    every minute (InpatientModule), so a transfer made elsewhere
+                    turns up without anyone pressing anything. */}
               </div>
             </div>
 
@@ -60,12 +72,23 @@ export default function MovementTab({ transferEventList, admissions, transferHis
               </Card>
             </div>
 
+            {/* The shared filter row (components/common/FilterBar). */}
+            <FilterBar
+              search={search}
+              onSearchChange={setSearch}
+              placeholder="Search patient, UHID, ward, bed or doctor..."
+              active={!!search}
+              onClear={() => setSearch('')}
+            />
+
             {/* Transfer event table */}
-            {transferEventList.length === 0 ? (
+            {shown.length === 0 ? (
               <Card>
                 <CardContent className="py-16 text-center">
                   <ArrowRight className="h-10 w-10 text-gray-200 mx-auto mb-3" />
-                  <p className="text-gray-400 font-medium">No patient movements recorded</p>
+                  <p className="text-gray-400 font-medium">
+                    {search ? 'No movement matches this search' : 'No patient movements recorded'}
+                  </p>
                   <p className="text-xs text-gray-400 mt-1">
                     Transfers are recorded when you use the Transfer button on an admission.
                   </p>
@@ -87,7 +110,9 @@ export default function MovementTab({ transferEventList, admissions, transferHis
                     </TableHeader>
                     <TableBody>
                       {(() => {
-                        const sortedTransfers = transferEventList.sort((a, b) => new Date(b.date) - new Date(a.date))
+                        // A copy, newest first — .sort() on the prop reordered
+                        // the parent's own array on every render.
+                        const sortedTransfers = [...shown].sort((a, b) => new Date(b.date) - new Date(a.date))
                         const startIdx = (transferHistoryPage - 1) * TRANSFERS_PER_PAGE
                         const endIdx = startIdx + TRANSFERS_PER_PAGE
                         const paginatedTransfers = sortedTransfers.slice(startIdx, endIdx)
@@ -151,13 +176,13 @@ export default function MovementTab({ transferEventList, admissions, transferHis
                       })()}
                     </TableBody>
                   </Table>
-                  {transferEventList.length > TRANSFERS_PER_PAGE && (
+                  {shown.length > TRANSFERS_PER_PAGE && (
                     <div className="flex items-center justify-end gap-2 p-4 border-t bg-gray-50">
                       <Button variant="outline" size="sm" onClick={() => setTransferHistoryPage(p => Math.max(1, p - 1))} disabled={transferHistoryPage === 1}>
                         <ChevronLeft className="h-4 w-4 mr-1" />Previous
                       </Button>
-                      <span className="text-sm text-gray-600">Page {transferHistoryPage} of {Math.ceil(transferEventList.length / TRANSFERS_PER_PAGE)}</span>
-                      <Button variant="outline" size="sm" onClick={() => setTransferHistoryPage(p => Math.min(Math.ceil(transferEventList.length / TRANSFERS_PER_PAGE), p + 1))} disabled={transferHistoryPage >= Math.ceil(transferEventList.length / TRANSFERS_PER_PAGE)}>
+                      <span className="text-sm text-gray-600">Page {transferHistoryPage} of {Math.ceil(shown.length / TRANSFERS_PER_PAGE)}</span>
+                      <Button variant="outline" size="sm" onClick={() => setTransferHistoryPage(p => Math.min(Math.ceil(shown.length / TRANSFERS_PER_PAGE), p + 1))} disabled={transferHistoryPage >= Math.ceil(shown.length / TRANSFERS_PER_PAGE)}>
                         <>Next<ChevronRight className="h-4 w-4 ml-1" /></>
                       </Button>
                     </div>

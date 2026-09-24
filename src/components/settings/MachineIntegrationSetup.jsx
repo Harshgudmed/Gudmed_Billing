@@ -11,6 +11,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, Di
 import { Cpu, Plus, Edit, RefreshCw, Loader2, Trash2, Server, Activity } from 'lucide-react'
 import { toast } from 'sonner'
 import machineIntegrationApi from '@/api/machineIntegrationApi'
+import { useLiveData } from '@/lib/useLiveData'
 
 const MACHINE_TYPES = [
   { value: 'lab_analyzer', label: 'Lab Analyzer (LIS)' },
@@ -85,6 +86,10 @@ export default function MachineIntegrationSetup() {
   }, [])
 
   useEffect(() => { load() }, [load])
+
+  // The incoming-message queue moves by itself as analysers post results, so
+  // this panel keeps itself current instead of offering a Refresh button.
+  useLiveData(['machine-integration', 'laboratory'], load)
 
   const openAdd = () => { setForm(emptyForm); setDialogOpen(true) }
 
@@ -176,12 +181,9 @@ export default function MachineIntegrationSetup() {
                 Connect analyzers / equipment for this hospital. Results flow in automatically — no manual typing.
               </CardDescription>
             </div>
-            <div className="flex gap-2">
-              <Button variant="outline" size="sm" onClick={load} disabled={loading}>
-                <RefreshCw className={`h-4 w-4 mr-1 ${loading ? 'animate-spin' : ''}`} />Refresh
-              </Button>
-              <Button size="sm" onClick={openAdd}><Plus className="h-4 w-4 mr-1" />Add Machine</Button>
-            </div>
+            {/* No Refresh button: the machine list and the incoming queue are
+                live (useLiveData above). */}
+            <Button size="sm" onClick={openAdd}><Plus className="h-4 w-4 mr-1" />Add Machine</Button>
           </div>
         </CardHeader>
         <CardContent>

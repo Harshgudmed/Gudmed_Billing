@@ -12,7 +12,8 @@ import {
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
-import { Search, Edit, Trash2, Package, Eye, Loader2 } from "lucide-react";
+import { Edit, Trash2, Package, Eye, Loader2 } from "lucide-react";
+import { FilterBar, FilterSelect } from "@/components/common/FilterBar";
 import { DRUG_CATEGORIES } from "../pharmacyConstants";
 import { stockBadge } from "../pharmacyHelpers";
 import { Pagination } from "@/components/common/Pagination";
@@ -41,30 +42,21 @@ export default function InventoryTab({
 }) {
   return (
     <TabsContent value="inventory" className="space-y-4">
-      <div className="flex gap-3">
-        <div className="relative flex-1">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
-          <Input
-            className="pl-9"
-            placeholder="Search drugs..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-          />
-        </div>
-        <Select value={categoryFilter} onValueChange={setCategoryFilter}>
-          <SelectTrigger className="w-44">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Categories</SelectItem>
-            {DRUG_CATEGORIES.map((c) => (
-              <SelectItem key={c} value={c}>
-                {c}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </div>
+      {/* The shared filter row (components/common/FilterBar). */}
+      <FilterBar
+        search={searchQuery}
+        onSearchChange={setSearchQuery}
+        placeholder="Search drugs..."
+        active={!!searchQuery || categoryFilter !== "all"}
+        onClear={() => { setSearchQuery(""); setCategoryFilter("all") }}
+      >
+        <FilterSelect
+          value={categoryFilter}
+          onChange={setCategoryFilter}
+          className="w-44"
+          options={[{ value: "all", label: "All Categories" }, ...DRUG_CATEGORIES.map((c) => ({ value: c, label: c }))]}
+        />
+      </FilterBar>
       <Card>
         <CardContent className="p-0">
           <Table>

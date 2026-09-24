@@ -6,7 +6,7 @@ import { Input } from '@/components/ui/input'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { FlaskConical, Plus, Eye, Edit, Trash2, Clock, User, FileText, AlertTriangle, CheckCircle, Search, Printer, Send, ChevronDown, Save, AlertCircle, Activity, TestTube, RefreshCw, Microscope, Beaker, Droplet, ClipboardList, FileBarChart, Play, CheckSquare, Loader2, Receipt, Upload, XCircle } from 'lucide-react'
+import { FlaskConical, Plus, Eye, Edit, Trash2, Clock, User, FileText, AlertTriangle, CheckCircle, Search, Printer, Send, ChevronDown, Save, AlertCircle, Activity, TestTube, Microscope, Beaker, Droplet, ClipboardList, FileBarChart, Play, CheckSquare, Loader2, Receipt, Upload, XCircle } from 'lucide-react'
 import CancelActionDialog from '@/components/common/CancelActionDialog'
 import { useCancelAction } from '@/components/common/hooks/useCancelAction'
 import { format, formatDistanceToNow } from 'date-fns'
@@ -32,6 +32,10 @@ const BulkImportDialog = lazy(() => import('@/components/common/BulkImportDialog
 import { Progress } from '@/components/ui/progress'
 import { labApi, LAB_ENDPOINT } from '@/api/labApi'
 import { useServerPagination } from '@/lib/useServerPagination'
+import { useLiveData } from '@/lib/useLiveData'
+import { useDebounce } from '@/lib/useDebounce'
+import { dateRangeFor } from '@/components/common/DateFilter'
+import { Pagination } from '@/components/common/Pagination'
 import { PaginatedTable } from '@/components/common/PaginatedTable'
 import { drName } from '@/lib/utils'
 import PatientLookup from '@/components/common/PatientLookup'
@@ -219,14 +223,6 @@ const STAT_TILES = [
 
 // The five report types. Never changed by anything at runtime, so it belongs
 // beside the other tables, not rebuilt inside JSX on every render.
-const REPORT_TYPES = [
-  { name: 'Patient Report',  icon: User,           desc: 'Individual lab report for patient' },
-  { name: 'Summary Report',  icon: FileBarChart,   desc: 'Daily/weekly summary' },
-  { name: 'Quality Control', icon: CheckSquare,    desc: 'QC and compliance reports' },
-  { name: 'Critical Values', icon: AlertTriangle,  desc: 'Critical results log' },
-  { name: 'Turnaround Time', icon: Clock,          desc: 'TAT analysis report' },
-]
-
 // The short chip on a test. Written twice, and the copies had drifted: one guarded
 // the missing testName that transformApiOrder itself allows for, the other did not
 // and threw, blanking the whole Results tab.
@@ -349,10 +345,21 @@ export default function LaboratoryModule() {
   const [results, setResults] = useState([])
   const [selectedTest, setSelectedTest] = useState(null)
   const [selectedOrder, setSelectedOrder] = useState(null)
-  const [searchQuery, setSearchQuery] = useState('')
+  // One search box per list, not one value shared by two. Test Catalog and
+  // Orders are different lists, so a patient name typed in Orders used to empty
+  // the catalogue ("No tests found") and a test name emptied the orders.
+  // Debounced, so a name is one request rather than one per letter.
+  const [catalogSearch, setCatalogSearch] = useState('')
+  const [orderSearch, setOrderSearch] = useState('')
+  const [reportSearch, setReportSearch] = useState('')
+  const debouncedCatalogSearch = useDebounce(catalogSearch, 300)
+  const debouncedOrderSearch = useDebounce(orderSearch, 300)
+  const debouncedReportSearch = useDebounce(reportSearch, 300)
   const [categoryFilter, setCategoryFilter] = useState('all')
   const [statusFilter, setStatusFilter] = useState('all')
   const [priorityFilter, setPriorityFilter] = useState('all')
+  const [orderDateFilter, setOrderDateFilter] = useState('all')
+  const [reportDateFilter, setReportDateFilter] = useState('all')
   const [showTestDialog, setShowTestDialog] = useState(false)
   const [showImport, setShowImport] = useState(false)
   const [orderTestSearch, setOrderTestSearch] = useState('')
@@ -364,7 +371,6 @@ export default function LaboratoryModule() {
   const [showOrderDialog, setShowOrderDialog] = useState(false)
   const [showResultDialog, setShowResultDialog] = useState(false)
   const [showViewOrderDialog, setShowViewOrderDialog] = useState(false)
-  const [showReportDialog, setShowReportDialog] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
   const [testsLoading, setTestsLoading] = useState(true)
   const [ordersLoading, setOrdersLoading] = useState(true)
@@ -388,11 +394,28 @@ export default function LaboratoryModule() {
     perPage: LAB_ITEMS_PER_PAGE,
     params: {
       resource: 'orders',
-      search: searchQuery,
+      search: debouncedOrderSearch,
       status: statusFilter === 'all' ? '' : statusFilter,
       priority: priorityFilter === 'all' ? '' : priorityFilter,
+      ...dateRangeFor({ mode: orderDateFilter }),
     },
   })
+
+  // The Reports tab listed whatever completed orders happened to be in the
+  // dashboard's capped fetch, with no way to find one — so a report from last
+  // week was unreachable. Its own server-paged list, searched and filtered in
+  // the database, on the date the result went out (dateOn=completed).
+  const reportsTable = useServerPagination(LAB_ENDPOINT, {
+    perPage: LAB_ITEMS_PER_PAGE,
+    params: {
+      resource: 'orders',
+      status: 'completed',
+      search: debouncedReportSearch,
+      dateOn: 'completed',
+      ...dateRangeFor({ mode: reportDateFilter }),
+    },
+  })
+  const reportOrders = useMemo(() => (reportsTable.rows || []).map(transformApiOrder), [reportsTable.rows])
 
   // The Tests CATALOG table pages on the server too. The full `tests` state (capped)
   // is still loaded separately for the order-creation picker and print lookups.
@@ -400,7 +423,7 @@ export default function LaboratoryModule() {
     perPage: LAB_ITEMS_PER_PAGE,
     params: {
       resource: 'tests',
-      search: searchQuery,
+      search: debouncedCatalogSearch,
       testCategory: categoryFilter === 'all' ? '' : categoryFilter,
     },
   })
@@ -835,19 +858,26 @@ export default function LaboratoryModule() {
     }
   }
 
-  const handleRefresh = () => {
+  const reloadAll = useCallback(() => {
     fetchTests()
     fetchOrders()
     fetchStats()
     fetchResults()
     ordersTable.refresh()
     // testsTable is the Catalog tab's own paginated list, separate from the
-    // fetchTests() dashboard/picker copy above — without this, Refresh looked
-    // like it worked (toast + dashboard updated) but the Catalog table kept
-    // showing stale rows until the tab was left and reopened.
+    // fetchTests() dashboard/picker copy above — without this the Catalog table
+    // kept showing stale rows until the tab was left and reopened.
     testsTable.refresh()
-    toast.success('Data refreshed')
-  }
+    reportsTable.refresh()
+  }, [fetchTests, fetchOrders, fetchStats, fetchResults, ordersTable.refresh, testsTable.refresh, reportsTable.refresh]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Live over the WebSocket the app already runs: the server announces every
+  // write in this hospital (middleware/liveUpdates.js) and this screen re-reads
+  // itself — a sample collected at the counter, a result entered by a colleague
+  // or an order raised from Billing appears on its own. That is why this module
+  // no longer carries a Refresh button. Billing raises lab orders, so its
+  // writes count too.
+  useLiveData(['laboratory', 'billing'], reloadAll)
 
   // Lab receipt uses the SHARED printLabReceipt so the Billing module and the
   // Laboratory module render an IDENTICAL Dr-Lal-style bill.
@@ -913,10 +943,6 @@ export default function LaboratoryModule() {
           <p className="text-gray-500">Complete laboratory management - tests, orders, results, and reports</p>
         </div>
         <div className="flex gap-2">
-          <Button variant="outline" onClick={handleRefresh}>
-            <RefreshCw className="mr-2 h-4 w-4" />
-            Refresh
-          </Button>
           <Button variant="outline" onClick={() => setShowOrderDialog(true)}>
             <Plus className="mr-2 h-4 w-4" />
             New Order
@@ -1174,36 +1200,32 @@ export default function LaboratoryModule() {
 
         {/* Test Catalog Tab */}
         <TabsContent value="catalog" className="space-y-4">
+          {/* One filter row above the table, the same shape on every tab here and
+              in Radiology: the search box takes the width, the filters sit beside
+              it, and Clear shows only when something is set. (A stray "3" used to
+              render between these two controls.) */}
+          <div className="flex flex-wrap gap-3">
+            <div className="relative flex-1 min-w-48">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+              <Input className="pl-9" placeholder="Search test name, code or category..." value={catalogSearch} onChange={(e) => setCatalogSearch(e.target.value)} />
+            </div>
+            <Select value={categoryFilter} onValueChange={setCategoryFilter}>
+              <SelectTrigger className="w-44"><SelectValue placeholder="All Categories" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Categories</SelectItem>
+                {TEST_CATEGORIES.map((c) => (
+                  <SelectItem key={c.value} value={c.value}>{c.label}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {(catalogSearch || categoryFilter !== 'all') && (
+              <Button variant="ghost" className="text-gray-500" onClick={() => { setCatalogSearch(''); setCategoryFilter('all') }}>Clear</Button>
+            )}
+          </div>
           <Card>
             <CardHeader>
-              <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-                <div>
-                  <CardTitle>Test Catalog</CardTitle>
-                  <CardDescription>Manage laboratory test definitions</CardDescription>
-                </div>
-                <div className="flex items-center gap-4">
-                  <div className="relative">
-                    <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
-                    <Input
-                      placeholder="Search tests..."
-                      className="pl-10 w-64"
-                      value={searchQuery}
-                      onChange={(e) => setSearchQuery(e.target.value)}
-                    />
-                  </div>
-                  <Select value={categoryFilter} onValueChange={setCategoryFilter}>
-                    <SelectTrigger className="w-40">
-                      <SelectValue placeholder="Category" />
-                    </SelectTrigger>3
-                    <SelectContent>
-                      <SelectItem value="all">All Categories</SelectItem>
-                      {TEST_CATEGORIES.map((c) => (
-                        <SelectItem key={c.value} value={c.value}>{c.label}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
+              <CardTitle>Test Catalog</CardTitle>
+              <CardDescription>Manage laboratory test definitions</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="rounded-md border">
@@ -1273,49 +1295,46 @@ export default function LaboratoryModule() {
 
         {/* Orders Tab */}
         <TabsContent value="orders" className="space-y-4">
+          <div className="flex flex-wrap gap-3">
+            <div className="relative flex-1 min-w-48">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+              <Input className="pl-9" placeholder="Search patient, UHID, phone or order #..." value={orderSearch} onChange={(e) => setOrderSearch(e.target.value)} />
+            </div>
+            <Select value={statusFilter} onValueChange={setStatusFilter}>
+              <SelectTrigger className="w-40"><SelectValue placeholder="All Status" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Status</SelectItem>
+                {ORDER_STATUSES.map((st) => (
+                  <SelectItem key={st.value} value={st.value}>{st.label}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Select value={priorityFilter} onValueChange={setPriorityFilter}>
+              <SelectTrigger className="w-36"><SelectValue placeholder="All Priority" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Priority</SelectItem>
+                {PRIORITIES.map((pr) => (
+                  <SelectItem key={pr.value} value={pr.value}>{pr.label}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {/* Ordered on — whole days in the hospital's own timezone. */}
+            <Select value={orderDateFilter} onValueChange={setOrderDateFilter}>
+              <SelectTrigger className="w-36"><SelectValue placeholder="Date" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Time</SelectItem>
+                <SelectItem value="today">Today</SelectItem>
+                <SelectItem value="week">This Week</SelectItem>
+                <SelectItem value="month">This Month</SelectItem>
+              </SelectContent>
+            </Select>
+            {(orderSearch || statusFilter !== 'all' || priorityFilter !== 'all' || orderDateFilter !== 'all') && (
+              <Button variant="ghost" className="text-gray-500" onClick={() => { setOrderSearch(''); setStatusFilter('all'); setPriorityFilter('all'); setOrderDateFilter('all') }}>Clear</Button>
+            )}
+            {/* No Refresh button — this list is live (useLiveData above). */}
+          </div>
           <Card>
-            <CardHeader>
-              <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-                <div className="flex items-center gap-4">
-                  <div className="relative">
-                    <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
-                    <Input
-                      placeholder="Search by patient, UHID, order #..."
-                      className="pl-10 w-64"
-                      value={searchQuery}
-                      onChange={(e) => setSearchQuery(e.target.value)}
-                    />
-                  </div>
-                  <Select value={statusFilter} onValueChange={setStatusFilter}>
-                    <SelectTrigger className="w-40">
-                      <SelectValue placeholder="Status" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">All Status</SelectItem>
-                      {ORDER_STATUSES.map((st) => (
-                        <SelectItem key={st.value} value={st.value}>{st.label}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  <Select value={priorityFilter} onValueChange={setPriorityFilter}>
-                    <SelectTrigger className="w-32">
-                      <SelectValue placeholder="Priority" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">All</SelectItem>
-                      {PRIORITIES.map((pr) => (
-                        <SelectItem key={pr.value} value={pr.value}>{pr.label}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <Button variant="outline" size="sm" onClick={handleRefresh}>
-                  <RefreshCw className="mr-2 h-4 w-4" />
-                  Refresh
-                </Button>
-              </div>
-            </CardHeader>
-            <CardContent className="space-y-4">
+            <CardContent className="space-y-4 pt-6">
               <div className="rounded-md border">
                 <PaginatedTable
                   pagination={ordersTable}
@@ -1655,52 +1674,48 @@ export default function LaboratoryModule() {
 
         {/* Reports Tab */}
         <TabsContent value="reports" className="space-y-4">
-          <div className="grid md:grid-cols-3 gap-6">
-            {/* Report Types */}
-            <Card className="md:col-span-1">
-              <CardHeader>
-                <CardTitle>Report Types</CardTitle>
-                <CardDescription>Select report type to generate</CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-2">
-                {REPORT_TYPES.map((report) => (
-                  <div
-                    key={report.name}
-                    className="p-3 rounded-lg border hover:bg-gray-50 cursor-pointer transition"
-                    onClick={() => setShowReportDialog(true)}
-                  >
-                    <div className="flex items-center gap-3">
-                      <report.icon className="h-5 w-5 text-blue-600" />
-                      <div>
-                        <p className="font-medium">{report.name}</p>
-                        <p className="text-xs text-gray-500">{report.desc}</p>
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </CardContent>
-            </Card>
-
-            {/* Completed Orders for Report */}
-            <Card className="md:col-span-2">
+          {/* Same filter row as the other tabs. The "Report Types" list that used
+              to sit on the left was removed at the user's request — every one of
+              its five entries opened the same dialog. */}
+          <div className="flex flex-wrap gap-3">
+            <div className="relative flex-1 min-w-48">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+              <Input className="pl-9" placeholder="Search patient, UHID, phone or order #..." value={reportSearch} onChange={(e) => setReportSearch(e.target.value)} />
+            </div>
+            {/* Completed on, not ordered on — this list is about results going out. */}
+            <Select value={reportDateFilter} onValueChange={setReportDateFilter}>
+              <SelectTrigger className="w-36"><SelectValue placeholder="Date" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Time</SelectItem>
+                <SelectItem value="today">Today</SelectItem>
+                <SelectItem value="week">This Week</SelectItem>
+                <SelectItem value="month">This Month</SelectItem>
+              </SelectContent>
+            </Select>
+            {(reportSearch || reportDateFilter !== 'all') && (
+              <Button variant="ghost" className="text-gray-500" onClick={() => { setReportSearch(''); setReportDateFilter('all') }}>Clear</Button>
+            )}
+          </div>
+          <div>
+            <Card>
               <CardHeader>
                 <CardTitle>Completed Orders</CardTitle>
                 <CardDescription>Generate reports for completed orders</CardDescription>
               </CardHeader>
               <CardContent>
-                <ScrollArea className="h-[400px]">
-                  {ordersLoading ? (
+                <div>
+                  {reportsTable.loading && reportOrders.length === 0 ? (
                     <div className="flex items-center justify-center py-12">
                       <Loader2 className="h-8 w-8 animate-spin text-[#2E4168]" />
                     </div>
-                  ) : completedOrders.length === 0 ? (
+                  ) : reportOrders.length === 0 ? (
                     <div className="text-center py-12 text-gray-500">
                       <FileBarChart className="h-12 w-12 mx-auto mb-4 opacity-50" />
-                      <p>No completed orders to report</p>
+                      <p>{reportSearch || reportDateFilter !== 'all' ? 'No completed order matches these filters' : 'No completed orders to report'}</p>
                     </div>
                   ) : (
                     <div className="space-y-3">
-                      {completedOrders.map(order => (
+                      {reportOrders.map(order => (
                         <Card key={order.id}>
                           <CardContent className="p-4">
                             <div className="flex items-center justify-between">
@@ -1735,7 +1750,10 @@ export default function LaboratoryModule() {
                       ))}
                     </div>
                   )}
-                </ScrollArea>
+                </div>
+                {/* Paged from the server, so a report from last week is reachable
+                    instead of only whatever the dashboard happened to load. */}
+                <Pagination page={reportsTable.page} totalPages={reportsTable.totalPages} onPageChange={reportsTable.setPage} />
               </CardContent>
             </Card>
           </div>
@@ -2456,27 +2474,6 @@ export default function LaboratoryModule() {
           )}
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowViewOrderDialog(false)}>
-              Close
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* Report Dialog Placeholder */}
-      <Dialog open={showReportDialog} onOpenChange={setShowReportDialog}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Generate Report</DialogTitle>
-            <DialogDescription>
-              Report generation feature coming soon
-            </DialogDescription>
-          </DialogHeader>
-          <div className="py-8 text-center text-gray-500">
-            <FileBarChart className="h-12 w-12 mx-auto mb-4 opacity-50" />
-            <p>Report generation will be available in a future update.</p>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setShowReportDialog(false)}>
               Close
             </Button>
           </DialogFooter>

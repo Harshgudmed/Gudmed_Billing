@@ -10,6 +10,8 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Badge } from '@/components/ui/badge'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { SearchableSelect } from '@/components/ui/searchable-select'
+import { FilterBar } from '@/components/common/FilterBar'
+import { useLiveData } from '@/lib/useLiveData'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogTrigger } from '@/components/ui/dialog'
 import { drName } from '@/lib/utils'
 
@@ -394,6 +396,10 @@ export default function RoomsManager() {
 
   const refreshRooms = () => loadRooms(activeFloorId)
 
+  // Live: a room added or a doctor re-assigned by another administrator shows
+  // up on this floor's list by itself.
+  useLiveData('rooms', refreshRooms)
+
   const selectFloor = async (id) => {
     setActiveFloorId(id)
     // A search/filter from the previous floor would silently hide the new
@@ -508,16 +514,17 @@ export default function RoomsManager() {
                 )}
               </div>
 
-              <div className="flex flex-wrap gap-2 mb-3">
-                <div className="relative flex-1 min-w-[200px]">
-                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
-                  <Input
-                    value={search}
-                    onChange={(e) => setSearch(e.target.value)}
-                    placeholder="Search room number, department, or doctor…"
-                    className="pl-9"
-                  />
-                </div>
+              {/* The shared filter row (components/common/FilterBar). The
+                  department picker stays a SearchableSelect — a hospital can have
+                  sixty departments, too many to scroll. */}
+              <FilterBar
+                className="mb-3"
+                search={search}
+                onSearchChange={setSearch}
+                placeholder="Search room number, department, or doctor…"
+                active={!!search || deptFilter !== 'all'}
+                onClear={() => { setSearch(''); setDeptFilter('all') }}
+              >
                 {/* Searchable, like the department field in the Add Room
                     dialog above — the same list, the same component, so a
                     department can be typed rather than scrolled to. The filter
@@ -536,7 +543,7 @@ export default function RoomsManager() {
                   emptyText="No matching department"
                   minSearchLength={0}
                 />
-              </div>
+              </FilterBar>
 
               {rooms.length === 0 ? (
                 <p className="text-sm text-gray-400 text-center py-10">No rooms on this floor yet.</p>

@@ -12,6 +12,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import client from '@/api/client'
 import { useAuth } from '@/lib/auth'
 import { getFullName } from "@/lib/patient";
+import { useLiveData } from '@/lib/useLiveData'
 
 const PRIORITIES = ['ROUTINE', 'URGENT', 'STAT']
 const DRUG_FORMS = [
@@ -126,13 +127,14 @@ export default function ClinicalOrdersTab({ admitted = [], admissionId: controll
   }, [])
   useEffect(() => { if (selectedId) load(selectedId) }, [selectedId, load])
 
-  // Near real-time: poll the selected patient's orders every 10s so orders placed
-  // elsewhere (e.g. the doctor's portal) appear here automatically, and vice-versa.
-  useEffect(() => {
-    if (!selectedId) return
-    const t = setInterval(() => load(selectedId), 10000)
-    return () => clearInterval(t)
-  }, [selectedId, load])
+  // Real time, not a 10-second poll: an order written in the doctor's portal is
+  // announced on the hospital's socket and lands on the nurse's screen at once
+  // (and the other way round). 'pharmacy', 'laboratory' and 'radiology' are
+  // here because an order's status changes when those departments act on it.
+  useLiveData(
+    selectedId ? ['inpatient', 'pharmacy', 'laboratory', 'radiology'] : [],
+    () => load(selectedId),
+  )
 
   const doTransition = async (order, action) => {
     const reason = action === 'cancel' ? (window.prompt('Reason for cancellation?') || '') : undefined

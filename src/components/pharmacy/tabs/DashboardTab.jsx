@@ -8,8 +8,8 @@ import { Badge } from "@/components/ui/badge";
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
-import { Input } from "@/components/ui/input";
-import { AlertTriangle, Package, Search } from "lucide-react";
+import { AlertTriangle, Package } from "lucide-react";
+import { FilterBar } from "@/components/common/FilterBar";
 import { format } from "date-fns";
 import { stockBadge } from "../pharmacyHelpers";
 import { formatMoney } from "@/lib/format";
@@ -54,15 +54,14 @@ export default function DashboardTab({
 
   return (
     <TabsContent value="dashboard" className="space-y-4">
-      <div className="relative max-w-md">
-        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
-        <Input
-          className="pl-9"
-          placeholder="Search patient, drug or batch..."
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-        />
-      </div>
+      {/* The shared filter row (components/common/FilterBar). */}
+      <FilterBar
+        search={search}
+        onSearchChange={setSearch}
+        placeholder="Search patient, drug or batch..."
+        active={!!search}
+        onClear={() => setSearch("")}
+      />
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
         {[
           {

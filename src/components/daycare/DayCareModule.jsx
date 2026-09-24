@@ -9,8 +9,10 @@ import { Textarea } from '@/components/ui/textarea'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import PatientLookup from '@/components/common/PatientLookup'
+import { FilterBar, FilterSelect, statusOptions } from '@/components/common/FilterBar'
+import { useLiveData } from '@/lib/useLiveData'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
-import { Sun, Plus, Search, Trash2, Loader2, AlertCircle } from 'lucide-react'
+import { Sun, Plus, Trash2, Loader2, AlertCircle } from 'lucide-react'
 import { format } from 'date-fns'
 import { toast } from 'sonner'
 import client from '@/api/client'
@@ -28,6 +30,10 @@ import { getFullName } from "@/lib/patient";
 const labelize = (s) => (s || '').replace(/_/g, ' ')
 
 const EMPTY = { patientId: '', doctorId: '', procedure: '', fee: '', paymentStatus: 'pending', status: 'admitted', dischargeTime: '', notes: '' }
+
+// The filter row's dropdowns, built from the same status lists the table uses.
+const DAY_CARE_STATUS_OPTIONS = statusOptions(Object.keys(STATUS_STYLES), { label: (v) => labelize(v).replace(/^\w/, (c) => c.toUpperCase()) })
+const PAYMENT_OPTIONS = statusOptions(Object.keys(PAY_STYLES), { allLabel: 'All Payments', label: (v) => v.replace(/^\w/, (c) => c.toUpperCase()) })
 
 export default function DayCareModule() {
   const [cases, setCases] = useState([])
@@ -57,6 +63,11 @@ export default function DayCareModule() {
   }
 
   useEffect(() => { fetchCases() }, [search, statusFilter, paymentFilter])
+
+  // Live: a day-care case admitted or discharged at another desk shows up here
+  // on its own, so this screen never needs a Refresh button.
+  useLiveData('day-care', fetchCases)
+
   useEffect(() => {
     client.get('/settings?resource=users').then(r => { if (r.success) setDoctors((r.data || []).filter(u => u.role === 'doctor' && u.isActive !== false)) }).catch(() => {})
   }, [])
@@ -133,37 +144,23 @@ export default function DayCareModule() {
         <Card className="border-l-4 border-l-blue-500"><CardHeader className="py-4"><CardTitle className="text-sm font-medium text-gray-500">Revenue</CardTitle></CardHeader><CardContent><div className="text-2xl font-bold">{inr(stats.revenue)}</div></CardContent></Card>
       </div>
 
+      {/* The shared filter row (components/common/FilterBar) — the same one
+          Radiology, Laboratory and the rest use. It used to be squeezed into the
+          card header, where the search box was a third of its width. */}
+      <FilterBar
+        search={search}
+        onSearchChange={setSearch}
+        placeholder="Search name, procedure, UHID..."
+        active={!!search || statusFilter !== 'all' || paymentFilter !== 'all'}
+        onClear={() => { setSearch(''); setStatusFilter('all'); setPaymentFilter('all') }}
+      >
+        <FilterSelect value={statusFilter} onChange={setStatusFilter} options={DAY_CARE_STATUS_OPTIONS} />
+        <FilterSelect value={paymentFilter} onChange={setPaymentFilter} options={PAYMENT_OPTIONS} />
+      </FilterBar>
+
       <Card>
         <CardHeader>
-          <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
-            <CardTitle className="flex items-center gap-2"><Sun className="h-5 w-5 text-amber-500" /> Day Care Patients</CardTitle>
-            <div className="flex flex-wrap items-center gap-2">
-              <div className="relative w-full md:w-64">
-                <Search className="h-4 w-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
-                <Input placeholder="Search name, procedure, UHID..." className="pl-9" value={search} onChange={e => setSearch(e.target.value)} />
-              </div>
-              <Select value={statusFilter} onValueChange={setStatusFilter}>
-                <SelectTrigger className="w-[160px]"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Statuses</SelectItem>
-                  <SelectItem value="admitted">Admitted</SelectItem>
-                  <SelectItem value="in_procedure">In Procedure</SelectItem>
-                  <SelectItem value="observation">Observation</SelectItem>
-                  <SelectItem value="discharged">Discharged</SelectItem>
-                  <SelectItem value="cancelled">Cancelled</SelectItem>
-                </SelectContent>
-              </Select>
-              <Select value={paymentFilter} onValueChange={setPaymentFilter}>
-                <SelectTrigger className="w-[160px]"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Payments</SelectItem>
-                  <SelectItem value="pending">Pending</SelectItem>
-                  <SelectItem value="partial">Partial</SelectItem>
-                  <SelectItem value="paid">Paid</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
+          <CardTitle className="flex items-center gap-2"><Sun className="h-5 w-5 text-amber-500" /> Day Care Patients</CardTitle>
         </CardHeader>
         <CardContent>
           {loading && cases.length === 0 ? (

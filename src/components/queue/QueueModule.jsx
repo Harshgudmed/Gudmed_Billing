@@ -6,9 +6,11 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { PaginatedTable } from '@/components/common/PaginatedTable'
+import { FilterBar } from '@/components/common/FilterBar'
 import { useDateFilter } from '@/components/common/DateFilter'
 import { useDebounce } from '@/lib/useDebounce'
 import { useServerPagination } from '@/lib/useServerPagination'
+import { useLiveData } from '@/lib/useLiveData'
 import client from '@/api/client'
 // Both are behind lazy() because they are whole modules living in this module's
 // tabs, and a static import puts them in the Queue route's bundle whether or not
@@ -92,12 +94,10 @@ export default function QueueModule() {
 
   const queuePage = useServerPagination('/queue', {
     perPage: QUEUE_PER_PAGE,
-    // The queue is a live screen: reception books a patient and must see them
-    // appear without pressing Refresh. The appointment now writes its queue row
-    // in the same transaction as the booking, so a poll this soon after already
-    // finds the patient there. 5s matches how often a busy front desk changes
-    // something, while staying far cheaper than the board's 3s wall-display poll.
-    pollMs: 5000,
+    // No poll here any more: the queue is pushed (useLiveData below). It used to
+    // re-read every 5 seconds, which meant a patient called in was up to five
+    // seconds late on screen and the server answered twelve times a minute per
+    // open desk even when nothing had happened.
     params: {
       search: debouncedSearch,
       status: statusFilter,
@@ -106,8 +106,13 @@ export default function QueueModule() {
     },
   })
   // `rows` isn't pulled out: PaginatedTable reads them off the pagination object
-  // itself. `loading` drives the Refresh button, `summary` the stat tiles.
+  // itself. `loading` drives the spinner, `summary` the stat tiles.
   const { loading, summary, refresh } = queuePage
+
+  // Live: a booking at reception, a doctor calling the next patient from the
+  // console, a consultation closed — each pushes on this hospital's socket and
+  // the waiting list redraws in about a second.
+  useLiveData(['queue', 'appointments', 'consultations', 'display'], refresh)
 
   // One place for the loading/success/error/refresh cycle every queue action
   // shares. setStatus, callNext and changePriority used to each copy-paste this
@@ -186,10 +191,8 @@ export default function QueueModule() {
             <MonitorPlay className="h-4 w-4 mr-1" />
             Open Display Board
           </Button>
-          <Button variant="outline" onClick={refresh} disabled={loading}>
-            <RefreshCw className={`h-4 w-4 mr-1 ${loading ? 'animate-spin' : ''}`} />
-            Refresh
-          </Button>
+          {/* No Refresh button: the waiting list is pushed over the hospital's
+              socket (useLiveData above), so it is already up to date. */}
         </div>
       </div>
 
@@ -228,24 +231,17 @@ export default function QueueModule() {
             })}
           </div>
 
-          {/* Filters */}
-          <div className="flex flex-wrap items-center gap-2">
-            <div className="relative flex-1 min-w-56">
-              <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-gray-400" />
-              <Input
-                className="pl-8"
-                placeholder="Search by patient name, UHID or queue number…"
-                value={search}
-                onChange={e => setSearch(e.target.value)}
-              />
-            </div>
+          {/* The shared filter row (components/common/FilterBar). The status here
+              is chosen by the cards above, so Clear resets it along with the rest. */}
+          <FilterBar
+            search={search}
+            onSearchChange={setSearch}
+            placeholder="Search by patient name, UHID or queue number…"
+            active={!!search || statusFilter !== 'all' || dateFilter.active}
+            onClear={() => { setSearch(''); setStatusFilter('all'); dateFilter.reset() }}
+          >
             {dateFilter.control}
-            {statusFilter !== 'all' && (
-              <Button variant="ghost" size="sm" className="text-gray-500" onClick={() => setStatusFilter('all')}>
-                Clear status
-              </Button>
-            )}
-          </div>
+          </FilterBar>
 
           {/* The table itself — header, first-load spinner, empty state, the page
               of rows and the pagination footer — is the shared PaginatedTable,

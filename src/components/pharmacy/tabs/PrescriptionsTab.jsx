@@ -12,9 +12,18 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
-import { CheckCircle, Printer, Loader2, Search, XCircle } from "lucide-react";
+import { CheckCircle, Printer, Loader2, XCircle } from "lucide-react";
 import { format } from "date-fns";
+import { FilterBar, FilterSelect } from "@/components/common/FilterBar";
 import { statusBadge } from "../pharmacyHelpers";
+
+const RX_STATUS_OPTIONS = [
+  { value: "all", label: "All" },
+  { value: "pending", label: "Pending" },
+  { value: "fully_dispensed", label: "Dispensed" },
+  { value: "partially_dispensed", label: "Partial" },
+  { value: "cancelled", label: "Cancelled" },
+];
 import { Pagination } from "@/components/common/Pagination";
 import { getFullName } from "@/lib/patient";
 
@@ -34,32 +43,21 @@ export default function PrescriptionsTab({
 }) {
   return (
     <TabsContent value="prescriptions" className="space-y-4">
-      <div className="flex gap-3">
-        <div className="relative flex-1">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
-          <Input
-            className="pl-9"
-            placeholder="Search patient, UHID, phone or doctor..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-          />
-        </div>
-        <Select
+      {/* The shared filter row (components/common/FilterBar). */}
+      <FilterBar
+        search={search}
+        onSearchChange={setSearch}
+        placeholder="Search patient, UHID, phone or doctor..."
+        active={!!search || prescriptionFilter !== "all"}
+        onClear={() => { setSearch(""); setPrescriptionFilter("all") }}
+      >
+        <FilterSelect
           value={prescriptionFilter}
-          onValueChange={setPrescriptionFilter}
-        >
-          <SelectTrigger className="w-52">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All</SelectItem>
-            <SelectItem value="pending">Pending</SelectItem>
-            <SelectItem value="fully_dispensed">Dispensed</SelectItem>
-            <SelectItem value="partially_dispensed">Partial</SelectItem>
-            <SelectItem value="cancelled">Cancelled</SelectItem>
-          </SelectContent>
-        </Select>
-      </div>
+          onChange={setPrescriptionFilter}
+          className="w-52"
+          options={RX_STATUS_OPTIONS}
+        />
+      </FilterBar>
       <Card>
         <CardContent className="p-0">
           <Table>

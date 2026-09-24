@@ -5,6 +5,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
 import { SearchableSelect } from '@/components/ui/searchable-select'
+import { FilterBar } from '@/components/common/FilterBar'
 import { toast } from 'sonner'
 import { Clock, Plus, Trash2, Calendar, ShieldCheck, HelpCircle, Save, Loader2, Sparkles, CheckCircle, ChevronRight, Search, Stethoscope, User, Heart, Brain, Ear, Eye, Bone, Baby, Ribbon, Smile } from 'lucide-react'
 import client from '@/api/client'
@@ -452,15 +453,15 @@ export default function DoctorTiming() {
           <span className="font-semibold text-gray-800">{selectedDepartment?.name}</span>
           <span className="text-gray-400">· {doctorsInSelectedDepartment.length} doctor{doctorsInSelectedDepartment.length === 1 ? '' : 's'}</span>
         </div>
-        <div className="relative max-w-sm">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
-          <Input
-            value={doctorSearch}
-            onChange={(e) => setDoctorSearch(e.target.value)}
-            placeholder="Filter doctors by name or specialization..."
-            className="pl-9 bg-white border-gray-200 focus-visible:ring-[#2E4168]/30"
-          />
-        </div>
+        {/* The shared filter row (components/common/FilterBar) — this box was a
+            third of the width while the doctors below ran full width. */}
+        <FilterBar
+          search={doctorSearch}
+          onSearchChange={setDoctorSearch}
+          placeholder="Filter doctors by name or specialization..."
+          active={!!doctorSearch}
+          onClear={() => setDoctorSearch('')}
+        />
         {doctorsInSelectedDepartment.length === 0 ? (
           <p className="text-gray-400">No doctors match this filter.</p>
         ) : (

@@ -1,14 +1,15 @@
 import { useState, useCallback } from 'react'
 import { toast } from 'sonner'
-import { QrCode, Search, RefreshCw, UserCheck, Trash2, Clock } from 'lucide-react'
+import { QrCode, UserCheck, Trash2, Clock } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
 import { Dialog, DialogContent } from '@/components/ui/dialog'
 import { TableRow, TableCell } from '@/components/ui/table'
 import { PaginatedTable } from '@/components/common/PaginatedTable'
+import { FilterBar } from '@/components/common/FilterBar'
 import { useServerPagination } from '@/lib/useServerPagination'
 import { useDebounce } from '@/lib/useDebounce'
+import { useLiveData } from '@/lib/useLiveData'
 import client from '@/api/client'
 import RegisterPatientForm from '@/components/common/RegisterPatientForm'
 
@@ -50,12 +51,15 @@ export default function SelfRegistrationModule() {
 
   const pending = useServerPagination('/pre-registration', {
     perPage: PER_PAGE,
-    // A counter screen: new walk-ups should appear without pressing Refresh, but
-    // this is far lighter than the queue, so a gentle poll is plenty.
-    pollMs: 10000,
     params: { search: debouncedSearch },
   })
   const { loading, refresh } = pending
+
+  // A walk-up finishes the QR form at the entrance and the row is on this
+  // counter's screen a second later — pushed, not polled every 10 seconds.
+  // (The public form has no login, so the push is fired by the controller
+  // itself: backend/src/controllers/preRegistrationController.js.)
+  useLiveData('pre-registration', refresh)
 
   const removeRow = useCallback(async (row) => {
     try {
@@ -84,22 +88,16 @@ export default function SelfRegistrationModule() {
         <QrCode className="h-3.5 w-3.5" /> The registration QR for the entrance is in Settings → Integrations.
       </p>
 
-      {/* Search */}
-      <div className="flex flex-wrap items-center gap-2">
-        <div className="relative flex-1 min-w-56">
-          <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-gray-400" />
-          <Input
-            className="pl-8"
-            placeholder="Find a patient by name or mobile number…"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-          />
-        </div>
-        <Button variant="outline" onClick={refresh} disabled={loading}>
-          <RefreshCw className={`h-4 w-4 mr-1 ${loading ? 'animate-spin' : ''}`} />
-          Refresh
-        </Button>
-      </div>
+      {/* The shared filter row (components/common/FilterBar) — the same search
+          box, in the same place, as every other list in the product. There is
+          no Refresh button: the list is live (useLiveData above). */}
+      <FilterBar
+        search={search}
+        onSearchChange={setSearch}
+        placeholder="Find a patient by name or mobile number…"
+        active={!!search}
+        onClear={() => setSearch('')}
+      />
 
       <Card>
         <CardContent className="p-0">

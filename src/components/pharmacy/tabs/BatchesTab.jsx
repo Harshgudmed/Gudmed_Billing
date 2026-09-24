@@ -11,11 +11,21 @@ import { Plus, Edit, Trash2 } from "lucide-react";
 import { format } from "date-fns";
 import { emptyBatch, PHARMACY_BATCHES_PER_PAGE } from "../pharmacyConstants";
 import { Pagination } from "@/components/common/Pagination";
+import { FilterBar, FilterSelect, DATE_MODES } from "@/components/common/FilterBar";
+
+// Same modes as everywhere else, said in expiry terms.
+const EXPIRY_DATE_OPTIONS = DATE_MODES.map((m) =>
+  m.value === "all" ? { ...m, label: "Any expiry" } : { ...m, label: `Expires ${m.label.toLowerCase()}` },
+);
 
 // `batches` is ONE server-fetched page. It used to be the whole table, which this
 // tab sliced client-side via `batchesPage` — a prop that no longer exists, so the
 // slice ran on NaN bounds and silently rendered an empty table.
 export default function BatchesTab({
+  search = "",
+  setSearch,
+  dateMode = "all",
+  setDateMode,
   batches = [],
   loading,
   page,
@@ -29,18 +39,30 @@ export default function BatchesTab({
 }) {
   return (
     <TabsContent value="batches" className="space-y-4">
-      <div className="flex justify-end">
-        <Button
-          onClick={() => {
-            setBatchForm(emptyBatch);
-            setEditingBatchId(null);
-            setShowBatchDialog(true);
-          }}
-        >
-          <Plus className="h-4 w-4 mr-1" />
-          Add Batch
-        </Button>
-      </div>
+      {/* This tab had no search and no filter at all. Both run in the database
+          (pharmacy/controllers/batch.controller.js), so they reach every batch —
+          not the ten rows on screen. The date filter is on EXPIRY. */}
+      <FilterBar
+        search={search}
+        onSearchChange={setSearch}
+        placeholder="Search medicine, batch # or supplier..."
+        active={!!search || dateMode !== "all"}
+        onClear={() => { setSearch(""); setDateMode("all") }}
+        actions={
+          <Button
+            onClick={() => {
+              setBatchForm(emptyBatch);
+              setEditingBatchId(null);
+              setShowBatchDialog(true);
+            }}
+          >
+            <Plus className="h-4 w-4 mr-1" />
+            Add Batch
+          </Button>
+        }
+      >
+        <FilterSelect value={dateMode} onChange={setDateMode} className="w-44" options={EXPIRY_DATE_OPTIONS} />
+      </FilterBar>
       <Card>
         <CardContent className="p-0">
           <Table>
@@ -90,7 +112,15 @@ export default function BatchesTab({
                       </TableCell>
                       <TableCell>{b.supplierName || "—"}</TableCell>
                       <TableCell>
-                        {dl < 0 ? (
+                        {/* The batch's own status comes first. This badge was
+                            worked out from the expiry date alone, so a REMOVED
+                            (recalled) batch still read "Active", and a used-up
+                            one looked sellable. */}
+                        {b.status === "recalled" ? (
+                          <Badge variant="destructive">Removed</Badge>
+                        ) : b.status === "depleted" ? (
+                          <Badge className="bg-gray-100 text-gray-700">Used up</Badge>
+                        ) : dl < 0 ? (
                           <Badge variant="destructive">Expired</Badge>
                         ) : dl <= 30 ? (
                           <Badge className="bg-red-100 text-red-800">

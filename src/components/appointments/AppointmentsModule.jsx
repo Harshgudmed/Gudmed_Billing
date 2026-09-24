@@ -26,6 +26,7 @@ import { appointmentSchema, editAppointmentSchema } from "./appointmentSchema";
 import { printAppointmentCard } from "./appointmentPrint";
 import { APPOINTMENTS_LIST_PER_PAGE, APPOINTMENT_STATUSES, WEEKLY_DAY_PAGE_SIZE } from "./appointmentConstants";
 import { useAppointments } from "./useAppointments";
+import { useLiveData } from "@/lib/useLiveData";
 import { parseDate, getPatientFullName } from "./appointmentHelpers";
 import { getFullName } from "@/lib/patient";
 import CancelAppointmentDialog from "./CancelAppointmentDialog";
@@ -885,10 +886,16 @@ export default function AppointmentsModule() {
   const handlePrintAppointmentCard = (appointment) =>
     printAppointmentCard(appointment, orgInfo);
 
+  // One bump re-runs every effect on this screen — the list, the week, the
+  // calendar counts and the stat cards all depend on refreshCount.
   const handleRefresh = () => {
     fetchData();
     setRefreshCount((count) => count + 1);
   };
+
+  // Live: reception books at the front desk, the doctor's screen shows it.
+  // This is why the header has no Refresh button any more.
+  useLiveData("appointments", handleRefresh);
 
   const onSubmit = useCallback(async (data) => {
     try {
@@ -962,11 +969,6 @@ export default function AppointmentsModule() {
           </p>
         </div>
         <div className="flex gap-2">
-          <Button variant="outline" onClick={handleRefresh}>
-            <RefreshCw className="h-4 w-4 mr-2" />
-            Refresh
-          </Button>
-         
           <AppointmentFormDialog
             isEdit={false}
             open={dialog.active === "new"}

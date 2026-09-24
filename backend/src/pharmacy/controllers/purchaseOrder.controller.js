@@ -8,13 +8,14 @@ import {
 import { getPagination, paginationMeta, handleServiceError, makeError } from '../utils.js'
 import { recordStockChange } from '../stockService.js'
 import { nextSeriesNumber } from '../../lib/counters.js'
+import { dayRange } from '../../lib/dates.js'
 
 const SORTABLE_FIELDS = ['orderDate', 'status', 'supplierName', 'totalAmount', 'createdAt']
 
 export async function list(req, res, next) {
   try {
     const ORGANIZATION_ID = getOrgId(req)
-    const { status, search, sortBy, sortOrder } = req.query
+    const { status, search, startDate, endDate, sortBy, sortOrder } = req.query
     const { page, limit, skip } = getPagination(req.query)
 
     const where = { organizationId: ORGANIZATION_ID }
@@ -25,6 +26,10 @@ export async function list(req, res, next) {
         { poNumber: { contains: search, mode: 'insensitive' } },
       ]
     }
+    // The Purchase Orders tab had no date filter at all. Filters on the ORDER
+    // date, as whole days in the hospital's timezone — the same dayRange the
+    // Sales list beside it (and a dozen other lists) already uses.
+    if (startDate || endDate) where.orderDate = dayRange(startDate, endDate)
 
     const orderBy = SORTABLE_FIELDS.includes(sortBy)
       ? { [sortBy]: sortOrder === 'asc' ? 'asc' : 'desc' }

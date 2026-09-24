@@ -7,6 +7,8 @@ import { getOrgSettings } from '@/lib/orgSettings'
 import { getFullName, calcAge as getAge, initials } from '@/lib/patient'
 import { useServerPagination } from '@/lib/useServerPagination'
 import { Pagination } from '@/components/common/Pagination'
+import { FilterBar } from '@/components/common/FilterBar'
+import { useLiveData } from '@/lib/useLiveData'
 import { format } from 'date-fns'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -15,7 +17,7 @@ import { Badge } from '@/components/ui/badge'
 import {
   Activity, Heart, Thermometer, Droplet, Scale,
   Plus, Save, Printer, Stethoscope, ClipboardList, BookOpen,
-  Pill, AlertTriangle, User, Loader2, RefreshCw, Check, Sparkles,
+  Pill, AlertTriangle, User, Loader2, Check, Sparkles,
   FlaskConical, Scan, ArrowLeft, Eye, Edit, Search, Trash2,
   X, CalendarClock, ChevronDown, ChevronUp,
 } from 'lucide-react'
@@ -197,6 +199,11 @@ export default function OpdModule() {
       hasRx: filterHasRx ? 'true' : '',
     },
   })
+  // Live over the app's WebSocket: a consultation saved by another doctor shows
+  // up here on its own (middleware/liveUpdates.js), so there is no Refresh
+  // button to press.
+  useLiveData('consultations', consultationsPagination.refresh)
+
   const consultations = consultationsPagination.rows
   const stats = consultationsPagination.summary || { total: 0, today: 0, thisWeek: 0, withRx: 0 }
 
@@ -523,7 +530,7 @@ export default function OpdModule() {
               <p className="text-gray-500 text-sm mt-1">View, manage and print patient consultation records</p>
             </div>
             <div className="flex gap-2">
-              <Button variant="outline" size="sm" onClick={consultationsPagination.refresh}><RefreshCw className="h-4 w-4 mr-1" />Refresh</Button>
+              {/* No Refresh button: this list is live (useLiveData below). */}
               <Button size="sm" className="bg-blue-600 hover:bg-blue-700" onClick={() => { resetForm(); setView('form') }}><Plus className="h-4 w-4 mr-2" />New Consultation</Button>
             </div>
           </div>
@@ -554,11 +561,15 @@ export default function OpdModule() {
           </div>
         </div>
 
-        <div className="flex flex-wrap gap-3 items-center">
-          <div className="relative flex-1 min-w-[220px] max-w-sm">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
-            <Input className="pl-9 rounded-xl" placeholder="Search by patient, UHID, doctor, diagnosis..." value={filterSearch} onChange={e => setFilterSearch(e.target.value)} />
-          </div>
+        {/* The shared filter row (components/common/FilterBar). The doctor picker
+            stays a SearchableSelect — a hospital can have a thousand doctors. */}
+        <FilterBar
+          search={filterSearch}
+          onSearchChange={setFilterSearch}
+          placeholder="Search by patient, UHID, doctor, diagnosis..."
+          active={filterDoctor !== 'all' || !!filterSearch || filterDate !== 'all' || filterHasRx}
+          onClear={() => { setFilterDoctor('all'); setFilterSearch(''); setFilterDate('all'); setSpecificDate(''); setCustomStart(''); setCustomEnd(''); setFilterHasRx(false) }}
+        >
           <SearchableSelect
             options={[
               // No "all" when there is only one name to pick — a doctor's list
@@ -600,10 +611,7 @@ export default function OpdModule() {
               <button type="button" onClick={() => setFilterHasRx(false)} className="rounded-full hover:bg-orange-100 p-0.5"><X className="h-3 w-3" /></button>
             </Badge>
           )}
-          {(filterDoctor !== 'all' || filterSearch || filterDate !== 'all' || filterHasRx) && (
-            <Button variant="ghost" size="sm" className="text-gray-500" onClick={() => { setFilterDoctor('all'); setFilterSearch(''); setFilterDate('all'); setSpecificDate(''); setCustomStart(''); setCustomEnd(''); setFilterHasRx(false) }}><X className="h-4 w-4 mr-1" />Clear</Button>
-          )}
-        </div>
+        </FilterBar>
 
         {consultationsPagination.loading && consultations.length === 0 ? (
           <div className="flex items-center justify-center py-20"><Loader2 className="h-8 w-8 animate-spin text-[#2E4168]" /></div>
