@@ -6,7 +6,7 @@ import { Input } from '@/components/ui/input'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { FlaskConical, Plus, Eye, Edit, Trash2, Clock, User, FileText, AlertTriangle, CheckCircle, Search, Printer, Send, ChevronDown, Save, AlertCircle, Activity, TestTube, Microscope, Beaker, Droplet, ClipboardList, FileBarChart, Play, CheckSquare, Loader2, Receipt, Upload, XCircle } from 'lucide-react'
+import { FlaskConical, Plus, Eye, Edit, Trash2, Clock, User, FileText, AlertTriangle, CheckCircle, Search, Printer, Send, ChevronDown, Save, AlertCircle, Activity, TestTube, Microscope, Beaker, Droplet, ClipboardList, FileBarChart, Play, CheckSquare, Loader2, Receipt, Upload, XCircle, CalendarClock } from 'lucide-react'
 import CancelActionDialog from '@/components/common/CancelActionDialog'
 import { useCancelAction } from '@/components/common/hooks/useCancelAction'
 import { format, formatDistanceToNow } from 'date-fns'
@@ -120,6 +120,8 @@ function transformApiOrder(apiOrder) {
     priority: apiOrder.priority || 'routine',
     status: apiOrder.status || 'pending',
     orderDate: new Date(apiOrder.orderDate),
+    // The day the patient is due; null on older orders (due the day ordered).
+    scheduledDate: apiOrder.scheduledDate ? new Date(apiOrder.scheduledDate) : null,
     requestingDoctor: apiOrder.requestedBy?.fullName || '',
     sampleCollectedAt: apiOrder.sampleCollectedAt ? new Date(apiOrder.sampleCollectedAt) : null,
     accessionNumber: apiOrder.accessionNumber || null,
@@ -359,6 +361,13 @@ export default function LaboratoryModule() {
   const [statusFilter, setStatusFilter] = useState('all')
   const [priorityFilter, setPriorityFilter] = useState('all')
   const [orderDateFilter, setOrderDateFilter] = useState('all')
+  // Which date the Orders date filter reads: when it was ordered, or when the
+  // patient is due ("who is coming today" ≠ "who was billed today").
+  const [orderDateOn, setOrderDateOn] = useState('ordered')
+  // The day a new order is due — today unless the patient will come later.
+  const [orderSchedule, setOrderSchedule] = useState(() => new Date().toLocaleDateString('en-CA'))
+  // Which choice the shared reschedule/cancel dialog opens on.
+  const [labDialogAction, setLabDialogAction] = useState('cancel')
   const [reportDateFilter, setReportDateFilter] = useState('all')
   const [showTestDialog, setShowTestDialog] = useState(false)
   const [showImport, setShowImport] = useState(false)
@@ -397,6 +406,7 @@ export default function LaboratoryModule() {
       search: debouncedOrderSearch,
       status: statusFilter === 'all' ? '' : statusFilter,
       priority: priorityFilter === 'all' ? '' : priorityFilter,
+      dateOn: orderDateOn === 'scheduled' ? 'scheduled' : '',
       ...dateRangeFor({ mode: orderDateFilter }),
     },
   })
@@ -634,6 +644,7 @@ export default function LaboratoryModule() {
         priority: data.priority,
         // Home-collection charge is tagged into notes so the receipt can show it.
         notes: `${data.notes || ''}${hcc > 0 ? ` [HCC:${hcc}]` : ''}`.trim(),
+        scheduledDate: orderSchedule || undefined,
       })
 
       setOrders(prev => [transformApiOrder(newOrder), ...prev])
@@ -673,6 +684,7 @@ export default function LaboratoryModule() {
       orderForm.reset()
       setSelectedPatient(null)
       setOrderHcc('')
+      setOrderSchedule(new Date().toLocaleDateString('en-CA'))
       setOrderAmountPaid('')
       setOrderPayMethod('cash')
       fetchStats()
@@ -716,14 +728,21 @@ export default function LaboratoryModule() {
   // its no-money mode: a doctor's order was never paid for. The server refuses
   // once the sample is collected or if the order was paid at Billing, and says
   // why — that message is what the toast shows.
+  // The same dialog also moves an order to the day the patient will actually
+  // come (billed today, collected later). The server keeps the reason in the
+  // audit trail and refuses once the sample is drawn.
   const cancelOrder = useCancelAction({
+    reschedule: (order, c) => labApi.updateOrder(order.id, { scheduledDate: c.date, rescheduleReason: c.reason }),
     cancel: (order, c) => labApi.updateOrder(order.id, { status: 'cancelled', rejectionReason: c.reason }),
     onDone: () => {
       fetchOrders()
       fetchStats()
       ordersTable.refresh()
     },
-    messages: { cancelled: () => 'Lab order cancelled — no sample was taken' },
+    messages: {
+      rescheduled: (c) => `Lab order moved to ${format(new Date(`${c.date}T00:00`), 'dd MMM yyyy')}`,
+      cancelled: () => 'Lab order cancelled — no sample was taken',
+    },
   })
 
   const handleStartProcessing = async (orderId) => {
@@ -885,9 +904,12 @@ export default function LaboratoryModule() {
     let clinic = {}
     try { clinic = JSON.parse(localStorage.getItem('gudmed-clinic-profile') || '{}') } catch { clinic = {} }
     const now = new Date()
+    // A report cannot be ready before the sample is drawn: for an order due on a
+    // later day, the turnaround counts from that day, not from today.
+    const due = order.scheduledDate && order.scheduledDate > now ? order.scheduledDate : now
     const etaFor = (testId) => {
       const tat = tests.find(td => td.id === testId)?.turnaroundTime || 24
-      return format(new Date(now.getTime() + tat * 3600 * 1000), 'dd-MM-yyyy HH:mm')
+      return format(new Date(due.getTime() + tat * 3600 * 1000), 'dd-MM-yyyy HH:mm')
     }
     // An order raised from a Billing invoice is numbered "LAB-<invoice number>"
     // and says so in its notes — that names the invoice it came from.
@@ -1365,7 +1387,14 @@ export default function LaboratoryModule() {
                 ))}
               </SelectContent>
             </Select>
-            {/* Ordered on — whole days in the hospital's own timezone. */}
+            {/* Ordered on, or due on — whole days in the hospital's own timezone. */}
+            <Select value={orderDateOn} onValueChange={setOrderDateOn}>
+              <SelectTrigger className="w-36"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="ordered">Ordered on</SelectItem>
+                <SelectItem value="scheduled">Due on</SelectItem>
+              </SelectContent>
+            </Select>
             <Select value={orderDateFilter} onValueChange={setOrderDateFilter}>
               <SelectTrigger className="w-36"><SelectValue placeholder="Date" /></SelectTrigger>
               <SelectContent>
@@ -1375,8 +1404,8 @@ export default function LaboratoryModule() {
                 <SelectItem value="month">This Month</SelectItem>
               </SelectContent>
             </Select>
-            {(orderSearch || statusFilter !== 'all' || priorityFilter !== 'all' || orderDateFilter !== 'all') && (
-              <Button variant="ghost" className="text-gray-500" onClick={() => { setOrderSearch(''); setStatusFilter('all'); setPriorityFilter('all'); setOrderDateFilter('all') }}>Clear</Button>
+            {(orderSearch || statusFilter !== 'all' || priorityFilter !== 'all' || orderDateFilter !== 'all' || orderDateOn !== 'ordered') && (
+              <Button variant="ghost" className="text-gray-500" onClick={() => { setOrderSearch(''); setStatusFilter('all'); setPriorityFilter('all'); setOrderDateFilter('all'); setOrderDateOn('ordered') }}>Clear</Button>
             )}
             {/* No Refresh button — this list is live (useLiveData above). */}
           </div>
@@ -1437,6 +1466,10 @@ export default function LaboratoryModule() {
                               <TableCell className="text-sm">
                                 <span>{format(new Date(order.orderDate), 'dd MMM yyyy')}</span>
                                 <p className="text-xs text-gray-500">{format(new Date(order.orderDate), 'HH:mm')}</p>
+                                {/* Shown only when it differs from the day it was ordered. */}
+                                {order.scheduledDate && format(order.scheduledDate, 'yyyy-MM-dd') !== format(new Date(order.orderDate), 'yyyy-MM-dd') && (
+                                  <p className="text-xs font-medium text-amber-700">Due {format(order.scheduledDate, 'dd MMM yyyy')}</p>
+                                )}
                               </TableCell>
                               <TableCell>
                                 <div className="flex gap-1">
@@ -1461,8 +1494,19 @@ export default function LaboratoryModule() {
                                     <Button
                                       size="sm"
                                       variant="ghost"
+                                      title="The patient will come on another day"
+                                      onClick={() => { setLabDialogAction('reschedule'); cancelOrder.start(order) }}
+                                    >
+                                      <CalendarClock className="h-4 w-4 mr-1" />
+                                      Reschedule
+                                    </Button>
+                                  )}
+                                  {order.status === 'pending' && (
+                                    <Button
+                                      size="sm"
+                                      variant="ghost"
                                       title="The patient did not take this test here"
-                                      onClick={() => cancelOrder.start(order)}
+                                      onClick={() => { setLabDialogAction('cancel'); cancelOrder.start(order) }}
                                     >
                                       <XCircle className="h-4 w-4 mr-1" />
                                       Cancel
@@ -2325,6 +2369,19 @@ export default function LaboratoryModule() {
                 />
               </div>
 
+              {/* The day the patient comes for the sample — billed today need not
+                  mean collected today. */}
+              <div className="space-y-2">
+                <Label htmlFor="lab-order-schedule">Sample Collection Date</Label>
+                <Input
+                  id="lab-order-schedule"
+                  type="date"
+                  min={new Date().toLocaleDateString('en-CA')}
+                  value={orderSchedule}
+                  onChange={e => setOrderSchedule(e.target.value)}
+                />
+              </div>
+
               {/* Payment collected at booking — recorded as a Payment on the invoice */}
               <PaymentFields
                 amount={orderAmountPaid}
@@ -2532,6 +2589,8 @@ export default function LaboratoryModule() {
         {...cancelOrder.dialogProps}
         module="laboratory"
         settlesMoney={false}
+        allowReschedule
+        initialAction={labDialogAction}
         title={cancelOrder.record?.orderNumber || ''}
         subtitle={cancelOrder.record?.patientName || ''}
       />

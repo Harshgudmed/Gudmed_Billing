@@ -232,3 +232,22 @@ export function parseUserDate(value, label, { minYear = 1900, maxYear = 2200 } =
 
   return date
 }
+
+/**
+ * The day a patient is booked to come for a test ('YYYY-MM-DD' from a date box)
+ * → the start of that day in the hospital's timezone. Refuses a day already
+ * past: booking or moving a visit to yesterday is always a mistake. A year
+ * ahead is the far limit — anything later is a typo in the year.
+ * Shared by Laboratory and Radiology so both accept exactly the same days.
+ */
+export function parseScheduleDay(value, label = 'Scheduled date') {
+  const fail = (message) => { throw Object.assign(new Error(message), { status: 400 }) }
+  parseUserDate(value, label)
+  const ymd = String(value).slice(0, 10)
+  const today = ymdInZone()
+  if (ymd < today) fail(`${label} cannot be in the past`)
+  const [y, m, d] = today.split('-').map(Number)
+  const limit = new Date(Date.UTC(y + 1, m - 1, d)).toISOString().slice(0, 10)
+  if (ymd > limit) fail(`${label} can be at most one year ahead`)
+  return dayRange(ymd, ymd).gte
+}

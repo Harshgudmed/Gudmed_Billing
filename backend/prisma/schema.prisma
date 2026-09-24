@@ -2371,6 +2371,10 @@ model LabOrder {
   provisionalDiagnosis String?
   priority             String    @default("routine")
   status               String    @default("pending")
+  // The day the patient is expected for sample collection. Billed today does
+  // not mean tested today — the patient may come later, or be rescheduled.
+  // Null on orders from before this column: read as the orderDate.
+  scheduledDate        DateTime?
   sampleCollectedAt    DateTime?
   sampleCollectedById  String?
   // Also per-hospital: the only lookup (integration/queueProcessor.js, matching

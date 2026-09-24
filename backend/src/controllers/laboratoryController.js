@@ -5,7 +5,7 @@ import { stripIdentity } from '../lib/stripIdentity.js'
 import { patientSearchWhere } from '../lib/patientSearch.js'
 import { nextSeriesNumber } from "../lib/counters.js";
 import { resolveRequestedById } from '../lib/requestedBy.js'
-import { todayRange, dayRange } from '../lib/dates.js'
+import { todayRange, dayRange, parseScheduleDay } from '../lib/dates.js'
 import { listResponse } from '../lib/pagination.js'
 import { z } from 'zod'
 import { PATIENT_SNAPSHOT_SELECT } from '../utils/patientSnapshot.js'
@@ -42,6 +42,8 @@ const createOrderSchema = z.object({
   provisionalDiagnosis: z.string().optional(),
   priority: z.string().optional(),
   notes: z.string().optional(),
+  // 'YYYY-MM-DD' — the day the patient is due. Blank = the day it is billed.
+  scheduledDate: z.string().optional(),
 })
 
 const createResultSchema = z.object({
@@ -139,7 +141,13 @@ export const getAll = async (req, res, next) => {
       // Whole days in the hospital's timezone (the shared dayRange), on the date
       // the screen is actually about: Orders asks when it was ordered, the
       // Reports tab (completed orders) asks when the result went out.
-      if (startDate || endDate) {
+      if ((startDate || endDate) && dateOn === 'scheduled') {
+        // "Who is due on these days": the booked day, or — for an order with
+        // none (made before the column existed) — the day it was ordered.
+        const range = dayRange(startDate, endDate)
+        const due = { OR: [{ scheduledDate: range }, { scheduledDate: null, orderDate: range }] }
+        where.AND = [...(where.AND || []), due]
+      } else if (startDate || endDate) {
         where[dateOn === 'completed' ? 'resultsReportedAt' : 'orderDate'] = dayRange(startDate, endDate)
       }
       const body = await listResponse(db.labOrder, {
@@ -246,6 +254,7 @@ export const create = async (req, res, next) => {
 
       const { patientId, consultationId, tests, clinicalIndication, provisionalDiagnosis, priority, notes } =
         parsed.data
+      const scheduledDate = parsed.data.scheduledDate ? parseScheduleDay(parsed.data.scheduledDate) : null
 
       const actorId = getActor(req).id
       // The order number is drawn from the atomic per-org counter inside the same
@@ -274,6 +283,7 @@ export const create = async (req, res, next) => {
             provisionalDiagnosis,
             priority,
             notes,
+            scheduledDate,
             status: 'pending',
           },
           // Return the patient too, so the freshly-created order shows the real
@@ -365,7 +375,9 @@ export const update = async (req, res, next) => {
         return res.status(400).json({ success: false, error: 'Validation error', details: parsed.error.issues })
       }
 
-      const { id, resource: _r, ...updates } = parsed.data
+      // `rescheduleReason` is why the day moved — it goes to the audit trail,
+      // not a column, so it must not reach Prisma through `...updates`.
+      const { id, resource: _r, rescheduleReason, ...updates } = parsed.data
 
       // Strip identity/tenant fields so a passthrough body can't relocate this
       // order to another org or corrupt its identity via the `...updates` spread.
@@ -382,9 +394,43 @@ export const update = async (req, res, next) => {
       // Tenant guard: only touch an order that belongs to this org.
       const owned = await db.labOrder.findFirst({
         where: { id, organizationId: ORGANIZATION_ID },
-        select: { id: true, status: true, orderNumber: true },
+        select: { id: true, status: true, orderNumber: true, scheduledDate: true, orderDate: true },
       })
       if (!owned) return res.status(404).json({ success: false, error: 'Lab order not found' })
+
+      // Moving the day the patient is due (they could not come, or were told to
+      // come later). Only while the sample is still to be drawn — after that the
+      // visit has happened. A reason is required and kept in the audit trail.
+      if (updates.scheduledDate !== undefined) {
+        if (owned.status !== 'pending') {
+          return res.status(409).json({
+            success: false,
+            title: "Can't reschedule",
+            error: 'The sample has already been collected for this order, so its date can no longer be changed.',
+          })
+        }
+        if (!String(rescheduleReason || '').trim()) {
+          return res.status(400).json({ success: false, title: 'Reason needed', error: 'Please give a reason for rescheduling.' })
+        }
+        const scheduledDate = parseScheduleDay(updates.scheduledDate)
+        // Compare-and-set, as with cancel: a sample collected in the same instant wins.
+        const { count } = await db.labOrder.updateMany({
+          where: { id, organizationId: ORGANIZATION_ID, status: 'pending' },
+          data: { scheduledDate },
+        })
+        if (count === 0) {
+          return res.status(409).json({ success: false, title: "Can't reschedule", error: 'The sample has just been collected for this order.' })
+        }
+        await auditIpd(req, ORGANIZATION_ID, {
+          action: 'reschedule',
+          entityType: 'lab.order',
+          entityId: id,
+          before: { scheduledDate: owned.scheduledDate || owned.orderDate },
+          after: { scheduledDate, rescheduleReason: String(rescheduleReason).trim() },
+        })
+        const data = await db.labOrder.findFirst({ where: { id, organizationId: ORGANIZATION_ID } })
+        return res.json({ success: true, data })
+      }
 
       // Closing an order the patient never came for (they went elsewhere, or did
       // not return). Three rules, checked here and not only on the screen:

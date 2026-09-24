@@ -6,7 +6,7 @@ import { Textarea } from '@/components/ui/textarea'
 import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
 } from '@/components/ui/dialog'
-import { Loader2, CalendarClock, IndianRupee } from 'lucide-react'
+import { Loader2, CalendarClock, IndianRupee, XCircle } from 'lucide-react'
 import { useOrgSettings } from '@/lib/useOrgSettings'
 import { calcRefund, isInstantRefund } from '@/lib/refund'
 import { formatMoney } from '@/lib/format'
@@ -78,10 +78,20 @@ export default function CancelActionDialog({
   // is just a reason and a Cancel button. Default true keeps Billing and
   // Radiology exactly as they were.
   settlesMoney = true,
+  // Opt-in, for the no-money mode: offer "move to another day" beside cancel.
+  // A lab order billed today may be collected another day — nothing to refund,
+  // but the patient still needs a new date. Omitted, nothing changes: a
+  // settlesMoney dialog follows the module's own `reschedule`, a no-money one
+  // offers cancel only.
+  allowReschedule,
+  // Which choice is selected when the dialog opens ('reschedule' or 'cancel'),
+  // for a screen with a separate button for each.
+  initialAction,
 }) {
   const cfg = CANCEL_MODULES[module] ?? CANCEL_MODULES.billing
   const { orgInfo } = useOrgSettings()
-  const offerReschedule = settlesMoney && cfg.reschedule
+  const offerReschedule = (allowReschedule ?? settlesMoney) && cfg.reschedule
+  const cancelKey = settlesMoney ? 'refund' : 'cancel'
 
   const [action, setAction] = useState('refund')
   const [reason, setReason] = useState('')
@@ -92,11 +102,11 @@ export default function CancelActionDialog({
   // reason is written onto the record, so it would be attributed to the wrong one.
   useEffect(() => {
     if (open) {
-      setAction(!settlesMoney ? 'cancel' : cfg.reschedule ? 'reschedule' : 'refund')
+      setAction(offerReschedule && initialAction !== 'cancel' ? 'reschedule' : cancelKey)
       setReason('')
       setDate('')
     }
-  }, [open, cfg.reschedule, settlesMoney])
+  }, [open, offerReschedule, cancelKey, initialAction])
 
   const workStarted = cfg.workStarted(record)
   const { charge, refund, chargePct } = calcRefund({ amount, workStarted, settings: orgInfo })
@@ -108,22 +118,26 @@ export default function CancelActionDialog({
 
   const submit = () => {
     if (!canConfirm) return
+    if (action === 'reschedule') {
+      onConfirm({ action: 'reschedule', reason: reason.trim(), date })
+      return
+    }
     if (!settlesMoney) {
       onConfirm({ action: 'cancel', reason: reason.trim() })
       return
     }
-    onConfirm(action === 'reschedule'
-      ? { action: 'reschedule', reason: reason.trim(), date }
-      : { action: 'refund', reason: reason.trim(), amount, charge, refund, chargePct, instant })
+    onConfirm({ action: 'refund', reason: reason.trim(), amount, charge, refund, chargePct, instant })
   }
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-md">
         <DialogHeader>
-          <DialogTitle>Cancel {cfg.label}</DialogTitle>
+          <DialogTitle>{!settlesMoney && offerReschedule ? `Reschedule or Cancel ${cfg.label}` : `Cancel ${cfg.label}`}</DialogTitle>
           <DialogDescription>
-            {!settlesMoney
+            {!settlesMoney && offerReschedule
+              ? 'Move it to the day the patient will come, or cancel it if they will not come here. Nothing is deleted.'
+              : !settlesMoney
               ? 'Use this when the patient did not take it here — they went elsewhere or did not come. Nothing is deleted; it moves to Cancelled.'
               : cfg.reschedule
                 ? 'Move this to a new date, or cancel it and settle the money.'
@@ -143,7 +157,9 @@ export default function CancelActionDialog({
             <div className="flex gap-2">
               {[
                 { key: 'reschedule', Icon: CalendarClock, text: cfg.rescheduleVerb ?? 'Reschedule' },
-                { key: 'refund', Icon: IndianRupee, text: 'Cancel & refund' },
+                settlesMoney
+                  ? { key: 'refund', Icon: IndianRupee, text: 'Cancel & refund' }
+                  : { key: 'cancel', Icon: XCircle, text: 'Cancel' },
               ].map(({ key, Icon, text }) => (
                 <button
                   key={key}
@@ -160,15 +176,17 @@ export default function CancelActionDialog({
             </div>
           )}
 
-          {!settlesMoney ? null : action === 'reschedule' ? (
+          {action === 'reschedule' ? (
             <div className="space-y-2">
               <div>
                 <Label>New date *</Label>
-                {/* Today is the floor: nothing can be moved into the past. */}
+                {/* Today is the floor: nothing can be moved into the past.
+                    The local day, not toISOString's UTC one — before 5:30 am in
+                    India that was still yesterday. */}
                 <Input
                   type="date"
                   value={date}
-                  min={new Date().toISOString().slice(0, 10)}
+                  min={new Date().toLocaleDateString('en-CA')}
                   onChange={(e) => setDate(e.target.value)}
                 />
               </div>
@@ -176,7 +194,7 @@ export default function CancelActionDialog({
                 <p className="text-xs text-gray-500">{cfg.rescheduleHint}</p>
               )}
             </div>
-          ) : (
+          ) : !settlesMoney ? null : (
             <div className="rounded-lg border p-3 text-sm space-y-1">
               <div className="flex justify-between">
                 <span className="text-gray-500">Billed</span>
@@ -231,9 +249,9 @@ export default function CancelActionDialog({
             disabled={!canConfirm}
           >
             {isSubmitting && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
-            {!settlesMoney
-              ? `Cancel ${cfg.label}`
-              : action === 'reschedule' ? (cfg.rescheduleVerb ?? 'Reschedule') : `Cancel & refund ${formatMoney(refund)}`}
+            {action === 'reschedule'
+              ? (cfg.rescheduleVerb ?? 'Reschedule')
+              : !settlesMoney ? `Cancel ${cfg.label}` : `Cancel & refund ${formatMoney(refund)}`}
           </Button>
         </DialogFooter>
       </DialogContent>

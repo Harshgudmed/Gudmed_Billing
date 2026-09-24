@@ -468,11 +468,17 @@ export default function RadiologyModule() {
   // already worked out what the refund would be — but the amount is NOT sent: the
   // server recomputes it from this hospital's own settings, so what the browser
   // shows is a preview, not the figure.
+  //
+  // Its own call, not handleUpdateStatus: that one catches its errors, so a
+  // refused reschedule still toasted "Moved to …". And the reason goes to the
+  // server's audit trail — it used to overwrite the order's notes, which is
+  // where a Billing-raised order keeps the invoice it came from.
   const cancelAction = useCancelAction({
-    reschedule: (o, c) => handleUpdateStatus(o.id, o.status, {
-      scheduledDate: c.date,
-      notes: `Rescheduled: ${c.reason}`,
-    }),
+    reschedule: async (o, c) => {
+      const res = await client.patch('/radiology', { resource: 'order', id: o.id, scheduledDate: c.date, rescheduleReason: c.reason })
+      if (!res?.success) throw new Error(res?.error || 'Could not reschedule this scan')
+      fetchOrders()
+    },
     cancel: (o, c) => handleUpdateStatus(o.id, 'cancelled', { cancellationReason: c.reason }),
     onDone: () => fetchStats(),
   })

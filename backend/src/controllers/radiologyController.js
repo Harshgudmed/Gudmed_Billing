@@ -3,7 +3,7 @@ import { getOrgId, getActor } from "../lib/reqContext.js";
 import { nextSeriesNumber } from "../lib/counters.js";
 import { stripIdentity } from '../lib/stripIdentity.js'
 import { resolveRequestedById } from '../lib/requestedBy.js'
-import { todayRange, dayRange } from '../lib/dates.js'
+import { todayRange, dayRange, parseScheduleDay } from '../lib/dates.js'
 import { z } from 'zod'
 import { PATIENT_SNAPSHOT_SELECT } from '../utils/patientSnapshot.js'
 import { patientSearchWhere } from '../lib/patientSearch.js'
@@ -355,7 +355,8 @@ export const create = async (req, res, next) => {
             ...(provisionalDiagnosis !== undefined ? { provisionalDiagnosis } : {}),
             ...(relevantHistory !== undefined ? { relevantHistory } : {}),
             ...(urgency !== undefined ? { urgency } : {}),
-            ...(scheduledDate !== undefined ? { scheduledDate: new Date(scheduledDate) } : {}),
+            // Checked like a reschedule: a real day, not in the past. Blank = none.
+            ...(scheduledDate ? { scheduledDate: parseScheduleDay(scheduledDate) } : {}),
             ...(notes !== undefined ? { notes } : {}),
           },
           include: {
@@ -438,16 +439,32 @@ export const update = async (req, res, next) => {
       if (!parsed.success) {
         return res.status(400).json({ success: false, error: 'Validation error', details: parsed.error.issues })
       }
-      const { id, resource: _r, ...fields } = parsed.data
+      // `rescheduleReason` goes to the audit trail, not a column.
+      const { id, resource: _r, rescheduleReason, ...fields } = parsed.data
       // .passthrough() keeps every unnamed key and they are spread straight into
       // update({ data }) — one shared list decides what a client may never move.
       stripIdentity(fields, 'radiologyOrder')
 
-      if (fields.scheduledDate) fields.scheduledDate = new Date(fields.scheduledDate)
-
       // Tenant guard: only touch an order that belongs to this org.
-      const owned = await db.radiologyOrder.findFirst({ where: { id, organizationId: ORGANIZATION_ID }, select: { id: true } })
+      const owned = await db.radiologyOrder.findFirst({
+        where: { id, organizationId: ORGANIZATION_ID },
+        select: { id: true, status: true, scheduledDate: true, orderDate: true },
+      })
       if (!owned) return res.status(404).json({ success: false, error: 'Radiology order not found' })
+
+      // Moving the scan to another day — the same rules as a lab order: only
+      // before the scan is started, with a reason, kept in the audit trail.
+      // It used to take any date (past, or not a date at all) from any status,
+      // and the screen wrote the reason over the order's notes.
+      if (fields.scheduledDate !== undefined) {
+        if (owned.status !== 'pending') {
+          return res.status(409).json({ success: false, title: "Can't reschedule", error: 'This scan has already been started, so its date can no longer be changed.' })
+        }
+        if (!String(rescheduleReason || '').trim()) {
+          return res.status(400).json({ success: false, title: 'Reason needed', error: 'Please give a reason for rescheduling.' })
+        }
+        fields.scheduledDate = parseScheduleDay(fields.scheduledDate)
+      }
 
       const data = await db.radiologyOrder.update({
         where: { id },
@@ -458,6 +475,15 @@ export const update = async (req, res, next) => {
           report: true,
         },
       })
+      if (fields.scheduledDate !== undefined) {
+        await auditIpd(req, ORGANIZATION_ID, {
+          action: 'reschedule',
+          entityType: 'radiology.order',
+          entityId: id,
+          before: { scheduledDate: owned.scheduledDate || owned.orderDate },
+          after: { scheduledDate: fields.scheduledDate, rescheduleReason: String(rescheduleReason).trim() },
+        })
+      }
       return res.json({ success: true, data })
     }
 
