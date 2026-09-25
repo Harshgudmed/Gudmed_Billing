@@ -657,6 +657,11 @@ export async function getAll(req, res) {
 
     return res.status(400).json({ success: false, error: 'Invalid resource type' })
   } catch (error) {
+    // A mistake in the request (e.g. a date filter that is not a date) keeps its
+    // own status and reason; only a real failure becomes a 500.
+    if (error?.status && error.status < 500) {
+      return res.status(error.status).json({ success: false, error: error.message })
+    }
     console.error('Billing getAll error:', error)
     return res.status(500).json({ success: false, error: 'Internal server error' })
   }
@@ -842,7 +847,6 @@ export async function create(req, res) {
 
       const {
         invoiceId,
-        patientId,
         amount,
         paymentMethod,
         paymentReference,
@@ -885,7 +889,7 @@ export async function create(req, res) {
         payment = await db.$transaction(async (tx) => {
         const invoice = await tx.invoice.findFirst({
           where: { id: invoiceId, organizationId: ORGANIZATION_ID },
-          select: { id: true, isArchived: true, status: true },
+          select: { id: true, isArchived: true, status: true, patientId: true },
         })
         if (!invoice) {
           const err = new Error('Invoice not found')
@@ -913,7 +917,10 @@ export async function create(req, res) {
           data: {
             organizationId: ORGANIZATION_ID,
             invoiceId,
-            patientId: patientId || null,
+            // The payer is whoever the invoice is for — never the request's
+            // patientId, which put a payment on another patient's history and
+            // receipts when a screen sent the wrong one.
+            patientId: invoice.patientId,
             amount,
             paymentMethod,
             paymentReference: paymentReference || null,

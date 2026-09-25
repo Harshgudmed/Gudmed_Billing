@@ -123,10 +123,6 @@ export default function DisplayBoardsModule() {
     fetchData()
   }, [])
 
-  // Live: a screen or a room set up by another administrator appears here on
-  // its own, so this page carries no Refresh button.
-  useLiveData(['screens', 'rooms'], fetchData)
-
   // Defaults the filter to the first floor once floors load, so the dialog
   // never opens showing every room in the hospital unfiltered.
   useEffect(() => {
@@ -155,6 +151,12 @@ export default function DisplayBoardsModule() {
       setLoading(false)
     }
   }
+
+  // Live: a screen or a room set up by another administrator appears here on
+  // its own, so this page carries no Refresh button. Below fetchData, not
+  // above: a `const` read before its line throws on the first render, and the
+  // whole TV Boards tab showed the error screen.
+  useLiveData(['screens', 'rooms'], fetchData)
 
   const handleOpenCreate = () => {
     setEditingScreen(null)

@@ -8,6 +8,7 @@ import { recordStockChange, consumeFromBatches } from '../stockService.js'
 import { getPatientSnapshot } from '../../utils/patientSnapshot.js'
 import { nextSeriesNumber } from '../../lib/counters.js'
 import { PATIENT_NAME_SELECT } from '../../lib/patientName.js'
+import { round2 } from '../../lib/money.js'
 
 const SORTABLE_FIELDS = ['saleDate', 'totalAmount', 'paymentStatus', 'createdAt']
 
@@ -95,7 +96,7 @@ export async function create(req, res, next) {
       for (const item of parsed.items) {
         const drug = await tx.pharmacyDrug.findFirst({
           where: { id: item.drugId, organizationId: ORGANIZATION_ID },
-          select: { id: true, drugName: true, quantityInStock: true, gstRate: true },
+          select: { id: true, drugName: true, quantityInStock: true, gstRate: true, sellingPrice: true, mrp: true },
         })
         if (!drug) {
           throw makeError(`Drug not found: ${item.drugId}`, 404, 'DRUG_NOT_FOUND')
@@ -111,11 +112,22 @@ export async function create(req, res, next) {
         drugsById.set(item.drugId, drug)
       }
 
+      // The price is the catalogue's, never the request's — the same rule
+      // Billing follows (lib/catalogPrice.js): selling price, else MRP. The body
+      // used to set it, so a medicine could be sold at ₹0.01 and the receipt
+      // looked normal. No screen lets a person type a price here, so nothing
+      // legitimate is lost.
+      const items = parsed.items.map((item) => {
+        const drug = drugsById.get(item.drugId)
+        const unitPrice = round2(drug.sellingPrice ?? drug.mrp ?? 0)
+        return { ...item, unitPrice, total: round2(unitPrice * item.quantity) }
+      })
+
       // MONEY SAFETY: compute the totals and validate the discount BEFORE any
       // stock mutation, so a bad discount can never decrement inventory or store
       // a negative total. Reject a discount that is negative, non-numeric, or
       // greater than the subtotal (which would drive totalAmount below 0).
-      const subtotal = parsed.items.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0)
+      const subtotal = round2(items.reduce((sum, item) => sum + item.total, 0))
       const discountAmount = safeMoney(parsed.discountAmount)
       if (discountAmount === null) {
         throw makeError('Discount amount must be a non-negative number', 400, 'INVALID_DISCOUNT')
@@ -135,7 +147,7 @@ export async function create(req, res, next) {
       // batch/expiry each line actually drew from onto the receipt (a GST invoice
       // must show the batch/expiry that was true at sale time, not looked up later).
       const enrichedItems = []
-      for (const item of parsed.items) {
+      for (const item of items) {
         const drug = drugsById.get(item.drugId)
         const { consumed } = await consumeFromBatches(tx, { drugId: item.drugId, quantity: item.quantity })
         enrichedItems.push({

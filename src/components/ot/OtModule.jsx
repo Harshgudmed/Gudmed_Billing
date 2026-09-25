@@ -11,6 +11,7 @@ import { FilterBar, FilterSelect, statusOptions } from '@/components/common/Filt
 import { useDateFilter } from '@/components/common/DateFilter'
 import { useDebounce } from '@/lib/useDebounce'
 import { useLiveData } from '@/lib/useLiveData'
+import { useAuth } from '@/lib/auth'
 import { getFullName } from '@/lib/patient'
 import { formatDateTime } from '@/lib/format'
 import {
@@ -36,7 +37,16 @@ import { OT_STATUS_COLORS, OT_PRIORITY_COLORS, formatSlot, formatDuration } from
 const labelize = (value) => (value || '').replace(/_/g, ' ')
 const OT_STATUS_OPTIONS = statusOptions(OT_STATUSES, { label: labelize })
 
+// Who may book a case — mirrors 'ot-booking' in backend/src/inpatient/rbac.js
+// (admin passes every check there). A nurse sees the board and runs the
+// checklist, but booking is desk work: the button used to show to nurses and
+// every attempt ended in "Your role cannot perform this action".
+const OT_BOOKING_ROLES = ['admin', 'super_admin', 'receptionist', 'doctor']
+
 export default function OtModule() {
+  const { user } = useAuth()
+  // No user = the no-login demo mode, where the server allows everything too.
+  const canBook = !user || OT_BOOKING_ROLES.includes(user.role)
   const [bookings, setBookings] = useState([])
   const [theatres, setTheatres] = useState([])
   const [surgeries, setSurgeries] = useState([])
@@ -173,9 +183,11 @@ export default function OtModule() {
             <p className="text-gray-500">Surgery scheduling &amp; theatre board</p>
           </div>
         </div>
-        <Button className="bg-blue-600 hover:bg-blue-700" onClick={() => openBooking(null)}>
-          <Plus className="h-4 w-4 mr-2" /> New Booking
-        </Button>
+        {canBook && (
+          <Button className="bg-blue-600 hover:bg-blue-700" onClick={() => openBooking(null)}>
+            <Plus className="h-4 w-4 mr-2" /> New Booking
+          </Button>
+        )}
       </div>
 
       <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
@@ -231,7 +243,7 @@ export default function OtModule() {
                   bookings={bookings}
                   showDate={spansMultipleDays}
                   onSelectCase={setSelectedCase}
-                  onAddCase={openBooking}
+                  onAddCase={canBook ? openBooking : undefined}
                 />
               </TabsContent>
 

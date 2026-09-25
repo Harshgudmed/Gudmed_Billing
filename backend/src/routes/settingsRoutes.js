@@ -1,4 +1,5 @@
 import { Router } from 'express'
+import { authorize } from '../middleware/auth.js'
 import {
   getOrganization, updateOrganization,
   getUsers, createUser, updateUser, toggleUserStatus,
@@ -6,6 +7,15 @@ import {
 } from '../controllers/settingsController.js'
 
 const router = Router()
+
+// Reading stays open to all staff — the user list fills doctor pickers on eight
+// screens. CHANGING settings is the administrator's: without this any logged-in
+// account (a receptionist was proven to) could create an admin, reset the
+// admin's password and log in as them, or rename the hospital. authorize()
+// always passes admin / super_admin, so naming 'admin' admits only them.
+const adminOnly = authorize('admin')
+router.post('/', adminOnly)
+router.patch('/', adminOnly)
 
 router.get('/', (req, res, next) => {
   const { resource } = req.query

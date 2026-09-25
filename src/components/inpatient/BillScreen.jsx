@@ -10,6 +10,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import client from '@/api/client'
+import { showApiError } from '@/lib/apiRequest'
 import { useAuth } from '@/lib/auth'
 
 const SERVICE_GROUPS = ['PROCEDURE', 'LAB', 'RADIOLOGY', 'PHARMACY', 'CONSUMABLE', 'DOCTOR_VISIT', 'NURSING', 'OTHER']
@@ -91,7 +92,7 @@ export default function BillScreen({ admission, orgInfo = {} }) {
     try {
       const res = await client.post('/inpatient', { resource: 'bill-generate', admissionId })
       if (res.success) { toast.success('Draft bill refreshed'); load() } else toast.error(res.error || 'Failed')
-    } catch (e) { toast.error(e?.response?.data?.error || 'Failed to generate') }
+    } catch (e) { showApiError(e, 'Failed to generate') }
     setBusy(false)
   }
 
@@ -100,7 +101,7 @@ export default function BillScreen({ admission, orgInfo = {} }) {
     try {
       const res = await client.post('/inpatient', { resource: 'bill-finalize', admissionId, billType })
       if (res.success) { toast.success(`Bill finalized — ${res.data.billNumber}`); load() } else toast.error(res.error || 'Failed')
-    } catch (e) { toast.error(e?.response?.data?.error || 'Failed to finalize') }
+    } catch (e) { showApiError(e, 'Failed to finalize') }
     setBusy(false)
   }
 
@@ -111,7 +112,7 @@ export default function BillScreen({ admission, orgInfo = {} }) {
       const res = await client.post('/inpatient', { resource: 'post-charge', admissionId, description: form.description, serviceGroup: form.serviceGroup, base: Number(form.base), quantity: Number(form.quantity) || 1 })
       if (res.success) { toast.success(`Charge added at ${inr(res.data.unitPrice)}`); setForm({ description: '', serviceGroup: 'PROCEDURE', base: '', quantity: 1 }); setPreview(null); await generate() }
       else toast.error(res.error || 'Failed')
-    } catch (e) { toast.error(e?.response?.data?.error || 'Failed to add charge') }
+    } catch (e) { showApiError(e, 'Failed to add charge') }
     setBusy(false)
   }
 
@@ -152,7 +153,7 @@ ${rows || '<tr><td colspan="5" style="text-align:center;color:#999">No service l
       const res = await client.post('/inpatient', { resource: 'payment', billId: bill.id, amount: Number(payForm.amount), method: payForm.method, reference: payForm.reference || undefined, note: payForm.note || undefined, idempotencyKey: `pay-${bill.id}-${Date.now()}` })
       if (res.success) { toast.success(`Payment received — ${res.data.receiptNumber}`); setShowPay(false); setPayForm({ amount: '', method: 'CASH', reference: '', note: '' }); load() }
       else toast.error(res.error || 'Failed')
-    } catch (e) { toast.error(e?.response?.data?.error || 'Payment failed') }
+    } catch (e) { showApiError(e, 'Payment failed') }
     setBusy(false)
   }
 
@@ -163,7 +164,7 @@ ${rows || '<tr><td colspan="5" style="text-align:center;color:#999">No service l
       const res = await client.post('/inpatient', { resource: 'refund', billId: bill.id, amount: Number(refundForm.amount), method: refundForm.method, reason: refundForm.reason || undefined })
       if (res.success) { toast.success(`Refund recorded — ${res.data.receiptNumber}`); setShowRefund(false); setRefundForm({ amount: '', method: 'CASH', reason: '' }); load() }
       else toast.error(res.error || 'Failed')
-    } catch (e) { toast.error(e?.response?.data?.error || 'Refund failed') }
+    } catch (e) { showApiError(e, 'Refund failed') }
     setBusy(false)
   }
 
@@ -173,7 +174,7 @@ ${rows || '<tr><td colspan="5" style="text-align:center;color:#999">No service l
     try {
       const res = await client.post('/inpatient', { resource: 'void-payment', paymentId: p.id, reason: 'Voided from bill screen' })
       if (res.success) { toast.success('Payment voided'); load() } else toast.error(res.error || 'Failed')
-    } catch (e) { toast.error(e?.response?.data?.error || 'Failed to void') }
+    } catch (e) { showApiError(e, 'Failed to void') }
     setBusy(false)
   }
 

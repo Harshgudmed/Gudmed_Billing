@@ -121,15 +121,18 @@ function TheatreColumn({ theatre, cases, showDate, onSelectCase, onAddCase }) {
           <CaseCard key={booking.id} booking={booking} showDate={showDate} onSelect={onSelectCase} />
         ))}
 
-        <button
-          type="button"
-          onClick={() => onAddCase?.(theatre)}
-          className="flex w-full items-center justify-center gap-2 rounded-lg border border-dashed
-                     border-gray-300 py-2.5 text-sm font-medium text-gray-500 transition-colors
-                     hover:border-blue-500 hover:text-blue-600"
-        >
-          <Plus className="h-4 w-4" /> Add case
-        </button>
+        {/* No onAddCase = this user cannot book, so no button that only fails. */}
+        {onAddCase && (
+          <button
+            type="button"
+            onClick={() => onAddCase(theatre)}
+            className="flex w-full items-center justify-center gap-2 rounded-lg border border-dashed
+                       border-gray-300 py-2.5 text-sm font-medium text-gray-500 transition-colors
+                       hover:border-blue-500 hover:text-blue-600"
+          >
+            <Plus className="h-4 w-4" /> Add case
+          </button>
+        )}
       </CardContent>
     </Card>
   )

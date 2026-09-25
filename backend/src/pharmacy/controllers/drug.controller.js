@@ -208,7 +208,9 @@ export async function adjustStock(req, res, next) {
       if (drug.quantityInStock < quantity) {
         throw makeError(`Only ${drug.quantityInStock} of "${drug.drugName}" in stock — cannot take out ${quantity}`, 422, 'INSUFFICIENT_STOCK')
       }
-      await consumeFromBatches(tx, { drugId: drug.id, quantity })
+      // A write-off: expired stock is exactly what this must be able to remove,
+      // soonest expiry (so expired first) as before.
+      await consumeFromBatches(tx, { drugId: drug.id, quantity, includeExpired: true })
       const quantityInStock = await recordStockChange(tx, {
         organizationId: ORGANIZATION_ID,
         drugId: drug.id,

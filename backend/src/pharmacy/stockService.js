@@ -7,6 +7,7 @@
 // ledger row commit atomically.
 
 import { makeError } from './utils.js'
+import { startOfToday } from '../lib/dates.js'
 
 /**
  * Apply a signed delta to a drug's stock and append a ledger row.
@@ -80,13 +81,41 @@ export async function recordStockChange(
  *   fully covered). `consumed` lists which batch(es) were drawn from — the caller
  *   uses this to snapshot batch/expiry onto the sale record for the printed receipt.
  */
-export async function consumeFromBatches(tx, { drugId, quantity }) {
+//
+// Expired batches are never handed to a patient. FIFO by expiry used to pick
+// the EXPIRED batch first (it expires soonest), so a sale, a dispense, a billed
+// medicine and a WhatsApp order all gave out medicine past its date. Stock that
+// is out of date still counts in quantityInStock until it is written off, so the
+// sellable quantity is checked here too: asking for more than is in date is a
+// refusal that says how much is expired, not a quiet fall-back onto it.
+// `includeExpired` is for taking stock OUT of the shelf without selling it
+// (Adjust Stock → Remove, a write-off), which must be able to reach them.
+export async function consumeFromBatches(tx, { drugId, quantity, includeExpired = false }) {
   let remaining = quantity
   const consumed = []
-  const batches = await tx.pharmacyBatch.findMany({
+  const today = startOfToday()
+  const all = await tx.pharmacyBatch.findMany({
     where: { drugId, status: 'active', quantityRemaining: { gt: 0 } },
     orderBy: { expiryDate: 'asc' },
   })
+  const isExpired = (b) => b.expiryDate && b.expiryDate < today
+  const batches = includeExpired ? all : all.filter((b) => !isExpired(b))
+
+  if (!includeExpired) {
+    const expiredQty = all.filter(isExpired).reduce((s, b) => s + b.quantityRemaining, 0)
+    if (expiredQty > 0) {
+      const drug = await tx.pharmacyDrug.findUnique({ where: { id: drugId }, select: { drugName: true, quantityInStock: true } })
+      const sellable = Math.max(0, (drug?.quantityInStock ?? 0) - expiredQty)
+      if (quantity > sellable) {
+        throw makeError(
+          `${drug?.drugName || 'This medicine'}: only ${sellable} in date — ${expiredQty} unit(s) are past their expiry and cannot be given out. Remove them with Adjust Stock.`,
+          422,
+          'EXPIRED_STOCK',
+          { drugName: drug?.drugName, requested: quantity, available: sellable, expired: expiredQty },
+        )
+      }
+    }
+  }
 
   for (const b of batches) {
     if (remaining <= 0) break
@@ -129,13 +158,25 @@ export async function findShortages(tx, { organizationId, items }) {
   })
   const byId = new Map(drugs.map((d) => [d.id, d]))
 
+  // Only IN-DATE stock can be promised: Billing takes the money here and the
+  // medicine is handed over later at dispense, which refuses expired batches
+  // (consumeFromBatches). Counting them here charged for a medicine the
+  // pharmacy then could not give.
+  const expired = await tx.pharmacyBatch.groupBy({
+    by: ['drugId'],
+    where: { drugId: { in: drugs.map((d) => d.id) }, status: 'active', quantityRemaining: { gt: 0 }, expiryDate: { lt: startOfToday() } },
+    _sum: { quantityRemaining: true },
+  })
+  const expiredById = new Map(expired.map((e) => [e.drugId, e._sum.quantityRemaining || 0]))
+
   const shortages = []
   for (const it of stockItems) {
     const d = byId.get(it.drugId)
+    const available = d ? Math.max(0, d.quantityInStock - (expiredById.get(d.id) || 0)) : 0
     if (!d) {
       shortages.push({ drugId: it.drugId, drugName: it.drugName || 'Unknown', requested: it.quantity, available: 0, shortage: it.quantity })
-    } else if (d.quantityInStock < it.quantity) {
-      shortages.push({ drugId: d.id, drugName: d.drugName, requested: it.quantity, available: d.quantityInStock, shortage: it.quantity - d.quantityInStock })
+    } else if (available < it.quantity) {
+      shortages.push({ drugId: d.id, drugName: d.drugName, requested: it.quantity, available, shortage: it.quantity - available })
     }
   }
   return shortages

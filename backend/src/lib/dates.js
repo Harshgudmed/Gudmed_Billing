@@ -79,14 +79,26 @@ export function ymdInZone(instant = new Date(), timeZone = HOSPITAL_TZ) {
 export function dayRange(startDate, endDate, timeZone = HOSPITAL_TZ) {
   const range = {}
   if (startDate) {
-    const [y, m, d] = String(startDate).slice(0, 10).split('-').map(Number)
+    const [y, m, d] = ymdParts(startDate, 'startDate')
     range.gte = zonedWallTimeToUtc(y, m, d, 0, 0, 0, 0, timeZone)
   }
   if (endDate) {
-    const [y, m, d] = String(endDate).slice(0, 10).split('-').map(Number)
+    const [y, m, d] = ymdParts(endDate, 'endDate')
     range.lte = zonedWallTimeToUtc(y, m, d, 23, 59, 59, 999, timeZone)
   }
   return range
+}
+
+// 'YYYY-MM-DD' (or an ISO string starting with one) → [y, m, d]. Anything else
+// is the caller's mistake, so a 400 that names the field — it used to become an
+// Invalid Date deep in the query and every list screen answered with a 500.
+function ymdParts(value, label) {
+  const text = String(value).slice(0, 10)
+  const match = text.match(/^(\d{4})-(\d{2})-(\d{2})$/)
+  const [y, m, d] = match ? [Number(match[1]), Number(match[2]), Number(match[3])] : []
+  const real = match && m >= 1 && m <= 12 && d >= 1 && d <= new Date(Date.UTC(y, m, 0)).getUTCDate()
+  if (!real) throw Object.assign(new Error(`${label} must be a date like 2026-09-25`), { status: 400 })
+  return [y, m, d]
 }
 
 /** `{ gte, lte }` covering the whole of TODAY in the hospital's timezone. */

@@ -69,7 +69,8 @@ const admissionSchema = z.object({
   admissionDiagnosis: z.string().optional(),
   chiefComplaint: z.string().optional(),
   expectedLengthOfStay: z.number().int().optional(),
-  depositAmount: z.number().optional(),
+  // Money taken in advance — never below zero (−5000 printed on the bill).
+  depositAmount: z.number().nonnegative("Deposit cannot be negative").optional(),
   admissionNotes: z.string().optional(),
   isCritical: z.boolean().optional(),
   criticalLevel: z.string().optional(),

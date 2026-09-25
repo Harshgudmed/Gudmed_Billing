@@ -18,6 +18,7 @@ import {
   Eye, EyeOff,
 } from 'lucide-react'
 import client from '@/api/client'
+import { useAuth } from '@/lib/auth'
 import DoctorTiming from './DoctorTiming'
 import { drName } from '@/lib/utils'
 import { useDebounce } from '@/lib/useDebounce'
@@ -1389,6 +1390,7 @@ const TABS = [
 ]
 
 export default function DoctorAccountabilityModule() {
+  const { user } = useAuth()
   const [tab, setTab] = useState('doctors')
   const [reloadKey, setReloadKey] = useState(0)
   const [addCommissionSignal, setAddCommissionSignal] = useState(0)
@@ -1452,9 +1454,14 @@ export default function DoctorAccountabilityModule() {
           <Button variant="outline" onClick={() => { setTab('commissions'); setAddCommissionSignal(s => s + 1) }}>
             <IndianRupee className="h-4 w-4 mr-2" />Add Commission
           </Button>
-          <Button onClick={() => setAddOpen(true)}>
-            <Plus className="h-4 w-4 mr-2" />Add Doctor
-          </Button>
+          {/* Creating a login is the administrator's (the server refuses anyone
+              else) — a doctor viewing their own accountability gets no button
+              that can only fail. No user = the no-login demo, which allows it. */}
+          {(!user || ['admin', 'super_admin'].includes(user.role)) && (
+            <Button onClick={() => setAddOpen(true)}>
+              <Plus className="h-4 w-4 mr-2" />Add Doctor
+            </Button>
+          )}
         </div>
       </div>
       <div className="flex border-b gap-1">

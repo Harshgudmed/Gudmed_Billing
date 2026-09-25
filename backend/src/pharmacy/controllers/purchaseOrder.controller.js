@@ -136,10 +136,18 @@ export async function receive(req, res, next) {
       if (!order) throw makeError('Purchase order not found', 404, 'PURCHASE_ORDER_NOT_FOUND')
 
       // INVENTORY INTEGRITY: receiving is idempotent. An already-received PO must
-      // not add its quantities to stock a second time. Guarded inside the same
-      // transaction that flips status + increments stock, so a concurrent double
-      // call can't slip a second stock add past this check.
-      if (order.status === 'received') {
+      // not add its quantities to stock a second time.
+      //
+      // Claimed with a compare-and-set BEFORE any stock moves. Reading the status
+      // and checking it (what this did) is not enough inside a transaction: two
+      // simultaneous receives both read "not received" and both added the goods
+      // — proven, 50 ordered and +100 on the shelf. The conditional update takes
+      // the row lock; the second one waits, re-reads, matches nothing, and stops.
+      const { count: claimed } = await tx.pharmacyPurchaseOrder.updateMany({
+        where: { id: order.id, organizationId: ORGANIZATION_ID, status: { not: 'received' } },
+        data: { status: 'received' },
+      })
+      if (claimed === 0) {
         throw makeError('Purchase order already received', 409, 'PURCHASE_ORDER_ALREADY_RECEIVED')
       }
 
