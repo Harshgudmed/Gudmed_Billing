@@ -1,5 +1,5 @@
 import { Router } from 'express'
-import { getAll, getOne, getRecords, create, update, remove } from '../controllers/patientController.js'
+import { getAll, getOne, getRecords, create, update, remove, setStatus } from '../controllers/patientController.js'
 import { getOrgId } from '../lib/reqContext.js'
 
 const router = Router()
@@ -18,6 +18,7 @@ router.get('/', getAll)
 router.get('/:id/records', getRecords)
 router.get('/:id', getOne)
 router.post('/', create)
+router.patch('/:id/status', setStatus)
 router.patch('/:id', update)
 router.put('/:id', update)
 router.delete('/:id', remove)

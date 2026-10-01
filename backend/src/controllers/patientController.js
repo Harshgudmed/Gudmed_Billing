@@ -532,3 +532,26 @@ export async function remove(req, res, next) {
     next(err)
   }
 }
+
+// Active ⇄ Inactive from the list's status dropdown. isActive is kept out of
+// PATIENT_EDITABLE_FIELDS on purpose, so this is the only way to reactivate.
+export async function setStatus(req, res, next) {
+  try {
+    const organizationId = getOrgId(req)
+    const { id } = req.params
+    const { isActive } = req.body ?? {}
+    if (typeof isActive !== "boolean") {
+      return res.status(400).json({ success: false, error: "isActive must be true or false" })
+    }
+    const result = await db.patient.updateMany({
+      where: { id, organizationId },
+      data: { isActive },
+    })
+    if (result.count === 0) {
+      return res.status(404).json({ success: false, error: "Patient not found" })
+    }
+    res.json({ success: true, message: isActive ? "Patient reactivated" : "Patient deactivated" })
+  } catch (err) {
+    next(err)
+  }
+}

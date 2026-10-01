@@ -158,12 +158,14 @@ export default function PatientsModule() {
     }
   };
 
+  const confirmDeactivate = (patient) => window.confirm(
+    `Deactivate patient "${getFullName(patient)}" (${patient.mrn})?\n\n` +
+    `This will hide them from the active patient list but keep all medical records.\n` +
+    `You can reactivate them later from the "Inactive" filter if needed.`
+  );
+
   const handleDeletePatient = async (patient) => {
-    if (!window.confirm(
-      `Deactivate patient "${getFullName(patient)}" (${patient.mrn})?\n\n` +
-      `This will hide them from the active patient list but keep all medical records.\n` +
-      `You can reactivate them later from the "Inactive" filter if needed.`
-    )) return;
+    if (!confirmDeactivate(patient)) return;
     try {
       const res = await client.delete(`/patients/${patient.id}`);
       if (res.success) {
@@ -174,6 +176,26 @@ export default function PatientsModule() {
       }
     } catch (err) {
       toast.error(err.message || 'Failed to deactivate patient');
+    }
+  };
+
+  // Status dropdown: deactivating asks first (same as Delete); reactivating
+  // just goes through with a toast.
+  const handleStatusChange = async (patient, isActive) => {
+    if (isActive === patient.isActive) return;
+    if (!isActive && !confirmDeactivate(patient)) return;
+    try {
+      const res = await client.patch(`/patients/${patient.id}/status`, { isActive });
+      if (res.success) {
+        toast.success(isActive
+          ? `Patient ${patient.mrn} reactivated`
+          : `Patient ${patient.mrn} deactivated — see the Inactive filter`);
+        fetchPatients();
+      } else {
+        toast.error(res.error || 'Failed to update patient status');
+      }
+    } catch (err) {
+      toast.error(err.message || 'Failed to update patient status');
     }
   };
 
@@ -272,6 +294,7 @@ export default function PatientsModule() {
               openPatient={openPatient}
               handlePrintCard={handlePrintCard}
               handleDeletePatient={handleDeletePatient}
+              handleStatusChange={handleStatusChange}
             />
           )}
         </CardContent>

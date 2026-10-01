@@ -2,10 +2,11 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Phone, Shield, Microscope, ScanLine, BedDouble, FileText, Eye, Printer, Trash2 } from 'lucide-react';
 import { getFullName, calculateAge, initials } from '../utils/patientUtils';
 
-export default function PatientListTable({ patients, openPatient, handlePrintCard, handleDeletePatient }) {
+export default function PatientListTable({ patients, openPatient, handlePrintCard, handleDeletePatient, handleStatusChange }) {
   return (
     <Table>
       <TableHeader>
@@ -125,10 +126,21 @@ export default function PatientListTable({ patients, openPatient, handlePrintCar
                   <span className="text-xs text-gray-300">—</span>
                 )}
               </TableCell>
-              <TableCell>
-                <Badge className={patient.isActive ? 'bg-green-100 text-green-700 border-0' : 'bg-gray-100 text-gray-500 border-0'}>
-                  {patient.isActive ? 'Active' : 'Inactive'}
-                </Badge>
+              {/* stopPropagation also covers the portaled menu: React bubbles
+                  its clicks through here, so picking an option won't open the row. */}
+              <TableCell onClick={(e) => e.stopPropagation()}>
+                <Select
+                  value={patient.isActive ? 'active' : 'inactive'}
+                  onValueChange={(v) => handleStatusChange(patient, v === 'active')}
+                >
+                  <SelectTrigger className={`h-7 w-[110px] text-xs font-medium border-0 ${patient.isActive ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="active">Active</SelectItem>
+                    <SelectItem value="inactive">Inactive</SelectItem>
+                  </SelectContent>
+                </Select>
               </TableCell>
               <TableCell className="text-right" onClick={(e) => e.stopPropagation()}>
                 <div className="flex gap-1 justify-end">
