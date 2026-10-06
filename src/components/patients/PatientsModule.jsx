@@ -62,7 +62,7 @@ export default function PatientsModule() {
   }, []);
 
   const location = useLocation();
-  const dateFilter = useDateFilter();
+  const dateFilter = useDateFilter('all', { showClear: false });
   const { startDate: dfStart, endDate: dfEnd } = dateFilter.range;
 
   const {
