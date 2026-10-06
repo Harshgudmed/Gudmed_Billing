@@ -1,14 +1,54 @@
 import { db } from '../config/db.js'
 import { getOrgId, getActor } from "../lib/reqContext.js";
-import { emitDisplayRefresh } from "../lib/realtime.js";
+import { emitDisplayRefresh, emitDataChanged } from "../lib/realtime.js";
 import { z } from 'zod'
 import { nextQueueNumber } from '../utils/queueNumber.js'
 import { getPagination, paginationMeta } from '../lib/pagination.js'
 import { priorityRank, QUEUE_ORDER_BY } from '../lib/queuePriority.js'
 import { dayRange, todayRange } from '../lib/dates.js'
-import { syncAppointmentsToQueue, NOT_QUEUEABLE } from '../lib/queueSync.js'
+import { syncAppointmentsToQueue, NOT_QUEUEABLE, VISIT_OVER, keepVisitInStep } from '../lib/queueSync.js'
 import { isOwned } from '../lib/tenant.js'
 import { PATIENT_NAME_SELECT, patientFullName } from '../lib/patientName.js'
+import { roleWorksIn } from '../lib/roleModules.js'
+import { scopedDoctorId } from '../utils/scope.js'
+
+/**
+ * Why this person may not move this queue entry, or null. The queue is run by
+ * reception and the administrator for everyone, and by a doctor for their own
+ * patients — booked with them, returning to them, or a walk-in nobody has yet.
+ * A doctor could complete another doctor's patient and call Dr B's next one;
+ * a nurse, who has no queue, could call patients in.
+ */
+function queueWriteProblem(req, entry) {
+  if (!roleWorksIn(req.user?.role, 'queue')) return 'You do not run the queue'
+  const me = scopedDoctorId(req)
+  if (me && entry?.assignedToId && entry.assignedToId !== me && entry.followUpDoctorId !== me) {
+    return 'This patient is in another doctor\'s queue'
+  }
+  return null
+}
+
+const OVER_WORDS = {
+  completed: 'completed',
+  cancelled: 'cancelled',
+  no_show: 'marked as a no-show',
+  rescheduled: 'rescheduled to another slot',
+}
+
+/**
+ * Why this queue entry can no longer be called in, alerted, completed or
+ * re-prioritised, or null. A visit that is over — on the queue row itself or on
+ * its appointment — has left the queue. The queue screen offers no buttons on
+ * such a row (QueueRow); this refuses the same for any caller, which is what
+ * stopped a rescheduled visit's old row being called in at its old slot.
+ * `entry` carries `status` and `appointment: { status }`.
+ */
+function visitOverProblem(entry) {
+  const over = [entry?.status, entry?.appointment?.status].find((s) => VISIT_OVER.includes(s))
+  return over
+    ? `This visit is already ${OVER_WORDS[over] || over}, so it is no longer in the queue. Refresh the queue to see who is waiting.`
+    : null
+}
 
 const queueSchema = z.object({
   patientId: z.string(),
@@ -279,15 +319,37 @@ export async function updateQueue(req, res, next) {
     // any authenticated caller could modify any other org's queue item).
     const existing = await db.queueManagement.findFirst({
       where: { id, organizationId: ORG_ID },
-      select: { id: true, priorityRank: true },
+      select: {
+        id: true, status: true, priorityRank: true, assignedToId: true, followUpDoctorId: true,
+        appointmentId: true, appointment: { select: { status: true } },
+      },
     })
     if (!existing) {
       return res.status(404).json({ success: false, error: 'Queue item not found' })
     }
+    const refused = queueWriteProblem(req, existing)
+    if (refused) return res.status(403).json({ success: false, error: refused })
+    const over = visitOverProblem(existing)
+    if (over) return res.status(409).json({ success: false, code: 'VISIT_OVER', error: over })
 
     // Whitelist + auto-set the matching timestamp on a status change — the old
     // code passed `req.body` straight to Prisma with no validation at all.
     const validatedData = queueUpdateSchema.parse(req.body)
+    // A booked visit is voided from Appointments, which voids its bill and
+    // commission as well. Voided here, the bill stayed live and the appointment
+    // still read "scheduled" while the patient had left the queue.
+    if (existing.appointmentId && ['cancelled', 'no_show'].includes(validatedData.status)) {
+      return res.status(409).json({
+        success: false,
+        code: 'USE_APPOINTMENTS',
+        error: 'This patient has a booked appointment. Cancel it or mark it a no-show from Appointments, so the appointment and its bill change with it.',
+      })
+    }
+    // A doctor does not hand a patient to someone else's queue.
+    const me = scopedDoctorId(req)
+    if (me && validatedData.assignedToId && validatedData.assignedToId !== me) {
+      return res.status(403).json({ success: false, error: 'Reception moves a patient to another doctor' })
+    }
     if (validatedData.roomId && !(await isOwned('room', validatedData.roomId, ORG_ID))) {
       return res.status(400).json({ success: false, error: 'Room not found' })
     }
@@ -311,14 +373,23 @@ export async function updateQueue(req, res, next) {
       data.priorityRank = newRank
     }
 
-    const item = await db.queueManagement.update({
-      where: { id },
-      data,
-      include: {
-        patient: { select: { ...PATIENT_NAME_SELECT, } },
-      },
+    // The appointment moves with its queue row, in the same transaction: called
+    // in here is "in consultation" there, completed here is completed there.
+    const { item, appointmentMoved } = await db.$transaction(async (tx) => {
+      const row = await tx.queueManagement.update({
+        where: { id },
+        data,
+        include: {
+          patient: { select: { ...PATIENT_NAME_SELECT, } },
+        },
+      })
+      const moved = validatedData.status && validatedData.status !== existing.status
+        ? await keepVisitInStep(tx, { organizationId: ORG_ID, appointmentIds: [existing.appointmentId], changed: 'queue', status: validatedData.status })
+        : 0
+      return { item: row, appointmentMoved: moved > 0 }
     })
     emitDisplayRefresh(ORG_ID) // push: a queue entry changed (room/status/etc.)
+    if (appointmentMoved) emitDataChanged(ORG_ID, 'appointments') // the Appointments screen re-reads too
     res.json({ success: true, data: item })
   } catch (err) {
     next(err)
@@ -347,7 +418,12 @@ export async function updateQueue(req, res, next) {
 export async function callNextPatient(req, res, next) {
   try {
     const ORG_ID = getOrgId(req)
-    const { roomId, doctorId, queueEntryId } = req.body || {}
+    const roleRefused = queueWriteProblem(req, null)
+    if (roleRefused) return res.status(403).json({ success: false, error: roleRefused })
+    // A doctor calls their own next patient: who they are comes from the login,
+    // not the request — sending Dr B's id called Dr B's patient in.
+    const { roomId, queueEntryId } = req.body || {}
+    const doctorId = scopedDoctorId(req) || req.body?.doctorId
     if (!roomId && !doctorId && !queueEntryId) {
       return res.status(400).json({ success: false, error: 'roomId, doctorId or queueEntryId is required' })
     }
@@ -363,9 +439,13 @@ export async function callNextPatient(req, res, next) {
     if (queueEntryId) {
       pinned = await db.queueManagement.findFirst({
         where: { id: queueEntryId, organizationId: ORG_ID },
-        select: { id: true, roomId: true, assignedToId: true },
+        select: { id: true, status: true, roomId: true, assignedToId: true, followUpDoctorId: true, appointment: { select: { status: true } } },
       })
       if (!pinned) return res.status(404).json({ success: false, error: 'Queue item not found' })
+      const pinnedRefused = queueWriteProblem(req, pinned)
+      if (pinnedRefused) return res.status(403).json({ success: false, error: pinnedRefused })
+      const over = visitOverProblem(pinned)
+      if (over) return res.status(409).json({ success: false, code: 'VISIT_OVER', error: over })
     }
 
     // Scope to the room (a shared room's queue is the room's, not one doctor's)
@@ -406,13 +486,17 @@ export async function callNextPatient(req, res, next) {
       const current = await tx.queueManagement.findFirst({
         where: { ...scope, status: 'in_progress', id: { not: pinned?.id } },
         orderBy: { serviceStartedAt: 'asc' },
-        select: { id: true },
+        select: { id: true, appointmentId: true },
       })
+      let appointmentsMoved = 0
       if (current) {
         await tx.queueManagement.update({
           where: { id: current.id },
           data: { status: 'completed', serviceCompletedAt: new Date() },
         })
+        // The patient leaving the room has finished their visit: their
+        // appointment is completed with it.
+        appointmentsMoved += await keepVisitInStep(tx, { organizationId: ORG_ID, appointmentIds: [current.appointmentId], changed: 'queue', status: 'completed' })
       }
 
       // Who walks in next. "Alert" is a PROMISE to the patient — the board told
@@ -453,7 +537,9 @@ export async function callNextPatient(req, res, next) {
           const claimed = await tx.queueManagement.updateMany({
             // status is the guard: if another call took this row a microsecond ago
             // it is no longer `fromStatus`, so count comes back 0 and we look again.
-            where: { id: candidate.id, status: pinned ? undefined : fromStatus },
+            // A pinned patient is claimed from any live status, never from a
+            // visit that ended a moment ago (refused up front; this closes the gap).
+            where: { id: candidate.id, status: pinned ? { notIn: VISIT_OVER } : fromStatus },
             data: { status: 'in_progress', serviceStartedAt: new Date(), calledAt: new Date() },
           })
           if (claimed.count === 1) return candidate.id
@@ -466,7 +552,7 @@ export async function callNextPatient(req, res, next) {
       }
 
       const claimedId = (await claim('called')) ?? (await claim('waiting'))
-      if (!claimedId) return { completedId: current?.id ?? null, nowServing: null }
+      if (!claimedId) return { completedId: current?.id ?? null, nowServing: null, appointmentsMoved }
 
       // Promote the patient AFTER this one to 'called' — the board's whole
       // "You're next · Be ready" mechanism is `status === 'called'`, and until
@@ -495,15 +581,19 @@ export async function callNextPatient(req, res, next) {
         where: { id: claimedId },
         include: { patient: { select: PATIENT_NAME_SELECT } },
       })
-      return { completedId: current?.id ?? null, nowServing, upNextId: upNext?.id ?? null }
+      // …and the patient walking in is now in consultation on Appointments too.
+      appointmentsMoved += await keepVisitInStep(tx, { organizationId: ORG_ID, appointmentIds: [nowServing.appointmentId], changed: 'queue', status: 'in_progress' })
+      return { completedId: current?.id ?? null, nowServing, upNextId: upNext?.id ?? null, appointmentsMoved }
     })
+    const { appointmentsMoved, ...outcome } = result
 
     emitDisplayRefresh(ORG_ID) // push: next patient called — the board's main live event
+    if (appointmentsMoved > 0) emitDataChanged(ORG_ID, 'appointments')
     res.json({
       success: true,
-      data: result,
-      message: result.nowServing
-        ? `Now serving ${patientFullName(result.nowServing.patient)}`
+      data: outcome,
+      message: outcome.nowServing
+        ? `Now serving ${patientFullName(outcome.nowServing.patient)}`
         : 'Queue is empty — nobody left to call',
     })
   } catch (err) {

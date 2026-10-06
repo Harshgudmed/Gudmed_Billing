@@ -43,7 +43,10 @@ export const QueueRow = memo(function QueueRow({
   const patientName = entry.patient ? getFullName(entry.patient) || '—' : '—'
   const status = entry.status || 'waiting'
   const priority = entry.priority || 'normal'
-  const isCompleted = ['completed', 'cancelled'].includes(status)
+  // A visit that is over has left the queue — a no-show, or the old slot of a
+  // rescheduled visit, too. The server refuses actions on these rows (VISIT_OVER
+  // in backend/src/lib/queueSync.js); this offers none.
+  const isCompleted = ['completed', 'cancelled', 'no_show', 'rescheduled'].includes(status)
 
   return (
     <TableRow className={isCompleted ? 'opacity-50' : ''}>

@@ -2,10 +2,14 @@ import { db } from '../config/db.js'
 import { patientSearchWhere } from '../lib/patientSearch.js'
 import { patientFullName, PATIENT_NAME_SELECT } from '../lib/patientName.js'
 import { optionalMobileSchema, normalizeIndianMobile } from '../lib/phone.js'
-import { dayRange } from '../lib/dates.js'
+import { dayRange, ymdInZone } from '../lib/dates.js'
 import { generateUHID } from '../lib/counters.js'
 import { getOrgId } from "../lib/reqContext.js";
 import { z } from 'zod'
+
+// Who keeps the patient register (deactivating a patient). Mirrored on the
+// Patients screen (PatientsModule canRemove).
+const PATIENT_REGISTRARS = new Set(['admin', 'super_admin', 'receptionist'])
 
 // Doctors only see their own patients — those they have an appointment or consultation
 // with. Returns a Prisma `where` fragment for the doctor, or null for every other role.
@@ -53,10 +57,18 @@ async function doctorOwnsPatient(doctorId, patientId) {
 // series, so pre-triage's patient conversion mints UHIDs the same way instead
 // of rolling its own.
 
+// Letters (any script), spaces and ' . - — the same allow-list every
+// registration form enforces (src/components/common/textFieldUtils.js
+// NAME_PATTERN). Without it the API stored "J0hn9" that no screen would accept.
+const NAME_PATTERN = /^[\p{L}\s'.-]*$/u
+const personName = (label) => z.string().trim()
+  .min(2, `${label} must be at least 2 characters`)
+  .regex(NAME_PATTERN, `${label} can only contain letters`)
+
 const patientSchema = z.object({
-  firstName: z.string().min(2),
+  firstName: personName('First name'),
   middleName: z.string().optional(),
-  lastName: z.string().min(2),
+  lastName: personName('Last name'),
   // Must be a real, parseable date that is not in the future. Previously plain
   // `z.string()`: a future date (age comes out negative) was stored, and an
   // unparseable value ("not-a-date") passed zod, then `new Date('Invalid Date')`
@@ -111,6 +123,21 @@ const patientSchema = z.object({
   isVip: z.boolean().default(false),
   notes: z.string().optional(),
 })
+
+const PHONE_FIELDS = ['phonePrimary', 'phoneSecondary', 'emergencyContactPhone']
+
+// Is this edit's value the one already stored? The edit form posts every field
+// back, dates as 'YYYY-MM-DD' (the stored value is a Date).
+function sameAsStored(sent, stored) {
+  if (stored instanceof Date) return String(sent ?? '').slice(0, 10) === ymdInZone(stored)
+  return String(sent ?? '').trim() === String(stored ?? '').trim()
+}
+
+// 'dateOfBirth' → 'Date of birth', for a refusal staff read.
+const fieldLabel = (field) => {
+  const words = String(field).replace(/([A-Z])/g, ' $1').toLowerCase()
+  return words.charAt(0).toUpperCase() + words.slice(1)
+}
 
 // Whitelist of fields a client may change via update. System/identity fields
 // (organizationId, mrn, isActive, id, timestamps) are NEVER here, so a
@@ -442,6 +469,37 @@ export async function update(req, res, next) {
     for (const key of PATIENT_EDITABLE_FIELDS) {
       if (body[key] !== undefined) updateData[key] = body[key]
     }
+
+    // An edit passes registration's rules (patientSchema) — field by field, for
+    // the fields it sends. This route used to take req.body as it came, so a
+    // first name "J0hn9", a date of birth in 1800, a cleared city or state and
+    // PIN 000000 were all saved although registration refuses every one, and a
+    // required field could be emptied.
+    //
+    // A value the edit does not CHANGE is not re-judged: the form posts every
+    // field back, and a record saved before a rule existed (a blank city, a
+    // one-letter surname) must not stop reception correcting its address — the
+    // same reason the phone check below lets an untouched legacy number through.
+    const changed = Object.keys(updateData).filter((f) => !PHONE_FIELDS.includes(f) && !sameAsStored(updateData[f], patient[f]))
+    for (const field of Object.keys(updateData)) {
+      if (!PHONE_FIELDS.includes(field) && !changed.includes(field)) delete updateData[field]
+    }
+    if (changed.length) {
+      // null means "clear it": allowed for an optional field, refused ("Required")
+      // for one registration requires.
+      const checked = patientSchema
+        .pick(Object.fromEntries(changed.map((f) => [f, true])))
+        .safeParse(Object.fromEntries(changed.map((f) => [f, updateData[f] ?? undefined])))
+      if (!checked.success) {
+        return res.status(400).json({
+          success: false,
+          error: checked.error.issues.map((i) => (i.message === 'Required' ? `${fieldLabel(i.path[0])} is required` : i.message)).join('. '),
+          details: checked.error.issues, // per field, for the edit form (issuesToFieldErrors)
+        })
+      }
+      for (const field of changed) updateData[field] = checked.data[field] ?? null
+    }
+
     // Edits go through the same phone rules as registration. This route takes
     // req.body directly (no zod schema), so without this an edit was the open
     // back door: a number rejected at registration could still be pasted in
@@ -455,7 +513,7 @@ export async function update(req, res, next) {
     // rejecting an unchanged bad value would mean nobody could fix that
     // patient's ADDRESS either — the legacy phone would hold the whole record
     // hostage. So: reject only what this edit actually tries to CHANGE.
-    for (const field of ['phonePrimary', 'phoneSecondary', 'emergencyContactPhone']) {
+    for (const field of PHONE_FIELDS) {
       if (updateData[field] === undefined) continue
       const raw = updateData[field]
       if (raw == null || String(raw).trim() === '') { updateData[field] = null; continue }
@@ -475,16 +533,8 @@ export async function update(req, res, next) {
       })
     }
 
-    // Same DOB guard as the create schema — this route takes req.body directly
-    // (no zod schema), so without this a future/garbage date rejected at
-    // registration could still be pasted in here.
-    if (updateData.dateOfBirth) {
-      const dob = new Date(updateData.dateOfBirth)
-      if (Number.isNaN(dob.getTime()) || dob.getTime() > Date.now()) {
-        return res.status(400).json({ success: false, error: 'Date of birth must be a valid date in the past' })
-      }
-      updateData.dateOfBirth = dob
-    }
+    // Already checked against patientSchema's date-of-birth rule above.
+    if (updateData.dateOfBirth) updateData.dateOfBirth = new Date(updateData.dateOfBirth)
     if (updateData.insuranceExpiryDate) updateData.insuranceExpiryDate = new Date(updateData.insuranceExpiryDate)
     if (Array.isArray(updateData.allergies)) updateData.allergies = JSON.stringify(updateData.allergies)
     if (Array.isArray(updateData.chronicConditions)) updateData.chronicConditions = JSON.stringify(updateData.chronicConditions)
@@ -512,10 +562,24 @@ export async function update(req, res, next) {
   }
 }
 
+// The patient register is the front desk's: reception and the administrator
+// take a patient off the active list and put them back. A doctor deactivated
+// another doctor's patient. With login off (the demo) there is no role, and the
+// demo may.
+function registrarRefused(req, res) {
+  const role = req.user?.role
+  if (role && !PATIENT_REGISTRARS.has(role)) {
+    res.status(403).json({ success: false, error: 'Patients are removed from the list by reception or the administrator' })
+    return true
+  }
+  return false
+}
+
 export async function remove(req, res, next) {
   try {
     const organizationId = getOrgId(req)
     const { id } = req.params
+    if (registrarRefused(req, res)) return
     // SOFT DELETE: a patient's medical/legal record must never be erased
     // (record-retention; admissions/bills/results point to it). We mark the
     // patient inactive so they drop out of the active list but all history is
@@ -539,6 +603,7 @@ export async function setStatus(req, res, next) {
   try {
     const organizationId = getOrgId(req)
     const { id } = req.params
+    if (registrarRefused(req, res)) return
     const { isActive } = req.body ?? {}
     if (typeof isActive !== "boolean") {
       return res.status(400).json({ success: false, error: "isActive must be true or false" })

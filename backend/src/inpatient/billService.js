@@ -37,9 +37,10 @@ export async function generateBill(organizationId, admissionId, userId) {
       where: { organizationId, admissionId, status: 'ACTIVE', billId: null },
       data: { billId: bill.id },
     })
-    // Re-attach any floating SUCCESS payments (e.g. carried over from a cancelled bill).
+    // Re-attach any floating SUCCESS payments (e.g. carried over from a cancelled
+    // bill), and refund requests still waiting for Finance with them.
     await tx.billPayment.updateMany({
-      where: { organizationId, admissionId, status: 'SUCCESS', billId: null },
+      where: { organizationId, admissionId, status: { in: ['SUCCESS', 'PENDING_APPROVAL'] }, billId: null },
       data: { billId: bill.id },
     })
     // Migrate a legacy admission deposit into an ADVANCE ledger entry (once).
@@ -127,9 +128,10 @@ export async function cancelBill(organizationId, billId, { reason } = {}) {
       where: { billId, organizationId, status: 'ACTIVE' },
       data: { billId: null },
     })
-    // Carry SUCCESS payments forward: detach (float to admission) → re-link on next generate.
+    // Carry SUCCESS payments forward: detach (float to admission) → re-link on next
+    // generate. A refund still waiting for approval goes with the money it holds.
     await tx.billPayment.updateMany({
-      where: { billId, organizationId, status: 'SUCCESS' },
+      where: { billId, organizationId, status: { in: ['SUCCESS', 'PENDING_APPROVAL'] } },
       data: { billId: null },
     })
     return tx.bill.update({ where: { id: billId }, data: { status: 'CANCELLED', cancelReason: reason || null, paidTotal: 0, balanceDue: 0, paymentStatus: 'UNPAID' } })

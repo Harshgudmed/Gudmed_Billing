@@ -10,6 +10,11 @@ import { listResponse } from '../lib/pagination.js'
 import { z } from 'zod'
 import { PATIENT_SNAPSHOT_SELECT } from '../utils/patientSnapshot.js'
 import { auditIpd } from '../inpatient/audit.js'
+import { orderCancelCheck } from '../lib/invoiceFulfillment.js'
+import { resultFlag } from '../lib/labFlag.js'
+
+// What a result is judged against (lib/labFlag.js).
+const RANGE_FIELDS = { referenceMin: true, referenceMax: true, criticalLow: true, criticalHigh: true }
 
 // ── Zod schemas ────────────────────────────────────────────────────────────────
 
@@ -302,7 +307,7 @@ export const create = async (req, res, next) => {
         return res.status(400).json({ success: false, error: 'Validation error', details: parsed.error.issues })
       }
 
-      const { orderId, testId, resultValue, resultUnit, isAbnormal, isCritical, flag, comment } =
+      const { orderId, testId, resultValue, resultUnit, isAbnormal, isCritical, comment } =
         parsed.data
 
       // Tenant guard: only attach a result to an order/test that belong to this
@@ -315,9 +320,11 @@ export const create = async (req, res, next) => {
 
       const ownedTest = await db.labTest.findFirst({
         where: { id: testId, organizationId: getOrgId(req) },
-        select: { id: true },
+        select: { id: true, ...RANGE_FIELDS },
       })
       if (!ownedTest) return res.status(404).json({ success: false, error: 'Lab test not found' })
+      // Judged against the test's range here, not taken from the screen's ticks.
+      const judged = resultFlag(resultValue, ownedTest, { isAbnormal, isCritical })
 
       // One value per test per order. Saving a draft and coming back to finish
       // it posted a SECOND row for the same test: the report then carried two
@@ -328,9 +335,7 @@ export const create = async (req, res, next) => {
       const fields = {
         resultValue,
         resultUnit,
-        isAbnormal,
-        isCritical,
-        flag,
+        ...judged,
         comment,
         // Taken from the session, never from the body: a lab report is a signed
         // clinical document, and until now nobody's name was recorded against
@@ -430,6 +435,7 @@ export const update = async (req, res, next) => {
         return res.json({ success: true, data })
       }
 
+      let cancelBill = null // its own unpaid bill, cancelled with it (orderCancelCheck)
       // Closing an order the patient never came for (they went elsewhere, or did
       // not return). Three rules, checked here and not only on the screen:
       //  - only while nothing has been done: once the sample is drawn the work
@@ -448,19 +454,12 @@ export const update = async (req, res, next) => {
             error: 'The sample has already been collected for this order, so it can no longer be cancelled.',
           })
         }
-        const paidOn = owned.orderNumber?.startsWith('LAB-')
-          ? await db.invoice.findFirst({
-            where: { organizationId: ORGANIZATION_ID, invoiceNumber: owned.orderNumber.slice(4) },
-            select: { invoiceNumber: true },
-          })
-          : null
-        if (paidOn) {
-          return res.status(409).json({
-            success: false,
-            title: 'Paid at Billing',
-            error: `This order was paid on invoice ${paidOn.invoiceNumber}. Cancel it from Billing so the patient is refunded.`,
-          })
-        }
+        // Its bill, raised either way (lib/invoiceFulfillment.js orderCancelCheck):
+        // the check only knew Billing's LAB-<invoice> orders, so an order booked
+        // here and paid was cancelled with the patient's money kept.
+        const check = await orderCancelCheck(db, ORGANIZATION_ID, 'lab', owned.orderNumber)
+        if (check.refusal) return res.status(409).json({ success: false, ...check.refusal })
+        cancelBill = check.cancelBill || null
         if (!String(updates.rejectionReason || '').trim()) {
           return res.status(400).json({ success: false, title: 'Reason needed', error: 'Please give a reason for cancelling this order.' })
         }
@@ -477,6 +476,14 @@ export const update = async (req, res, next) => {
           })
           if (count === 0) {
             throw Object.assign(new Error('The sample has already been collected for this order, so it can no longer be cancelled.'), { status: 409 })
+          }
+          // Its own unpaid bill goes with it (a bill of this order alone).
+          const bill = cancelBill
+          if (bill) {
+            await tx.invoice.updateMany({
+              where: { id: bill.id, organizationId: ORGANIZATION_ID, amountPaid: { lte: 0 }, status: { not: 'cancelled' } },
+              data: { status: 'cancelled', paymentStatus: 'cancelled', cancelledAt: new Date(), cancellationReason: `Lab order cancelled: ${String(updates.rejectionReason).trim()}` },
+            })
           }
           return tx.labOrder.findFirst({ where: { id, organizationId: ORGANIZATION_ID } })
         }
@@ -521,9 +528,22 @@ export const update = async (req, res, next) => {
         select: {
           id: true, verifiedAt: true, resultValue: true, resultUnit: true,
           isAbnormal: true, isCritical: true, flag: true, comment: true,
+          test: { select: RANGE_FIELDS },
         },
       })
       if (!owned) return res.status(404).json({ success: false, error: 'Lab result not found' })
+
+      // A changed value or tick is judged again against the test's range. With
+      // a new value, only the ticks sent with it count — the old value's ticks
+      // described the old value.
+      if (['resultValue', 'isAbnormal', 'isCritical', 'flag'].some((f) => updates[f] !== undefined)) {
+        const newValue = updates.resultValue !== undefined ? updates.resultValue : owned.resultValue
+        const kept = updates.resultValue !== undefined ? {} : owned
+        Object.assign(updates, resultFlag(newValue, owned.test, {
+          isAbnormal: updates.isAbnormal ?? kept.isAbnormal,
+          isCritical: updates.isCritical ?? kept.isCritical,
+        }))
+      }
 
       // Whoever signs it off is the logged-in user, not whatever the body claims.
       if (updates.verifiedAt) updates.verifiedById = await signerId(db, ORGANIZATION_ID, req)

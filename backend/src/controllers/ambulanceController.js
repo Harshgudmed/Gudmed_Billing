@@ -3,8 +3,8 @@ import { nextSeriesNumber } from '../lib/counters.js'
 import { patientSearchWhere } from '../lib/patientSearch.js'
 import { dayRange } from '../lib/dates.js'
 import { getOrgId, safeMoney } from "../lib/reqContext.js";
-import { isOwned } from "../lib/tenant.js";
 import { PATIENT_NAME_SELECT } from '../lib/patientName.js'
+import { billsOfRecords, invoiceOfOrder, orderCancelCheck, changeRecordCharge, withBill, refusalError } from '../lib/invoiceFulfillment.js'
 
 const patientSelect = { ...PATIENT_NAME_SELECT, mrn: true, phonePrimary: true }
 
@@ -31,7 +31,9 @@ export async function getAll(req, res, next) {
       include: { patient: { select: patientSelect } },
       orderBy: { tripDate: 'desc' },
     })
-    res.json({ success: true, data: trips })
+    // Each trip's money is read off its bill (lib/invoiceFulfillment.js).
+    const bills = await billsOfRecords(db, ORG_ID, 'ambulance', trips.map((t) => t.tripNumber))
+    res.json({ success: true, data: trips.map((t) => withBill(t, bills.get(t.tripNumber))) })
   } catch (err) {
     next(err)
   }
@@ -81,7 +83,8 @@ export async function create(req, res, next) {
         include: { patient: { select: patientSelect } },
       })
     })
-    res.json({ success: true, data: trip })
+    // The screen raises the trip's bill next (src/lib/billing.js createInvoiceWithPayment).
+    res.json({ success: true, data: withBill(trip, null) })
   } catch (err) {
     next(err)
   }
@@ -94,7 +97,8 @@ export async function update(req, res, next) {
     if (!id) return res.status(400).json({ success: false, error: 'id is required' })
 
     // Tenant guard: only touch a trip that belongs to this org (no cross-tenant write).
-    if (!(await isOwned('ambulanceTrip', id, ORG_ID))) return res.status(404).json({ success: false, error: 'Ambulance trip not found' })
+    const existing = await db.ambulanceTrip.findFirst({ where: { id, organizationId: ORG_ID }, select: { tripNumber: true, charge: true, status: true, patientId: true } })
+    if (!existing) return res.status(404).json({ success: false, error: 'Ambulance trip not found' })
 
     const data = {}
     const allowed = ['ambulanceType', 'fromLocation', 'toLocation', 'status', 'driverName', 'vehicleNumber', 'contactPhone', 'notes']
@@ -119,10 +123,39 @@ export async function update(req, res, next) {
       data.patientId = safePatientId
     }
 
-    const trip = await db.ambulanceTrip.update({
-      where: { id },
-      data,
-      include: { patient: { select: patientSelect } },
+    const cancelling = data.status === 'cancelled' && existing.status !== 'cancelled'
+    const reopening = existing.status === 'cancelled' && data.status && data.status !== 'cancelled'
+    const chargeChanged = data.charge !== undefined && data.charge !== Number(existing.charge)
+    const patientChanged = data.patientId !== undefined && data.patientId !== existing.patientId
+    const trip = await db.$transaction(async (tx) => {
+      const bill = await invoiceOfOrder(tx, ORG_ID, 'ambulance', existing.tripNumber)
+      // A bill belongs to one patient; it is not moved to another one here.
+      if (patientChanged && bill && bill.status !== 'cancelled') {
+        throw refusalError({ title: 'Billed', error: `This trip is billed on ${bill.invoiceNumber} to its patient, so the patient can no longer be changed. Cancel the trip (or its bill in Billing) and log a new one.` })
+      }
+      if (reopening && bill) {
+        throw refusalError({ title: 'Cancelled', error: 'This trip was cancelled together with its bill. Log a new trip instead.' })
+      }
+      if (cancelling) {
+        // The lab order's rule (lib/invoiceFulfillment.js orderCancelCheck).
+        const check = await orderCancelCheck(tx, ORG_ID, 'ambulance', existing.tripNumber)
+        if (check.refusal) throw refusalError(check.refusal)
+        if (check.cancelBill) {
+          await tx.invoice.updateMany({
+            where: { id: check.cancelBill.id, organizationId: ORG_ID, amountPaid: { lte: 0 }, status: { not: 'cancelled' } },
+            data: { status: 'cancelled', paymentStatus: 'cancelled', cancelledAt: new Date(), cancellationReason: `Ambulance trip ${existing.tripNumber} cancelled` },
+          })
+        }
+      } else if (chargeChanged) {
+        const change = await changeRecordCharge(tx, { organizationId: ORG_ID, kind: 'ambulance', number: existing.tripNumber, charge: data.charge })
+        if (change.refusal) throw refusalError(change.refusal)
+      }
+      const updated = await tx.ambulanceTrip.update({
+        where: { id },
+        data,
+        include: { patient: { select: patientSelect } },
+      })
+      return withBill(updated, await invoiceOfOrder(tx, ORG_ID, 'ambulance', existing.tripNumber))
     })
     res.json({ success: true, data: trip })
   } catch (err) {
@@ -135,6 +168,13 @@ export async function remove(req, res, next) {
     const ORG_ID = getOrgId(req)
     const { id } = req.query
     if (!id) return res.status(400).json({ success: false, error: 'id is required' })
+    const existing = await db.ambulanceTrip.findFirst({ where: { id, organizationId: ORG_ID }, select: { tripNumber: true } })
+    if (!existing) return res.status(404).json({ success: false, error: 'Ambulance trip not found' })
+    // A billed trip is not deleted out from under its bill; it is cancelled instead.
+    const bill = await invoiceOfOrder(db, ORG_ID, 'ambulance', existing.tripNumber)
+    if (bill && bill.status !== 'cancelled') {
+      return res.status(409).json({ success: false, error: `This trip is billed on ${bill.invoiceNumber}. Set it to Cancelled instead — an unpaid bill is cancelled with it; a paid one is cancelled in Billing with "Cancel & refund".` })
+    }
     // Tenant-scoped delete: deleteMany with the org filter only removes OUR row.
     const { count } = await db.ambulanceTrip.deleteMany({ where: { id, organizationId: ORG_ID } })
     if (count === 0) return res.status(404).json({ success: false, error: 'Ambulance trip not found' })

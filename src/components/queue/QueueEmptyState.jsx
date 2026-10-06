@@ -8,7 +8,10 @@ import { Button } from '@/components/ui/button'
 // queue is broken" when in fact the filters simply exclude everything — so name
 // the filters in force, and give a one-click way out.
 export function QueueEmptyState({ dateFilter, statusFilter, search, onClearFilters }) {
-  const filtered = dateFilter.active || statusFilter !== 'all' || search
+  // The date narrows the list whenever it is not All Dates — Today included,
+  // though Today is the default and so not "something to clear" in the filter row.
+  const datesNarrowed = dateFilter.mode !== 'all'
+  const filtered = datesNarrowed || statusFilter !== 'all' || search
 
   return (
     <>
@@ -17,7 +20,7 @@ export function QueueEmptyState({ dateFilter, statusFilter, search, onClearFilte
         <>
           <p className="text-gray-600">No patients match the current filters</p>
           <p className="text-xs mt-1">
-            Showing {dateFilter.active ? <b>{dateFilter.mode === 'today' ? 'today' : 'the selected dates'}</b> : 'all dates'}
+            Showing {datesNarrowed ? <b>{dateFilter.mode === 'today' ? 'today' : 'the selected dates'}</b> : 'all dates'}
             {statusFilter !== 'all' && <> · status <b>{statusFilter}</b></>}
             {search && <> · search <b>“{search}”</b></>}
           </p>

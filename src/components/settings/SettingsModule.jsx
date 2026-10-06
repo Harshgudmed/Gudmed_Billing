@@ -1,6 +1,7 @@
 ﻿import { useState, useEffect, lazy, Suspense } from 'react'
 import { toFormValues, fromFormValues } from '@/lib/orgSettingsSchema'
 import { clearOrgCache } from '@/lib/orgSettings'
+import { isModuleOn } from '@/lib/roleConfig'
 import { requiredNameSchema, optionalMobileSchema } from '@/lib/schemas/patientFormSchema'
 import { PhoneInput } from '@/components/common/PhoneInput'
 import { drName } from '@/lib/utils'
@@ -13,7 +14,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import {
   Settings, Building2, Users, Package, Link2, Database, Search,
   Save, Plus, Edit, Eye, CheckCircle, XCircle, AlertCircle, RefreshCw, Loader2, Clock, Palette,
-  MessageCircle, Bell, DoorOpen, MonitorPlay,
+  MessageCircle, Bell, DoorOpen, MonitorPlay, ShieldCheck, Zap, Landmark, UserCog, Undo2,
 } from 'lucide-react'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -37,6 +38,8 @@ import { Pagination } from '@/components/common/Pagination'
 import { FilterBar, FilterSelect } from '@/components/common/FilterBar'
 import IntegrationsHub from './IntegrationsHub'
 import RoomsManager from './RoomsManager'
+import { ChoiceCards, ToggleCard } from '@/components/common/ChoiceCards'
+import { CancellationCharges } from './CancellationCharges'
 // lazy: the display-board manager is a module in its own right, sitting in one
 // Settings tab. A static import put it in the Settings bundle for everyone who
 // opens Settings to change a phone number.
@@ -44,6 +47,36 @@ const DisplayBoardsModule = lazy(() => import('../display-boards/DisplayBoardsMo
 
 const ORG_ID = 'org-demo'
 const ITEMS_PER_PAGE = 10
+
+// Each choice says what it does for the staff, not what it is called — the
+// person setting up the hospital picks a way of working, not a code.
+const REFUND_MODE_CHOICES = [
+  { value: 'approval', Icon: ShieldCheck, title: 'Approval first',
+    description: 'The counter raises the refund. Finance (or an administrator) approves it before any money goes back to the patient.',
+    steps: ['Counter raises refund', 'Finance approves', 'Patient gets money'] },
+  { value: 'instant', Icon: Zap, title: 'Instant at the counter',
+    description: 'The counter pays the money back straight away. No one else checks it.',
+    steps: ['Counter refunds', 'Patient gets money'] },
+]
+const PAYMENT_MODE_CHOICES = [
+  { value: 'finance', Icon: Landmark, title: 'Finance Controller pays',
+    description: 'Finance records each payment against an approved vendor bill. It counts as paid at once.',
+    steps: ['Finance records payment', 'Bill is paid'] },
+  { value: 'officer_finance', Icon: Users, title: 'Purchase Officer records, Finance approves',
+    description: 'The purchase officer enters the payment; it counts as paid only after Finance approves. Two people check every payment.',
+    steps: ['Purchase Officer records', 'Finance approves', 'Bill is paid'] },
+  { value: 'admin', Icon: UserCog, title: 'Administrator only',
+    description: 'Only an administrator records vendor payments — for a small hospital where one person handles the money.',
+    steps: ['Administrator records', 'Bill is paid'] },
+]
+const RETURN_MODE_CHOICES = [
+  { value: 'approval', Icon: ShieldCheck, title: 'Purchase Officer approves',
+    description: 'The store raises the return. Stock goes down and the debit note is made only after the purchase officer approves it.',
+    steps: ['Store raises return', 'Purchase Officer approves', 'Stock goes down + debit note'] },
+  { value: 'direct', Icon: Zap, title: 'Store posts it directly',
+    description: 'The store’s return takes the goods out of stock and makes the debit note straight away.',
+    steps: ['Store raises return', 'Stock goes down + debit note'] },
+]
 
 const ROLE_LABELS = {
   super_admin: 'Super Administrator',
@@ -54,6 +87,9 @@ const ROLE_LABELS = {
   pharmacist: 'Pharmacist',
   billing_clerk: 'Billing Clerk',
   inventory_manager: 'Inventory Manager',
+  finance_controller: 'Finance Controller',
+  purchase_officer: 'Purchase Officer',
+  store_keeper: 'Store Keeper',
 }
 
 // The Users filter row's role dropdown, from the same list the form uses.
@@ -102,6 +138,7 @@ const ALL_MODULES = [
   { key: 'deathCertificate',     label: 'Death Certificates',   description: 'Issue and track death certificates' },
   { key: 'inpatient',            label: 'Inpatient (IPD)',      description: 'Admissions, wards/beds, IPD billing, and discharge' },
   { key: 'ot',                   label: 'Operation Theatre',    description: 'Theatre list, case bookings, and the surgical record' },
+  { key: 'purchase',             label: 'Purchase & Supply Chain', description: 'Requests, RFQs, orders, goods receipt, stock, store indents, returns, vendor bills and payments' },
   { key: 'pharmacy',             label: 'Pharmacy',             description: 'Drug inventory, dispensing, and sales' },
   { key: 'doctorAccountability', label: 'Doctor Accountability', description: 'Doctor commissions and settlements' },
   { key: 'inventory',            label: 'Inventory',            description: 'Stock management across departments' },
@@ -145,8 +182,10 @@ export default function SettingsModule() {
     ...toFormValues({}),
   })
 
+  // Each switch starts as the hospital would see it with nothing saved: on,
+  // except modules that stay off until enabled (roleConfig.isModuleOn).
   const [modules, setModules] = useState(
-    Object.fromEntries(ALL_MODULES.map(m => [m.key, true]))
+    Object.fromEntries(ALL_MODULES.map(m => [m.key, isModuleOn(m.key, {})]))
   )
 
   const userForm = useForm({
@@ -579,51 +618,74 @@ export default function SettingsModule() {
 
           {/* Cancellation & refund — each hospital decides for itself. One takes
               the money back at the counter, another sends it to finance first. */}
+          <Card className="overflow-hidden shadow-sm">
+            <CardHeader className="border-b bg-gray-50/70">
+              <div className="flex items-start gap-3">
+                <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-blue-50 text-blue-600"><Undo2 className="h-5 w-5" /></span>
+                <div>
+                  <CardTitle>Cancellation &amp; Refund</CardTitle>
+                  <CardDescription>
+                    What happens when a bill, lab test, scan or medicine sale is cancelled, and how the patient gets the money back.
+                    Applies to Billing, Pharmacy, Radiology and Laboratory.
+                  </CardDescription>
+                </div>
+              </div>
+            </CardHeader>
+            <CardContent className="grid gap-6 pt-6">
+              <div>
+                <ChoiceCards
+                  legend="1. Who releases the refund?"
+                  name="refundMode"
+                  value={orgForm.refundMode}
+                  onChange={v => setOrgForm(p => ({ ...p, refundMode: v }))}
+                  options={REFUND_MODE_CHOICES}
+                />
+              </div>
+              <div>
+                <ToggleCard
+                  title="The person who raised a refund may also approve it"
+                  description="Leave off so a second person checks every refund. Turn on where one administrator does both."
+                  checked={orgForm.refundSelfApproval}
+                  onChange={v => setOrgForm(p => ({ ...p, refundSelfApproval: v }))}
+                  disabled={orgForm.refundMode === 'instant'}
+                  disabledNote="Not needed with instant refunds: there is no approval step."
+                />
+              </div>
+              <CancellationCharges
+                before={orgForm.cancelChargeBeforeWorkPct}
+                after={orgForm.cancelChargeAfterWorkPct}
+                onBefore={(v) => setOrgForm(p => ({ ...p, cancelChargeBeforeWorkPct: v }))}
+                onAfter={(v) => setOrgForm(p => ({ ...p, cancelChargeAfterWorkPct: v }))}
+              />
+            </CardContent>
+          </Card>
+
           <Card>
             <CardHeader>
-              <CardTitle>Cancellation &amp; Refund</CardTitle>
-              <CardDescription>
-                Applies to Billing, Pharmacy, Radiology and Laboratory cancellations.
-              </CardDescription>
+              <CardTitle>Purchase &amp; Supply Chain</CardTitle>
+              <CardDescription>How this hospital pays vendors, returns goods and asks vendors for rates.</CardDescription>
             </CardHeader>
-            <CardContent className="grid md:grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label>Refund mode</Label>
-                <Select
-                  value={orgForm.refundMode}
-                  onValueChange={v => setOrgForm(p => ({ ...p, refundMode: v }))}
-                >
-                  <SelectTrigger><SelectValue placeholder="Select" /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="approval">Approval first &mdash; finance approves before money moves</SelectItem>
-                    <SelectItem value="instant">Instant &mdash; refunded at the counter</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <div />
-              <div className="space-y-2">
-                <Label>Cancellation charge % &mdash; BEFORE work started</Label>
-                <Input
-                  type="number" min="0" max="100" placeholder="0"
-                  value={orgForm.cancelChargeBeforeWorkPct}
-                  onChange={e => setOrgForm(p => ({ ...p, cancelChargeBeforeWorkPct: e.target.value }))}
-                />
-                <p className="text-xs text-gray-500">
-                  Sample not drawn, scan not begun. 0 = full refund.
-                </p>
-              </div>
-              <div className="space-y-2">
-                <Label>Cancellation charge % &mdash; AFTER work started</Label>
-                <Input
-                  type="number" min="0" max="100" placeholder="100"
-                  value={orgForm.cancelChargeAfterWorkPct}
-                  onChange={e => setOrgForm(p => ({ ...p, cancelChargeAfterWorkPct: e.target.value }))}
-                />
-                <p className="text-xs text-gray-500">
-                  Reagent or contrast already spent. 100 = no refund. Put the same
-                  number in both boxes for one flat rate.
-                </p>
-              </div>
+            <CardContent className="space-y-6">
+              <ChoiceCards
+                legend="Who pays vendors"
+                name="purchasePaymentMode"
+                value={orgForm.purchasePaymentMode}
+                onChange={v => setOrgForm(p => ({ ...p, purchasePaymentMode: v }))}
+                options={PAYMENT_MODE_CHOICES}
+              />
+              <ChoiceCards
+                legend="Returns to vendors"
+                name="purchaseReturnMode"
+                value={orgForm.purchaseReturnMode}
+                onChange={v => setOrgForm(p => ({ ...p, purchaseReturnMode: v }))}
+                options={RETURN_MODE_CHOICES}
+              />
+              <ToggleCard
+                title="E-mail RFQs to vendors"
+                description="When an RFQ is sent, each vendor with an e-mail address gets the list of items by e-mail. Needs E-mail (SMTP) set up in Settings → Integrations. Vendors' rates are still entered here."
+                checked={orgForm.rfqEmailVendors}
+                onChange={v => setOrgForm(p => ({ ...p, rfqEmailVendors: v }))}
+              />
             </CardContent>
           </Card>
 
@@ -822,7 +884,7 @@ export default function SettingsModule() {
             <CardContent>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 {ALL_MODULES.map(({ key, label, description }) => {
-                  const enabled = modules[key] !== false
+                  const enabled = isModuleOn(key, modules)
                   return (
                     <div key={key} className="flex items-center justify-between p-4 border rounded-lg">
                       <div className="flex items-center gap-4">
@@ -852,6 +914,7 @@ export default function SettingsModule() {
         <TabsContent value="integrations" className="space-y-4">
           <IntegrationsHub
             settings={organization?.settings || {}}
+            modules={modules}
             onSaved={(newSettings) => setOrganization((o) => ({ ...o, settings: newSettings }))}
           />
         </TabsContent>

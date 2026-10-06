@@ -67,7 +67,6 @@ import {
 import { SearchableSelect } from "@/components/ui/searchable-select";
 import { Checkbox } from "@/components/ui/checkbox";
 import client from "@/api/client";
-import { createInvoiceWithPayment } from "@/lib/billing";
 import { showApiError } from "@/lib/apiRequest";
 import { drName } from "@/lib/utils";
 import {
@@ -513,35 +512,10 @@ ${rx.notes ? `<div class="note-bar"><strong>Notes:</strong> ${escapeHtml(rx.note
     }));
   };
 
-  const afterDispense = async (rx) => {
-    const items = rx.items || [];
-    const totalCost = items.reduce((s, i) => s + (i.unitPrice || 0) * i.quantity, 0);
-    if (rx.patientId && totalCost > 0) {
-      try {
-        // Through the shared biller (lib/billing.js), like Lab and Radiology.
-        // This used to be a hand-written POST that sent each line as
-        // `description`, while the server requires `serviceName` — so EVERY
-        // dispense was rejected with a 400, the error was swallowed by the catch
-        // below, and the label printed under a green "Prescription dispensed".
-        // Medicines left the counter with no bill and nobody was told.
-        await createInvoiceWithPayment({
-          patientId: rx.patientId,
-          items: items.map((i) => ({
-            serviceName: i.drugName,
-            quantity: i.quantity,
-            unitPrice: i.unitPrice || 0,
-            total: (i.unitPrice || 0) * i.quantity,
-            tax: 0,
-            type: "pharmacy",
-          })),
-          notes: `Pharmacy dispense — Rx ${String(rx.id || "").slice(-8).toUpperCase()}`,
-        });
-      } catch (err) {
-        // Now it is said out loud: the drugs are dispensed either way, but the
-        // counter must know the bill did not go through.
-        showApiError(err, "Dispensed, but the invoice could not be created — please raise it in Billing");
-      }
-    }
+  // The bill is the server's: dispensing records the pharmacy sale (or, for a
+  // prescription already paid at Billing, none). This used to raise a second,
+  // unpaid Billing invoice for the same medicine on every dispense.
+  const afterDispense = (rx) => {
     handlePrintLabel(rx);
     setShowDispenseDialog(false);
     setSelectedPrescription(null);
@@ -689,7 +663,8 @@ ${rx.notes ? `<div class="note-bar"><strong>Notes:</strong> ${escapeHtml(rx.note
     setSavingSale(true);
     try {
       const items = valid.map((item) => ({ drugId: item.drugId, drugName: item.drugName || "", quantity: item.quantity, unitPrice: item.sellingPrice || 0, total: (item.sellingPrice || 0) * item.quantity }));
-      const res = await client.post("/pharmacy/sales", { items, customerName: customerName.trim() || undefined, paymentMethod, paymentStatus: "paid", patientId: salePatient?.id || undefined, phone: salePatient?.phonePrimary || undefined, uhid: salePatient?.mrn || undefined, referenceDoctor: saleReferenceDoctor.trim() || undefined, payments: splitPayment ? salePayments.filter(p => p.amount > 0) : undefined });
+      const res = await client.post("/pharmacy/sales", { items, customerName: customerName.trim() || undefined, paymentMethod, paymentStatus: "paid", patientId: salePatient?.id || undefined, phone: salePatient?.phonePrimary || undefined, uhid: salePatient?.mrn || undefined, referenceDoctor: saleReferenceDoctor.trim() || undefined, // The amount boxes hold text; the server takes numbers (as text every split sale failed).
+        payments: splitPayment ? salePayments.map(p => ({ ...p, amount: Number(p.amount) || 0 })).filter(p => p.amount > 0) : undefined });
       if (res.success) {
         handlePrintSaleReceipt(res.data, paymentMethod, format);
         toast.success(`Sale completed`);
@@ -726,7 +701,9 @@ ${rx.notes ? `<div class="note-bar"><strong>Notes:</strong> ${escapeHtml(rx.note
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
+      {/* Phone width: the title stacks over the buttons, which wrap — the row
+          pushed the page 241 px sideways at 390 px. */}
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
         <div>
           <h1 className="text-3xl font-bold flex items-center gap-2">
             <Pill className="h-7 w-7 text-pink-600" />
@@ -734,7 +711,7 @@ ${rx.notes ? `<div class="note-bar"><strong>Notes:</strong> ${escapeHtml(rx.note
           </h1>
           <p className="text-gray-500">Drug inventory, prescriptions &amp; dispensing</p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           {/* No Refresh button: this screen is live (useLiveData below). */}
           <Button variant="outline" onClick={() => setShowSaleDialog(true)}>
             <ShoppingCart className="h-4 w-4 mr-1" /> Direct Sale
@@ -749,7 +726,7 @@ ${rx.notes ? `<div class="note-bar"><strong>Notes:</strong> ${escapeHtml(rx.note
       </div>
 
       <Tabs value={activeTab} onValueChange={setActiveTab}>
-        <TabsList className="grid w-full grid-cols-6">
+        <TabsList className="grid w-full h-auto grid-cols-2 md:grid-cols-6">
           <TabsTrigger value="dashboard">Dashboard</TabsTrigger>
           <TabsTrigger value="inventory">Drug Inventory</TabsTrigger>
           <TabsTrigger value="prescriptions">Prescriptions</TabsTrigger>
@@ -1397,11 +1374,11 @@ ${rx.notes ? `<div class="note-bar"><strong>Notes:</strong> ${escapeHtml(rx.note
                   <div className="rounded-lg border border-blue-200 bg-blue-50 px-5 py-2 text-right">
                     <p className="text-[10px] text-gray-500 uppercase font-semibold">Grand Total</p>
                     <p className="text-lg font-bold text-blue-700">
-                      ₹{poItems.reduce((s, i) => {
+                      {formatMoney(poItems.reduce((s, i) => {
                         const r = i.rate || i.unitCost || 0;
                         const net = r - (r * (i.discountPercentage || 0) / 100);
                         return s + (i.quantityOrdered || 1) * net;
-                      }, 0).toLocaleString("en-IN", { minimumFractionDigits: 2 })}
+                      }, 0))}
                     </p>
                   </div>
                 </div>

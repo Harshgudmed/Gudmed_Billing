@@ -3,6 +3,8 @@ import { getOrgId } from "../lib/reqContext.js";
 import { scopedDoctorId } from '../utils/scope.js'
 import { PATIENT_NAME_SELECT } from '../lib/patientName.js'
 import { todayRange } from '../lib/dates.js'
+import { todayRevenue } from '../lib/revenue.js'
+import { roleWorksIn } from '../lib/roleModules.js'
 
 // ---------------------------------------------------------------------------
 // Short-lived per-scope cache + single-flight dedup.
@@ -19,15 +21,20 @@ import { todayRange } from '../lib/dates.js'
 //   2. Single-flight — concurrent cache-misses for the same scope share ONE
 //      in-flight computation instead of each firing its own 10-query fan-out.
 //
-// Cache keys include the org id AND the doctor scope, so tenants and per-doctor
-// views never share data. Every underlying query keeps its organizationId
+// Cache keys include the org id, the doctor scope AND the role, so tenants,
+// per-doctor views and roles never share data. Every underlying query keeps its organizationId
 // filter (org-scoping is preserved end to end).
 // ---------------------------------------------------------------------------
 const CACHE_TTL_MS = 30_000
 const dashCache = new Map()     // key -> { expires: number, data: object }
 const dashInflight = new Map()  // key -> Promise<object>
 
-async function computeDashboard(ORG_ID, myDoctorId) {
+// Each figure belongs to a module (lib/roleModules.js); a role is sent only the
+// figures of the modules it works in, and the others are not even counted — a
+// billing desk gets the day's takings, not the patient list or the bed count.
+async function computeDashboard(ORG_ID, myDoctorId, role) {
+  const can = (module) => roleWorksIn(role, module)
+  const skip = (fallback) => Promise.resolve(fallback)
   // "Today" is the HOSPITAL's day (todayRange, Asia/Kolkata), not the UTC day.
   // These were hand-rolled UTC midnight boundaries, which is a different 24h
   // window entirely: an appointment booked for today is stored at the start of
@@ -66,11 +73,11 @@ async function computeDashboard(ORG_ID, myDoctorId) {
     upcomingAppointments,
     queueWaiting,
   ] = await Promise.all([
-    db.patient.count({ where: patientWhere }),
+    can('patients') ? db.patient.count({ where: patientWhere }) : skip(0),
 
-    db.appointment.count({ where: todayApptWhere }),
+    can('appointments') ? db.appointment.count({ where: todayApptWhere }) : skip(0),
 
-    db.labOrder.count({
+    !can('laboratory') ? skip(0) : db.labOrder.count({
       where: {
         organizationId: ORG_ID,
         status: { in: ['pending', 'sample_collected', 'in_progress'] },
@@ -78,7 +85,7 @@ async function computeDashboard(ORG_ID, myDoctorId) {
       },
     }),
 
-    db.prescription.count({
+    !can('pharmacy') ? skip(0) : db.prescription.count({
       where: {
         organizationId: ORG_ID,
         status: 'pending',
@@ -87,19 +94,18 @@ async function computeDashboard(ORG_ID, myDoctorId) {
     }),
 
     // Revenue is a hospital metric, not a doctor metric — doctors get 0.
-    isDoctor
-      ? Promise.resolve({ _sum: { amount: 0 } })
-      : db.payment.aggregate({
-          where: { organizationId: ORG_ID, paymentDate: todayWindow, isRefund: false },
-          _sum: { amount: true },
-        }),
+    // Every counter, net of refunds paid out today: the same figure as
+    // Billing's tile (lib/revenue.js), so the two never disagree.
+    isDoctor || !can('billing')
+      ? Promise.resolve({ total: 0 })
+      : todayRevenue(db, ORG_ID, todayWindow),
 
     // Single groupBy replaces two separate bed.count() round-trips.
     //
     // Skipped for a doctor, like the payments aggregate above: ward occupancy is
     // the hospital's business, not one doctor's, and their dashboard does not
     // render it. Not asking is a round-trip saved, not just a field hidden.
-    isDoctor
+    isDoctor || !can('inpatient')
       ? Promise.resolve([])
       : db.bed.groupBy({
           by: ['status'],
@@ -109,7 +115,7 @@ async function computeDashboard(ORG_ID, myDoctorId) {
 
     // Critical alerts — org-scoped so one tenant never sees another's count.
     // Scoped further to the doctor's own lab orders when a doctor is logged in.
-    db.labResult.count({
+    !can('opd') ? skip(0) : db.labResult.count({
       where: {
         organizationId: ORG_ID,
         isCritical: true,
@@ -118,20 +124,20 @@ async function computeDashboard(ORG_ID, myDoctorId) {
       },
     }),
 
-    db.appointment.groupBy({
+    !can('appointments') ? skip([]) : db.appointment.groupBy({
       by: ['status'],
       where: todayApptWhere,
       _count: true,
     }),
 
-    db.patient.findMany({
+    !can('patients') ? skip([]) : db.patient.findMany({
       where: patientWhere,
       take: 5,
       orderBy: { createdAt: 'desc' },
       select: { ...PATIENT_NAME_SELECT, gender: true, dateOfBirth: true, createdAt: true },
     }),
 
-    db.appointment.findMany({
+    !can('appointments') ? skip([]) : db.appointment.findMany({
       where: {
         organizationId: ORG_ID,
         status: { in: ['scheduled', 'confirmed'] },
@@ -148,7 +154,7 @@ async function computeDashboard(ORG_ID, myDoctorId) {
     // Today's queue waiting count. A doctor sees only patients waiting for
     // them (assignedToId) or returning to them (followUpDoctorId) — same
     // "mine" scoping queueController.js uses for the queue list.
-    db.queueManagement.count({
+    !can('queue') ? skip(0) : db.queueManagement.count({
       where: {
         organizationId: ORG_ID,
         status: 'waiting',
@@ -164,22 +170,19 @@ async function computeDashboard(ORG_ID, myDoctorId) {
 
   return {
     stats: {
-      totalPatients,
-      todayAppointments,
-      pendingLabOrders,
-      pendingPrescriptions,
+      ...(can('patients') ? { totalPatients } : {}),
+      ...(can('appointments') ? { todayAppointments } : {}),
+      ...(can('laboratory') ? { pendingLabOrders } : {}),
+      ...(can('pharmacy') ? { pendingPrescriptions } : {}),
       // OMITTED for a doctor rather than sent as zero. The payments aggregate
       // above already refuses them the figure, but a tile reading "Today's
       // Revenue ₹0" states something false — the hospital did collect money,
       // this doctor is simply not the audience for it. Absent, the tile is not
       // drawn at all, which is the honest version of "not yours to see".
-      ...(isDoctor ? {} : {
-        todayRevenue: todayPayments._sum.amount || 0,
-        occupiedBeds,
-        availableBeds: totalBeds - occupiedBeds,
-      }),
-      queueWaiting,
-      criticalAlerts: criticalLabResults,
+      ...(isDoctor || !can('billing') ? {} : { todayRevenue: todayPayments.total }),
+      ...(isDoctor || !can('inpatient') ? {} : { occupiedBeds, availableBeds: totalBeds - occupiedBeds }),
+      ...(can('queue') ? { queueWaiting } : {}),
+      ...(can('opd') ? { criticalAlerts: criticalLabResults } : {}),
     },
     appointmentStatuses: appointmentStatusGroups.reduce((acc, item) => {
       acc[item.status] = item._count
@@ -200,7 +203,8 @@ export async function getDashboard(req, res, next) {
     // their patients, their appointments, their prescriptions/lab orders, their queue.
     const myDoctorId = scopedDoctorId(req)
 
-    const key = `${ORG_ID}::${myDoctorId || ''}`
+    const role = req.user?.role || ''
+    const key = `${ORG_ID}::${myDoctorId || ''}::${role}`
     const nowMs = Date.now()
 
     // 1. Serve a fresh cached result if we have one.
@@ -212,7 +216,7 @@ export async function getDashboard(req, res, next) {
     // 2. Single-flight: concurrent misses for the same scope share one compute.
     let inflight = dashInflight.get(key)
     if (!inflight) {
-      inflight = computeDashboard(ORG_ID, myDoctorId)
+      inflight = computeDashboard(ORG_ID, myDoctorId, role)
         .then((data) => {
           dashCache.set(key, { expires: Date.now() + CACHE_TTL_MS, data })
           return data

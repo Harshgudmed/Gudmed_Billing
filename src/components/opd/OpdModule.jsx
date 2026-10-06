@@ -36,6 +36,9 @@ import client from '@/api/client'
 import { drName, cToF, fToC } from '@/lib/utils'
 import PatientLookup from '@/components/common/PatientLookup'
 import { printPrescription } from './utils/printOpd'
+import { useAuth } from '@/lib/auth'
+import { localYmd } from '@/lib/format'
+import { showApiError } from '@/lib/apiRequest'
 const vitalsSchema = z.object({
   temperature: z.number().min(86).max(113).optional(),
   bloodPressureSystolic: z.number().min(60).max(250).optional(),
@@ -53,10 +56,10 @@ const clinicalSchema = z.object({
   followUpDate: z.string().optional(),
 })
 
-const DEFAULT_VITALS = {
-  temperature: 98.6, bloodPressureSystolic: 120, bloodPressureDiastolic: 80,
-  pulseRate: 72, oxygenSaturation: 98, weight: 70,
-}
+// Empty: a vital is what someone measured. Prefilled "normal" values
+// (98.6°F, 120/80, 72, SpO2 98%, 70 kg) were saved as if taken for every
+// patient whose nurse did not overwrite them.
+const DEFAULT_VITALS = {}
 
 const slug = (s) => String(s).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
 
@@ -210,7 +213,11 @@ export default function OpdModule() {
   const stats = consultationsPagination.summary || { total: 0, today: 0, thisWeek: 0, withRx: 0 }
 
   const [selectedPatientId, setSelectedPatientId] = useState('')
-  const [selectedDoctorId, setSelectedDoctorId] = useState('')
+  // A doctor writes as themselves (the server refuses another doctor's name),
+  // so their own name is filled in and fixed; the administrator chooses.
+  const { user } = useAuth()
+  const myDoctorId = user?.role === 'doctor' ? user.id : ''
+  const [selectedDoctorId, setSelectedDoctorId] = useState(myDoctorId)
   const [prescriptionItems, setPrescriptionItems] = useState([])
   const [selectedDrug, setSelectedDrug] = useState('')
   const [isSaving, setIsSaving] = useState(false)
@@ -415,7 +422,7 @@ export default function OpdModule() {
     setPrescriptionItems([]); setLabOrderItems([]); setRadiologyOrderItems([])
     setSelectedDrug(''); setSelectedLabTest(''); setSelectedRadExam('')
     drugPicker.clear(); labTestPicker.clear(); radExamPicker.clear()
-    setSelectedPatientId(''); setSelectedPatientRecord(null); setSelectedDoctorId(''); setEditingId(null)
+    setSelectedPatientId(''); setSelectedPatientRecord(null); setSelectedDoctorId(myDoctorId); setEditingId(null)
     setDepartment(''); setProblem(''); setConditions([]); setGuidance(null)
   }
 
@@ -497,8 +504,9 @@ export default function OpdModule() {
         toast.success('OPD prescription saved')
       }
       resetForm(); consultationsPagination.refresh(); setView('list')
-    } catch {
-      toast.error('Failed to save prescription')
+    } catch (err) {
+      // The server's reason (e.g. another doctor's name, a missing field), not just "failed".
+      showApiError(err, 'Failed to save prescription')
     } finally {
       setIsSaving(false)
     }
@@ -679,9 +687,9 @@ export default function OpdModule() {
                             )
                           })()}
                         </div>
-                        <div className="mt-2 flex items-center justify-between">
+                        <div className="mt-2 flex flex-wrap items-center justify-between gap-1">
                           <span className="text-xs text-gray-500">Dr. {drName(docName).replace('Dr. ', '')}</span>
-                          <div className="flex gap-1">
+                          <div className="flex flex-wrap gap-1">
                             <Button size="sm" variant="ghost" className="h-8 px-2 text-gray-600 hover:text-blue-600" onClick={() => setViewing(c)}><Eye className="h-4 w-4 mr-1" />View</Button>
                             <Button size="sm" variant="ghost" className="h-8 px-2 text-blue-600 hover:text-blue-700" onClick={() => openEdit(c)}><Edit className="h-4 w-4 mr-1" />Edit</Button>
                             <Button size="sm" variant="ghost" className="h-8 px-2 text-green-600 hover:text-green-700" onClick={() => printPrescription(c, patName, patMrn, patAge, patGender, docName, orgInfo)}><Printer className="h-4 w-4 mr-1" />Print</Button>
@@ -812,7 +820,7 @@ export default function OpdModule() {
               </div>
               <div>
                 <Label className="text-sm font-medium mb-2 block">Attending Doctor *</Label>
-                <Select value={selectedDoctorId} onValueChange={setSelectedDoctorId}>
+                <Select value={selectedDoctorId} onValueChange={setSelectedDoctorId} disabled={!!myDoctorId}>
                   <SelectTrigger className="rounded-xl"><SelectValue placeholder="Select doctor" /></SelectTrigger>
                   <SelectContent>{doctors.map(d => <SelectItem key={d.id} value={d.id}>{drName(d.fullName)}{d.specialization ? ` — ${d.specialization}` : ''}</SelectItem>)}</SelectContent>
                 </Select>
@@ -934,7 +942,7 @@ export default function OpdModule() {
                   <FormField key={f.name} control={vitalsForm.control} name={f.name} render={({ field }) => (
                     <FormItem>
                       <FormLabel className="flex items-center gap-1 text-xs">{f.icon}{f.label}</FormLabel>
-                      <FormControl><Input type="number" step={f.step} className="rounded-xl" {...field} onChange={e => field.onChange(f.parse(e.target.value))} /></FormControl>
+                      <FormControl><Input type="number" step={f.step} className="rounded-xl" {...field} value={field.value ?? ''} onChange={e => { const v = f.parse(e.target.value); field.onChange(Number.isFinite(v) ? v : undefined) }} /></FormControl>
                       <FormMessage />
                     </FormItem>
                   )} />
@@ -1058,7 +1066,7 @@ export default function OpdModule() {
             <Form {...clinicalForm}>
               <form className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <FormField control={clinicalForm.control} name="advice" render={({ field }) => (<FormItem className="md:col-span-2"><FormLabel>Advice / Instructions</FormLabel><FormControl><Textarea rows={2} className="rounded-xl" placeholder="Diet, rest, warning signs, when to return..." {...field} /></FormControl></FormItem>)} />
-                <FormField control={clinicalForm.control} name="followUpDate" render={({ field }) => (<FormItem><FormLabel>Follow-up Date</FormLabel><FormControl><Input type="date" className="rounded-xl" {...field} /></FormControl></FormItem>)} />
+                <FormField control={clinicalForm.control} name="followUpDate" render={({ field }) => (<FormItem><FormLabel>Follow-up Date</FormLabel><FormControl><Input type="date" className="rounded-xl" min={editingId ? undefined : localYmd()} {...field} /></FormControl></FormItem>)} />
               </form>
             </Form>
           </Section>

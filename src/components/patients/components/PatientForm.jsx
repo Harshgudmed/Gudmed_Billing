@@ -92,12 +92,14 @@ export default function PatientForm({ form, isSubmitting, onSubmitFn, submitLabe
             <FormItem>
               <FormLabel>Locality / Area</FormLabel>
               <FormControl><Input placeholder="e.g. Andheri West" {...field} value={field.value || ''} /></FormControl>
+              <FormMessage />
             </FormItem>
           )} />
           <FormField control={form.control} name="city" render={({ field }) => (
             <FormItem>
-              <FormLabel>Village / Town / City</FormLabel>
+              <FormLabel>Village / Town / City *</FormLabel>
               <FormControl><Input placeholder="e.g. Mumbai" {...field} value={field.value || ''} /></FormControl>
+              <FormMessage />
             </FormItem>
           )} />
         </div>
@@ -106,22 +108,24 @@ export default function PatientForm({ form, isSubmitting, onSubmitFn, submitLabe
             <FormItem>
               <FormLabel>District</FormLabel>
               <FormControl><Input placeholder="e.g. Mumbai Suburban" {...field} value={field.value || ''} /></FormControl>
+              <FormMessage />
             </FormItem>
           )} />
           <FormField control={form.control} name="state" render={({ field }) => (
             <FormItem>
-              <FormLabel>State</FormLabel>
+              <FormLabel>State *</FormLabel>
               <Select onValueChange={field.onChange} value={field.value || ''}>
                 <FormControl><SelectTrigger><SelectValue placeholder="Select state" /></SelectTrigger></FormControl>
                 <SelectContent>
                   {INDIAN_STATES.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}
                 </SelectContent>
               </Select>
+              <FormMessage />
             </FormItem>
           )} />
           <FormField control={form.control} name="pincode" render={({ field }) => (
             <FormItem>
-              <FormLabel>PIN Code</FormLabel>
+              <FormLabel>PIN Code *</FormLabel>
               <FormControl>
                 <Input
                   placeholder="6-digit PIN" inputMode="numeric" maxLength={6}
@@ -155,18 +159,21 @@ export default function PatientForm({ form, isSubmitting, onSubmitFn, submitLabe
             <FormItem>
               <FormLabel>Emergency Contact</FormLabel>
               <FormControl><Input placeholder="Contact name" {...field} /></FormControl>
+              <FormMessage />
             </FormItem>
           )} />
           <FormField control={form.control} name="emergencyContactPhone" render={({ field }) => (
             <FormItem>
               <FormLabel>Contact Phone</FormLabel>
               <FormControl><Input placeholder="Phone number" {...field} /></FormControl>
+              <FormMessage />
             </FormItem>
           )} />
           <FormField control={form.control} name="emergencyContactRelationship" render={({ field }) => (
             <FormItem>
               <FormLabel>Relationship</FormLabel>
               <FormControl><Input placeholder="e.g. Spouse" {...field} /></FormControl>
+              <FormMessage />
             </FormItem>
           )} />
         </div>

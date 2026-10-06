@@ -11,6 +11,7 @@ import { useDateFilter } from '@/components/common/DateFilter'
 import { useDebounce } from '@/lib/useDebounce'
 import { useServerPagination } from '@/lib/useServerPagination'
 import { useLiveData } from '@/lib/useLiveData'
+import { useEnabledModules } from '@/lib/useEnabledModules'
 import client from '@/api/client'
 // Both are behind lazy() because they are whole modules living in this module's
 // tabs, and a static import puts them in the Queue route's bundle whether or not
@@ -86,11 +87,15 @@ const TODAY_LABEL = new Date().toLocaleDateString('en-IN', {
 
 export default function QueueModule() {
   const [activeTab, setActiveTab] = useState('queue')
+  // Billing is not a doctor's module: the tab showed a doctor every invoice in
+  // the hospital (the server now refuses that read too).
+  const showBilling = useEnabledModules().canOpen('billing')
   const [updatingId, setUpdatingId] = useState(null)
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState('all')
   const debouncedSearch = useDebounce(search, 300)
-  const dateFilter = useDateFilter('today')
+  // The filter row has one Clear (FilterBar's), back to Today — not a second one in the date control.
+  const dateFilter = useDateFilter('today', { showClear: false })
 
   const queuePage = useServerPagination('/queue', {
     perPage: QUEUE_PER_PAGE,
@@ -174,8 +179,8 @@ export default function QueueModule() {
 
   return (
     <div className="space-y-4">
-      {/* Header */}
-      <div className="flex items-center justify-between">
+      {/* Header — stacks at phone width (the button pushed the page sideways). */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
           <h1 className="text-3xl font-bold flex items-center gap-2">
             <Users className="h-7 w-7 text-blue-600" />
@@ -197,11 +202,11 @@ export default function QueueModule() {
       </div>
 
       <Tabs value={activeTab} onValueChange={setActiveTab}>
-        <TabsList>
+        <TabsList className="h-auto flex-wrap justify-start">
           <TabsTrigger value="queue">Queue</TabsTrigger>
           <TabsTrigger value="registrations">New Registrations</TabsTrigger>
           <TabsTrigger value="appointments">Appointments</TabsTrigger>
-          <TabsTrigger value="billing">Billing</TabsTrigger>
+          {showBilling && <TabsTrigger value="billing">Billing</TabsTrigger>}
         </TabsList>
 
         {/* ── Queue Tab ── */}
@@ -259,7 +264,7 @@ export default function QueueModule() {
                     dateFilter={dateFilter}
                     statusFilter={statusFilter}
                     search={debouncedSearch}
-                    onClearFilters={() => { dateFilter.reset(); setStatusFilter('all'); setSearch('') }}
+                    onClearFilters={() => { dateFilter.setMode('all'); setStatusFilter('all'); setSearch('') }}
                   />
                 }
                 renderRow={(entry, idx) => (
@@ -296,11 +301,13 @@ export default function QueueModule() {
         </TabsContent>
 
         {/* ── Billing Tab ── */}
-        <TabsContent value="billing">
-          <Suspense fallback={<TabLoading name="Billing" />}>
-            <BillingModule />
-          </Suspense>
-        </TabsContent>
+        {showBilling && (
+          <TabsContent value="billing">
+            <Suspense fallback={<TabLoading name="Billing" />}>
+              <BillingModule />
+            </Suspense>
+          </TabsContent>
+        )}
       </Tabs>
     </div>
   )

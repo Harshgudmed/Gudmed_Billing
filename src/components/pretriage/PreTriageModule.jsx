@@ -572,7 +572,7 @@ export default function PreTriageModule() {
             <CardTitle>Screenings</CardTitle>
             <div className="flex items-center gap-3 flex-wrap">
               {/* Filter tabs with live counts */}
-              <div className="flex rounded-md border overflow-hidden">
+              <div className="flex flex-wrap rounded-md border overflow-hidden">
                 <button
                   onClick={() => setActiveFilter('all')}
                   className={`px-3 py-1.5 text-sm font-medium transition-colors flex items-center gap-1.5 ${

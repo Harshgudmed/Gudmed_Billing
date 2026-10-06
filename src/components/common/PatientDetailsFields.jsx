@@ -2,9 +2,11 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { Users, Phone, MapPin, AlertCircle, Shield, FileText, Check } from 'lucide-react'
+import { Users, Phone, AlertCircle, Shield, FileText, Check } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { PhoneInput } from './PhoneInput'
+import AddressFields, { INDIAN_STATES } from './AddressFields'
+import { FieldError } from './FieldError'
 import { sanitizeTextInput, sanitizeMultilineInput } from './textFieldUtils'
 import { BLOOD_GROUPS } from '@/components/patients/utils/patientUtils'
 import { dobInputBounds } from '@/lib/schemas/patientFormSchema'
@@ -27,14 +29,9 @@ import { dobInputBounds } from '@/lib/schemas/patientFormSchema'
 // decides what happens on submit: reception creates the patient and books the
 // appointment, the QR page only files a pending self-registration.
 
-export const INDIAN_STATES = [
-  'Andhra Pradesh', 'Arunachal Pradesh', 'Assam', 'Bihar', 'Chhattisgarh',
-  'Goa', 'Gujarat', 'Haryana', 'Himachal Pradesh', 'Jharkhand', 'Karnataka',
-  'Kerala', 'Madhya Pradesh', 'Maharashtra', 'Manipur', 'Meghalaya', 'Mizoram',
-  'Nagaland', 'Odisha', 'Punjab', 'Rajasthan', 'Sikkim', 'Tamil Nadu',
-  'Telangana', 'Tripura', 'Uttar Pradesh', 'Uttarakhand', 'West Bengal',
-  'Delhi', 'Jammu & Kashmir', 'Ladakh', 'Chandigarh', 'Puducherry',
-]
+// Moved to their own files (the address is shared with the vendor form);
+// re-exported so every existing import from here keeps working.
+export { INDIAN_STATES, FieldError }
 
 export const INSURANCE_PROVIDERS = [
   'CGHS', 'ESIC', 'PM-JAY (Ayushman Bharat)', 'Star Health', 'HDFC ERGO',
@@ -61,10 +58,6 @@ export const GENDERS = [
 // Renders next to a field, right under its Input/Select, for both a Zod
 // validation error caught before submit and a validation error the backend
 // sends back after it — one place, either source.
-export function FieldError({ message }) {
-  if (!message) return null
-  return <p className="mt-1 text-xs text-red-600">{message}</p>
-}
 
 /**
  * Free-text notes about the visit. Separate from the fields above because the
@@ -306,54 +299,14 @@ export default function PatientDetailsFields({
         </div>
       </section>
 
-      {/* Address */}
-      <section className="rounded-lg border bg-gray-50/60 p-4 space-y-3">
-        <div className="flex items-center gap-2 text-sm font-semibold text-gray-700">
-          <MapPin className="h-4 w-4 text-blue-600" />Address
-        </div>
-        <div className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2 [&>div]:min-w-0">
-          <div>
-            <Label className="text-xs text-gray-600">House / Flat / Building No.</Label>
-            <Input className="mt-1" value={patientForm.houseNumber} onChange={e => setTextField('houseNumber', e.target.value)} placeholder="e.g. Flat 12B" />
-          </div>
-          <div>
-            <Label className="text-xs text-gray-600">Street / Block</Label>
-            <Input className="mt-1" value={patientForm.street} onChange={e => setTextField('street', e.target.value)} placeholder="e.g. Block G, MG Road" />
-          </div>
-        </div>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <div>
-            <Label className="text-xs text-gray-600">Locality / Area</Label>
-            <Input className="mt-1" value={patientForm.locality} onChange={e => setNameField('locality', e.target.value)} placeholder="e.g. Andheri West" />
-          </div>
-          <div>
-            <Label className="text-xs text-gray-600">Village / Town / City <span className="text-red-500">*</span></Label>
-            <Input className={cn('mt-1', fieldErrors.city && 'border-red-500')} value={patientForm.city} onChange={e => setNameField('city', e.target.value)} placeholder="e.g. Mumbai" required />
-            <FieldError message={fieldErrors.city} />
-          </div>
-        </div>
-        <div className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-3 [&>div]:min-w-0">
-          <div>
-            <Label className="text-xs text-gray-600">District</Label>
-            <Input className="mt-1" value={patientForm.district} onChange={e => setNameField('district', e.target.value)} placeholder="e.g. Mumbai Suburban" />
-          </div>
-          <div>
-            <Label className="text-xs text-gray-600">State <span className="text-red-500">*</span></Label>
-            <Select value={patientForm.state} onValueChange={v => setField('state', v)}>
-              <SelectTrigger className={cn('mt-1', fieldErrors.state && 'border-red-500')}><SelectValue placeholder="Select State" /></SelectTrigger>
-              <SelectContent>
-                {INDIAN_STATES.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}
-              </SelectContent>
-            </Select>
-            <FieldError message={fieldErrors.state} />
-          </div>
-          <div>
-            <Label className="text-xs text-gray-600">PIN Code <span className="text-red-500">*</span></Label>
-            <Input className={cn('mt-1', fieldErrors.pincode && 'border-red-500')} value={patientForm.pincode} onChange={e => setField('pincode', e.target.value.replace(/\D/g, ''))} placeholder="Enter 6-digit PIN code" inputMode="numeric" maxLength={6} required />
-            <FieldError message={fieldErrors.pincode} />
-          </div>
-        </div>
-      </section>
+      {/* Address — the shared component (the vendor form uses it too) */}
+      <AddressFields
+        values={patientForm}
+        setField={setField}
+        setTextField={setTextField}
+        setNameField={setNameField}
+        fieldErrors={fieldErrors}
+      />
 
       {/* Emergency Contact */}
       <section className="rounded-lg border bg-gray-50/60 p-4 space-y-3">

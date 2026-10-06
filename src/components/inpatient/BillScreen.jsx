@@ -12,6 +12,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '
 import client from '@/api/client'
 import { showApiError } from '@/lib/apiRequest'
 import { useAuth } from '@/lib/auth'
+import { useOrgSettings } from '@/lib/useOrgSettings'
 
 const SERVICE_GROUPS = ['PROCEDURE', 'LAB', 'RADIOLOGY', 'PHARMACY', 'CONSUMABLE', 'DOCTOR_VISIT', 'NURSING', 'OTHER']
 const PAY_METHODS = ['CASH', 'UPI', 'CARD', 'BANK_TRANSFER', 'CHEQUE']
@@ -24,6 +25,12 @@ import { escapeHtml } from '@/lib/printTemplate'
 const statusStyle = { DRAFT: 'bg-amber-100 text-amber-800', FINAL: 'bg-green-100 text-green-800', CANCELLED: 'bg-gray-200 text-gray-600' }
 const payStatusStyle = { UNPAID: 'bg-red-100 text-red-800', PARTIAL: 'bg-amber-100 text-amber-800', PAID: 'bg-green-100 text-green-800', REFUNDED: 'bg-purple-100 text-purple-800' }
 const ledgerTypeStyle = { ADVANCE: 'bg-blue-100 text-blue-800', PAYMENT: 'bg-green-100 text-green-800', REFUND: 'bg-purple-100 text-purple-800' }
+const ledgerStatus = {
+  SUCCESS: { label: 'OK', cls: 'bg-green-100 text-green-800' },
+  VOID: { label: 'VOID', cls: 'bg-gray-200 text-gray-600' },
+  PENDING_APPROVAL: { label: 'Pending approval', cls: 'bg-amber-100 text-amber-800' },
+  REJECTED: { label: 'Rejected', cls: 'bg-red-100 text-red-700' },
+}
 
 // Desktop IPD Bill Screen — Phase 1. Uses only Bill / BillCounter / IpdCharge:
 //   GET  ?resource=bill          (persisted bill header + history)
@@ -36,6 +43,10 @@ export default function BillScreen({ admission, orgInfo = {} }) {
   // Demo (no user) allows all; otherwise gate by role.
   const canCollect = !user || ['receptionist', 'billing', 'admin', 'super_admin'].includes(role)
   const canRefund = !user || ['billing', 'admin', 'super_admin'].includes(role)
+  // Settings → Cancellation & Refund: with approval (the default) a refund here
+  // is a request Finance approves in Billing › Refund Approvals. The server
+  // reads the same setting and decides; this only words the dialog.
+  const refundNeedsApproval = useOrgSettings().orgInfo.refundMode !== 'instant'
 
   const [bill, setBill] = useState(null)
   const [history, setHistory] = useState([])
@@ -162,7 +173,10 @@ ${rows || '<tr><td colspan="5" style="text-align:center;color:#999">No service l
     setBusy(true)
     try {
       const res = await client.post('/inpatient', { resource: 'refund', billId: bill.id, amount: Number(refundForm.amount), method: refundForm.method, reason: refundForm.reason || undefined })
-      if (res.success) { toast.success(`Refund recorded — ${res.data.receiptNumber}`); setShowRefund(false); setRefundForm({ amount: '', method: 'CASH', reason: '' }); load() }
+      if (res.success) {
+        toast.success(res.data.status === 'PENDING_APPROVAL' ? 'Refund request sent — Finance approves it in Billing › Refund Approvals' : `Refund recorded — ${res.data.receiptNumber}`)
+        setShowRefund(false); setRefundForm({ amount: '', method: 'CASH', reason: '' }); load()
+      }
       else toast.error(res.error || 'Failed')
     } catch (e) { showApiError(e, 'Refund failed') }
     setBusy(false)
@@ -202,6 +216,7 @@ ${rows || '<tr><td colspan="5" style="text-align:center;color:#999">No service l
 
   // Totals: persisted bill if present, else live preview.
   const T = bill || { bedTotal: live?.bedCharges?.total, serviceTotal: live?.serviceCharges?.total, subtotal: live?.subtotal, taxTotal: live?.taxTotal, discountTotal: 0, depositTotal: 0, payableTotal: live?.grandTotal }
+  const pendingRefund = payments.filter((p) => p.type === 'REFUND' && p.status === 'PENDING_APPROVAL').reduce((sum, p) => sum - p.amount, 0)
   const segLines = live?.bedCharges?.lines || []
   const svcLines = live?.serviceCharges?.lines || []
 
@@ -340,20 +355,25 @@ ${rows || '<tr><td colspan="5" style="text-align:center;color:#999">No service l
             </div>
           </div>
           <div className="text-center"><Badge className={(payStatusStyle[bill.paymentStatus] || '') + ' text-xs'}>{bill.paymentStatus || 'UNPAID'}</Badge></div>
+          {pendingRefund > 0 && (
+            <p className="text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded p-2" role="status">
+              Refund of {inr(pendingRefund)} pending approval — Paid above does not include it until Finance approves it in Billing › Refund Approvals.
+            </p>
+          )}
 
           {/* Payment ledger */}
           {payments.length === 0 ? <p className="text-sm text-gray-400 py-3 text-center border rounded">No payments recorded</p> : (
             <Table>
               <TableHeader><TableRow><TableHead>Receipt</TableHead><TableHead>Date/Time</TableHead><TableHead>Type</TableHead><TableHead>Method</TableHead><TableHead className="text-right">Amount</TableHead><TableHead>Cashier</TableHead><TableHead>Status</TableHead><TableHead></TableHead></TableRow></TableHeader>
               <TableBody>{payments.map((p) => (
-                <TableRow key={p.id} className={p.status === 'VOID' ? 'opacity-50 line-through' : ''}>
+                <TableRow key={p.id} className={p.status === 'VOID' || p.status === 'REJECTED' ? 'opacity-50 line-through' : ''}>
                   <TableCell className="text-xs font-mono">{p.receiptNumber || '—'}</TableCell>
                   <TableCell className="text-xs text-gray-500">{p.paidAt ? format(new Date(p.paidAt), 'dd MMM, hh:mm a') : ''}</TableCell>
                   <TableCell><Badge className={(ledgerTypeStyle[p.type] || '') + ' text-[10px]'}>{p.type}</Badge></TableCell>
                   <TableCell className="text-xs">{p.method}{p.reference ? <span className="text-gray-400"> · {p.reference}</span> : ''}</TableCell>
                   <TableCell className={'text-sm text-right font-medium ' + (p.amount < 0 ? 'text-purple-700' : '')}>{p.amount < 0 ? '- ' : ''}{inr(Math.abs(p.amount))}</TableCell>
                   <TableCell className="text-xs text-gray-500">{p.receivedByName || '—'}</TableCell>
-                  <TableCell>{p.status === 'VOID' ? <Badge className="bg-gray-200 text-gray-600 text-[10px]">VOID</Badge> : <Badge className="bg-green-100 text-green-800 text-[10px]">OK</Badge>}</TableCell>
+                  <TableCell><Badge className={(ledgerStatus[p.status] || ledgerStatus.SUCCESS).cls + ' text-[10px]'}>{(ledgerStatus[p.status] || ledgerStatus.SUCCESS).label}</Badge></TableCell>
                   <TableCell className="text-right whitespace-nowrap">
                     {p.status === 'SUCCESS' && <Button size="icon" variant="ghost" className="h-7 w-7" title="Print receipt" onClick={() => printReceipt(p)}><Printer className="h-3.5 w-3.5" /></Button>}
                     {p.status === 'SUCCESS' && canRefund && p.type !== 'REFUND' && <Button size="icon" variant="ghost" className="h-7 w-7 text-red-500" title="Void" onClick={() => voidPaymentRow(p)}><Ban className="h-3.5 w-3.5" /></Button>}
@@ -396,15 +416,16 @@ ${rows || '<tr><td colspan="5" style="text-align:center;color:#999">No service l
       {/* Refund dialog (billing role) */}
       <Dialog open={showRefund} onOpenChange={setShowRefund}>
         <DialogContent className="max-w-sm">
-          <DialogHeader><DialogTitle>Record Refund</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle>{refundNeedsApproval ? 'Request Refund' : 'Record Refund'}</DialogTitle></DialogHeader>
           <div className="space-y-3">
-            {bill && <p className="text-xs text-gray-500">Paid: {inr(bill.paidTotal)} · {(bill.balanceDue || 0) < 0 ? <span className="text-purple-700 font-semibold">Overpaid {inr(Math.abs(bill.balanceDue))}</span> : 'no overpayment'}</p>}
+            {bill && <p className="text-xs text-gray-500">Paid: {inr(bill.paidTotal)} · {(bill.balanceDue || 0) < 0 ? <span className="text-purple-700 font-semibold">Overpaid {inr(Math.abs(bill.balanceDue))}</span> : 'no overpayment'}{pendingRefund > 0 && <> · <span className="text-amber-700">{inr(pendingRefund)} already waiting for approval</span></>}</p>}
+            {refundNeedsApproval && <p className="text-xs text-amber-700">Finance approves this in Billing › Refund Approvals before any money is paid out.</p>}
             <div><Label>Refund Amount (₹) *</Label><Input type="number" min={1} value={refundForm.amount} onChange={(e) => setRefundForm((p) => ({ ...p, amount: e.target.value }))} autoFocus /></div>
             <div><Label>Method</Label>
               <Select value={refundForm.method} onValueChange={(v) => setRefundForm((p) => ({ ...p, method: v }))}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{PAY_METHODS.map((m) => <SelectItem key={m} value={m}>{m.replace('_', ' ')}</SelectItem>)}</SelectContent></Select></div>
             <div><Label>Reason</Label><Input value={refundForm.reason} onChange={(e) => setRefundForm((p) => ({ ...p, reason: e.target.value }))} placeholder="e.g. unused deposit / overpayment" /></div>
           </div>
-          <DialogFooter><Button variant="outline" onClick={() => setShowRefund(false)}>Cancel</Button><Button className="bg-purple-600 hover:bg-purple-700" onClick={doRefund} disabled={busy}>{busy ? 'Saving…' : 'Record Refund'}</Button></DialogFooter>
+          <DialogFooter><Button variant="outline" onClick={() => setShowRefund(false)}>Cancel</Button><Button className="bg-purple-600 hover:bg-purple-700" onClick={doRefund} disabled={busy}>{busy ? 'Saving…' : refundNeedsApproval ? 'Send for Approval' : 'Record Refund'}</Button></DialogFooter>
         </DialogContent>
       </Dialog>
     </div>

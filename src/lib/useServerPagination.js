@@ -14,7 +14,7 @@ import { useLatestRequest } from "@/lib/useLatestRequest";
 //     perPage: 15,
 //     params: { search: debouncedSearch, category },
 //   });
-//   dp.rows  dp.page  dp.setPage  dp.totalPages  dp.loading  dp.refresh()
+//   dp.rows  dp.page  dp.setPage  dp.totalPages  dp.loading  dp.error  dp.refresh()
 //   pollMs: 5000  — optional live refresh; omit for a normal, static list.
 export function useServerPagination(endpoint, { perPage = 15, params = {}, pollMs = 0 } = {}) {
   const [page, setPage] = useState(1);
@@ -24,6 +24,8 @@ export function useServerPagination(endpoint, { perPage = 15, params = {}, pollM
   // Some endpoints return an extra `summary` block (e.g. sales revenue across
   // the whole filtered set, not just this page). Exposed for those callers.
   const [summary, setSummary] = useState(null);
+  // The last failure's message, cleared by the next good answer.
+  const [error, setError] = useState(null);
 
   // Stable string key so the effects only re-run when a filter value actually
   // changes (not on every parent re-render that rebuilds the params object).
@@ -52,11 +54,14 @@ export function useServerPagination(endpoint, { perPage = 15, params = {}, pollM
       setRows(res.data ?? []);
       setTotal(res.pagination?.totalRecords ?? res.meta?.total ?? 0);
       setSummary(res.summary ?? null);
-    } catch {
+      setError(null);
+    } catch (err) {
       if (!isLatest()) return;
-      setRows([]);
-      setTotal(0);
-      setSummary(null);
+      // Keep the last good page: emptying it said "No records found" when the
+      // server had simply not answered (a restart, a dropped connection, a live
+      // refresh that failed) — a queue that looks empty is worse than one that
+      // is a few seconds old. `error` lets the table say so.
+      setError(err?.message || "Could not load the list");
     } finally {
       // The newer request owns the spinner; an outdated one must not clear it
       // while that request is still on its way.
@@ -128,5 +133,5 @@ export function useServerPagination(endpoint, { perPage = 15, params = {}, pollM
     if (page > totalPages) setPage(totalPages);
   }, [page, totalPages]);
 
-  return { rows, total, totalPages, page, setPage, loading, summary, refresh: fetchPage };
+  return { rows, total, totalPages, page, setPage, loading, summary, error, refresh: fetchPage };
 }

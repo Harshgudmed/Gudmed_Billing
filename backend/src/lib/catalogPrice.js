@@ -108,8 +108,9 @@ export async function catalogPrice(tx, { organizationId, sourceType, sourceId })
  * matching what fulfillRadiologyItems already does further down the same
  * transaction, and stopping a cross-tenant id from reaching the FK.
  */
-export async function priceInvoiceItems(tx, { organizationId, items }) {
+export async function priceInvoiceItems(tx, { organizationId, items, discountAmount = 0 }) {
   const priced = []
+  const ratedAt = [] // lines whose GST is recomputed here (index, rate)
 
   for (const item of items) {
     // A clinical line carries sourceType + sourceId. A BillingService line
@@ -142,10 +143,10 @@ export async function priceInvoiceItems(tx, { organizationId, items }) {
 
     // Tax rides on the line as an amount, not a rate, so it cannot be recomputed
     // in general. Where the biller sent the rate too (pharmacy does), recompute
-    // it — otherwise overriding the price would leave GST calculated on the old
-    // one. Lines without a rate keep the tax they arrived with.
+    // it below — otherwise overriding the price would leave GST calculated on
+    // the old one. Lines without a rate keep the tax they arrived with.
     if (price !== null && typeof item.gstRate === 'number' && item.gstRate > 0) {
-      line.tax = round2((total * item.gstRate) / 100)
+      ratedAt.push([priced.length, item.gstRate])
     }
 
     // Marks a catalogue line the catalogue could not price, so "which bills went
@@ -153,6 +154,17 @@ export async function priceInvoiceItems(tx, { organizationId, items }) {
     if (price === null && sourceId) line.priceSource = 'unpriced'
 
     priced.push(line)
+  }
+
+  // GST is charged on what the patient pays for the line: its price less its
+  // share of the bill's discount (shared by value), to the paisa. It was taken
+  // on the price before the discount (₹25.50 instead of ₹25.20), and the New
+  // Invoice screen, which works the same way (BillingModule cartLines), showed
+  // a total the stored bill did not have.
+  const subtotal = priced.reduce((s, l) => s + l.total, 0)
+  for (const [i, rate] of ratedAt) {
+    const share = subtotal > 0 ? (Number(discountAmount) || 0) * priced[i].total / subtotal : 0
+    priced[i].tax = round2(((priced[i].total - share) * rate) / 100)
   }
 
   return priced

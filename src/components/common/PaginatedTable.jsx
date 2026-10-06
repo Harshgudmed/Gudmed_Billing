@@ -18,7 +18,8 @@ import { Loader2 } from 'lucide-react'
 //
 // Edge cases handled once, here: shows a spinner only on the FIRST load (not on
 // every page change), shows the empty state only when a finished load returned
-// nothing, and spans the empty/loading cell across every column.
+// nothing, says when a load failed (with Try again) instead of "nothing found",
+// and spans the empty/loading cell across every column.
 export function PaginatedTable({
   pagination,
   columns,
@@ -29,12 +30,22 @@ export function PaginatedTable({
   tableClassName,
   headerClassName,
 }) {
-  const { rows, loading, page, totalPages, setPage } = pagination
+  const { rows, loading, page, totalPages, setPage, error, refresh } = pagination
   const items = transform ? rows.map(transform) : rows
   const colSpan = columns.length
+  const retry = (
+    <button type="button" onClick={refresh} className="ml-2 font-medium underline underline-offset-2">Try again</button>
+  )
 
   return (
     <div>
+      {/* A failed load keeps the last good rows (useServerPagination); say so,
+          rather than pass them off as current. */}
+      {error && items.length > 0 && (
+        <p role="alert" className="mb-2 rounded-md bg-amber-50 px-3 py-2 text-sm text-amber-800">
+          Could not refresh this list — showing what was last loaded. {retry}
+        </p>
+      )}
       <Table className={tableClassName}>
         <TableHeader className={headerClassName}>
           <TableRow>
@@ -51,6 +62,12 @@ export function PaginatedTable({
                 {/* Optional — a screen that already said "Loading queue…" keeps
                     saying it; callers that pass nothing get the bare spinner. */}
                 {loadingLabel && <span className="ml-2">{loadingLabel}</span>}
+              </TableCell>
+            </TableRow>
+          ) : items.length === 0 && error ? (
+            <TableRow>
+              <TableCell colSpan={colSpan} role="alert" className="text-center py-10 text-red-600">
+                Could not load this list: {error}. {retry}
               </TableCell>
             </TableRow>
           ) : items.length === 0 ? (

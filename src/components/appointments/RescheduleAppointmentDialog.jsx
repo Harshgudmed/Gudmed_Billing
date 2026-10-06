@@ -98,7 +98,7 @@ export default function RescheduleAppointmentDialog({
                   <SelectValue placeholder={
                     !date ? "Pick a date first"
                       : timetableLoading ? "Loading slots…"
-                      : availableTimeSlots.length === 0 ? "Doctor not available this day"
+                      : availableTimeSlots.length === 0 ? "No free time left with this doctor on this date"
                       : "Select time"
                   } />
                 </SelectTrigger>

@@ -84,12 +84,12 @@ export default function WardsBedsTab({
 
             {/* Bed Map */}
             <div>
-              <div className="flex items-center justify-between mb-3">
+              <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
                 <div>
                   <h2 className="text-base font-semibold">Bed Map</h2>
                   <p className="text-xs text-gray-500">Visual overview of all beds</p>
                 </div>
-                <div className="flex items-center gap-3 text-xs">
+                <div className="flex flex-wrap items-center gap-3 text-xs">
                   <Select value={buildingFilter} onValueChange={setBuildingFilter}>
                     <SelectTrigger className="w-44 h-8 text-xs"><SelectValue placeholder="All Buildings" /></SelectTrigger>
                     <SelectContent>

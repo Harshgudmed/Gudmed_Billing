@@ -17,6 +17,7 @@ import { round2 } from './money.js'
 /** Defaults when a hospital has never opened the Cancellation settings. */
 export const REFUND_DEFAULTS = {
   refundMode: 'approval',
+  refundSelfApproval: false,
   cancelChargeBeforeWorkPct: 0,
   cancelChargeAfterWorkPct: 100,
 }
@@ -34,6 +35,8 @@ export function refundSettings(organization) {
     // Anything but an explicit 'instant' means approval — the safer reading when
     // the setting is missing, misspelt, or was never saved.
     refundMode: stored.refundMode === 'instant' ? 'instant' : 'approval',
+    // Maker-checker unless the hospital explicitly allows it (Settings).
+    refundSelfApproval: stored.refundSelfApproval === true,
     // ?? not ||: a hospital that deliberately sets 0% means zero, and || would
     // silently replace that with the default.
     cancelChargeBeforeWorkPct: Number(stored.cancelChargeBeforeWorkPct ?? REFUND_DEFAULTS.cancelChargeBeforeWorkPct),
@@ -59,3 +62,13 @@ export function calcRefund({ amount, workStarted, settings }) {
 }
 
 export const isInstantRefund = (settings) => settings?.refundMode === 'instant'
+
+/**
+ * Why this person may not approve this refund, or null. Whoever raised a refund
+ * approves it only where the hospital allows that (refundSelfApproval) — an
+ * administrator included, since this is money leaving the hospital.
+ */
+export function selfApprovalProblem(settings, requestedById, actorId) {
+  if (settings?.refundSelfApproval || !requestedById || requestedById !== actorId) return null
+  return 'You raised this refund, so someone else must approve it (Settings → Cancellation & Refund can allow this)'
+}

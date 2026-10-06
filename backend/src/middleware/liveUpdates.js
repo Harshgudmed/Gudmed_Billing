@@ -20,7 +20,10 @@ export function liveUpdates(req, res, next) {
   if (method === 'GET' || method === 'HEAD' || method === 'OPTIONS') return next()
 
   res.on('finish', () => {
-    if (res.statusCode >= 400) return
+    // `res.locals.noLiveUpdate`: a write that changes only the caller's own
+    // view (marking their notifications read) — telling every screen in the
+    // hospital to re-read would cost one request per person for nothing.
+    if (res.statusCode >= 400 || res.locals.noLiveUpdate) return
     // '/api/laboratory/…' → 'laboratory'. baseUrl is the mount path, which is
     // exactly the module, so a controller never has to name itself.
     const topic = String(req.baseUrl || req.originalUrl || '')

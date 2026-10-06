@@ -100,9 +100,12 @@ export function useDateFilter(initialMode = "all", { showClear = true } = {}) {
 
   const range = dateRangeFor({ mode, specificDate, customStart, customEnd });
 
-  const active = mode !== "all";
+  // "Something to clear" means changed from the screen's own default, and Clear
+  // goes back to that default: the queue opens on Today, and its Clear used to
+  // jump to All Dates — while showing a Clear that was never needed.
+  const active = mode !== initialMode;
   const reset = () => {
-    setMode("all");
+    setMode(initialMode);
     setSpecificDate("");
     setCustomStart("");
     setCustomEnd("");
@@ -145,5 +148,6 @@ export function useDateFilter(initialMode = "all", { showClear = true } = {}) {
     </div>
   );
 
-  return { mode, matches, active, reset, control, key, range };
+  // setMode: for a "show all dates" escape (the queue's empty state).
+  return { mode, setMode, matches, active, reset, control, key, range };
 }

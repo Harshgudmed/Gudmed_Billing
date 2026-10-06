@@ -40,6 +40,7 @@ import { getFullName, calcAge } from "@/lib/patient";
 // window that shares this app's origin — any HTML in them would run there, so
 // every text field goes through the shared escaper.
 import { escapeHtml } from '@/lib/printTemplate'
+import { formatMoney } from '@/lib/format'
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -428,6 +429,7 @@ export default function RadiologyModule() {
                 quantity: 1, unitPrice: exam.price, tax: 0, total: exam.price,
               }],
               notes: `[Radiology] Radiology Order ${res.data.orderNumber || ''}`.trim(),
+              type: 'radiology', // Billing's Type column / filter: a radiology bill, not an untyped one
               amountPaid: orderForm.amountPaid,
               paymentMethod: orderForm.paymentMethod,
             })
@@ -772,7 +774,7 @@ ${order.clinicalIndication ? `<div class="section"><div class="section-header">C
   return (
     <div className="space-y-4">
       {/* Header */}
-      <div className="flex items-center justify-between mb-4">
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 mb-4">
         <div className="flex items-center gap-2">
           <Scan className="h-6 w-6 text-blue-600" />
           <div>
@@ -780,7 +782,7 @@ ${order.clinicalIndication ? `<div class="section"><div class="section-header">C
             <p className="text-sm text-gray-500">Imaging orders, exam catalog and reports</p>
           </div>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           {/* No Refresh button: this screen is live (useLiveData below). */}
           <Button onClick={() => setShowOrderDialog(true)}>
             <Plus className="h-4 w-4 mr-1" />New Order
@@ -820,7 +822,8 @@ ${order.clinicalIndication ? `<div class="section"><div class="section-header">C
 
       {/* Tabs - full width underline style */}
       <div className="border-b mb-4">
-        <div className="flex">
+        {/* scrolls inside itself at phone width, never the page */}
+        <div className="flex overflow-x-auto">
           {[
             { value: 'dashboard', label: 'Dashboard' },
             { value: 'worklist', label: 'Worklist' },
@@ -829,7 +832,7 @@ ${order.clinicalIndication ? `<div class="section"><div class="section-header">C
             { value: 'reports', label: 'Reports' },
           ].map(tab => (
             <button key={tab.value} onClick={() => setActiveTab(tab.value)}
-              className={`px-6 py-3 text-sm font-medium border-b-2 transition-colors ${activeTab === tab.value ? 'border-gray-900 text-gray-900' : 'border-transparent text-gray-500 hover:text-gray-700'}`}>
+              className={`px-6 py-3 text-sm font-medium border-b-2 transition-colors whitespace-nowrap ${activeTab === tab.value ? 'border-gray-900 text-gray-900' : 'border-transparent text-gray-500 hover:text-gray-700'}`}>
               {tab.label}
             </button>
           ))}
@@ -980,7 +983,7 @@ ${order.clinicalIndication ? `<div class="section"><div class="section-header">C
                     <TableCell className="font-medium">{e.examName}</TableCell>
                     <TableCell>{categoryBadge(e.examCategory)}</TableCell>
                     <TableCell>{e.bodyPart || '—'}</TableCell>
-                    <TableCell>₹{(e.price || 0).toLocaleString()}</TableCell>
+                    <TableCell>{formatMoney(e.price)}</TableCell>
                     <TableCell>{e.estimatedDuration || '—'} min</TableCell>
                     <TableCell>
                       {e.contrastRequired
@@ -1304,7 +1307,7 @@ ${order.clinicalIndication ? `<div class="section"><div class="section-header">C
               <Label>Exam *</Label>
               <Select value={orderForm.examId} onValueChange={v => setOrderForm(p => ({ ...p, examId: v }))}>
                 <SelectTrigger><SelectValue placeholder="Select exam" /></SelectTrigger>
-                <SelectContent>{exams.map(e => <SelectItem key={e.id} value={e.id}>{e.examName} — ₹{e.price || 0}</SelectItem>)}</SelectContent>
+                <SelectContent>{exams.map(e => <SelectItem key={e.id} value={e.id}>{e.examName} — {formatMoney(e.price)}</SelectItem>)}</SelectContent>
               </Select>
             </div>
             <div>
@@ -1386,6 +1389,11 @@ ${order.clinicalIndication ? `<div class="section"><div class="section-header">C
       <CancelActionDialog
         {...cancelAction.dialogProps}
         module="radiology"
+        // Cancelling here only closes the scan: money taken is given back by
+        // Billing's "Cancel & refund" (the server refuses a paid scan and says
+        // so). Offering a refund here announced one that was never made.
+        settlesMoney={false}
+        allowReschedule
         amount={cancelAction.record?.exam?.price ?? 0}
         title={cancelAction.record?.orderNumber}
         subtitle={cancelAction.record?.patient ? getFullName(cancelAction.record.patient) : ''}

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useLocation } from 'react-router-dom';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -20,6 +20,7 @@ import RegisterPatientForm from '@/components/common/RegisterPatientForm';
 import { FilterBar, FilterSelect } from '@/components/common/FilterBar';
 import { useLiveData } from '@/lib/useLiveData';
 import { useDateFilter } from '@/components/common/DateFilter';
+import { useAuth } from '@/lib/auth';
 
 const PATIENT_STATUS_OPTIONS = [
   { value: 'all', label: 'All Patients' },
@@ -28,7 +29,8 @@ const PATIENT_STATUS_OPTIONS = [
 ];
 
 // Extracted Patients Components & Hooks
-import { getFullName, patientSchema } from './utils/patientUtils';
+import { getFullName } from './utils/patientUtils';
+import { patientEditSchema, issuesToFieldErrors } from '@/lib/schemas/patientFormSchema';
 import { printOpdPrescription } from './utils/printPrescription';
 import { usePatients } from './hooks/usePatients';
 import { usePatientRecords } from './hooks/usePatientRecords';
@@ -46,6 +48,10 @@ const STAT_STYLES = {
 };
 
 export default function PatientsModule() {
+  // The patient register is the front desk's: only reception and the
+  // administrator remove a patient from the list (patientController PATIENT_REGISTRARS).
+  const { user } = useAuth();
+  const canRemove = !user || ['admin', 'super_admin', 'receptionist'].includes(user.role);
   const [orgInfo, setOrgInfo] = useState({ name: 'Hospital', address: '', city: '', phone: '', email: '' });
 
   useEffect(() => {
@@ -98,7 +104,10 @@ export default function PatientsModule() {
     records, recordsLoading, fetchRecords, cancelAppointment, cancellingId
   } = usePatientRecords(selectedPatient, showViewDialog);
 
-  // Form setup for editing
+  // Form setup for editing. The rules are registration's (patientEditSchema),
+  // judged against the values the record opened with — kept in a ref so the
+  // resolver, built once by useForm, reads the patient being edited now.
+  const editStoredRef = useRef({});
   const form = useForm({
     // Validate when the user LEAVES a field, not only when they press Save.
     // react-hook-form defaults to mode: 'onSubmit', so every one of these forms was
@@ -107,7 +116,7 @@ export default function PatientsModule() {
     // moment. CLAUDE.md's validation section asks for the message under the field
     // the moment focus leaves it; this is the one line that turns that on.
     mode: 'onBlur',
-    resolver: zodResolver(patientSchema),
+    resolver: (values, context, options) => zodResolver(patientEditSchema(editStoredRef.current))(values, context, options),
     defaultValues: {
       firstName: '', middleName: '', lastName: '', dateOfBirth: '',
       gender: 'male', phonePrimary: '', phoneSecondary: '', email: '',
@@ -129,7 +138,7 @@ export default function PatientsModule() {
 
   const openEdit = (patient) => {
     setSelectedPatient(patient);
-    form.reset({
+    const stored = {
       firstName: patient.firstName || '', middleName: patient.middleName || '', lastName: patient.lastName || '',
       dateOfBirth: patient.dateOfBirth ? format(new Date(patient.dateOfBirth), 'yyyy-MM-dd') : '',
       gender: patient.gender || 'male', phonePrimary: patient.phonePrimary || '', phoneSecondary: patient.phoneSecondary || '',
@@ -139,7 +148,9 @@ export default function PatientsModule() {
       emergencyContactName: patient.emergencyContactName || '', emergencyContactPhone: patient.emergencyContactPhone || '',
       emergencyContactRelationship: patient.emergencyContactRelationship || '', bloodGroup: patient.bloodGroup || '',
       hasInsurance: patient.hasInsurance || false, insuranceProvider: patient.insuranceProvider || '', insuranceId: patient.insuranceId || '',
-    });
+    };
+    editStoredRef.current = stored;
+    form.reset(stored);
     setShowEditDialog(true);
   };
 
@@ -152,7 +163,9 @@ export default function PatientsModule() {
       setShowEditDialog(false);
       fetchPatients();
     } catch (err) {
-      toast.error(err.message || 'Failed to update patient');
+      // The server's refusal names the field: show it under that field as well.
+      Object.entries(issuesToFieldErrors(err.details)).forEach(([field, message]) => form.setError(field, { message }));
+      toast.error(err.message || 'Could not save the patient. Check the details and try again.');
     } finally {
       setIsSubmitting(false);
     }
@@ -293,8 +306,8 @@ export default function PatientsModule() {
               patients={patients}
               openPatient={openPatient}
               handlePrintCard={handlePrintCard}
-              handleDeletePatient={handleDeletePatient}
-              handleStatusChange={handleStatusChange}
+              handleDeletePatient={canRemove ? handleDeletePatient : undefined}
+              handleStatusChange={canRemove ? handleStatusChange : undefined}
             />
           )}
         </CardContent>

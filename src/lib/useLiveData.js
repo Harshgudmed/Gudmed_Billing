@@ -44,8 +44,14 @@ export function useLiveData(topics, onChange, { fallbackMs = 60000, quietMs = 40
       timer = setTimeout(() => { if (alive) handler.current?.() }, quietMs)
     }
     const onData = ({ topic } = {}) => { if (topic && mine.has(topic)) reload() }
-    const join = () => { if (joined) socket.emit('display:join', { orgId: joined }) }
+    // The staff room is joined from the login token (the server reads the
+    // hospital from it); the org room is for the demo, where there is no login.
+    const join = () => {
+      socket.emit('staff:join', { token: localStorage.getItem('token') || undefined })
+      if (joined) socket.emit('display:join', { orgId: joined })
+    }
 
+    if (socket.connected) join()
     getDisplayOrgId().then((orgId) => { if (!alive) return; joined = orgId; join() })
     socket.on('connect', join)          // re-join after a reconnect
     socket.on('data:changed', onData)

@@ -1,5 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { getOrgRaw, clearOrgCache } from '@/lib/orgSettings'
+import { useAuth } from '@/lib/auth'
+import { roleCanOpen } from '@/lib/roleConfig'
 
 /**
  * Which modules this hospital has switched on, for any screen that offers a
@@ -25,6 +27,7 @@ import { getOrgRaw, clearOrgCache } from '@/lib/orgSettings'
  * would be handed the map from before the change.
  */
 export function useEnabledModules() {
+  const { user } = useAuth()
   // null while the first read is in flight — distinguishable from "loaded, and
   // the hospital has disabled nothing", which is an empty object.
   const [modules, setModules] = useState(null)
@@ -59,5 +62,11 @@ export function useEnabledModules() {
     [modules],
   )
 
-  return { modules, isEnabled, loading: modules === null }
+  // Opt-in for screens that link to whole modules: may the signed-in role open
+  // this MODULES key ("laboratory", "purchase")? The sidebar's own rule
+  // (roleConfig roleCanOpen); a module that must be switched on stays hidden
+  // until the hospital's switches have loaded.
+  const canOpen = useCallback((key) => roleCanOpen(user?.role, key, modules || {}), [user, modules])
+
+  return { modules, isEnabled, canOpen, loading: modules === null }
 }

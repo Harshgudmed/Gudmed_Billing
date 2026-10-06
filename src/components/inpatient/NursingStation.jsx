@@ -260,11 +260,11 @@ export default function NursingStation({ admitted = [] }) {
         {loading && <Loader2 className="h-4 w-4 animate-spin text-gray-400" />}
       </div>
 
-      {/* Sub-tabs */}
-      <div className="flex border-b">
+      {/* Sub-tabs — scroll inside themselves at phone width, never the page */}
+      <div className="flex border-b overflow-x-auto">
         {[{ id: 'vitals', label: 'Vitals & NEWS', Icon: Activity }, { id: 'notes', label: 'Clinical Notes', Icon: ClipboardList }, { id: 'mar', label: 'Medications (eMAR)', Icon: Pill }, { id: 'chart', label: 'Treatment Chart', Icon: CheckCircle2 }].map(({ id, label, Icon }) => (
           <button key={id} onClick={() => setTab(id)}
-            className={`flex items-center gap-1.5 px-4 py-2 text-sm font-medium border-b-2 -mb-px ${tab === id ? 'border-blue-600 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700'}`}>
+            className={`flex shrink-0 items-center gap-1.5 px-4 py-2 text-sm font-medium whitespace-nowrap border-b-2 -mb-px ${tab === id ? 'border-blue-600 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700'}`}>
             <Icon className="h-4 w-4" />{label}
           </button>
         ))}

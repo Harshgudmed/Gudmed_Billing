@@ -35,10 +35,24 @@ export const ORG_SETTING_FIELDS = [
   // A hospital that wants one flat rate simply puts the same number in both.
   { key: 'refundMode',                type: 'text',   default: 'approval',
     label: 'Refund mode', options: ['approval', 'instant'] },
+  // With approval first: may the person who raised a refund also approve it?
+  // Off by default (maker-checker); a hospital with a single administrator
+  // turns it on. Read by the server (lib/refundPolicy.js), never sent by a request.
+  { key: 'refundSelfApproval',        type: 'bool',   default: false,
+    label: 'The person who raised a refund may also approve it' },
   { key: 'cancelChargeBeforeWorkPct', type: 'number', default: 0,
     label: 'Cancellation charge % — before work started' },
   { key: 'cancelChargeAfterWorkPct',  type: 'number', default: 100,
     label: 'Cancellation charge % — after work started' },
+
+  // Purchase: how this hospital pays vendors, returns goods and asks for rates.
+  // Read by the server (backend/src/lib/purchaseSettings.js), same keys.
+  { key: 'purchasePaymentMode', type: 'text', default: 'finance',
+    label: 'Who pays vendors', options: ['finance', 'admin', 'officer_finance'] },
+  { key: 'purchaseReturnMode',  type: 'text', default: 'approval',
+    label: 'Returns to vendors', options: ['approval', 'direct'] },
+  { key: 'rfqEmailVendors',     type: 'bool', default: false,
+    label: 'E-mail RFQs to vendors' },
 
   // Spoken announcements on the waiting-hall display boards.
   //

@@ -3,6 +3,7 @@ import { Input } from '@/components/ui/input'
 import { Search, Loader2 } from 'lucide-react'
 import client from '@/api/client'
 import { useDebounce } from '@/lib/useDebounce'
+import { formatMoney } from '@/lib/format'
 
 /**
  * Debounced server-side drug picker.
@@ -78,7 +79,7 @@ export default function PosDrugCombo({ onSelect, selectedName = '', inStockOnly 
                  }}
                >
                  <div className="font-medium">{d.drugName}</div>
-                 <div className="text-xs text-gray-500">Stock: {d.quantityInStock} | Rate: ₹{d.sellingPrice}</div>
+                 <div className="text-xs text-gray-500">Stock: {d.quantityInStock} | Rate: {formatMoney(d.sellingPrice)}</div>
                </div>
              ))
            )}

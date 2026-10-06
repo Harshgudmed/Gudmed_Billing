@@ -7,8 +7,13 @@ import {
   notifyPharmacyTeam,
 } from '../controllers/notificationController.js'
 import { handleIncoming } from '../controllers/whatsappBotController.js'
+import { inbox, markRead } from '../controllers/inboxController.js'
 
 const router = Router()
+
+// The signed-in person's own in-app notifications (the bell in the header).
+router.get('/inbox',               inbox)
+router.patch('/inbox',             markRead)
 
 router.post('/consultation',       sendConsultationNotification)
 router.post('/prescription',       sendPrescriptionNotification)

@@ -13,6 +13,7 @@ import client from '@/api/client'
 import { useAuth } from '@/lib/auth'
 import { getFullName } from "@/lib/patient";
 import { useLiveData } from '@/lib/useLiveData'
+import { formatMoney } from '@/lib/format'
 
 const PRIORITIES = ['ROUTINE', 'URGENT', 'STAT']
 const DRUG_FORMS = [
@@ -142,7 +143,7 @@ export default function ClinicalOrdersTab({ admitted = [], admissionId: controll
     try {
       const res = await client.post('/inpatient', { resource: `order-${action}`, id: order.id, reason })
       if (res.success) {
-        if (action === 'complete' && res.charge) toast.success(`Completed · ₹${res.charge.lineTotal} billed`)
+        if (action === 'complete' && res.charge) toast.success(`Completed · ${formatMoney(res.charge.lineTotal)} billed`)
         else toast.success(`Order ${ACTION_LABEL[action].toLowerCase()}d`)
         load(selectedId); if (detail?.order?.id === order.id) openDetail(order.id)
       } else toast.error(res.error || 'Failed')
@@ -366,7 +367,7 @@ function NewOrderView({ admissionId, patientLabel, onClose, onPlaced }) {
                           {r.category ? <span className="ml-2">· {r.category}</span> : null}
                         </span>
                       </span>
-                      {r.basePrice != null && <span className="text-sm font-semibold text-gray-700">₹{r.basePrice}</span>}
+                      {r.basePrice != null && <span className="text-sm font-semibold text-gray-700">{formatMoney(r.basePrice)}</span>}
                       <ChevronRight className="h-4 w-4 text-gray-300" />
                     </button>
                   )
@@ -398,7 +399,7 @@ function NewOrderView({ admissionId, patientLabel, onClose, onPlaced }) {
                         <div className="text-xs text-gray-400">
                           <Badge className={TYPE_STYLE[picked.orderType]} variant="secondary">{TYPE_LABEL[picked.orderType] || picked.orderType}</Badge>
                           {picked.code ? <span className="ml-2">{picked.code}</span> : null}
-                          {picked.basePrice != null ? <span className="ml-2">· ₹{picked.basePrice}</span> : null}
+                          {picked.basePrice != null ? <span className="ml-2">· {formatMoney(picked.basePrice)}</span> : null}
                         </div>
                       </div>
                       <Button variant="outline" size="sm" onClick={() => setPicked(null)}>Change</Button>
@@ -491,9 +492,9 @@ function NewOrderView({ admissionId, patientLabel, onClose, onPlaced }) {
                           <span className="ml-2 text-gray-500">
                             est.{' '}
                             {occurrenceCount > 1 && (
-                              <span className="text-gray-400">{occurrenceCount} × ₹{Number(picked.basePrice).toLocaleString('en-IN')} = </span>
+                              <span className="text-gray-400">{occurrenceCount} × {formatMoney(picked.basePrice)} = </span>
                             )}
-                            <span className="font-semibold text-gray-800">₹{estimate.toLocaleString('en-IN')}</span>
+                            <span className="font-semibold text-gray-800">{formatMoney(estimate)}</span>
                           </span>
                         )}
                       </div>

@@ -4,39 +4,47 @@ import { getOrgId, getActor } from "../lib/reqContext.js";
 import { todayRange, dayRange } from '../lib/dates.js'
 import { nextSeriesNumber, invoiceProbe } from "../lib/counters.js";
 import { recalcInvoice, refundableAmount } from "../lib/invoiceLedger.js";
-import { refundSettings, isInstantRefund } from "../lib/refundPolicy.js";
-import { fulfillInvoiceItems, invoiceTag } from "../lib/invoiceFulfillment.js";
+import { refundSettings, isInstantRefund, selfApprovalProblem } from "../lib/refundPolicy.js";
+import { fulfillInvoiceItems, invoiceTag, callOffBilledRecord } from "../lib/invoiceFulfillment.js";
 import { recordStockChange } from "../pharmacy/stockService.js";
 import { round2 } from "../lib/money.js";
+import { todayRevenue } from "../lib/revenue.js";
 import { priceInvoiceItems } from "../lib/catalogPrice.js";
 import { z } from 'zod'
 import { PATIENT_NAME_SELECT } from '../lib/patientName.js'
+import { refuseBilling, billingAllows, CREATE_NEEDS, UPDATE_NEEDS, BILLING_REFUSED } from '../lib/billingAccess.js'
 
 // Validation schemas
+//
+// Every money and quantity field is .finite(). z.number() on its own admits
+// Infinity, and Infinity arrives over plain HTTP: `1e309` is valid JSON and
+// JSON.parse reads it as Infinity. It then reached Postgres, which refused it,
+// and the caller got a 500 carrying the database's own error text — proven
+// with a real request. .finite() turns that into an ordinary 400.
 const serviceSchema = z.object({
   serviceName: z.string().min(1),
   serviceCode: z.string().min(1),
   serviceCategory: z.string().min(1),
   department: z.string().min(1),
-  unitPrice: z.number().nonnegative(),
+  unitPrice: z.number().finite().nonnegative(),
   isTaxable: z.boolean(),
-  taxPercentage: z.number().nonnegative().default(0),
+  taxPercentage: z.number().finite().nonnegative().default(0),
   isCoveredByInsurance: z.boolean(),
-  insuranceCopayPercentage: z.number().nonnegative().default(0),
+  insuranceCopayPercentage: z.number().finite().nonnegative().default(0),
   description: z.string().optional(),
 })
 
 const invoiceItemSchema = z.object({
   serviceId: z.string().optional(),
   serviceName: z.string().min(1),
-  quantity: z.number().positive(),
-  unitPrice: z.number().nonnegative(),
-  total: z.number().nonnegative(),
-  tax: z.number().nonnegative().default(0),
+  quantity: z.number().finite().positive(),
+  unitPrice: z.number().finite().nonnegative(),
+  total: z.number().finite().nonnegative(),
+  tax: z.number().finite().nonnegative().default(0),
   // Optional pass-through so a Pharmacy sale's GST invoice details (GST%,
   // batch, expiry) survive into the Invoice too — items is stored as opaque
   // JSON, so these just ride along for the receipt to read back out later.
-  gstRate: z.number().nonnegative().optional(),
+  gstRate: z.number().finite().nonnegative().optional(),
   batchNumber: z.string().optional(),
   expiryDate: z.string().nullish(),
   // Which module this line was billed from, and that module's record id. Set by
@@ -51,21 +59,23 @@ const invoiceItemSchema = z.object({
   // this they were untyped and the list could only show them as "—".
   // 'consultation' (not 'opd') because that is what appointmentController's
   // auto-voucher has always written; the two must stay one vocabulary.
-  type: z.enum(['consultation', 'procedure', 'vaccine', 'pharmacy', 'lab', 'radiology']).optional(),
+  // 'daycare' / 'ambulance': the bill a Day Care case or ambulance trip raises
+  // from its own screen (src/lib/billing.js createInvoiceWithPayment).
+  type: z.enum(['consultation', 'procedure', 'vaccine', 'pharmacy', 'lab', 'radiology', 'daycare', 'ambulance']).optional(),
 })
 
 const invoiceSchema = z.object({
   patientId: z.string().min(1),
   consultationId: z.string().optional(),
   items: z.array(invoiceItemSchema).min(1),
-  discountAmount: z.number().nonnegative().default(0),
+  discountAmount: z.number().finite().nonnegative().default(0),
   // A percentage is a share of something, so it cannot pass 100. Without the
   // upper bound a typed "500" in the GST box was accepted and stored: the bill
   // charged five times the treatment in tax, and a 500% discount would have
   // handed money back. The amount is checked separately below (it may not
   // exceed the subtotal), but the two boxes on screen are percentages.
-  discountPercentage: z.number().nonnegative().max(100, 'Discount cannot be more than 100%').default(0),
-  taxPercentage: z.number().nonnegative().max(100, 'GST cannot be more than 100%').default(0),
+  discountPercentage: z.number().finite().nonnegative().max(100, 'Discount cannot be more than 100%').default(0),
+  taxPercentage: z.number().finite().nonnegative().max(100, 'GST cannot be more than 100%').default(0),
   notes: z.string().optional(),
   idempotencyKey: z.string().min(1).optional(),
 })
@@ -73,7 +83,7 @@ const invoiceSchema = z.object({
 const paymentSchema = z.object({
   invoiceId: z.string().min(1),
   patientId: z.string().optional(),
-  amount: z.number().positive(),
+  amount: z.number().finite().positive(),
   paymentMethod: z.string().min(1),
   paymentReference: z.string().optional(),
   mobileMoneyProvider: z.string().optional(),
@@ -89,12 +99,19 @@ const paymentSchema = z.object({
 // actual money refund. amountPaid is DECREMENTED atomically, mirroring payment.
 const refundSchema = z.object({
   invoiceId: z.string().min(1),
-  amount: z.number().positive(),
+  amount: z.number().finite().positive(),
   refundReason: z.string().min(1),
   paymentMethod: z.string().min(1).default('cash'), // cash | bank_transfer | credit_note | upi ...
   originalPaymentId: z.string().optional(),
   notes: z.string().optional(),
+  // "Cancel & refund" on a paid bill: the bill is cancelled when this refund
+  // is applied (at once in instant mode, else when Finance approves it).
+  cancelInvoice: z.boolean().optional(),
 })
+
+// A refund raised to cancel its bill carries this tag in its notes, the way
+// prescriptions carry [INV:…] (lib/invoiceFulfillment.js).
+const CANCEL_TAG = '[CANCEL]'
 
 // Add-on test after billing: append one line to an existing invoice and
 // recompute the financial summary (spec: "add a new invoice item").
@@ -125,11 +142,11 @@ const serviceUpdateSchema = z.object({
     serviceCode: z.string().min(1).optional(),
     serviceCategory: z.string().min(1).optional(),
     department: z.string().min(1).optional(),
-    unitPrice: z.number().nonnegative().optional(),
+    unitPrice: z.number().finite().nonnegative().optional(),
     isTaxable: z.boolean().optional(),
-    taxPercentage: z.number().nonnegative().optional(),
+    taxPercentage: z.number().finite().nonnegative().optional(),
     isCoveredByInsurance: z.boolean().optional(),
-    insuranceCopayPercentage: z.number().nonnegative().optional(),
+    insuranceCopayPercentage: z.number().finite().nonnegative().optional(),
     description: z.string().optional(),
     isActive: z.boolean().optional(),
   }),
@@ -159,6 +176,8 @@ const INVOICE_TYPE_MATCH = {
   radiology: ['"sourceType":"radiology"', '"type":"radiology"'],
   procedure: ['"type":"procedure"'],
   vaccine: ['"type":"vaccine"'],
+  daycare: ['"type":"daycare"'],
+  ambulance: ['"type":"ambulance"'],
 }
 
 // Atomic, gap-free, per-org invoice number. Format: INV-2026-27-000123.
@@ -195,6 +214,10 @@ function nextRefundNumber(tx, organizationId) {
  */
 async function reverseInvoiceFulfillment(tx, { organizationId, invoice, actorId }) {
   const reversed = { saleId: null, stockReturned: [], labOrderIds: [], radiologyOrderIds: [], prescriptionIds: [] }
+
+  // A day-care case or ambulance trip billed from its own screen, not yet
+  // started, is called off with its bill (lib/invoiceFulfillment.js).
+  Object.assign(reversed, await callOffBilledRecord(tx, { organizationId, baseInvoiceNumber: invoice.invoiceNumber.replace(/-R\d+$/, '') }))
 
   const sale = await tx.pharmacySale.findFirst({
     where: { organizationId, receiptNumber: invoice.invoiceNumber },
@@ -236,8 +259,14 @@ async function reverseInvoiceFulfillment(tx, { organizationId, invoice, actorId 
   // worklist would lose a real result; that case needs a human (re-bill or reject).
   const pendingOrderWhere = { organizationId, status: 'pending' }
 
+  // An order booked on the Lab or Radiology screen is not named after its bill;
+  // the bill's notes name it ("Lab Order LO-…", src/lib/billing.js) — so it is
+  // found that way too, or cancelling its bill left the test on the worklist.
+  const notedLab = (String(invoice.notes || '').match(/Lab Order (\S+)/) || [])[1]
+  const notedRad = (String(invoice.notes || '').match(/Radiology Order (\S+)/) || [])[1]
+
   const labOrders = await tx.labOrder.findMany({
-    where: { ...pendingOrderWhere, orderNumber: `LAB-${invoice.invoiceNumber}` },
+    where: { ...pendingOrderWhere, orderNumber: { in: [`LAB-${invoice.invoiceNumber}`, ...(notedLab ? [notedLab] : [])] } },
     select: { id: true },
   })
   if (labOrders.length) {
@@ -249,7 +278,7 @@ async function reverseInvoiceFulfillment(tx, { organizationId, invoice, actorId 
   }
 
   const radiologyOrders = await tx.radiologyOrder.findMany({
-    where: { ...pendingOrderWhere, orderNumber: { startsWith: `RAD-${invoice.invoiceNumber}-` } },
+    where: { ...pendingOrderWhere, OR: [{ orderNumber: { startsWith: `RAD-${invoice.invoiceNumber}-` } }, ...(notedRad ? [{ orderNumber: notedRad }] : [])] },
     select: { id: true },
   })
   if (radiologyOrders.length) {
@@ -329,7 +358,9 @@ const claimed = await tx.invoice.updateMany({
   },
 })
 if (claimed.count !== 1) {
-  const err = new Error('This invoice has already been revised by an approved refund. Re-raise this request against the revised invoice.')
+  // Another refund on this bill was approved a moment ago. Its revision now
+  // holds this request too (pending refunds move across), so approving again works.
+  const err = new Error('This bill was just revised by another approved refund — this request has moved to the revised bill. Approve it again.')
   err.status = 409; throw err
 }
 
@@ -382,7 +413,11 @@ const revisedInvoice = await tx.invoice.create({
     parentInvoiceId: oldInvoice.id,
     invoiceNumber: revisedNumber,
     items: JSON.stringify(revisedItems),
-    subtotal: newTotalAmount,
+    // The refund comes off the subtotal, as its negative line does: discount
+    // and tax are carried unchanged, so subtotal − discount + tax is still the
+    // total. (It used to store the new TOTAL as the subtotal — ₹467 against
+    // parts adding to ₹434 on a bill with a discount.)
+    subtotal: round2(oldInvoice.subtotal - refundedAmount),
     taxAmount: oldInvoice.taxAmount,
     taxPercentage: oldInvoice.taxPercentage,
     discountAmount: oldInvoice.discountAmount,
@@ -411,17 +446,19 @@ const revisedInvoice = await tx.invoice.create({
 // refunded became "₹4,000 paid, ₹5,000 due" and the counter re-billed money
 // it had already taken.
 //
-// Exactly the rows invoiceLedger() reads move across: every collection, plus
-// refunds that are APPROVED (recalc computes paid − approvedRefunds, so the
-// approved refund must sit alongside the collections it reduces). A refund
-// still PENDING_APPROVAL — or REJECTED — stays with the superseded document:
-// it belongs to a bill that no longer exists and must be re-raised against
-// the revision, which is exactly what the 409 above tells the approver.
+// Every row invoiceLedger() reads moves across: every collection, refunds
+// that are APPROVED (recalc computes paid − approvedRefunds, so the approved
+// refund must sit alongside the collections it reduces), and refunds still
+// PENDING_APPROVAL. A pending refund moves no money — it only reserves its
+// amount, which it goes on reserving on the revision. Left on the archived
+// original it could never be approved (409 every time) and sat in Finance's
+// queue forever; on the revision it is simply approved next, as -R2.
+// A REJECTED refund stays with the superseded document as history.
 await tx.payment.updateMany({
   where: {
     invoiceId: oldInvoice.id,
     organizationId: organizationId,
-    OR: [{ isRefund: false }, { isRefund: true, status: 'APPROVED' }],
+    OR: [{ isRefund: false }, { isRefund: true, status: { in: ['APPROVED', 'PENDING_APPROVAL'] } }],
   },
   data: { invoiceId: revisedInvoice.id },
 })
@@ -454,6 +491,56 @@ return { payment: approvedPayment, revisedInvoice: revisedWithTotals }
 }
 
 
+/**
+ * The rest of "Cancel & refund" on a paid bill, once its refund is applied:
+ * the work the bill raised and nobody has started is called off (pending lab
+ * and radiology orders, an undispensed prescription — reverseInvoiceFulfillment,
+ * which keys on the bill's first number), and a revision left with nothing to
+ * pay is marked cancelled. A revision still holding a cancellation charge stays
+ * as the bill for that charge. Cancelling a paid bill used to be refused by the
+ * server after the refund request had already been made, stranding the refund.
+ *
+ * On a bill paid only in part, the part never paid is not owed once the bill
+ * is cancelled. The revision is "total − refund", so it went on asking for that
+ * rest: a ₹1000 day-care bill with ₹500 paid, cancelled with the ₹500 refunded,
+ * left a ₹500 revision due on a cancelled case. That rest comes off with its own
+ * line, so what stays is only the charge kept (what was paid and not refunded).
+ */
+async function settleCancellation(tx, { organizationId, original, revised, reason, actorId }) {
+  const base = original.invoiceNumber.replace(/-R\d+$/, '')
+  const reversed = await reverseInvoiceFulfillment(tx, { organizationId, invoice: { ...original, invoiceNumber: base }, actorId })
+  if (revised && revised.balanceDue > 0.005) {
+    const unpaid = round2(revised.balanceDue)
+    let lines = []
+    try { lines = JSON.parse(revised.items || '[]') } catch { lines = [] }
+    lines.push({ serviceName: 'Cancelled — unpaid balance not charged', quantity: 1, unitPrice: -unpaid, total: -unpaid, tax: 0 })
+    await tx.invoice.update({
+      where: { id: revised.id },
+      data: { items: JSON.stringify(lines), subtotal: round2(revised.subtotal - unpaid), totalAmount: round2(revised.totalAmount - unpaid) },
+    })
+    await recalcInvoice(tx, revised.id)
+    revised = await tx.invoice.findUnique({ where: { id: revised.id } })
+  }
+  let cancelled = null
+  if (revised && revised.totalAmount <= 0.005) {
+    cancelled = await tx.invoice.update({
+      where: { id: revised.id },
+      data: { status: 'cancelled', cancelledAt: new Date(), cancellationReason: reason || 'Cancelled with a full refund' },
+    })
+  }
+  await tx.auditLog.create({
+    data: {
+      organizationId,
+      action: 'INVOICE_CANCELLED',
+      entityType: 'Invoice',
+      entityId: original.id,
+      metadata: JSON.stringify({ reason: reason || null, revisedInvoiceId: revised?.id || null, chargeKept: revised?.totalAmount || 0, reversed }),
+      performedAt: new Date(),
+    },
+  })
+  return cancelled || revised
+}
+
 export async function getAll(req, res) {
   try {
     const ORGANIZATION_ID = getOrgId(req)
@@ -462,7 +549,11 @@ export async function getAll(req, res) {
     // Guard like `limit`: a bare parseInt let `offset=-5` (or `offset=abc` → NaN)
     // reach Prisma, which threw a 500. A bad page offset is a client mistake — it
     // must clamp to a valid skip, never crash and page the on-call.
-    const offset = Math.max(parseInt(req.query.offset) || 0, 0)
+    // `page` (from useServerPagination) is read as an offset of whole pages;
+    // callers that send `offset` themselves are unchanged.
+    const offset = req.query.page
+      ? (Math.max(parseInt(req.query.page) || 1, 1) - 1) * limit
+      : Math.max(parseInt(req.query.offset) || 0, 0)
 
     if (resource === 'services') {
       const where = {
@@ -592,9 +683,16 @@ export async function getAll(req, res) {
         db.payment.count({ where }),
       ])
 
+      // Who approved or rejected each refund, by name — the column showed raw user ids.
+      const approverIds = [...new Set(payments.map((p) => p.approvedByUserId).filter(Boolean))]
+      const approvers = approverIds.length
+        ? await db.user.findMany({ where: { id: { in: approverIds }, organizationId: ORGANIZATION_ID }, select: { id: true, fullName: true } })
+        : []
+      const nameOf = new Map(approvers.map((u) => [u.id, u.fullName]))
+
       return res.json({
         success: true,
-        data: payments,
+        data: payments.map((p) => ({ ...p, approvedByName: nameOf.get(p.approvedByUserId) || null })),
         meta: { total, limit, offset, hasMore: offset + limit < total },
       })
     }
@@ -610,14 +708,9 @@ export async function getAll(req, res) {
         outstandingBalanceResult,
         totalServicesCount,
       ] = await Promise.all([
-        db.payment.aggregate({
-          _sum: { amount: true },
-          where: {
-            organizationId: ORGANIZATION_ID,
-            paymentDate: { gte: todayStart, lte: todayEnd },
-            isRefund: false,
-          },
-        }),
+        // Every counter, net of refunds paid out — the same figure as the
+        // Dashboard's tile (lib/revenue.js).
+        todayRevenue(db, ORGANIZATION_ID, { gte: todayStart, lte: todayEnd }),
         db.invoice.count({
           where: {
             organizationId: ORGANIZATION_ID,
@@ -645,7 +738,7 @@ export async function getAll(req, res) {
       ])
 
       const stats = {
-        todayRevenue: todayRevenueResult._sum.amount || 0,
+        todayRevenue: todayRevenueResult.total,
         pendingInvoices: pendingInvoicesCount,
         collectedToday: collectedTodayResult._sum.amount || 0,
         outstandingBalance: outstandingBalanceResult._sum.balanceDue || 0,
@@ -671,6 +764,8 @@ export async function create(req, res) {
   try {
     const ORGANIZATION_ID = getOrgId(req)
     const { resource } = req.body
+    // Who may write what: lib/billingAccess.js.
+    if (refuseBilling(req, res, CREATE_NEEDS, resource)) return
 
     if (resource === 'service') {
       const parsed = serviceSchema.safeParse(req.body)
@@ -754,6 +849,7 @@ export async function create(req, res) {
         const items = await priceInvoiceItems(tx, {
           organizationId: ORGANIZATION_ID,
           items: parsed.data.items,
+          discountAmount,
         })
         const subtotal = round2(items.reduce((sum, item) => sum + item.total, 0))
         const taxAmount = round2(items.reduce((sum, item) => sum + (item.tax || 0), 0))
@@ -987,11 +1083,18 @@ export async function create(req, res) {
       if (!parsed.success) {
         return res.status(400).json({ success: false, error: parsed.error.flatten() })
       }
-      const { invoiceId, amount, refundReason, paymentMethod, originalPaymentId, notes } = parsed.data
+      const { invoiceId, amount, refundReason, paymentMethod, originalPaymentId, notes, cancelInvoice } = parsed.data
 
       // MONEY = ACID. A refund is only a REQUEST here — no cash moves and
       // amountPaid is untouched until a finance approver signs it off.
       const refund = await db.$transaction(async (tx) => {
+        // Refund requests on ONE invoice take turns. The cap below reads what is
+        // still refundable and then inserts; two requests arriving together both
+        // read "1000 refundable" and both inserted, reserving 1200 against 1000
+        // paid (proven, billingAudit.test.js). Locking the invoice row first makes
+        // the second request wait, then read the balance the first one left.
+        // Other invoices are not held up — the lock is on this row only.
+        await tx.$executeRaw`SELECT 1 FROM "Invoice" WHERE "id" = ${invoiceId} AND "organizationId" = ${ORGANIZATION_ID} FOR UPDATE`
         const invoice = await tx.invoice.findFirst({
           where: { id: invoiceId, organizationId: ORGANIZATION_ID },
           select: { id: true, status: true, isArchived: true },
@@ -1059,9 +1162,12 @@ export async function create(req, res) {
             isRefund: true,
             refundReason,
             originalPaymentId: originalPaymentId || null,
-            notes: notes || null,
+            notes: cancelInvoice ? `${CANCEL_TAG} ${notes || ''}`.trim() : (notes || null),
             paymentDate: new Date(),
             status: 'PENDING_APPROVAL', // awaits finance approval
+            // Who asked for it: the approver must be someone else unless the
+            // hospital allows self-approval (Settings). It was never recorded.
+            createdById: getActor(req).id || null,
           },
         })
 
@@ -1107,7 +1213,10 @@ export async function create(req, res) {
             payment: { ...created, invoice: fullInvoice },
             actor: getActor(req),
           })
-          return { ...applied.payment, revisedInvoice: applied.revisedInvoice, instant: true }
+          const revisedInvoice = cancelInvoice
+            ? await settleCancellation(tx, { organizationId: ORGANIZATION_ID, original: fullInvoice, revised: applied.revisedInvoice, reason: refundReason, actorId: getActor(req).id })
+            : applied.revisedInvoice
+          return { ...applied.payment, revisedInvoice, instant: true }
         }
 
         return created
@@ -1123,9 +1232,8 @@ export async function create(req, res) {
       // Approving a refund releases hospital money, so it is role-gated. When auth
       // is enforced there is always a role; when it is off (local demo) there is
       // none and the gate stays open, matching every other endpoint's demo posture.
-      const APPROVER_ROLES = ['finance_controller', 'super_admin', 'admin']
-      if (actor.role && !APPROVER_ROLES.includes(actor.role)) {
-        return res.status(403).json({ success: false, error: 'Unauthorized to approve refunds' })
+      if (actor.role && !billingAllows(req, 'approve')) {
+        return res.status(403).json({ success: false, error: BILLING_REFUSED.approve })
       }
       if (!actor.role && process.env.AUTH_ENFORCED === 'true') {
         return res.status(401).json({ success: false, error: 'Authentication required' })
@@ -1171,9 +1279,37 @@ export async function create(req, res) {
           return updatedPayment
         }
 
+        // Maker-checker: not the person who raised it, unless the hospital allows.
+        const org = await tx.organization.findUnique({ where: { id: ORGANIZATION_ID }, select: { settings: true } })
+        const selfProblem = selfApprovalProblem(refundSettings(org), payment.createdById, actor.id)
+        if (selfProblem) { const err = new Error(selfProblem); err.status = 403; throw err }
+
+        // A request still sitting on a bill that a refund has since revised
+        // (raised before pending refunds moved across with the revision) could
+        // never be approved: follow the chain to the live revision and approve
+        // it there, if the money it reserved is still there to refund.
+        if (payment.invoice?.isArchived) {
+          const base = payment.invoice.invoiceNumber.replace(/-R\d+$/, '')
+          const live = await tx.invoice.findFirst({
+            where: { organizationId: ORGANIZATION_ID, isArchived: false, OR: [{ invoiceNumber: base }, { invoiceNumber: { startsWith: `${base}-R` } }] },
+            orderBy: { createdAt: 'desc' },
+          })
+          if (!live) { const err = new Error('The bill this refund was raised on no longer has a live revision — reject the request'); err.status = 409; throw err }
+          await tx.payment.update({ where: { id: payment.id }, data: { invoiceId: live.id } })
+          if ((await refundableAmount(tx, live.id)) < -0.005) {
+            const err = new Error(`${live.invoiceNumber} no longer holds this much to refund — reject the request and raise it again`); err.status = 409; throw err
+          }
+          payment.invoiceId = live.id
+          payment.invoice = live
+        }
+
         // The approve path lives in applyApprovedRefund so the instant-refund
         // path runs exactly this code, not a second copy of it.
-        return applyApprovedRefund(tx, { organizationId: ORGANIZATION_ID, payment, actor })
+        const applied = await applyApprovedRefund(tx, { organizationId: ORGANIZATION_ID, payment, actor })
+        if (String(payment.notes || '').startsWith(CANCEL_TAG)) {
+          applied.revisedInvoice = await settleCancellation(tx, { organizationId: ORGANIZATION_ID, original: payment.invoice, revised: applied.revisedInvoice, reason: payment.refundReason, actorId: actor.id })
+        }
+        return applied
       })
 
       return res.status(200).json({ success: true, data: result })
@@ -1269,6 +1405,7 @@ export async function update(req, res) {
   try {
     const ORGANIZATION_ID = getOrgId(req)
     const { resource } = req.body
+    if (refuseBilling(req, res, UPDATE_NEEDS, resource)) return
 
     if (resource === 'invoice') {
       const parsed = invoiceUpdateSchema.safeParse(req.body)
@@ -1280,15 +1417,32 @@ export async function update(req, res) {
       const updateData = { ...updates }
       if (updateData.dueDate) updateData.dueDate = new Date(updateData.dueDate)
 
+      // A bill's status follows its money: paid / sent come from the payment
+      // ledger (recalcInvoice), never from a request. Set by hand, an unpaid
+      // bill read "paid" with ₹0 collected, and a cancelled one was reopened
+      // and paid while its scan stayed cancelled. Only cancelling is asked for.
+      if (updates.status && updates.status !== 'cancelled') {
+        return res.status(400).json({ success: false, error: 'A bill\'s status follows its payments — record a payment or a refund instead' })
+      }
+
       const invoice = await db.$transaction(async (tx) => {
         // Tenant guard: only touch an invoice that belongs to this org.
         const existing = await tx.invoice.findFirst({
           where: { id, organizationId: ORGANIZATION_ID },
-          select: { id: true, invoiceNumber: true, amountPaid: true, paymentStatus: true },
+          select: { id: true, invoiceNumber: true, amountPaid: true, paymentStatus: true, status: true, isArchived: true, notes: true },
         })
         if (!existing) {
           const err = new Error('Invoice not found')
           err.status = 404
+          throw err
+        }
+        // Closed documents stay as they were: a cancelled bill, and the frozen
+        // original of a revised one — not even cancelled, as its "refunded"
+        // status passed the payments check below and the cancel then returned
+        // its medicines to stock while the revised bill still stood.
+        if (existing.isArchived || (updates.status !== 'cancelled' && existing.status === 'cancelled')) {
+          const err = new Error(existing.isArchived ? 'This bill was revised after a refund — change its revised bill instead' : 'A cancelled bill cannot be changed')
+          err.status = 409
           throw err
         }
 

@@ -16,6 +16,9 @@ import { Ambulance, Plus, Trash2, Loader2, AlertCircle } from 'lucide-react'
 import { format } from 'date-fns'
 import { toast } from 'sonner'
 import client from '@/api/client'
+import PaymentFields from '@/components/billing/PaymentFields'
+import RecordBillDialog, { BillSummary } from '@/components/daycare/RecordBillDialog'
+import { raiseRecordBill } from '@/lib/billing'
 
 const TYPES = [
   { value: 'BLS', label: 'BLS (Basic Life Support)' },
@@ -43,10 +46,15 @@ const TRIP_STATUS_OPTIONS = statusOptions(
   { label: (v) => (v === 'enroute' ? 'En Route' : v.replace(/^\w/, (c) => c.toUpperCase())) },
 )
 
+// amountPaid / paymentMethod are not stored on the trip: they are the payment
+// taken on its bill when it is logged (handleSubmit).
 const EMPTY = {
   patientId: '', ambulanceType: 'ALS', fromLocation: '', toLocation: 'Hospital',
   distanceKm: '', charge: '', status: 'completed', driverName: '', vehicleNumber: '', contactPhone: '', notes: '',
+  amountPaid: '', paymentMethod: 'cash',
 }
+// The wording of the trip's line on its bill.
+const billLine = (t) => `Ambulance ${t.ambulanceType}: ${t.fromLocation || '—'} → ${t.toLocation || '—'}`
 
 export default function AmbulanceModule() {
   const [trips, setTrips] = useState([])
@@ -62,6 +70,7 @@ export default function AmbulanceModule() {
   const [saving, setSaving] = useState(false)
   const [form, setForm] = useState(EMPTY)
   const [formOpen, setFormOpen] = useState(false)
+  const [billTripId, setBillTripId] = useState(null) // the trip whose Bill dialog is open
 
   async function fetchTrips() {
     setLoading(true); setError(null)
@@ -102,19 +111,44 @@ export default function AmbulanceModule() {
   async function handleSubmit(e) {
     e.preventDefault()
     if (!form.fromLocation && !form.patientId) { toast.error('Select a patient or enter a pickup location'); return }
+    const charge = Number(form.charge) || 0
+    const paidNow = Number(form.amountPaid) || 0
+    if (paidNow > charge) { toast.error('The amount received cannot be more than the charge'); return }
+    if (paidNow > 0 && !form.patientId) { toast.error('Select the patient to take a payment — a bill needs a patient'); return }
     setSaving(true)
     try {
-      const res = await client.post('/ambulance', form)
-      if (res.success) { toast.success(`Trip ${res.data.tripNumber} added`); setForm(EMPTY); setSelectedPatient(null); setFormOpen(false); fetchTrips() }
-      else toast.error(res.error || 'Failed to add trip')
+      const { amountPaid, paymentMethod, ...tripFields } = form
+      const res = await client.post('/ambulance', tripFields)
+      if (!res.success) { toast.error(res.error || 'Failed to add trip'); return }
+      const trip = res.data
+      toast.success(`Trip ${trip.tripNumber} added`)
+      setForm(EMPTY); setSelectedPatient(null); setFormOpen(false)
+      // The charge is billed in Billing, like a lab order, so the money is in
+      // Billing, revenue and the patient's bills. A trip with no patient has
+      // no one to bill; its Bill button says so.
+      if (charge > 0 && trip.patientId) {
+        try {
+          const raised = await raiseRecordBill('ambulance', { number: trip.tripNumber, patientId: trip.patientId, serviceName: billLine(trip), charge, amountPaid, paymentMethod })
+          if (!raised?.invoice) throw new Error('Billing did not accept it')
+          toast.success(paidNow > 0 ? `Bill raised; ${inr(paidNow)} received` : 'Bill raised in Billing')
+        } catch (err) {
+          toast.error(`The trip is saved, but its bill was not completed: ${err.message || 'please try again'}. Open its Bill to finish.`)
+        }
+      }
+      fetchTrips()
     } catch (e) { toast.error(e.message || 'Failed to add trip') } finally { setSaving(false) }
   }
 
+  // Resolves with the saved trip, or throws with the server's reason.
+  async function saveTrip(id, body) {
+    const res = await client.patch('/ambulance', { id, ...body })
+    if (!res.success) throw new Error(res.error || 'Failed to update')
+    setTrips(ts => ts.map(t => t.id === id ? res.data : t))
+    return res.data
+  }
+
   async function changeStatus(id, status) {
-    try {
-      const res = await client.patch('/ambulance', { id, status })
-      if (res.success) { setTrips(ts => ts.map(t => t.id === id ? res.data : t)) }
-    } catch { toast.error('Failed to update status') }
+    try { await saveTrip(id, { status }) } catch (e) { toast.error(e.message || 'Failed to update status') }
   }
 
   async function handleDelete(id) {
@@ -122,8 +156,10 @@ export default function AmbulanceModule() {
     try {
       const res = await client.delete(`/ambulance?id=${id}`)
       if (res.success) { toast.success('Trip deleted'); fetchTrips() }
-    } catch { toast.error('Failed to delete') }
+    } catch (e) { toast.error(e.message || 'Failed to delete') }
   }
+
+  const billTrip = trips.find(t => t.id === billTripId) || null
 
   return (
     <div className="space-y-6">
@@ -202,6 +238,7 @@ export default function AmbulanceModule() {
                     <TableHead>To</TableHead>
                     <TableHead>Km</TableHead>
                     <TableHead>Charge</TableHead>
+                    <TableHead>Payment</TableHead>
                     <TableHead>Date</TableHead>
                     <TableHead>Status</TableHead>
                     <TableHead className="text-right">Actions</TableHead>
@@ -209,7 +246,7 @@ export default function AmbulanceModule() {
                 </TableHeader>
                 <TableBody>
                   {filteredTrips.length === 0 ? (
-                    <TableRow><TableCell colSpan={10} className="text-center py-10 text-gray-500">No ambulance trips found.</TableCell></TableRow>
+                    <TableRow><TableCell colSpan={11} className="text-center py-10 text-gray-500">No ambulance trips found.</TableCell></TableRow>
                   ) : filteredTrips.map(t => (
                     <TableRow key={t.id}>
                       <TableCell className="font-mono font-medium text-blue-700">{t.tripNumber}</TableCell>
@@ -219,6 +256,7 @@ export default function AmbulanceModule() {
                       <TableCell>{t.toLocation || '—'}</TableCell>
                       <TableCell>{t.distanceKm != null ? `${t.distanceKm} km` : '—'}</TableCell>
                       <TableCell className="font-medium">{inr(t.charge)}</TableCell>
+                      <TableCell><BillSummary record={t} onOpen={() => setBillTripId(t.id)} /></TableCell>
                       <TableCell>{format(new Date(t.tripDate), 'yyyy-MM-dd')}</TableCell>
                       <TableCell>
                         <Select value={t.status} onValueChange={v => changeStatus(t.id, v)}>
@@ -290,12 +328,32 @@ export default function AmbulanceModule() {
                 </Select>
               </div>
               <div><Label>Notes</Label><Textarea className="mt-1" rows={2} value={form.notes} onChange={e => set('notes', e.target.value)} /></div>
+              {/* Taken on the trip's bill in Billing, raised when the trip is saved. */}
+              <PaymentFields
+                amount={form.amountPaid}
+                method={form.paymentMethod}
+                onAmountChange={v => set('amountPaid', v)}
+                onMethodChange={v => set('paymentMethod', v)}
+                charge={form.charge}
+              />
               <Button type="submit" className="bg-green-600 hover:bg-green-700 w-full" disabled={saving}>
                 {saving ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Plus className="h-4 w-4 mr-2" />} Add Trip
               </Button>
             </form>
         </DialogContent>
       </Dialog>
+
+      <RecordBillDialog
+        open={!!billTrip}
+        onOpenChange={(o) => { if (!o) setBillTripId(null) }}
+        kind="ambulance"
+        record={billTrip}
+        number={billTrip?.tripNumber}
+        charge={billTrip?.charge}
+        serviceName={billTrip ? billLine(billTrip) : ''}
+        saveCharge={(charge) => saveTrip(billTrip.id, { charge })}
+        onChanged={fetchTrips}
+      />
     </div>
   )
 }

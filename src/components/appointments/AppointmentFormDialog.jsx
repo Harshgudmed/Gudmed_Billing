@@ -14,7 +14,7 @@ import { getPatientFullName } from "./appointmentHelpers";
 import { useDoctorTimetable } from "@/components/common/hooks/useDoctorTimetable";
 import { useSlotCheck } from "@/components/common/hooks/useSlotCheck";
 import { FieldError } from "@/components/common/PatientDetailsFields";
-import { formatTime12h } from "@/lib/format";
+import { formatTime12h, formatMoney } from "@/lib/format";
 
 export default function AppointmentFormDialog({
   open,
@@ -154,7 +154,7 @@ export default function AppointmentFormDialog({
                       className="w-full"
                       options={isEdit 
                         ? (doctors || []).map(d => ({ value: d.id, label: `${drName(d.fullName)} - ${d.specialization}` }))
-                        : (availableDoctors || []).map(d => ({ value: d.id, label: `${drName(d.fullName)}${d.consultationFee != null ? ` (₹${d.consultationFee})` : ""}`, sublabel: d.specialization }))
+                        : (availableDoctors || []).map(d => ({ value: d.id, label: `${drName(d.fullName)}${d.consultationFee != null ? ` (${formatMoney(d.consultationFee)})` : ""}`, sublabel: d.specialization }))
                       }
                       value={field.value}
                       onChange={(val) => {
@@ -252,7 +252,7 @@ export default function AppointmentFormDialog({
                             !doctorId ? "Select a doctor first"
                               : !appointmentDate ? "Select a date first"
                               : timetableLoading ? "Loading slots…"
-                              : timeOptions.length === 0 ? "Doctor not available this day"
+                              : timeOptions.length === 0 ? "No free time left with this doctor on this date"
                               : "Select time"
                           } />
                         </SelectTrigger>

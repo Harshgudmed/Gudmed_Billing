@@ -180,7 +180,11 @@ export async function create(req, res, next) {
         paymentMethod: p.paymentMethod,
         reference: p.reference || null,
       }))
-      const amountPaidTotal = paymentSplits.reduce((s, p) => s + Number(p.amount || 0), 0)
+      const amountPaidTotal = round2(paymentSplits.reduce((s, p) => s + Number(p.amount || 0), 0))
+      // A split settles the bill, no more: ₹150 was recorded against a ₹5 sale.
+      if (amountPaidTotal > totalAmount + 0.005) {
+        throw makeError(`The payments add up to ₹${amountPaidTotal}, more than the bill of ₹${totalAmount}`, 400, 'PAYMENT_EXCEEDS_TOTAL')
+      }
 
       // Capture patient details for the receipt via the SHARED snapshot helper —
       // the single source of truth for patient info across every module. Only link

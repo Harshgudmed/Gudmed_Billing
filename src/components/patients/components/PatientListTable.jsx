@@ -129,6 +129,13 @@ export default function PatientListTable({ patients, openPatient, handlePrintCar
               {/* stopPropagation also covers the portaled menu: React bubbles
                   its clicks through here, so picking an option won't open the row. */}
               <TableCell onClick={(e) => e.stopPropagation()}>
+                {!handleStatusChange ? (
+                  // Only reception and the administrator change a patient's status
+                  // (the server refuses everyone else), so others see it, not a menu.
+                  <span className={`inline-flex h-7 items-center rounded-md px-2.5 text-xs font-medium ${patient.isActive ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}>
+                    {patient.isActive ? 'Active' : 'Inactive'}
+                  </span>
+                ) : (
                 <Select
                   value={patient.isActive ? 'active' : 'inactive'}
                   onValueChange={(v) => handleStatusChange(patient, v === 'active')}
@@ -141,6 +148,7 @@ export default function PatientListTable({ patients, openPatient, handlePrintCar
                     <SelectItem value="inactive">Inactive</SelectItem>
                   </SelectContent>
                 </Select>
+                )}
               </TableCell>
               <TableCell className="text-right" onClick={(e) => e.stopPropagation()}>
                 <div className="flex gap-1 justify-end">
@@ -152,10 +160,13 @@ export default function PatientListTable({ patients, openPatient, handlePrintCar
                     onClick={() => handlePrintCard(patient)}>
                     <Printer className="h-4 w-4" />
                   </Button>
-                  <Button variant="ghost" size="icon" className="h-8 w-8 text-red-500" title="Delete Patient"
-                    onClick={() => handleDeletePatient(patient)}>
-                    <Trash2 className="h-4 w-4" />
-                  </Button>
+                  {/* Only for those who may remove a patient (the caller passes no handler otherwise). */}
+                  {handleDeletePatient && (
+                    <Button variant="ghost" size="icon" className="h-8 w-8 text-red-500" title="Delete Patient"
+                      onClick={() => handleDeletePatient(patient)}>
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  )}
                 </div>
               </TableCell>
             </TableRow>

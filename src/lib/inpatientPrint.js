@@ -11,6 +11,7 @@ import { getFullName } from '@/lib/patient';
 // iframe (same origin as the app) any HTML in them would run, so every text
 // field goes through the shared escaper.
 import { escapeHtml as esc } from '@/lib/printTemplate'
+import { formatMoney } from './format.js'
 
 // Print small documents via a hidden iframe (avoids popup blockers).
 function printViaIframe(html) {
@@ -44,7 +45,7 @@ export function printAdmissionSlip(adm, { orgInfo, wardName, admissionNo }) {
 <tr><td>Bed Number</td><td>${esc(adm.bed?.bedNumber||'—')}</td></tr>
 <tr><td>Admission Type</td><td>${esc(adm.admissionType||'—')}</td></tr>
 <tr><td>Expected Stay</td><td>${adm.expectedLengthOfStay||'—'} day(s)</td></tr>
-<tr><td>Deposit Paid</td><td>₹${(adm.depositAmount||0).toLocaleString()}</td></tr>
+<tr><td>Deposit Paid</td><td>${formatMoney(adm.depositAmount)}</td></tr>
 ${adm.isCritical?`<tr><td>Status</td><td style="color:${adm.criticalLevel === 'blue' ? 'blue' : 'orange'};font-weight:bold">CRITICAL (${adm.criticalLevel ? adm.criticalLevel.toUpperCase() : 'CODE'})</td></tr>`:''}
 </table>
 <div class="diag"><strong>Admission Diagnosis:</strong><br/>${esc(adm.admissionDiagnosis||'—')}</div>

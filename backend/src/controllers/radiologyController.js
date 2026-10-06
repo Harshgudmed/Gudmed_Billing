@@ -9,6 +9,7 @@ import { PATIENT_SNAPSHOT_SELECT } from '../utils/patientSnapshot.js'
 import { patientSearchWhere } from '../lib/patientSearch.js'
 import { isOwned } from '../lib/tenant.js'
 import { auditIpd } from '../inpatient/audit.js'
+import { orderCancelCheck } from '../lib/invoiceFulfillment.js'
 
 // ── Zod Schemas ────────────────────────────────────────────────────────────────
 
@@ -448,9 +449,27 @@ export const update = async (req, res, next) => {
       // Tenant guard: only touch an order that belongs to this org.
       const owned = await db.radiologyOrder.findFirst({
         where: { id, organizationId: ORGANIZATION_ID },
-        select: { id: true, status: true, scheduledDate: true, orderDate: true },
+        select: { id: true, status: true, scheduledDate: true, orderDate: true, orderNumber: true },
       })
       if (!owned) return res.status(404).json({ success: false, error: 'Radiology order not found' })
+
+      // Cancelling a scan — the lab order's rules: only before the scan is
+      // started, with a reason, and never with the patient's money kept
+      // (lib/invoiceFulfillment.js orderCancelCheck); its own unpaid bill goes
+      // with it. There were no rules: a completed scan could be cancelled, and a
+      // paid one was, while the screen said a refund had been sent.
+      let cancelBill = null
+      if (fields.status === 'cancelled') {
+        if (owned.status !== 'pending') {
+          return res.status(409).json({ success: false, title: "Can't cancel", error: 'This scan has already been started, so it can no longer be cancelled.' })
+        }
+        if (!String(fields.cancellationReason || '').trim()) {
+          return res.status(400).json({ success: false, title: 'Reason needed', error: 'Please give a reason for cancelling this scan.' })
+        }
+        const check = await orderCancelCheck(db, ORGANIZATION_ID, 'radiology', owned.orderNumber)
+        if (check.refusal) return res.status(409).json({ success: false, ...check.refusal })
+        cancelBill = check.cancelBill || null
+      }
 
       // Moving the scan to another day — the same rules as a lab order: only
       // before the scan is started, with a reason, kept in the audit trail.
@@ -466,14 +485,25 @@ export const update = async (req, res, next) => {
         fields.scheduledDate = parseScheduleDay(fields.scheduledDate)
       }
 
-      const data = await db.radiologyOrder.update({
-        where: { id },
-        data: fields,
-        include: {
-          patient: { select: patientSelect },
-          exam: true,
-          report: true,
-        },
+      const include = { patient: { select: patientSelect }, exam: true, report: true }
+      const data = await db.$transaction(async (tx) => {
+        if (fields.status === 'cancelled') {
+          // Only while still pending as the write lands: a scan started in the
+          // same instant wins over a cancel read a moment earlier.
+          const { count } = await tx.radiologyOrder.updateMany({
+            where: { id, organizationId: ORGANIZATION_ID, status: 'pending' },
+            data: { status: 'cancelled', cancellationReason: String(fields.cancellationReason).trim() },
+          })
+          if (count === 0) throw Object.assign(new Error('This scan has already been started, so it can no longer be cancelled.'), { status: 409 })
+          if (cancelBill) {
+            await tx.invoice.updateMany({
+              where: { id: cancelBill.id, organizationId: ORGANIZATION_ID, amountPaid: { lte: 0 }, status: { not: 'cancelled' } },
+              data: { status: 'cancelled', paymentStatus: 'cancelled', cancelledAt: new Date(), cancellationReason: `Scan cancelled: ${String(fields.cancellationReason).trim()}` },
+            })
+          }
+          return tx.radiologyOrder.findFirst({ where: { id, organizationId: ORGANIZATION_ID }, include })
+        }
+        return tx.radiologyOrder.update({ where: { id }, data: fields, include })
       })
       if (fields.scheduledDate !== undefined) {
         await auditIpd(req, ORGANIZATION_ID, {

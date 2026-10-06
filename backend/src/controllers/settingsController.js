@@ -4,12 +4,19 @@ import { getOrgId } from "../lib/reqContext.js";
 import { listResponse } from "../lib/pagination.js";
 import bcrypt from 'bcryptjs'
 import { forgetAccount } from '../middleware/auth.js'
+import { withoutSecrets, keepSecrets } from '../lib/settingsSecrets.js'
 
+const readSettings = (org) => {
+  try { return org?.settings ? JSON.parse(org.settings) : {} } catch { return {} }
+}
+
+// What the screens get: every staff role reads this, so integration secrets
+// (API keys, the e-mail password) are left out — lib/settingsSecrets.js.
 function parseOrg(org) {
   if (!org) return org
   return {
     ...org,
-    settings: org.settings ? (() => { try { return JSON.parse(org.settings) } catch { return {} } })() : {},
+    settings: withoutSecrets(readSettings(org)),
     modulesEnabled: org.modulesEnabled ? (() => { try { return JSON.parse(org.modulesEnabled) } catch { return {} } })() : {},
   }
 }
@@ -86,7 +93,9 @@ export async function updateOrganization(req, res, next) {
     if (problem) return res.status(400).json({ success: false, error: problem })
     const data = { ...checked.data }
     if (req.body.settings && typeof req.body.settings === 'object') {
-      data.settings = JSON.stringify(req.body.settings)
+      // The screen never had the secrets, so it sends them back blank: keep the stored ones.
+      const current = await db.organization.findUnique({ where: { id: ORG_ID }, select: { settings: true } })
+      data.settings = JSON.stringify(keepSecrets(req.body.settings, readSettings(current)))
     }
     if (req.body.modulesEnabled && typeof req.body.modulesEnabled === 'object') {
       data.modulesEnabled = JSON.stringify(req.body.modulesEnabled)
@@ -233,6 +242,10 @@ const ASSIGNABLE_ROLES = new Set([
   'finance_controller',
   'lab_technician',
   'radiology_technician',
+  // Purchase & Supply Chain: raises requests and orders, keeps vendors and
+  // items (purchase_officer); receives goods and raises requests (store_keeper).
+  'purchase_officer',
+  'store_keeper',
 ])
 
 // Returns an error message when `role` is not an assignable role, else null.

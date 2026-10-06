@@ -38,6 +38,9 @@ const PERMS = {
   payment: ['receptionist', 'billing'],
   'void-payment': ['billing'],
   refund: ['billing'],
+  // Approving or rejecting a refund request releases hospital money: Finance,
+  // as for OPD refunds (lib/billingAccess.js BILLING_ROLES.approve).
+  'refund-decision': ['finance_controller'],
 
   // ── Phase 3A: Clinical Orders (CPOE) spine ──
   // Doctors (and nurses, for verbal/protocol orders) place orders. Departments

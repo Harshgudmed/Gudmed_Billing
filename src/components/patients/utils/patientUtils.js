@@ -1,4 +1,3 @@
-import { z } from 'zod';
 // The name/age/initials helpers live in one dependency-free module now; re-exported
 // here so existing `patientUtils` imports keep working against a single implementation.
 export { calcAge, getFullName, patientDisplayName, initials } from '@/lib/patient';
@@ -23,28 +22,7 @@ export const INSURANCE_PROVIDERS = [
   'Max Bupa', 'Reliance Health', 'SBI Health', 'Tata AIG',
 ];
 
-export const patientSchema = z.object({
-  firstName: z.string().min(2, 'First name is required'),
-  middleName: z.string().optional(),
-  lastName: z.string().min(2, 'Last name is required'),
-  dateOfBirth: z.string().min(1, 'Date of birth is required'),
-  gender: z.enum(['male', 'female', 'other']),
-  phonePrimary: z.string().min(10, 'Valid phone number required'),
-  phoneSecondary: z.string().optional(),
-  email: z.string().email('Invalid email').optional().or(z.literal('')),
-  houseNumber: z.string().optional(),
-  street: z.string().optional(),
-  locality: z.string().optional(),
-  city: z.string().optional(),
-  district: z.string().optional(),
-  state: z.string().optional(),
-  pincode: z.string().regex(/^\d{6}$/, 'PIN code must be 6 digits').optional().or(z.literal('')),
-  emergencyContactName: z.string().optional(),
-  emergencyContactPhone: z.string().optional(),
-  emergencyContactRelationship: z.string().optional(),
-  bloodGroup: z.string().optional(),
-  hasInsurance: z.boolean().optional().default(false),
-  insuranceProvider: z.string().optional(),
-  insuranceId: z.string().optional(),
-});
+// The Edit Patient form's rules are registration's own: patientEditSchema in
+// src/lib/schemas/patientFormSchema.js. (A looser copy lived here and let an edit
+// save a name with digits, a date of birth in 1800 and an emptied city.)
 

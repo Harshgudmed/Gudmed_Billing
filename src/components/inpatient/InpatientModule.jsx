@@ -36,6 +36,7 @@ import {
   emptyWard, emptyAdmission, emptyDischarge, emptyNote, emptyAddBed,
 } from '@/lib/inpatientHelpers'
 import { getFullName } from "@/lib/patient";
+import { formatMoney } from '@/lib/format'
 
 function admissionStatusBadge(status) {
   const map = { admitted:'bg-green-100 text-green-800', discharged:'bg-gray-100 text-gray-800', transferred:'bg-blue-100 text-blue-800' }
@@ -445,9 +446,9 @@ export default function InpatientModule() {
   )
 
   return (
-    <div className="-m-6 min-h-screen bg-gray-50">
+    <div className="-m-4 md:-m-6 min-h-screen bg-gray-50">
       {/* ── Header ── */}
-      <div className="bg-white border-b px-6 py-3 flex items-center justify-between">
+      <div className="bg-white border-b px-6 py-3 flex flex-wrap items-center justify-between gap-2">
         <div className="flex items-center gap-3">
           <BedDouble className="h-5 w-5 text-blue-600" />
           <div>
@@ -463,8 +464,8 @@ export default function InpatientModule() {
         </div>
       </div>
 
-      {/* ── Tab Bar ── */}
-      <div className="bg-white border-b flex">
+      {/* ── Tab Bar ── scrolls inside itself at phone width, never the page */}
+      <div className="bg-white border-b flex overflow-x-auto">
         {TABS.map(t => (
           <button key={t.value} onClick={() => setActiveTab(t.value)}
             className={`px-6 py-3 text-sm font-medium border-b-2 transition-colors whitespace-nowrap ${activeTab === t.value ? 'border-gray-900 text-gray-900' : 'border-transparent text-gray-500 hover:text-gray-700'}`}>
@@ -474,7 +475,7 @@ export default function InpatientModule() {
       </div>
 
       {/* ── Tab Content ── */}
-      <div className="p-6 space-y-6">
+      <div className="p-4 md:p-6 space-y-6">
 
         {/* ════════════════════ DASHBOARD ════════════════════ */}
         {activeTab === 'dashboard' && (
@@ -745,7 +746,7 @@ export default function InpatientModule() {
                 <div><span className="text-gray-500">Ward / Bed: </span><span>{getWardName(wards, viewAdmission)} · Bed {viewAdmission.bed?.bedNumber || '—'}</span></div>
                 <div><span className="text-gray-500">Admitted: </span><span>{viewAdmission.admissionDate ? format(new Date(viewAdmission.admissionDate), 'dd MMM yyyy') : '—'}</span></div>
                 <div><span className="text-gray-500">Type: </span><span>{viewAdmission.admissionType}</span></div>
-                <div><span className="text-gray-500">Deposit: </span><span>₹{(viewAdmission.depositAmount || 0).toLocaleString()}</span></div>
+                <div><span className="text-gray-500">Deposit: </span><span>{formatMoney(viewAdmission.depositAmount)}</span></div>
               </div>
               <div><p className="text-gray-500 mb-1">Diagnosis:</p><p className="bg-gray-50 p-2 rounded">{viewAdmission.admissionDiagnosis}</p></div>
               {viewAdmission.isCritical && <Badge className={viewAdmission.criticalLevel === 'blue' ? 'bg-blue-500' : 'bg-yellow-500 hover:bg-yellow-600'}>Critical: Code {viewAdmission.criticalLevel === 'blue' ? 'Blue' : 'Yellow'}</Badge>}

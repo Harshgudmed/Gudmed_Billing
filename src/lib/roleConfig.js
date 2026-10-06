@@ -28,6 +28,10 @@ export const MODULES = {
   deathCertificate:     { path: 'death-certificates',    label: 'Death Certificates',   toggle: 'deathCertificate' },
   inpatient:            { path: 'inpatient',             label: 'Inpatient (IPD)',      toggle: 'inpatient' },
   ot:                   { path: 'ot',                    label: 'Operation Theatre',    toggle: 'ot' },
+  purchase:             { path: 'purchase',              label: 'Purchase & Supply Chain', toggle: 'purchase' },
+  // A department asks the store for goods it holds. The store's stock is
+  // Purchase's, so it is there only while Purchase is switched on.
+  storeIndent:          { path: 'store-indent',          label: 'Store Indent',         toggle: 'purchase' },
   pharmacy:             { path: 'pharmacy',              label: 'Pharmacy',             toggle: 'pharmacy' },
   billing:              { path: 'billing',               label: 'Billing',              toggle: null },
   doctorAccountability: { path: 'doctor-accountability', label: 'Doctor Accountability', toggle: 'doctorAccountability' },
@@ -41,8 +45,8 @@ export const ROLES = {
     home: 'dashboard',
     modules: [
       'dashboard', 'patients', 'appointments', 'preTriage', 'queue', 'opd', 'pharmacy',
-      'laboratory', 'radiology', 'dayCare', 'ambulance', 'insurance', 'deathCertificate', 'inpatient', 'ot', 'billing',
-      'doctorAccountability', 'settings',
+      'laboratory', 'radiology', 'dayCare', 'ambulance', 'insurance', 'deathCertificate', 'inpatient', 'ot', 'purchase',
+      'storeIndent', 'billing', 'doctorAccountability', 'settings',
     ],
   },
   doctor: {
@@ -56,12 +60,12 @@ export const ROLES = {
     // the query, so this cannot widen what they see. Without it the dashboard's
     // "Today's Appointments → View All" button pointed at a route this role has
     // no entry for, and the catch-all bounced them back to OPD.
-    modules: ['dashboard', 'opd', 'appointments', 'queue', 'patients', 'doctorAccountability', 'ot'],
+    modules: ['dashboard', 'opd', 'appointments', 'queue', 'patients', 'doctorAccountability', 'ot', 'storeIndent'],
   },
   receptionist: {
     label: 'Receptionist',
     home: 'appointments',
-    modules: ['dashboard', 'appointments', 'preTriage', 'queue', 'patients', 'billing', 'ot'],
+    modules: ['dashboard', 'appointments', 'preTriage', 'queue', 'patients', 'billing', 'ot', 'storeIndent'],
   },
 
   // ── Phase 3.0: clinical-orders roles. Mapped in backend rbac.js already; these
@@ -69,26 +73,70 @@ export const ROLES = {
   nurse: {
     label: 'Nurse',
     home: 'dashboard',
-    modules: ['dashboard', 'preTriage', 'patients', 'ot'],
+    modules: ['dashboard', 'preTriage', 'patients', 'ot', 'storeIndent'],
   },
   pharmacist: {
     label: 'Pharmacist',
     home: 'pharmacy',
-    modules: ['dashboard', 'pharmacy'],
+    modules: ['dashboard', 'pharmacy', 'storeIndent'],
   },
   billing: {
     label: 'Billing',
     home: 'billing',
-    modules: ['dashboard', 'billing'],
+    modules: ['dashboard', 'billing', 'storeIndent'],
   },
   finance_controller: {
     label: 'Finance Controller',
     home: 'billing',
-    modules: ['dashboard', 'billing'],
+    // Purchase: to approve requests above the hospital's limit, and to read.
+    modules: ['dashboard', 'billing', 'purchase', 'storeIndent'],
+  },
+
+  // ── Purchase & Supply Chain. Purchase only: the backend lets these roles
+  //    reach /purchase and nothing clinical. ──
+  purchase_officer: {
+    label: 'Purchase Officer',
+    home: 'purchase',
+    modules: ['purchase'],
+  },
+  store_keeper: {
+    label: 'Store Keeper',
+    home: 'purchase',
+    modules: ['purchase'],
   },
 }
 
 export const KNOWN_ROLES = Object.keys(ROLES)
+
+// Modules a hospital must switch ON before they appear. Every other module is
+// on until switched off — a hospital saved before a module existed has no key
+// for it, and reading "no key" as "on" kept their screens as they were. A
+// module still being built must not appear in every hospital's sidebar the day
+// it ships, so it reads "no key" as OFF instead.
+const OFF_UNTIL_ENABLED = new Set(['purchase'])
+
+/**
+ * Is this module switched on for the hospital? `toggle` is a MODULES[...].toggle
+ * key; null means the module cannot be switched off. The one rule shared by
+ * both sidebars and the Settings → Modules switches, so they always agree.
+ */
+export function isModuleOn(toggle, modulesEnabled = {}) {
+  if (!toggle) return true
+  return OFF_UNTIL_ENABLED.has(toggle) ? modulesEnabled[toggle] === true : modulesEnabled[toggle] !== false
+}
+
+/**
+ * May this role open this module (a MODULES key) in this hospital? The
+ * sidebar's rule, for any screen that links to another module — a dashboard
+ * tile, a quick action — so nothing offers a door the sidebar does not have.
+ * With login off (the demo) every role may open everything the hospital has on.
+ */
+export function roleCanOpen(role, key, modulesEnabled = {}) {
+  const m = MODULES[key]
+  if (!m) return false
+  if (AUTH_ENFORCED && !(ROLES[role]?.modules || []).includes(key)) return false
+  return isModuleOn(m.toggle, modulesEnabled)
+}
 
 // Hero imagery for each login page — real hospital photos (Unsplash CDN) with a
 // role-coloured gradient overlay. If a photo fails to load, the gradient remains,
@@ -135,6 +183,18 @@ export const LOGIN_HERO = {
     img: 'https://images.unsplash.com/photo-1554224155-8d04cb21cd6c?auto=format&fit=crop&w=1200&q=70',
     title: 'Finance Controller',
     subtitle: 'Approve refunds, audit ledgers, and manage hospital finances.',
+  },
+  purchase_officer: {
+    color: '#2563eb',
+    img: 'https://images.unsplash.com/photo-1554224155-8d04cb21cd6c?auto=format&fit=crop&w=1200&q=70',
+    title: 'Purchase',
+    subtitle: 'Requests, approvals, orders and vendors.',
+  },
+  store_keeper: {
+    color: '#0891b2',
+    img: 'https://images.unsplash.com/photo-1554224155-8d04cb21cd6c?auto=format&fit=crop&w=1200&q=70',
+    title: 'Stores',
+    subtitle: 'Raise requests and receive what was ordered.',
   },
   patient: {
     color: '#0d9488',

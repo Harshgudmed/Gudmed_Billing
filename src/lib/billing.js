@@ -28,9 +28,22 @@ export function percentBox(raw) {
 // when there's nothing to bill. Non-throwing on the payment step is the caller's
 // choice; this throws only if the invoice POST itself rejects.
 //   items = [{ serviceName, quantity, unitPrice, tax, total }]
-export async function createInvoiceWithPayment({ patientId, items, notes, amountPaid = 0, paymentMethod = 'cash' }) {
+// Opt-in (existing callers are unchanged without them):
+//   type           — what kind of bill this is ('lab', 'radiology', 'daycare',
+//                    'ambulance'), stamped on every line that has none, so
+//                    Billing's Type column and filter can tell it from an OPD bill.
+//   idempotencyKey — one bill per record: raising it again (a retry, a double
+//                    click) returns the same bill, and the booking payment is
+//                    keyed too, so it is not taken twice.
+export async function createInvoiceWithPayment({ patientId, items, notes, amountPaid = 0, paymentMethod = 'cash', type, idempotencyKey }) {
   if (!patientId || !Array.isArray(items) || items.length === 0) return null
-  const invRes = await client.post('/billing', { resource: 'invoice', patientId, items, notes })
+  const invRes = await client.post('/billing', {
+    resource: 'invoice',
+    patientId,
+    items: type ? items.map((i) => ({ type, ...i })) : items,
+    notes,
+    ...(idempotencyKey ? { idempotencyKey } : {}),
+  })
   if (!invRes?.success) return null
   const invoice = invRes.data
   let payment = null
@@ -42,10 +55,31 @@ export async function createInvoiceWithPayment({ patientId, items, notes, amount
       patientId,
       amount: amt,
       paymentMethod: paymentMethod || 'cash',
+      ...(idempotencyKey ? { idempotencyKey: `${idempotencyKey}:booking` } : {}),
     })
     if (payRes?.success) payment = payRes.data
   }
   return { invoice, payment }
+}
+
+// The bill a Day Care case or an ambulance trip raises from its own screen —
+// one per record, found again by its key. Keep the key in step with
+// moduleBillKey in backend/src/lib/invoiceFulfillment.js, which reads it back.
+const RECORD_BILL = {
+  daycare: { key: 'DAYCARE', label: 'Day Care', note: 'Day Care Case' },
+  ambulance: { key: 'AMBULANCE', label: 'Ambulance', note: 'Ambulance Trip' },
+}
+export function raiseRecordBill(kind, { number, patientId, serviceName, charge, amountPaid, paymentMethod }) {
+  const bill = RECORD_BILL[kind]
+  return createInvoiceWithPayment({
+    patientId,
+    items: [{ serviceName, quantity: 1, unitPrice: Number(charge), tax: 0, total: Number(charge) }],
+    notes: `[${bill.label}] ${bill.note} ${number}`,
+    amountPaid,
+    paymentMethod,
+    type: kind,
+    idempotencyKey: `${bill.key}:${number}`,
+  })
 }
 
 // Find the invoice auto-created for an order (tagged with the order number in its
@@ -79,4 +113,25 @@ export async function fetchOrderInvoicePayments({ patientId, orderNumber, invoic
   } catch {
     return empty
   }
+}
+
+// ── Who may do what in Billing ────────────────────────────────────────────────
+// Mirrors backend/src/lib/billingAccess.js, which decides every write again:
+// the counters raise bills and take money, the Finance Controller sets prices
+// and releases refunds (and takes no money), an administrator does everything.
+// These only choose which tabs and buttons a person is shown.
+const BILLING_ADMINS = ['admin', 'super_admin']
+const BILLING_ROLES = {
+  raise: ['receptionist', 'billing', 'billing_clerk', 'pharmacist', 'lab_technician', 'radiology_technician'],
+  adjust: ['receptionist', 'billing', 'billing_clerk'],
+  approve: ['finance_controller'],
+  catalog: ['finance_controller'],
+  // The Billing screen's Insurance tab lists the claims; the front desk does not work them.
+  insurance: ['billing', 'billing_clerk', 'finance_controller'],
+}
+
+/** What `role` may do in Billing. No role (login off, the demo) may do everything. */
+export function billingAccess(role) {
+  const can = (what) => !role || BILLING_ADMINS.includes(role) || BILLING_ROLES[what].includes(role)
+  return { canRaise: can('raise'), canAdjust: can('adjust'), canApprove: can('approve'), canEditCatalog: can('catalog'), canSeeInsurance: can('insurance') }
 }

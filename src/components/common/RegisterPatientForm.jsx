@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button'
 import { DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog'
 import client from '@/api/client'
 import { useCreatePatient } from '@/lib/useCreatePatient'
+import { useEnabledModules } from '@/lib/useEnabledModules'
 import { patientFormSchema, issuesToFieldErrors } from '@/lib/schemas/patientFormSchema'
 import PatientDetailsFields, { NotesSection } from './PatientDetailsFields'
 import AppointmentFields, { buildAppointmentPayload } from './AppointmentFields'
@@ -51,6 +52,12 @@ export default function RegisterPatientForm({ onSuccess, onCancel, initialData }
   // savingPatient covers the whole flow (patient create + appointment book),
   // so the submit button stays disabled across both steps.
   const savingPatient = creatingPatient || bookingAppointment
+  // Booking belongs to the roles that book (Appointments, or the billing
+  // counter) — the server refuses anyone else, so a nurse registering a patient
+  // is not offered a booking that would fail.
+  const { canOpen } = useEnabledModules()
+  const canBook = canOpen('appointments') || canOpen('billing')
+  const booking = canBook && !!patientForm.bookAppointment
   const [doctors, setDoctors] = useState([])
   const [departments, setDepartments] = useState([])
 
@@ -101,7 +108,7 @@ export default function RegisterPatientForm({ onSuccess, onCancel, initialData }
     // Catch obviously-bad input before it makes a round trip. The backend
     // (patientController.js `patientSchema`) still re-validates and remains
     // the source of truth — this is only a faster first pass.
-    const parsed = patientFormSchema.safeParse(patientForm)
+    const parsed = patientFormSchema.safeParse({ ...patientForm, bookAppointment: booking })
     if (!parsed.success) {
       setFieldErrors(issuesToFieldErrors(parsed.error.issues))
       toast.error('Please fix the highlighted fields')
@@ -117,7 +124,7 @@ export default function RegisterPatientForm({ onSuccess, onCancel, initialData }
 
       // Registration done. Booking is a separate act, and the box may say not
       // to book at all.
-      if (!patientForm.bookAppointment) {
+      if (!booking) {
         toast.success(`Patient ${patient.mrn} registered`)
         setPatientForm(emptyPatientForm)
         setFieldErrors({})
@@ -189,15 +196,17 @@ export default function RegisterPatientForm({ onSuccess, onCancel, initialData }
           fieldErrors={fieldErrors}
         />
 
-        <AppointmentFields
-          patientForm={patientForm}
-          setField={setField}
-          setPatientForm={setPatientForm}
-          fieldErrors={fieldErrors}
-          setFieldErrors={setFieldErrors}
-          doctors={doctors}
-          departments={departments}
-        />
+        {canBook && (
+          <AppointmentFields
+            patientForm={patientForm}
+            setField={setField}
+            setPatientForm={setPatientForm}
+            fieldErrors={fieldErrors}
+            setFieldErrors={setFieldErrors}
+            doctors={doctors}
+            departments={departments}
+          />
+        )}
 
         {/* Notes */}
         <NotesSection value={patientForm.notes} setField={setField} />
@@ -207,7 +216,7 @@ export default function RegisterPatientForm({ onSuccess, onCancel, initialData }
           <Button type="submit" className="w-full sm:w-auto" disabled={savingPatient}>
             {savingPatient
               ? 'Registering...'
-              : patientForm.bookAppointment ? 'Register & Book' : 'Register Patient'}
+              : booking ? 'Register & Book' : 'Register Patient'}
           </Button>
         </div>
       </form>

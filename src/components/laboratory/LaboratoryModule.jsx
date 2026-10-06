@@ -4,6 +4,7 @@ import { sendLabResultNotification } from '@/lib/whatsapp'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { StatCard } from '@/components/common/StatCard'
 import { Badge } from '@/components/ui/badge'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { FlaskConical, Plus, Eye, Edit, Trash2, Clock, User, FileText, AlertTriangle, CheckCircle, Search, Printer, Send, ChevronDown, Save, AlertCircle, Activity, TestTube, Microscope, Beaker, Droplet, ClipboardList, FileBarChart, Play, CheckSquare, Loader2, Receipt, Upload, XCircle, CalendarClock } from 'lucide-react'
@@ -44,6 +45,7 @@ import { printLabReport } from './printLabReport'
 import PaymentFields from '@/components/billing/PaymentFields'
 import { createInvoiceWithPayment, fetchOrderInvoicePayments } from '@/lib/billing'
 import { getFullName, calcAge } from "@/lib/patient";
+import { formatMoney } from "@/lib/format";
 
 // Every call now goes through labApi (src/api/labApi.js), which owns the
 // "/laboratory" endpoint and the `resource` names, and takes plain objects
@@ -203,24 +205,15 @@ const SAMPLE_TYPES = [
   { value: 'Fluid',  Icon: FlaskConical, className: 'text-cyan-500' },
 ]
 
-// The six dashboard tiles. Only the number, the label, the icon and the colour
-// ever differ, so the markup lives in one place and this table holds the rest.
-// Colours are written out in full, never built as `bg-${tone}-50` — Tailwind
-// scans the source for whole class names, and an interpolated one is never
-// found, so every tile would ship colourless.
+// The six dashboard tiles. Only the number, the label, the icon and the tone
+// differ; the tile itself (and the HMS status colours) is the shared StatCard.
 const STAT_TILES = [
-  { key: 'pendingOrders',   label: 'Pending Orders',   Icon: Clock,
-    card: 'bg-yellow-50 border-yellow-200', num: 'text-yellow-700', txt: 'text-yellow-600', icon: 'text-yellow-500' },
-  { key: 'sampleCollected', label: 'Sample Collected', Icon: TestTube,
-    card: 'bg-blue-50 border-blue-200',     num: 'text-blue-700',   txt: 'text-blue-600',   icon: 'text-blue-500' },
-  { key: 'inProgress',      label: 'In Progress',      Icon: Activity,
-    card: 'bg-orange-50 border-orange-200', num: 'text-orange-700', txt: 'text-orange-600', icon: 'text-orange-500' },
-  { key: 'completedToday',  label: 'Completed Today',  Icon: CheckCircle,
-    card: 'bg-green-50 border-green-200',   num: 'text-green-700',  txt: 'text-green-600',  icon: 'text-green-500' },
-  { key: 'criticalResults', label: 'Critical Results', Icon: AlertTriangle,
-    card: 'bg-red-50 border-red-200',       num: 'text-red-700',    txt: 'text-red-600',    icon: 'text-red-500' },
-  { key: 'totalTests',      label: 'Total Tests',      Icon: Microscope,
-    card: 'bg-purple-50 border-purple-200', num: 'text-purple-700', txt: 'text-purple-600', icon: 'text-purple-500' },
+  { key: 'pendingOrders',   label: 'Pending Orders',   Icon: Clock,         tone: 'yellow' },
+  { key: 'sampleCollected', label: 'Sample Collected', Icon: TestTube,      tone: 'blue' },
+  { key: 'inProgress',      label: 'In Progress',      Icon: Activity,      tone: 'orange' },
+  { key: 'completedToday',  label: 'Completed Today',  Icon: CheckCircle,   tone: 'green' },
+  { key: 'criticalResults', label: 'Critical Results', Icon: AlertTriangle, tone: 'red' },
+  { key: 'totalTests',      label: 'Total Tests',      Icon: Microscope,    tone: 'purple' },
 ]
 
 // The five report types. Never changed by anything at runtime, so it belongs
@@ -671,6 +664,7 @@ export default function LaboratoryModule() {
             notes: `[Laboratory] Lab Order ${newOrder.orderNumber || ''}`.trim(),
             amountPaid: orderAmountPaid,
             paymentMethod: orderPayMethod,
+            type: 'lab', // Billing's Type column / filter: a lab bill, not an untyped one
           })
           toast.success('Invoice generated for this lab order')
         } catch (e) {
@@ -778,7 +772,8 @@ export default function LaboratoryModule() {
         resultUnit: selectedTest.unit,
         isAbnormal: data.isAbnormal,
         isCritical: data.isCritical,
-        flag: data.isCritical ? 'A' : data.isAbnormal ? 'H' : 'N',
+        // No flag: the server sets High / Low / Normal from the test's range
+        // (lib/labFlag.js); "abnormal" used to go out as High even when low.
         comment: data.comment,
       })
 
@@ -1011,7 +1006,7 @@ export default function LaboratoryModule() {
           </h1>
           <p className="text-gray-500">Complete laboratory management - tests, orders, results, and reports</p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           <Button variant="outline" onClick={() => setShowOrderDialog(true)}>
             <Plus className="mr-2 h-4 w-4" />
             New Order
@@ -1029,7 +1024,7 @@ export default function LaboratoryModule() {
 
       {/* Main Tabs */}
       <Tabs value={activeTab} onValueChange={setActiveTab}>
-        <TabsList className="grid w-full grid-cols-5">
+        <TabsList className="grid w-full h-auto grid-cols-2 md:grid-cols-5">
           <TabsTrigger value="dashboard">Dashboard</TabsTrigger>
           <TabsTrigger value="catalog">Test Catalog</TabsTrigger>
           <TabsTrigger value="orders">Orders</TabsTrigger>
@@ -1046,18 +1041,8 @@ export default function LaboratoryModule() {
             </div>
           ) : (
             <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
-              {STAT_TILES.map(({ key, label, Icon, card, num, txt, icon }) => (
-                <Card key={key} className={card}>
-                  <CardContent className="p-4">
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <p className={`text-2xl font-bold ${num}`}>{stats[key]}</p>
-                        <p className={`text-xs ${txt}`}>{label}</p>
-                      </div>
-                      <Icon className={`h-8 w-8 ${icon}`} />
-                    </div>
-                  </CardContent>
-                </Card>
+              {STAT_TILES.map(({ key, label, Icon, tone }) => (
+                <StatCard key={key} tone={tone} icon={Icon} label={label} value={stats[key]} />
               ))}
             </div>
           )}
@@ -1333,7 +1318,7 @@ export default function LaboratoryModule() {
                         </div>
                       </TableCell>
                       <TableCell>{test.turnaroundTime}</TableCell>
-                      <TableCell className="font-medium">{test.price?.toLocaleString() || '0'}</TableCell>
+                      <TableCell className="font-medium">{formatMoney(test.price)}</TableCell>
                       <TableCell>
                         <Badge className={getActiveBadgeColor(test.isActive)}>
                           {test.isActive ? 'Active' : 'Inactive'}

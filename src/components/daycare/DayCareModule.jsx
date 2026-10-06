@@ -16,6 +16,9 @@ import { Sun, Plus, Trash2, Loader2, AlertCircle } from 'lucide-react'
 import { format } from 'date-fns'
 import { toast } from 'sonner'
 import client from '@/api/client'
+import PaymentFields from '@/components/billing/PaymentFields'
+import RecordBillDialog, { BillSummary, PAY_STYLES } from './RecordBillDialog'
+import { raiseRecordBill } from '@/lib/billing'
 
 const STATUS_STYLES = {
   admitted: 'bg-blue-100 text-blue-700',
@@ -24,12 +27,15 @@ const STATUS_STYLES = {
   discharged: 'bg-green-100 text-green-700',
   cancelled: 'bg-gray-200 text-gray-600',
 }
-const PAY_STYLES = { pending: 'bg-orange-100 text-orange-700', partial: 'bg-amber-100 text-amber-700', paid: 'bg-green-100 text-green-700' }
 import { formatMoney as inr } from '@/lib/format'
 import { getFullName } from "@/lib/patient";
 const labelize = (s) => (s || '').replace(/_/g, ' ')
 
-const EMPTY = { patientId: '', doctorId: '', procedure: '', fee: '', paymentStatus: 'pending', status: 'admitted', dischargeTime: '', notes: '' }
+// amountPaid / paymentMethod are not stored on the case: they are the payment
+// taken on its bill at admission (handleSubmit).
+const EMPTY = { patientId: '', doctorId: '', procedure: '', fee: '', amountPaid: '', paymentMethod: 'cash', status: 'admitted', dischargeTime: '', notes: '' }
+// The wording of the case's line on its bill.
+const billLine = (c) => (c.procedure ? `Day care: ${c.procedure}` : 'Day care')
 
 // The filter row's dropdowns, built from the same status lists the table uses.
 const DAY_CARE_STATUS_OPTIONS = statusOptions(Object.keys(STATUS_STYLES), { label: (v) => labelize(v).replace(/^\w/, (c) => c.toUpperCase()) })
@@ -48,6 +54,7 @@ export default function DayCareModule() {
   const [open, setOpen] = useState(false)
   const [saving, setSaving] = useState(false)
   const [form, setForm] = useState(EMPTY)
+  const [billCaseId, setBillCaseId] = useState(null) // the case whose Bill dialog is open
 
   async function fetchCases() {
     setLoading(true); setError(null)
@@ -76,7 +83,10 @@ export default function DayCareModule() {
     total: cases.length,
     active: cases.filter(c => !['discharged', 'cancelled'].includes(c.status)).length,
     discharged: cases.filter(c => c.status === 'discharged').length,
-    revenue: cases.reduce((s, c) => s + (c.fee || 0), 0),
+    // Money actually collected: what was paid on each case's bill (net of
+    // refunds), or what was recorded on the case before it was linked to
+    // Billing. A fee nobody has paid yet is not revenue.
+    revenue: cases.reduce((s, c) => s + (c.bill ? (c.bill.status === 'cancelled' ? 0 : Number(c.bill.amountPaid) || 0) : (c.paidOutsideBilling || 0)), 0),
   }), [cases])
 
   const displayedCases = useMemo(() => {
@@ -90,19 +100,42 @@ export default function DayCareModule() {
   async function handleSubmit(e) {
     e.preventDefault()
     if (!form.patientId) { toast.error('Select a patient'); return }
+    const fee = Number(form.fee) || 0
+    const paidNow = Number(form.amountPaid) || 0
+    if (paidNow > fee) { toast.error('The amount received cannot be more than the fee'); return }
     setSaving(true)
     try {
-      const res = await client.post('/day-care', form)
-      if (res.success) { toast.success(`Day care case ${res.data.caseNumber} created`); setForm(EMPTY); setSelectedPatient(null); setOpen(false); fetchCases() }
-      else toast.error(res.error || 'Failed to create')
+      const { amountPaid, paymentMethod, ...caseFields } = form
+      const res = await client.post('/day-care', caseFields)
+      if (!res.success) { toast.error(res.error || 'Failed to create'); return }
+      const dayCase = res.data
+      toast.success(`Day care case ${dayCase.caseNumber} created`)
+      setForm(EMPTY); setSelectedPatient(null); setOpen(false)
+      // Its fee is billed in Billing, like a lab order — the money is taken on
+      // that bill, so Billing, revenue and the patient's bills all see it.
+      if (fee > 0) {
+        try {
+          const raised = await raiseRecordBill('daycare', { number: dayCase.caseNumber, patientId: dayCase.patientId, serviceName: billLine(dayCase), charge: fee, amountPaid, paymentMethod })
+          if (!raised?.invoice) throw new Error('Billing did not accept it')
+          toast.success(paidNow > 0 ? `Bill raised; ${inr(paidNow)} received` : 'Bill raised in Billing')
+        } catch (err) {
+          toast.error(`The case is saved, but its bill was not completed: ${err.message || 'please try again'}. Open its Bill to finish.`)
+        }
+      }
+      fetchCases()
     } catch (e) { toast.error(e.message || 'Failed to create') } finally { setSaving(false) }
   }
 
+  // Resolves with the saved case, or throws with the server's reason.
+  async function saveCase(id, body) {
+    const res = await client.patch('/day-care', { id, ...body })
+    if (!res.success) throw new Error(res.error || 'Failed to update')
+    setCases(cs => cs.map(c => c.id === id ? res.data : c))
+    return res.data
+  }
+
   async function patch(id, body) {
-    try {
-      const res = await client.patch('/day-care', { id, ...body })
-      if (res.success) setCases(cs => cs.map(c => c.id === id ? res.data : c))
-    } catch { toast.error('Failed to update') }
+    try { await saveCase(id, body) } catch (e) { toast.error(e.message || 'Failed to update') }
   }
 
   async function handleDelete(id) {
@@ -110,8 +143,10 @@ export default function DayCareModule() {
     try {
       const res = await client.delete(`/day-care?id=${id}`)
       if (res.success) { toast.success('Deleted'); fetchCases() }
-    } catch { toast.error('Failed to delete') }
+    } catch (e) { toast.error(e.message || 'Failed to delete') }
   }
+
+  const billCase = cases.find(c => c.id === billCaseId) || null
 
   return (
     <div className="space-y-6">
@@ -141,7 +176,7 @@ export default function DayCareModule() {
           className={`cursor-pointer transition-shadow hover:shadow-md border-l-4 border-l-green-500 ${quickFilter === 'discharged' ? 'ring-2 ring-green-500' : ''}`}
           onClick={() => setQuickFilter(f => f === 'discharged' ? 'all' : 'discharged')}
         ><CardHeader className="py-4"><CardTitle className="text-sm font-medium text-gray-500">Discharged</CardTitle></CardHeader><CardContent><div className="text-2xl font-bold">{stats.discharged}</div></CardContent></Card>
-        <Card className="border-l-4 border-l-blue-500"><CardHeader className="py-4"><CardTitle className="text-sm font-medium text-gray-500">Revenue</CardTitle></CardHeader><CardContent><div className="text-2xl font-bold">{inr(stats.revenue)}</div></CardContent></Card>
+        <Card className="border-l-4 border-l-blue-500"><CardHeader className="py-4"><CardTitle className="text-sm font-medium text-gray-500">Revenue (collected)</CardTitle></CardHeader><CardContent><div className="text-2xl font-bold">{inr(stats.revenue)}</div></CardContent></Card>
       </div>
 
       {/* The shared filter row (components/common/FilterBar) — the same one
@@ -187,16 +222,9 @@ export default function DayCareModule() {
                     <TableCell>{c.procedure || '—'}</TableCell>
                     <TableCell>{format(new Date(c.admissionDate), 'yyyy-MM-dd')}</TableCell>
                     <TableCell className="font-medium">{inr(c.fee)}</TableCell>
-                    <TableCell>
-                      <Select value={c.paymentStatus} onValueChange={v => patch(c.id, { paymentStatus: v })}>
-                        <SelectTrigger className={`h-7 w-[110px] border-0 capitalize ${PAY_STYLES[c.paymentStatus] || ''}`}><SelectValue /></SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="pending">Pending</SelectItem>
-                          <SelectItem value="partial">Partial</SelectItem>
-                          <SelectItem value="paid">Paid</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </TableCell>
+                    {/* What its bill says — the status used to be a drop-down that
+                        saved nothing (the server never took it) and no money moved. */}
+                    <TableCell><BillSummary record={c} onOpen={() => setBillCaseId(c.id)} /></TableCell>
                     <TableCell>
                       <Select value={c.status} onValueChange={v => patch(c.id, { status: v })}>
                         <SelectTrigger className={`h-7 w-[140px] border-0 capitalize ${STATUS_STYLES[c.status] || ''}`}><SelectValue>{labelize(c.status)}</SelectValue></SelectTrigger>
@@ -245,28 +273,27 @@ export default function DayCareModule() {
               <div><Label>Fee (₹)</Label><Input className="mt-1" type="number" placeholder="₹" value={form.fee} onChange={e => set('fee', e.target.value)} /></div>
               <div><Label>Discharge Time</Label><Input className="mt-1" type="time" value={form.dischargeTime} onChange={e => set('dischargeTime', e.target.value)} /></div>
             </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <Label>Payment</Label>
-                <Select value={form.paymentStatus} onValueChange={v => set('paymentStatus', v)}>
-                  <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
-                  <SelectContent><SelectItem value="pending">Pending</SelectItem><SelectItem value="partial">Partial</SelectItem><SelectItem value="paid">Paid</SelectItem></SelectContent>
-                </Select>
-              </div>
-              <div>
-                <Label>Status</Label>
-                <Select value={form.status} onValueChange={v => set('status', v)}>
-                  <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="admitted">Admitted</SelectItem>
-                    <SelectItem value="in_procedure">In Procedure</SelectItem>
-                    <SelectItem value="observation">Observation</SelectItem>
-                    <SelectItem value="discharged">Discharged</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
+            <div>
+              <Label>Status</Label>
+              <Select value={form.status} onValueChange={v => set('status', v)}>
+                <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="admitted">Admitted</SelectItem>
+                  <SelectItem value="in_procedure">In Procedure</SelectItem>
+                  <SelectItem value="observation">Observation</SelectItem>
+                  <SelectItem value="discharged">Discharged</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
             <div><Label>Notes</Label><Textarea className="mt-1" rows={2} value={form.notes} onChange={e => set('notes', e.target.value)} /></div>
+            {/* Taken on the case's bill in Billing, raised when the case is saved. */}
+            <PaymentFields
+              amount={form.amountPaid}
+              method={form.paymentMethod}
+              onAmountChange={v => set('amountPaid', v)}
+              onMethodChange={v => set('paymentMethod', v)}
+              charge={form.fee}
+            />
             <DialogFooter>
               <Button type="button" variant="outline" onClick={() => setOpen(false)}>Cancel</Button>
               <Button type="submit" className="bg-blue-600 hover:bg-blue-700" disabled={saving}>
@@ -276,6 +303,18 @@ export default function DayCareModule() {
           </form>
         </DialogContent>
       </Dialog>
+
+      <RecordBillDialog
+        open={!!billCase}
+        onOpenChange={(o) => { if (!o) setBillCaseId(null) }}
+        kind="daycare"
+        record={billCase}
+        number={billCase?.caseNumber}
+        charge={billCase?.fee}
+        serviceName={billCase ? billLine(billCase) : ''}
+        saveCharge={(fee) => saveCase(billCase.id, { fee })}
+        onChanged={fetchCases}
+      />
     </div>
   )
 }

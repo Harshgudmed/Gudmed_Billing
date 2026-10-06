@@ -1,11 +1,42 @@
 import { Server } from 'socket.io'
+import jwt from 'jsonwebtoken'
+import { JWT_SECRET } from '../config/security.js'
+import { isAuthEnforced } from '../middleware/auth.js'
 
 // One Socket.IO server for the whole app. Display boards connect and join a room
 // per organization, so a single "refresh" signal reaches exactly that hospital's
 // screens (never another tenant's) the instant its queue changes — replacing the
 // every-3-seconds polling with an on-change push. Everything here is a safe no-op
 // until initRealtime() runs, so importing the emit helper never crashes tests.
+//
+// Two kinds of room:
+//   org:<id>    display boards — they say which hospital they are; they only
+//               ever hear "the queue changed, re-read it" (display:refresh)
+//   staff:<id>  signed-in staff screens — the hospital is taken from the login
+//               token, never from what the browser says; they hear which
+//               module's data changed and that the bell has news (data:changed)
+// Neither push carries data: each screen re-reads through its own login.
 let io = null
+
+/** The login token a staff socket presented: in the handshake, or the session cookie. */
+function tokenOf(socket, given) {
+  if (given) return given
+  if (socket.handshake.auth?.token) return socket.handshake.auth.token
+  const cookie = socket.handshake.headers?.cookie || ''
+  const m = /(?:^|;\s*)token=([^;]+)/.exec(cookie)
+  return m ? decodeURIComponent(m[1]) : null
+}
+
+/** The hospital of a valid staff login, or null. */
+function staffOrg(token) {
+  if (!token) return null
+  try {
+    const d = jwt.verify(token, JWT_SECRET)
+    return d.role === 'patient' ? null : d.organizationId || null
+  } catch {
+    return null
+  }
+}
 
 export function initRealtime(httpServer) {
   io = new Server(httpServer, {
@@ -16,11 +47,22 @@ export function initRealtime(httpServer) {
   })
 
   io.on('connection', (socket) => {
+    const joinStaff = (token) => {
+      const org = staffOrg(tokenOf(socket, token))
+      if (org) socket.join(`staff:${org}`)
+    }
+    joinStaff()
+    // A screen that signed in after its socket opened says so.
+    socket.on('staff:join', ({ token } = {}) => joinStaff(token))
+
     // A board announces which org (and optionally which screen) it is, so it
     // only ever receives its own hospital's updates.
     socket.on('display:join', ({ orgId, screenId } = {}) => {
       if (orgId) socket.join(`org:${orgId}`)
       if (screenId) socket.join(`screen:${screenId}`)
+      // With login switched off (the demo) there are no tokens: the staff
+      // screens of that one hospital are joined by what they say.
+      if (orgId && !isAuthEnforced()) socket.join(`staff:${orgId}`)
     })
   })
 
@@ -48,12 +90,12 @@ export function emitDisplayRefresh(orgId, screenId = null) {
  * screen only re-reads when ITS data moved (see middleware/liveUpdates.js, which
  * fires it after every successful write, and the client's useLiveData).
  *
- * The payload carries no data — just the topic — so it is safe on the same
- * per-organization room the boards use.
+ * Only signed-in staff of this hospital hear it (the staff:<id> room, joined
+ * from the login token). The payload carries no data — just the topic.
  */
 export function emitDataChanged(orgId, topic) {
   if (!io || !orgId || !topic) return
-  io.to(`org:${orgId}`).emit('data:changed', { topic, at: Date.now() })
+  io.to(`staff:${orgId}`).emit('data:changed', { topic, at: Date.now() })
 }
 
 export const getIO = () => io

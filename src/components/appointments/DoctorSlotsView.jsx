@@ -105,9 +105,9 @@ export default function DoctorSlotsView({
               <User className="h-5 w-5 text-blue-600" />
               Doctor Slot Availability
             </CardTitle>
-            <div className="flex items-center gap-3">
+            <div className="flex flex-wrap items-center gap-3">
               <Select value={selectedDoctor} onValueChange={setSelectedDoctor}>
-                <SelectTrigger className="w-[220px]">
+                <SelectTrigger className="w-full sm:w-[220px]">
                   <SelectValue placeholder="Select Doctor" />
                 </SelectTrigger>
                 <SelectContent>

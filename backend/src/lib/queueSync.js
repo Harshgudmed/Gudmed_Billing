@@ -25,6 +25,70 @@ import { parseTimetable } from './doctorTimetable.js'
 // puts back exactly what the sync is careful to leave out.
 export const NOT_QUEUEABLE = ['cancelled', 'no_show', 'rescheduled']
 
+// ── One visit, two records: keeping them in step ─────────────────────────────
+//
+// A booked visit lives twice — as the Appointment (reception's book) and as its
+// queue row (the waiting hall). Each screen moves its own record: Call in and
+// Complete on the queue, Start / Complete / Cancel on Appointments. When only one
+// side moved, the two disagreed: a patient called in still read "checked in" on
+// Appointments, and a visit completed there still sat "waiting" in the queue,
+// where call-next could promote them to "you are next".
+//
+// So every status change on one side calls keepVisitInStep() inside the same
+// transaction, and it moves the other side to the status that means the same
+// moment of the visit. It writes only the OTHER table, with a plain updateMany —
+// never back through a controller — so A moving B can never move A again.
+
+// After any of these the visit is over, on either side: nothing moves a record
+// out of one, and an over visit is not called, alerted or completed again.
+export const VISIT_OVER = ['completed', ...NOT_QUEUEABLE]
+
+// Appointment status → its queue row's. scheduled / confirmed are not here (being
+// booked is already being in the queue), nor checked_in (upsertQueueForAppointment
+// seats the patient).
+const QUEUE_STATUS_FOR = {
+  in_progress: 'in_progress',
+  completed: 'completed',
+  cancelled: 'cancelled',
+  no_show: 'no_show',
+  rescheduled: 'rescheduled',
+}
+// Queue status → its appointment's. Not 'called' or 'waiting': an alert ("you are
+// next") is not the consultation, and Undo alert would need the appointment to
+// step backwards, which its status rules forbid. Not cancelled / no_show either:
+// a booked visit is voided from Appointments, which voids its bill too
+// (queueController refuses those for a booked visit).
+const APPOINTMENT_STATUS_FOR = { in_progress: 'in_progress', completed: 'completed' }
+
+const QUEUE_STAMP = { in_progress: 'serviceStartedAt', completed: 'serviceCompletedAt' }
+const APPOINTMENT_STAMP = { in_progress: 'startedAt', completed: 'completedAt' }
+
+/**
+ * Move the other half of these visits to match a status change.
+ *
+ * @param client          the caller's transaction, so both halves commit together
+ * @param appointmentIds  the visits' appointment ids (nulls — walk-ins — are skipped)
+ * @param changed         'appointment' | 'queue' — the side the caller just moved
+ * @param status          the status that side moved to
+ * @returns how many rows on the other side moved
+ */
+export async function keepVisitInStep(client, { organizationId, appointmentIds, changed, status }) {
+  const ids = (appointmentIds || []).filter(Boolean)
+  const toQueue = changed === 'appointment'
+  const target = (toQueue ? QUEUE_STATUS_FOR : APPOINTMENT_STATUS_FOR)[status]
+  if (!organizationId || ids.length === 0 || !target) return 0
+
+  const stampField = (toQueue ? QUEUE_STAMP : APPOINTMENT_STAMP)[target]
+  const data = { status: target, ...(stampField ? { [stampField]: new Date() } : {}) }
+  // Forward only: a record already over stays over, and one already in the
+  // target state is not stamped twice.
+  const stillMoving = { notIn: [...VISIT_OVER, target] }
+  const { count } = toQueue
+    ? await client.queueManagement.updateMany({ where: { organizationId, appointmentId: { in: ids }, status: stillMoving }, data })
+    : await client.appointment.updateMany({ where: { organizationId, id: { in: ids }, status: stillMoving }, data })
+  return count
+}
+
 // Postgres caps a single prepared statement at 32,767 bind variables, and
 // every id in an `appointmentId: { in: [...] }` list is one bind variable.
 // A sync spanning many months of appointments can carry tens of thousands of
@@ -59,9 +123,13 @@ export function chunk(arr, size) {
  * @param {boolean} requireRoom  refuse instead of writing a row with no room:
  *   roomId=null shows on NO board, so the patient would wait unseen. Used at
  *   check-in, where the patient is physically present and must be seated.
+ * @param {boolean} followMove  the appointment's doctor, day or time was just
+ *   edited: an existing row follows it — new doctor, the room that doctor sits
+ *   in for the new slot, the new slot as its place in line. The token is kept.
+ *   Off (booking, check-in), an existing row is left exactly as staff set it.
  * @throws an Error with code NO_ROOM when requireRoom and no room resolves.
  */
-export async function upsertQueueForAppointment(client, { organizationId, appointment, requireRoom = false }) {
+export async function upsertQueueForAppointment(client, { organizationId, appointment, requireRoom = false, followMove = false }) {
   const { roomId, visitType } = await deriveRoomAndVisitType({
     doctorId: appointment.doctorId,
     patientId: appointment.patientId,
@@ -83,6 +151,20 @@ export async function upsertQueueForAppointment(client, { organizationId, appoin
     )
   }
   const priority = appointment.priority || 'normal'
+  const joinedQueueAt = zonedDateTimeToUtc(ymdInZone(appointment.appointmentDate), appointment.appointmentTime)
+  if (followMove && appointment.doctorId) {
+    // "You are next" was promised in the old doctor's room; with another doctor
+    // or room the patient waits in line again rather than jumping the new one.
+    await client.queueManagement.updateMany({
+      where: {
+        organizationId,
+        appointmentId: appointment.id,
+        status: 'called',
+        OR: [{ assignedToId: { not: appointment.doctorId } }, ...(roomId ? [{ roomId: { not: roomId } }, { roomId: null }] : [])],
+      },
+      data: { status: 'waiting', calledAt: null },
+    })
+  }
   return client.queueManagement.upsert({
     where: { appointmentId: appointment.id },
     create: {
@@ -97,11 +179,12 @@ export async function upsertQueueForAppointment(client, { organizationId, appoin
       status: 'waiting',
       priority,
       priorityRank: priorityRank(priority),
-      joinedQueueAt: zonedDateTimeToUtc(ymdInZone(appointment.appointmentDate), appointment.appointmentTime),
+      joinedQueueAt,
     },
     // Already queued (a re-check-in, or a concurrent sync got there first) —
-    // leave staff's own changes (called/priority) alone.
-    update: {},
+    // leave staff's own changes (called/priority) alone. Only a moved visit
+    // re-points the row; its token and status stay.
+    update: followMove ? { assignedToId: appointment.doctorId, roomId, visitType, joinedQueueAt } : {},
   })
 }
 
@@ -136,7 +219,7 @@ export async function syncAppointmentsToQueue(organizationId, startDate, endDate
 async function syncBatch(organizationId, appointments) {
   const existing = await db.queueManagement.findMany({
     where: { organizationId, appointmentId: { in: appointments.map((a) => a.id) } },
-    select: { appointmentId: true, joinedQueueAt: true, roomId: true, status: true },
+    select: { appointmentId: true, joinedQueueAt: true, roomId: true, status: true, assignedToId: true },
   })
   const byAppointment = new Map(existing.map((q) => [q.appointmentId, q]))
 
@@ -220,10 +303,16 @@ async function syncBatch(organizationId, appointments) {
       && current.roomId !== derivedRoom
       && (current.roomId == null || current.status === 'waiting')
 
-    if (slotChanged || roomNeedsFix) {
+    // The doctor heals the same way: a row written before an edit of the
+    // appointment's doctor moved its queue row (see followMove) still sits in
+    // the old doctor's queue. Waiting only, for the reason given above.
+    const doctorNeedsFix = a.doctorId != null && current.assignedToId !== a.doctorId && current.status === 'waiting'
+
+    if (slotChanged || roomNeedsFix || doctorNeedsFix) {
       const data = {}
       if (slotChanged) data.joinedQueueAt = slot
       if (roomNeedsFix) data.roomId = derivedRoom
+      if (doctorNeedsFix) data.assignedToId = a.doctorId
       // Status and priority are deliberately left alone here — staff may
       // since have called the patient or bumped them up by hand.
       ops.push(db.queueManagement.update({ where: { appointmentId: a.id }, data }))

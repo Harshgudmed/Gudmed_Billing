@@ -170,6 +170,25 @@ export const patientDetailsSchema = z.object({
   notes: optionalTextSchema,
 })
 
+// ── Editing a registered patient ──────────────────────────────────────────
+// The same rules as registration, for what the edit CHANGES. A value saved
+// before a rule existed (a blank city, a phone with its country code) is left
+// alone when untouched, so it cannot stop reception correcting the rest of the
+// record. Mirrors patientController.js update(), which refuses the same.
+//
+// `stored` is the form's values as first filled in from the record.
+export const patientEditSchema = (stored = {}) =>
+  z.object({}).passthrough().superRefine((data, ctx) => {
+    for (const [field, rule] of Object.entries(patientDetailsSchema.shape)) {
+      if (!(field in data)) continue
+      if (String(data[field] ?? '').trim() === String(stored[field] ?? '').trim()) continue
+      const result = rule.safeParse(data[field])
+      if (!result.success) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, path: [field], message: result.error.issues[0].message })
+      }
+    }
+  })
+
 // ── Register + (optionally) the first appointment ─────────────────────────
 // Registration and booking are two different acts, and a hospital does the
 // first without the second all the time — a walk-in who will be seen later, a

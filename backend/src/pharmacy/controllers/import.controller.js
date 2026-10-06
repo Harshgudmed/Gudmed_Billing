@@ -2,6 +2,7 @@ import { db } from '../../config/db.js'
 import { getOrgId } from "../../lib/reqContext.js";
 import { handleServiceError, makeError } from '../utils.js'
 import { recordStockChange } from '../stockService.js'
+import { round2 } from '../../lib/money.js'
 
 // Bulk import of a medicine catalog / purchase list.
 //
@@ -18,6 +19,8 @@ const num = (v) => {
   const n = Number(String(v).replace(/[, ]/g, ''))
   return Number.isFinite(n) ? n : undefined
 }
+// Prices to the paisa, as for a drug or batch typed in by hand.
+const rupees = (v) => { const n = num(v); return n === undefined ? undefined : round2(n) }
 
 const str = (v) => {
   if (v === null || v === undefined) return undefined
@@ -71,9 +74,9 @@ function normalizeRow(raw) {
     strength: str(pick('strength', 'power', 'mg')),
     unitOfMeasure: str(pick('unitofmeasure', 'unit', 'uom')),
     barcode: str(pick('barcode', 'barcodeno', 'ean', 'upc')),
-    mrp: num(pick('mrp', 'maxretailprice')),
-    sellingPrice: num(pick('sellingprice', 'salerate', 'saleprice', 'rate', 'price')),
-    purchasePrice: num(pick('purchaseprice', 'purchaserate', 'costprice', 'cost', 'ptr')),
+    mrp: rupees(pick('mrp', 'maxretailprice')),
+    sellingPrice: rupees(pick('sellingprice', 'salerate', 'saleprice', 'rate', 'price')),
+    purchasePrice: rupees(pick('purchaseprice', 'purchaserate', 'costprice', 'cost', 'ptr')),
     gstRate: num(pick('gstrate', 'gst', 'tax', 'taxpercent')),
     reorderLevel: num(pick('reorderlevel', 'reorder', 'minstock', 'minimumstock')),
     quantity: num(pick('quantity', 'currentstock', 'stock', 'qty', 'openingstock', 'openingqty')),
@@ -192,7 +195,7 @@ export async function importDrugs(req, res, next) {
                   quantityReceived: row.quantity,
                   quantityRemaining: row.quantity,
                   costPricePerUnit: row.purchasePrice,
-                  totalCost: row.purchasePrice ? row.purchasePrice * row.quantity : undefined,
+                  totalCost: row.purchasePrice ? round2(row.purchasePrice * row.quantity) : undefined,
                   supplierName: row.supplierName,
                   status: 'active',
                 },

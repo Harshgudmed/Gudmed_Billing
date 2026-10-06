@@ -20,8 +20,13 @@ import {
   collectPayment,
   voidPayment,
   refund,
+  decideRefund,
+  refundRequests,
   collections,
 } from "../inpatient/billPaymentService.js";
+import { refundSettings, isInstantRefund, selfApprovalProblem } from "../lib/refundPolicy.js";
+import { billingAllows } from "../lib/billingAccess.js";
+import { getPagination, paginationMeta } from "../lib/pagination.js";
 import { computeNews2 } from "../inpatient/nursingService.js";
 import { DISCHARGE_TYPES } from "../inpatient/dischargeService.js";
 import { ipdAllowed, orderAllowed } from "../inpatient/rbac.js";
@@ -144,7 +149,8 @@ export async function getAll(req, res) {
     if (resource === "bill")                      return await getBill(req, res, context);
     if (resource === "payments")                  return await getPayments(req, res, context);
     if (resource === "collections")               return await getCollections(req, res, context);
-    if (resource === "bed-categories")            return await getBedCategories(req, res, context);
+    if (resource === "refund-requests")           return await getRefundRequests(req, res, context);
+    if (resource === "bed-categories")           return await getBedCategories(req, res, context);
     if (resource === "tariff-plans")              return await getTariffPlans(req, res, context);
     if (resource === "vitals")                    return await getVitals(req, res, context);
     if (resource === "clinical-notes-v2")         return await getClinicalNotesV2(req, res, context);
@@ -589,6 +595,33 @@ async function getCollections(req, res, context) {
   return res.json({ success: true, data: report });
 }
 
+// IPD refunds for Billing › Refund Approvals, paged in the database. Finance
+// decides them; the billing desk may follow its own requests.
+async function getRefundRequests(req, res, context) {
+  if (!billingAllows(req, "approve") && !billingAllows(req, "adjust"))
+    return res.status(403).json({ success: false, code: "FORBIDDEN", error: "Only the billing desk and Finance see refund requests" });
+  const STATUSES = ["PENDING_APPROVAL", "SUCCESS", "REJECTED", "all"];
+  // No status (the screen's "All refunds" drops the param) means all.
+  const status = STATUSES.includes(req.query.status) ? req.query.status : "all";
+  const { page, limit, skip } = getPagination(req.query);
+  const { rows, total } = await refundRequests(context.orgId, { status, skip, take: limit });
+  // Who decided each one is in the audit trail (BillPayment has no approver
+  // column): one read for the whole page.
+  const decisions = rows.length
+    ? await db.auditLog.findMany({
+        where: { organizationId: context.orgId, entityType: "ipd.payment", action: { in: ["refund-approve", "refund-reject"] }, entityId: { in: rows.map((r) => r.id) } },
+        select: { entityId: true, newValues: true, performedAt: true },
+      })
+    : [];
+  const decidedBy = new Map(decisions.map((d) => {
+    let by = null;
+    try { by = JSON.parse(d.newValues || "{}").by || null; } catch { by = null; }
+    return [d.entityId, { by, at: d.performedAt }];
+  }));
+  const data = rows.map((r) => ({ ...r, patient: r.admission?.patient || null, decidedByName: decidedBy.get(r.id)?.by || null, decidedAt: decidedBy.get(r.id)?.at || null }));
+  return res.json({ success: true, data, pagination: paginationMeta(page, limit, total), meta: { total } });
+}
+
 async function getBedCategories(req, res, context) {
   const cats = await db.bedCategory.findMany({
     where: { organizationId: context.orgId, isActive: true },
@@ -848,6 +881,7 @@ export async function create(req, res) {
     if (resource === "payment")            return await createPayment(req, res, orgId, body);
     if (resource === "void-payment")       return await createVoidPayment(req, res, orgId, body);
     if (resource === "refund")             return await createRefund(req, res, orgId, body);
+    if (resource === "refund-decision")    return await createRefundDecision(req, res, orgId, body);
     if (resource === "cancel-charge")      return await createCancelCharge(req, res, orgId, body);
     if (resource === "discharge-finalize") return await createDischargeFinalize(req, res, orgId, body);
     if (resource === "mark-exit")          return await createMarkExit(req, res, orgId, body);
@@ -1888,6 +1922,9 @@ async function createVoidPayment(req, res, orgId, body) {
 async function createRefund(req, res, orgId, body) {
       const { billId, amount, reason, method } = body;
       try {
+        // Settings → Cancellation & Refund decides whether Finance sees it
+        // first — read from the hospital, never from the request.
+        const org = await db.organization.findUnique({ where: { id: orgId }, select: { settings: true } });
         const r = await refund(orgId, {
           billId,
           amount,
@@ -1895,14 +1932,16 @@ async function createRefund(req, res, orgId, body) {
           method,
           userId: req.user?.id,
           userName: req.user?.fullName,
+          needsApproval: !isInstantRefund(refundSettings(org)),
         });
         await auditIpd(req, orgId, {
-          action: "refund",
+          action: r.payment.status === "PENDING_APPROVAL" ? "refund-request" : "refund",
           entityType: "ipd.payment",
           entityId: r.payment.id,
           after: {
             billId,
             amount: r.payment.amount,
+            status: r.payment.status,
             receipt: r.payment.receiptNumber,
             balanceDue: r.totals?.balanceDue,
           },
@@ -1910,6 +1949,38 @@ async function createRefund(req, res, orgId, body) {
         return res
           .status(201)
           .json({ success: true, data: r.payment, totals: r.totals });
+      } catch (e) {
+        return svcErr(res, e);
+      }
+}
+
+// Finance approves (money goes out) or rejects an IPD refund request.
+async function createRefundDecision(req, res, orgId, body) {
+      const { paymentId, action, reason } = body;
+      try {
+        const org = await db.organization.findUnique({ where: { id: orgId }, select: { settings: true } });
+        const settings = refundSettings(org);
+        const actor = getActor(req);
+        const r = await decideRefund(orgId, {
+          paymentId,
+          action,
+          reason,
+          selfProblem: (requestedById) => selfApprovalProblem(settings, requestedById, actor.id),
+        });
+        await auditIpd(req, orgId, {
+          action: action === "APPROVE" ? "refund-approve" : "refund-reject",
+          entityType: "ipd.payment",
+          entityId: r.payment.id,
+          after: {
+            billId: r.payment.billId,
+            amount: r.payment.amount,
+            status: r.payment.status,
+            receipt: r.payment.receiptNumber,
+            reason: reason || null,
+            by: actor.name,
+          },
+        });
+        return res.json({ success: true, data: r.payment, totals: r.totals });
       } catch (e) {
         return svcErr(res, e);
       }

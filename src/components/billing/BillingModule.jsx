@@ -2,12 +2,15 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { useOrgSettings } from '@/lib/useOrgSettings'
 import { useEnabledModules } from '@/lib/useEnabledModules'
 import { formatMoney as fmt, formatDateTime } from '@/lib/format'
+import { round2 } from '@/lib/money'
+import { showApiError } from '@/lib/apiRequest'
 import { calcAge, getFullName } from '@/lib/patient'
 import { toast } from 'sonner'
 import { format } from 'date-fns'
 import client from '@/api/client'
 import PatientLookup from '@/components/common/PatientLookup'
 import RefundApprovalsTab from './RefundApprovalsTab'
+import InsuranceClaimsTab from './InsuranceClaimsTab'
 // ReceiptIndianRupee, not Receipt: the plain one carries a dollar sign, which is
 // the wrong currency on every screen in this hospital.
 import { ReceiptIndianRupee, Plus, Search, Trash2, Shield, Eye, Printer, Download, TrendingUp, Clock, AlertCircle, Pencil, X, XCircle } from 'lucide-react'
@@ -32,7 +35,8 @@ import { useBookingSource } from '@/components/common/hooks/useBookingSource'
 import { useDateFilter } from '@/components/common/DateFilter'
 import { FilterBar, FilterSelect } from '@/components/common/FilterBar'
 import { useLiveData } from '@/lib/useLiveData'
-import { percentBox } from '@/lib/billing'
+import { percentBox, billingAccess } from '@/lib/billing'
+import { useAuth } from '@/lib/auth'
 
 // The filter row's dropdowns, written once each.
 const INVOICE_STATUS_OPTIONS = [
@@ -51,14 +55,8 @@ const INVOICE_TYPE_OPTIONS = [
   { value: 'radiology', label: 'Radiology' },
   { value: 'procedure', label: 'Procedure' },
   { value: 'vaccine', label: 'Vaccine' },
-]
-const CLAIM_STATUS_OPTIONS = [
-  { value: 'all', label: 'All' },
-  { value: 'submitted', label: 'Submitted' },
-  { value: 'pending', label: 'Pending' },
-  { value: 'approved', label: 'Approved' },
-  { value: 'settled', label: 'Settled' },
-  { value: 'rejected', label: 'Rejected' },
+  { value: 'daycare', label: 'Day Care' },
+  { value: 'ambulance', label: 'Ambulance' },
 ]
 
 // ── Catalogue ─────────────────────────────────────────────────────────────────
@@ -175,16 +173,9 @@ const DEPT_MODULE = {
   Radiology: 'radiology',
 }
 
+// Full class names for the tab row, by how many tabs this person has.
+const TAB_COLS = { 1: 'sm:grid-cols-1', 2: 'sm:grid-cols-2', 3: 'sm:grid-cols-3', 4: 'sm:grid-cols-4', 5: 'sm:grid-cols-5' }
 const BILLING_ITEMS_PER_PAGE = 10
-
-// Claim statuses as stored by the insurance module (InsuranceClaim.status).
-const CLAIM_STATUS_STYLE = {
-  approved:  'bg-green-100 text-green-800',
-  settled:   'bg-emerald-100 text-emerald-800',
-  pending:   'bg-yellow-100 text-yellow-800',
-  submitted: 'bg-blue-100 text-blue-800',
-  rejected:  'bg-red-100 text-red-800',
-}
 
 const DEFAULT_CLINIC = {
   doctorName: 'Dr. Abebe Kebede', qualification: 'MBBS, MD (General Medicine)',
@@ -213,6 +204,9 @@ const BILL_TYPE_LABEL = {
   radiology: { label: 'Radiology', className: 'bg-amber-100 text-amber-700' },
   procedure: { label: 'Procedure', className: 'bg-orange-100 text-orange-700' },
   vaccine: { label: 'Vaccine', className: 'bg-green-100 text-green-700' },
+  // The bill a Day Care case or an ambulance trip raises (typed by the server).
+  daycare: { label: 'Day Care', className: 'bg-pink-100 text-pink-700' },
+  ambulance: { label: 'Ambulance', className: 'bg-red-100 text-red-700' },
 }
 
 // The cart's category (what the biller picked) → the `type` stored on the line.
@@ -259,6 +253,7 @@ function PayBadge({ invoice }) {
   // Checked before paid/partial: a cancelled bill is void whatever was collected
   // on it, and must never read as money still owed.
   if (invoice.cancelled) return <Badge className="bg-gray-200 text-gray-700">Cancelled</Badge>
+  if (invoice.archived) return <Badge className="bg-gray-100 text-gray-600" title="A refund was approved — its revised invoice (-R) is the live bill">Revised</Badge>
   if (invoice.paid) return <Badge className="bg-green-100 text-green-800">Paid</Badge>
   const total = Number(invoice.total || 0)
   const paidAmt = Number(invoice.amountPaid || 0)
@@ -267,12 +262,30 @@ function PayBadge({ invoice }) {
   return <Badge className="bg-yellow-100 text-yellow-800">Pending</Badge>
 }
 
+// A read that failed: says so, and — when older data is still on screen — that
+// it is what was last loaded, with Try again (the words PaginatedTable uses).
+function LoadFailed({ what, stale, onRetry }) {
+  return (
+    <p role="alert" className="rounded-md bg-amber-50 px-3 py-2 text-sm text-amber-800">
+      {stale ? `Could not refresh ${what} — showing what was last loaded.` : `Could not load ${what}. Check the connection, then try again.`}
+      <button type="button" onClick={onRetry} className="ml-2 font-medium underline underline-offset-2">Try again</button>
+    </p>
+  )
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // MAIN COMPONENT
 // ─────────────────────────────────────────────────────────────────────────────
 export default function BillingModule({ onBack }) {
-  const user = JSON.parse(localStorage.getItem('gudmed-user') || '{}')
+  // The signed-in person, from the login itself. (This read localStorage
+  // 'gudmed-user', which nothing ever writes — so the role was always empty and
+  // Refund Approvals never showed its Approve buttons to anyone.)
+  const { user } = useAuth()
   const [activeTab, setActiveTab] = useState('invoices')
+  // What this person may do here (lib/billing.js billingAccess, the server's
+  // rules): the counters raise bills, take money and ask for refunds; the
+  // Finance Controller sets prices and approves refunds; an administrator both.
+  const access = billingAccess(user?.role)
   const [orgInfo, setOrgInfo] = useState({ name: 'Hospital', address: '', city: '', phone: '', email: '' })
   const [clinic, setClinic] = useState(() => {
     if (typeof window !== 'undefined') {
@@ -283,12 +296,20 @@ export default function BillingModule({ onBack }) {
   })
 
   // Data
+  // A failed read keeps what is on screen and sets its *Failed flag, which the
+  // screen turns into "could not load / refresh … Try again" — never an empty
+  // list passed off as "nothing found". The next good read clears it.
   const [bills, setBills] = useState([])
   const [billsLoading, setBillsLoading] = useState(false)
+  const [billsFailed, setBillsFailed] = useState(false)
 
   const [services, setServices] = useState([])
   const [servicesLoading, setServicesLoading] = useState(false)
-  const [stats, setStats] = useState({ todayRevenue: 0, pendingCount: 0, collectedToday: 0, outstanding: 0 })
+  const [servicesFailed, setServicesFailed] = useState(false)
+  // null until the first good read, so the tiles never claim ₹0 for figures
+  // that were never loaded.
+  const [stats, setStats] = useState(null)
+  const [statsFailed, setStatsFailed] = useState(false)
 
   // Real Lab/Radiology/Pharmacy catalogues (was hardcoded dummy CATALOGUE data).
   // Lab tests + Radiology exams are small enough to load in full and filter
@@ -298,12 +319,6 @@ export default function BillingModule({ onBack }) {
   const [pharmacyDrugs, setPharmacyDrugs] = useState([])
   const [catalogLoading, setCatalogLoading] = useState(false)
 
-  // Real insurance claims (was a hardcoded DEMO_CLAIMS array of fake patients).
-  // GET /insurance returns cases, each with its nested claims — flatten to rows.
-  const [claims, setClaims] = useState([])
-  const [claimsLoading, setClaimsLoading] = useState(false)
-  const [claimSearch, setClaimSearch] = useState('')
-  const [claimStatusFilter, setClaimStatusFilter] = useState('all')
 
   // New invoice form
   const newForm = () => ({
@@ -392,13 +407,6 @@ export default function BillingModule({ onBack }) {
   }
   const [catSearch, setCatSearch] = useState('')
   const [saving, setSaving] = useState(false)
-
-  // Patient search
-  const [patientSearch, setPatientSearch] = useState('')
-  const [patientDropdown, setPatientDropdown] = useState(false)
-  const [patientResults, setPatientResults] = useState([])
-  const [patSearchLoading, setPatSearchLoading] = useState(false)
-  const dropRef = useRef(null)
 
   // Modals
   const [showInvoiceModal, setShowInvoiceModal] = useState(null)
@@ -496,12 +504,23 @@ export default function BillingModule({ onBack }) {
     setInvoicesPage(1)
   }, [debouncedInvoiceSearch, invoiceFilter, invoiceType, dateFilter.key])
 
-  // Derived cart totals
-  const subtotal = form.items.reduce((a, i) => a + i.qty * i.amt, 0)
+  // Derived cart totals, by the server's rule (backend/src/lib/catalogPrice.js
+  // priceInvoiceItems): each line's GST is on its price less its share of the
+  // discount, at the line's own rate (a medicine's) or else the bill's GST %,
+  // to the paisa — and the bill's GST is the sum of its lines'. Worked out
+  // differently, the cart showed ₹425 for a bill stored at ₹424.80, "Full
+  // amount" was then refused, and a medicine's GST never showed at all.
+  const subtotal = round2(form.items.reduce((a, i) => a + i.qty * i.amt, 0))
   const discountAmt = Math.round(subtotal * form.discount / 100)
-  const gstAmt = Math.round((subtotal - discountAmt) * form.gstPct / 100)
+  const cartLines = form.items.map((it) => {
+    const lineTotal = round2(it.qty * it.amt)
+    const lineDiscount = subtotal > 0 ? (lineTotal / subtotal) * discountAmt : 0
+    const rate = Number(it.gstRate) > 0 ? Number(it.gstRate) : (Number(form.gstPct) || 0)
+    return { lineTotal, lineDiscount, tax: round2(((lineTotal - lineDiscount) * rate) / 100) }
+  })
+  const gstAmt = round2(cartLines.reduce((a, l) => a + l.tax, 0))
   const homeCharge = Number(form.homeCollection) || 0
-  const total = subtotal - discountAmt + gstAmt + homeCharge
+  const total = round2(subtotal - discountAmt + gstAmt + homeCharge)
 
   // ── Fetch all ─────────────────────────────────────────────────────────────
   const fetchBills = useCallback(async () => {
@@ -563,6 +582,13 @@ export default function BillingModule({ onBack }) {
             // it rendered "Pending" with a live Pay button — the cashier took
             // the money at the counter and only then hit the server's refusal.
             cancelled: inv.status === 'cancelled' || inv.paymentStatus === 'cancelled',
+            // Replaced by its revision (-R1…) when a refund was approved: a frozen
+            // record, no longer the bill to collect on or cancel. It read as
+            // "Pending" with Pay and Cancel, and offered to take ₹0.00 online.
+            archived: !!inv.isArchived,
+            // A consultation written against this bill = the visit took place
+            // (CancelActionDialog prices a cancellation by it).
+            consultationId: inv.consultationId || null,
             // The raw status too. The cancel dialog asks "has the work started?"
             // to price the cancellation, and answers it from this — without it
             // every bill read as already-worked and was charged the after-work
@@ -581,8 +607,13 @@ export default function BillingModule({ onBack }) {
           }
         })
         setBills(mapped)
+        setBillsFailed(false)
       }
-    } catch { /* silent */ }
+    } catch {
+      // Keep the rows already on screen; the table says the load failed (an
+      // empty table read "No invoices found" when the server never answered).
+      setBillsFailed(true)
+    }
     finally { setBillsLoading(false) }
     // `dateFilter.key` and not the range object: a fresh { startDate, endDate } is
     // built on every render, so depending on it would refetch forever. The key is
@@ -600,8 +631,9 @@ export default function BillingModule({ onBack }) {
           collectedToday: s.collectedToday    || 0,
           outstanding:   s.outstandingBalance || 0,
         })
+        setStatsFailed(false)
       }
-    } catch { /* silent */ }
+    } catch { setStatsFailed(true) }
   }, [])
 
   const fetchServices = useCallback(async () => {
@@ -612,34 +644,11 @@ export default function BillingModule({ onBack }) {
       if (res.success) {
         setServices(res.data || [])
         setTotalServices(res.meta?.total || 0)
+        setServicesFailed(false)
       }
-    } catch { /* silent */ }
+    } catch { setServicesFailed(true) }
     finally { setServicesLoading(false) }
   }, [servicesPage])
-
-  const fetchClaims = useCallback(async () => {
-    setClaimsLoading(true)
-    try {
-      const res = await client.get('/insurance')
-      if (res.success) {
-        const rows = (res.data || []).flatMap((c) =>
-          (c.claims || []).map((cl) => ({
-            id: cl.id,
-            claimNumber: cl.claimNumber,
-            patient: getFullName(c.patient) || '—',
-            insurer: c.insurerName,
-            policy: c.policyNumber,
-            amount: cl.claimAmount,
-            approved: cl.approvedAmount,
-            status: cl.status,
-            submitted: cl.submittedAt || cl.createdAt,
-          }))
-        )
-        setClaims(rows)
-      }
-    } catch { /* silent — the insurance module owns this data */ }
-    finally { setClaimsLoading(false) }
-  }, [])
 
   // Real Lab test catalog search
   // isCancelled() lets the caller disown a reply whose search term is already stale.
@@ -677,8 +686,7 @@ export default function BillingModule({ onBack }) {
     fetchBills()
     fetchServices()
     fetchStats()
-    fetchClaims()
-  }, [fetchBills, fetchServices, fetchStats, fetchClaims])
+  }, [fetchBills, fetchServices, fetchStats])
 
   // Live over the app's WebSocket: the server announces every write in this
   // hospital (middleware/liveUpdates.js), so a payment taken at another counter,
@@ -692,15 +700,15 @@ export default function BillingModule({ onBack }) {
   // keystroke in the invoice search also re-pulled the service catalogue, the stat
   // cards and the insurance claims. Measured: four requests, one of them wanted,
   // on every keystroke, every filter change and every page turn.
+  // (The claims now load in their own tab — InsuranceClaimsTab.)
   useEffect(() => { fetchBills() }, [fetchBills])
 
-  // These three read nothing the user types. They are the module's opening state;
-  // Refresh and every write path still call fetchAll, which re-reads all four.
+  // These two read nothing the user types. They are the module's opening state;
+  // every write path still calls fetchAll, which re-reads all three.
   useEffect(() => {
     fetchServices()
     fetchStats()
-    fetchClaims()
-  }, [fetchServices, fetchStats, fetchClaims])
+  }, [fetchServices, fetchStats])
 
   const { orgInfo: hookOrgInfo } = useOrgSettings()
   // Settings → Modules decides which departments this hospital can bill for.
@@ -722,30 +730,6 @@ export default function BillingModule({ onBack }) {
       }))
     }
   }, [hookOrgInfo])
-
-  // ── Patient search ─────────────────────────────────────────────────────────
-  // clearTimeout only stops a debounce that hasn't fired — a request already in flight
-  // still returns, so a slow reply for an earlier prefix could repaint the dropdown and
-  // let the cashier click a patient who no longer matches the box. Drop late replies.
-  useEffect(() => {
-    if (!patientSearch || patientSearch.length < 2) { setPatientResults([]); return }
-    let cancelled = false
-    const t = setTimeout(async () => {
-      setPatSearchLoading(true)
-      try {
-        const res = await client.get('/patients', { params: { search: patientSearch, limit: 8 } })
-        if (!cancelled && res.success) setPatientResults(res.data || [])
-      } catch { /* silent */ }
-      finally { if (!cancelled) setPatSearchLoading(false) }
-    }, 300)
-    return () => { cancelled = true; clearTimeout(t) }
-  }, [patientSearch])
-
-  useEffect(() => {
-    const h = (e) => { if (dropRef.current && !dropRef.current.contains(e.target)) setPatientDropdown(false) }
-    document.addEventListener('mousedown', h)
-    return () => document.removeEventListener('mousedown', h)
-  }, [])
 
   // ── Unified server-side catalog search (Lab, Radiology, Pharmacy) ────────
   // A slow reply for an earlier keystroke (or for the department the user just switched
@@ -770,8 +754,6 @@ export default function BillingModule({ onBack }) {
       gender: p.gender === 'male' ? 'M' : p.gender === 'female' ? 'F' : 'O',
       uhid: p.mrn,
     }))
-    setPatientSearch(getFullName(p))
-    setPatientDropdown(false)
   }
 
   // ── Cart helpers ───────────────────────────────────────────────────────────
@@ -806,23 +788,21 @@ export default function BillingModule({ onBack }) {
     if (form.items.length === 0) { toast.error('Add at least one service'); return }
     const amtReceived = Number(form.amountReceived) || 0
     if (amtReceived < 0) { toast.error('Amount received cannot be negative'); return }
-    if (amtReceived > total + 0.01) { toast.error(`Amount received cannot exceed total ₹${total.toLocaleString('en-IN')}`); return }
+    if (amtReceived > total + 0.01) { toast.error(`Amount received cannot exceed total ${fmt(total)}`); return }
     setSaving(true)
     const deptLabel = DEPT_LABEL[department] || department
     // Build item array for the backend. The backend enforces structure and
     // computes its own subtotal.
-    const apiItems = form.items.map(it => {
-      const itemTotal = it.qty * it.amt
-      const itemDiscount = subtotal > 0 ? (itemTotal / subtotal) * discountAmt : 0
-      const itemTax = Math.round((itemTotal - itemDiscount) * (form.gstPct || 0) / 100)
-      
+    const apiItems = form.items.map((it, idx) => {
+      // The very figures the cart shows (cartLines above), so the two agree.
+      const { lineTotal, lineDiscount, tax } = cartLines[idx]
       return {
         serviceName: it.name,
         quantity:    it.qty,
         unitPrice:   it.amt,
-        total:       itemTotal,
-        tax:         itemTax,
-        discount:    itemDiscount,
+        total:       lineTotal,
+        tax,
+        discount:    lineDiscount,
         // Only the three clinical catalogues carry a master-data id; billing it
         // decrements pharmacy stock / raises the lab-radiology order.
         ...(it.id && SOURCE_TYPE[it.cat] ? { sourceType: SOURCE_TYPE[it.cat], sourceId: it.id } : {}),
@@ -861,17 +841,29 @@ export default function BillingModule({ onBack }) {
           notes: `[${deptLabel}] ${form.notes || ''}${department === 'Lab' && homeCharge > 0 ? ` [HCC:${homeCharge}]` : ''}`.trim(),
         })
         if (result.success) {
-          bill.dbId = result.data.id
-          bill.id = result.data.invoiceNumber
-          bill.invoiceNo = result.data.invoiceNumber
+          const saved = result.data
+          bill.dbId = saved.id
+          bill.id = saved.invoiceNumber
+          bill.invoiceNo = saved.invoiceNumber
+          // The stored figures are the bill (the server prices it from the catalogue).
+          Object.assign(bill, { subtotal: saved.subtotal, discountAmt: saved.discountAmount, gstAmt: saved.taxAmount, total: saved.totalAmount })
           if (amtReceived > 0) {
-            await client.post('/billing', {
-              resource: 'payment', invoiceId: result.data.id,
-              patientId: form.patientId, amount: amtReceived, paymentMethod: form.payMode,
-            })
-            bill.amountPaid = amtReceived
-            bill.balanceDue = Math.max(0, total - amtReceived)
-            bill.paid = bill.balanceDue <= 0.009
+            // Never more than the stored bill asks for.
+            const amount = Math.min(amtReceived, saved.totalAmount)
+            try {
+              await client.post('/billing', {
+                resource: 'payment', invoiceId: saved.id,
+                patientId: form.patientId, amount, paymentMethod: form.payMode,
+              })
+              bill.amountPaid = amount
+              bill.balanceDue = round2(Math.max(0, saved.totalAmount - amount))
+              bill.paid = bill.balanceDue <= 0.009
+            } catch (err) {
+              // The invoice IS saved. Saying "Failed to save invoice" here sent
+              // people to save it again — a second bill for the same visit.
+              showApiError(err, `Invoice ${saved.invoiceNumber} is saved, but the payment was not recorded — take it from the invoice list`)
+              Object.assign(bill, { amountPaid: 0, balanceDue: saved.totalAmount, paid: false })
+            }
           }
           await fetchBills()
         }
@@ -881,15 +873,15 @@ export default function BillingModule({ onBack }) {
       toast.success('Invoice saved!')
       // WhatsApp notification
       if ((clinic.whatsappEnabled ?? true) && form.sendWhatsApp && form.phone) {
-        const itemLines = form.items.map(it => `  • ${it.name} x${it.qty} = ₹${(it.qty * it.amt).toLocaleString('en-IN')}`).join('\n')
+        const itemLines = form.items.map(it => `  • ${it.name} x${it.qty} = ${fmt(it.qty * it.amt)}`).join('\n')
         const msgText = [
           `Dear ${form.patientName},`,
           ``,
           `Your invoice *${bill.invoiceNo}* from *${clinic.clinicName}* has been generated.`,
           ``,
           `*Services:*`, itemLines, ``,
-          form.discount > 0 ? `Discount: -₹${discountAmt.toLocaleString('en-IN')}` : null,
-          `*Total: ₹${total.toLocaleString('en-IN', { minimumFractionDigits: 2 })}*`,
+          form.discount > 0 ? `Discount: -${fmt(discountAmt)}` : null,
+          `*Total: ${fmt(total)}*`,
           `Payment Mode: ${form.payMode}`,
           ``,
           `Thank you for visiting ${clinic.clinicName}!`,
@@ -901,9 +893,8 @@ export default function BillingModule({ onBack }) {
       setShowInvoiceModal(bill)
       setForm(newForm())
       setDepartment(''); setActiveCat('')
-      setPatientSearch('')
       setActiveTab('invoices')
-    } catch { toast.error('Failed to save invoice') }
+    } catch (err) { showApiError(err, 'Failed to save invoice') }
     finally { setSaving(false) }
   }
 
@@ -1000,7 +991,7 @@ export default function BillingModule({ onBack }) {
         // Also open WhatsApp with the link
         if (bill.phone) {
           const phone = bill.phone.replace(/\D/g, '').slice(-10)
-          const msg = `Dear ${bill.patientName}, your payment link for Invoice ${bill.invoiceNo} (₹${bill.total.toLocaleString('en-IN')}) is: ${res.shortUrl}`
+          const msg = `Dear ${bill.patientName}, your payment link for Invoice ${bill.invoiceNo} (${fmt(bill.total)}) is: ${res.shortUrl}`
           window.open(`https://wa.me/91${phone}?text=${encodeURIComponent(msg)}`, '_blank')
         }
       }
@@ -1017,7 +1008,7 @@ export default function BillingModule({ onBack }) {
     const bal = bill.balanceDue ?? (Number(bill.total || 0) - Number(bill.amountPaid || 0))
     const amt = Number(amount)
     if (!Number.isFinite(amt) || amt <= 0) { toast.error('Enter a valid amount'); return }
-    if (amt > bal + 0.01) { toast.error(`Amount cannot exceed balance ₹${bal.toLocaleString('en-IN')}`); return }
+    if (amt > bal + 0.01) { toast.error(`Amount cannot exceed balance ${fmt(bal)}`); return }
     // Hard guard against double-click / double-submit → duplicate payment.
     if (paymentLock.current) return
     paymentLock.current = true
@@ -1042,7 +1033,7 @@ export default function BillingModule({ onBack }) {
         // Keep the modal open so the next installment / method can be collected.
         setShowPayModal(updated)
         setPayAmount(String(newBal))
-        toast.success(`₹${amt.toLocaleString('en-IN')} received via ${method}. Balance ₹${newBal.toLocaleString('en-IN')}`)
+        toast.success(`${fmt(amt)} received via ${method}. Balance ${fmt(newBal)}`)
       }
     } catch { toast.error('Failed to record payment') }
     finally { paymentLock.current = false; setSavingPayment(false) }
@@ -1198,16 +1189,22 @@ export default function BillingModule({ onBack }) {
     }),
     cancel: async (b, c) => {
       const paid = Number(b.amountPaid) || 0
-      // Refund FIRST. Cancelling archives the invoice and the API refuses a refund
-      // against a cancelled document — the other order loses the money silently.
-      if (paid > 0 && c.refund > 0) {
+      // A paid bill is cancelled THROUGH its refund: one request that says so,
+      // and the server cancels the bill when the refund is applied (at once in
+      // instant mode, else on Finance's approval). Refunding and then cancelling
+      // as two calls failed on the second — the server will not cancel a bill
+      // holding money — and left the refund behind on a bill still standing.
+      if (paid > 0) {
+        if (!(c.refund > 0)) throw new Error('Nothing would be refunded (the cancellation charge is the whole amount), so this paid bill stays as it is')
         await client.post('/billing', {
           resource: 'refund',
           invoiceId: b.dbId,
           amount: Math.min(c.refund, paid),
           refundReason: c.reason,
           paymentMethod: 'cash',
+          cancelInvoice: true,
         })
+        return
       }
       await client.patch('/billing', {
         resource: 'invoice',
@@ -1215,23 +1212,16 @@ export default function BillingModule({ onBack }) {
         updates: { status: 'cancelled', cancellationReason: c.reason },
       })
     },
-    messages: { rescheduled: (c) => `Due date moved to ${c.date}` },
+    messages: {
+      rescheduled: (c) => `Due date moved to ${c.date}`,
+      cancelled: (c) => (c.refund > 0
+        ? (c.instant ? 'Cancelled — refund issued at the counter' : 'Refund sent for approval — the bill is cancelled once it is approved')
+        : 'Cancelled'),
+    },
     onDone: () => fetchAll(),
   })
 
   const filteredBills = bills // Backend handles pagination and filtering now
-
-  // ── Filtered insurance claims (client-side; claims list is fetched in full) ─
-  const filteredClaims = claims.filter(c => {
-    const matchesStatus = claimStatusFilter === 'all' || c.status === claimStatusFilter
-    const q = claimSearch.trim().toLowerCase()
-    const matchesSearch = !q ||
-      (c.claimNumber || '').toLowerCase().includes(q) ||
-      (c.patient || '').toLowerCase().includes(q) ||
-      (c.insurer || '').toLowerCase().includes(q) ||
-      (c.policy || '').toLowerCase().includes(q)
-    return matchesStatus && matchesSearch
-  })
 
   // ── Recent transactions (last 10) ─────────────────────────────────────────
   const recentBills = [...bills].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt)).slice(0, 10)
@@ -1280,13 +1270,24 @@ export default function BillingModule({ onBack }) {
     )
   }
 
+  // The tabs this person works in — each shown only to those who may use it.
+  const tabs = [
+    { value: 'invoices', label: 'Dashboard & Invoices', show: true },
+    { value: 'new-invoice', label: 'New Invoice', show: access.canRaise },
+    { value: 'catalog', label: 'Service Catalog', show: true },
+    { value: 'insurance', label: 'Insurance', show: access.canSeeInsurance },
+    { value: 'approvals', label: 'Refund Approvals', show: access.canApprove },
+  ].filter((tb) => tb.show)
+
   // ─────────────────────────────────────────────────────────────────────────
   // RENDER
   // ─────────────────────────────────────────────────────────────────────────
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex items-center justify-between mb-6">
+      {/* Wraps on a phone: an administrator gets both buttons, which pushed
+          the page 82px sideways at 390px. */}
+      <div className="flex flex-wrap items-center justify-between gap-3 mb-6">
         <div>
           <h1 className="text-3xl font-bold flex items-center gap-2">
             <ReceiptIndianRupee className="h-7 w-7 text-blue-600" />Billing &amp; Payments
@@ -1295,19 +1296,15 @@ export default function BillingModule({ onBack }) {
         </div>
         <div className="flex gap-2">
           {/* No Refresh button: this screen is live (useLiveData below). */}
-          <Button variant="outline" onClick={() => setActiveTab('new-invoice')}><Plus className="h-4 w-4 mr-1" />New Invoice</Button>
-          <Button onClick={() => setActiveTab('catalog')} className="bg-gray-900 hover:bg-gray-800"><Plus className="h-4 w-4 mr-1" />Add Service</Button>
+          {access.canRaise && <Button variant="outline" onClick={() => setActiveTab('new-invoice')}><Plus className="h-4 w-4 mr-1" />New Invoice</Button>}
+          {access.canEditCatalog && <Button onClick={() => { setActiveTab('catalog'); openAddServiceDialog() }} className="bg-gray-900 hover:bg-gray-800"><Plus className="h-4 w-4 mr-1" />Add Service</Button>}
         </div>
       </div>
 
       {/* Tabs */}
       <Tabs value={activeTab} onValueChange={setActiveTab}>
-        <TabsList className="w-full grid grid-cols-6 mb-6">
-          <TabsTrigger value="invoices">Dashboard & Invoices</TabsTrigger>
-          <TabsTrigger value="new-invoice">New Invoice</TabsTrigger>
-          <TabsTrigger value="catalog">Service Catalog</TabsTrigger>
-          <TabsTrigger value="insurance">Insurance</TabsTrigger>
-          <TabsTrigger value="approvals">Refund Approvals</TabsTrigger>
+        <TabsList className={`w-full grid h-auto mb-6 grid-cols-2 ${TAB_COLS[tabs.length]}`}>
+          {tabs.map((tb) => <TabsTrigger key={tb.value} value={tb.value}>{tb.label}</TabsTrigger>)}
         </TabsList>
 
         {/* ── INVOICES (Merged with Dashboard) ── */}
@@ -1315,9 +1312,9 @@ export default function BillingModule({ onBack }) {
           {/* Stats cards */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             {[
-              { label: 'Today Revenue', value: fmt(stats.todayRevenue), color: 'text-green-600', bg: 'bg-green-50' },
-              { label: 'Pending Invoices', value: stats.pendingCount, color: 'text-yellow-600', bg: 'bg-yellow-50' },
-              { label: 'Outstanding Balance', value: fmt(stats.outstanding), color: 'text-red-600', bg: 'bg-red-50' },
+              { label: 'Today Revenue', value: stats ? fmt(stats.todayRevenue) : '—', color: 'text-green-600', bg: 'bg-green-50' },
+              { label: 'Pending Invoices', value: stats ? stats.pendingCount : '—', color: 'text-yellow-600', bg: 'bg-yellow-50' },
+              { label: 'Outstanding Balance', value: stats ? fmt(stats.outstanding) : '—', color: 'text-red-600', bg: 'bg-red-50' },
             ].map(s => (
               <Card key={s.label} className={s.bg}>
                 <CardContent className="pt-5 pb-4">
@@ -1327,6 +1324,7 @@ export default function BillingModule({ onBack }) {
               </Card>
             ))}
           </div>
+          {statsFailed && <LoadFailed what="today's figures" stale={!!stats} onRetry={fetchStats} />}
 
           {/* The shared filter row (components/common/FilterBar). */}
           <FilterBar
@@ -1340,6 +1338,7 @@ export default function BillingModule({ onBack }) {
             <FilterSelect value={invoiceType} onChange={setInvoiceType} options={INVOICE_TYPE_OPTIONS} />
             {dateFilter.control}
           </FilterBar>
+          {billsFailed && <LoadFailed what="invoices" stale={bills.length > 0} onRetry={fetchBills} />}
           <Card>
             <CardContent className="p-0">
               {billsLoading ? (
@@ -1363,7 +1362,7 @@ export default function BillingModule({ onBack }) {
                     </TableHeader>
                     <TableBody>
                       {filteredBills.length === 0 ? (
-                        <TableRow><TableCell colSpan={9} className="text-center py-10 text-gray-400">No invoices found</TableCell></TableRow>
+                        !billsFailed && <TableRow><TableCell colSpan={9} className="text-center py-10 text-gray-400">No invoices found</TableCell></TableRow>
                       ) : filteredBills.map(b => (
                         <TableRow key={b.id}>
                           <TableCell className="font-mono text-sm text-blue-600">{b.invoiceNo}</TableCell>
@@ -1378,10 +1377,10 @@ export default function BillingModule({ onBack }) {
                           <TableCell>
                             <div className="flex gap-1">
                               <Button size="sm" variant="outline" onClick={() => setShowInvoiceModal(b)}>View</Button>
-                              {!b.cancelled && (!b.paid || (b.balanceDue ?? (b.total - (b.amountPaid || 0))) > 0) && (
+                              {access.canRaise && !b.cancelled && !b.archived && (!b.paid || (b.balanceDue ?? (b.total - (b.amountPaid || 0))) > 0) && (
                                 <Button size="sm" onClick={() => { setShowPayModal(b); setPayMethod('Cash') }}>Pay</Button>
                               )}
-                              {!b.cancelled && (
+                              {access.canAdjust && !b.cancelled && !b.archived && (
                                 <Button size="sm" variant="ghost" className="text-red-500" title="Cancel"
                                   onClick={() => cancelAction.start(b)}>
                                   <XCircle className="h-4 w-4" />
@@ -1405,7 +1404,7 @@ export default function BillingModule({ onBack }) {
         </TabsContent>
 
         {/* ── NEW INVOICE ── */}
-        <TabsContent value="new-invoice">
+        {access.canRaise && <TabsContent value="new-invoice">
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             {/* Left: Patient + Catalogue */}
             <div className="space-y-4">
@@ -1628,7 +1627,7 @@ export default function BillingModule({ onBack }) {
                         <Button className="flex-1" onClick={saveInvoice} disabled={saving}>
                           {saving ? 'Saving...' : 'Save Invoice'}
                         </Button>
-                        <Button variant="outline" onClick={() => { setForm(newForm()); setDepartment(''); setActiveCat(''); setPatientSearch('') }}>Clear</Button>
+                        <Button variant="outline" onClick={() => { setForm(newForm()); setDepartment(''); setActiveCat('') }}>Clear</Button>
                       </div>
                     </>
                   )}
@@ -1636,7 +1635,7 @@ export default function BillingModule({ onBack }) {
               </Card>
             </div>
           </div>
-        </TabsContent>
+        </TabsContent>}
 
         {/* ── PAYMENTS ── */}
 
@@ -1644,9 +1643,13 @@ export default function BillingModule({ onBack }) {
         {/* ── SERVICE CATALOG ── */}
         <TabsContent value="catalog" className="space-y-4">
           <div className="flex justify-between items-center">
-            <p className="text-sm text-gray-500">{totalServices || services.length} services in catalog</p>
-            <Button onClick={openAddServiceDialog}><Plus className="h-4 w-4 mr-1" />Add Service</Button>
+            <p className="text-sm text-gray-500">
+              {servicesFailed && services.length === 0 ? 'Service catalog' : `${totalServices || services.length} services in catalog`}
+              {!access.canEditCatalog && <span className="text-gray-400"> · view only — prices are set by Finance</span>}
+            </p>
+            {access.canEditCatalog && <Button onClick={openAddServiceDialog}><Plus className="h-4 w-4 mr-1" />Add Service</Button>}
           </div>
+          {servicesFailed && <LoadFailed what="the service catalog" stale={services.length > 0} onRetry={fetchServices} />}
           <Card>
             <CardContent className="p-0">
               {servicesLoading ? (
@@ -1662,28 +1665,28 @@ export default function BillingModule({ onBack }) {
                         <TableHead>Department</TableHead>
                         <TableHead>Price</TableHead>
                         <TableHead>Description</TableHead>
-                        <TableHead className="text-right">Actions</TableHead>
+                        {access.canEditCatalog && <TableHead className="text-right">Actions</TableHead>}
                       </TableRow>
                     </TableHeader>
                     <TableBody>
                       {services.length === 0 ? (
-                        <TableRow><TableCell colSpan={7} className="text-center py-10 text-gray-400">No services added yet</TableCell></TableRow>
+                        !servicesFailed && <TableRow><TableCell colSpan={access.canEditCatalog ? 7 : 6} className="text-center py-10 text-gray-400">No services added yet</TableCell></TableRow>
                       ) : services.map(s => (
                         <TableRow key={s.id}>
                           <TableCell className="font-medium">{s.serviceName}</TableCell>
                           <TableCell className="text-sm text-gray-500">{s.serviceCode || '—'}</TableCell>
                           <TableCell><Badge variant="outline">{s.serviceCategory || '—'}</Badge></TableCell>
                           <TableCell className="text-sm text-gray-500">{s.department || '—'}</TableCell>
-                          <TableCell className="font-semibold">₹{Number(s.unitPrice || 0).toLocaleString('en-IN')}</TableCell>
+                          <TableCell className="font-semibold">{fmt(s.unitPrice || 0)}</TableCell>
                           <TableCell className="text-sm text-gray-500">{s.description || '—'}</TableCell>
-                          <TableCell className="text-right">
+                          {access.canEditCatalog && <TableCell className="text-right">
                             <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => openEditServiceDialog(s)}>
                               <Pencil className="h-3.5 w-3.5" />
                             </Button>
                             <Button variant="ghost" size="icon" className="h-7 w-7 text-red-500" onClick={() => setDeletingService(s)}>
                               <Trash2 className="h-3.5 w-3.5" />
                             </Button>
-                          </TableCell>
+                          </TableCell>}
                         </TableRow>
                       ))}
                     </TableBody>
@@ -1700,98 +1703,12 @@ export default function BillingModule({ onBack }) {
         </TabsContent>
 
         {/* ── INSURANCE ── */}
-        <TabsContent value="insurance" className="space-y-4">
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2"><Shield className="h-5 w-5 text-blue-600" />Insurance Claims</CardTitle>
-              <CardDescription>Track and manage insurance claims and reimbursements</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="grid grid-cols-4 gap-4">
-                <div
-                  className={`bg-blue-50 rounded-lg p-4 text-center cursor-pointer transition-shadow hover:shadow-md ${claimStatusFilter === 'all' ? 'ring-2 ring-blue-400' : ''}`}
-                  onClick={() => setClaimStatusFilter('all')}
-                >
-                  <p className="text-sm text-blue-600 font-medium">Total Claims</p>
-                  <p className="text-3xl font-bold text-blue-700">{claims.length}</p>
-                </div>
-                <div
-                  className={`bg-green-50 rounded-lg p-4 text-center cursor-pointer transition-shadow hover:shadow-md ${claimStatusFilter === 'approved' ? 'ring-2 ring-green-400' : ''}`}
-                  onClick={() => setClaimStatusFilter('approved')}
-                >
-                  <p className="text-sm text-green-600 font-medium">Approved / Settled</p>
-                  <p className="text-3xl font-bold text-green-700">{claims.filter(c => c.status === 'approved' || c.status === 'settled').length}</p>
-                </div>
-                <div
-                  className={`bg-yellow-50 rounded-lg p-4 text-center cursor-pointer transition-shadow hover:shadow-md ${claimStatusFilter === 'pending' ? 'ring-2 ring-yellow-400' : ''}`}
-                  onClick={() => setClaimStatusFilter('pending')}
-                >
-                  <p className="text-sm text-yellow-600 font-medium">Pending / Submitted</p>
-                  <p className="text-3xl font-bold text-yellow-700">{claims.filter(c => c.status === 'pending' || c.status === 'submitted').length}</p>
-                </div>
-                <div
-                  className={`bg-red-50 rounded-lg p-4 text-center cursor-pointer transition-shadow hover:shadow-md ${claimStatusFilter === 'rejected' ? 'ring-2 ring-red-400' : ''}`}
-                  onClick={() => setClaimStatusFilter('rejected')}
-                >
-                  <p className="text-sm text-red-600 font-medium">Rejected</p>
-                  <p className="text-3xl font-bold text-red-700">{claims.filter(c => c.status === 'rejected').length}</p>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-
-          <FilterBar
-            search={claimSearch}
-            onSearchChange={setClaimSearch}
-            placeholder="Search claim #, patient, insurer or policy..."
-            active={!!claimSearch || claimStatusFilter !== 'all'}
-            onClear={() => { setClaimSearch(''); setClaimStatusFilter('all') }}
-          >
-            <FilterSelect value={claimStatusFilter} onChange={setClaimStatusFilter} options={CLAIM_STATUS_OPTIONS} />
-          </FilterBar>
-
-          <Card>
-            <CardContent className="p-0">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Claim #</TableHead>
-                    <TableHead>Patient</TableHead>
-                    <TableHead>Insurance Company</TableHead>
-                    <TableHead>Policy No.</TableHead>
-                    <TableHead className="text-right">Claimed</TableHead>
-                    <TableHead className="text-right">Approved</TableHead>
-                    <TableHead>Submitted</TableHead>
-                    <TableHead>Status</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {claimsLoading ? (
-                    <TableRow><TableCell colSpan={8} className="text-center py-8 text-gray-500">Loading claims…</TableCell></TableRow>
-                  ) : filteredClaims.length === 0 ? (
-                    <TableRow><TableCell colSpan={8} className="text-center py-8 text-gray-500">{claims.length === 0 ? 'No insurance claims yet. Add a policy and raise a claim from the Insurance module.' : 'No claims match your search/filter.'}</TableCell></TableRow>
-                  ) : filteredClaims.map(c => (
-                    <TableRow key={c.id}>
-                      <TableCell className="font-mono text-sm text-blue-600">{c.claimNumber}</TableCell>
-                      <TableCell className="font-medium">{c.patient}</TableCell>
-                      <TableCell className="text-sm">{c.insurer}</TableCell>
-                      <TableCell className="font-mono text-xs text-gray-500">{c.policy || '—'}</TableCell>
-                      <TableCell className="text-right font-semibold">{fmt(c.amount)}</TableCell>
-                      <TableCell className="text-right font-semibold text-green-700">{c.approved != null ? fmt(c.approved) : '—'}</TableCell>
-                      <TableCell className="text-sm text-gray-500">{c.submitted ? format(new Date(c.submitted), 'dd MMM yyyy') : '—'}</TableCell>
-                      <TableCell>
-                        <Badge className={CLAIM_STATUS_STYLE[c.status] || 'bg-gray-100 text-gray-800'}>{c.status}</Badge>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </CardContent>
-          </Card>
-        </TabsContent>
-        <TabsContent value="approvals" className="space-y-4">
+        {access.canSeeInsurance && <TabsContent value="insurance">
+          <InsuranceClaimsTab />
+        </TabsContent>}
+        {access.canApprove && <TabsContent value="approvals" className="space-y-4">
           <RefundApprovalsTab userRole={user?.role} onProcess={fetchAll} />
-        </TabsContent>
+        </TabsContent>}
       </Tabs>
 
       {/* ── Invoice View Dialog ── */}
@@ -1888,7 +1805,7 @@ export default function BillingModule({ onBack }) {
                                         <Printer className="h-3 w-3 mr-1" />Print
                                       </Button>
                                       {(() => {
-                                        if (p.isRefund) return null;
+                                        if (p.isRefund || !access.canAdjust) return null;
                                         const relatedRefunds = (showInvoiceModal?.payments || []).filter(pay => pay.isRefund && pay.originalPaymentId === p.id && pay.status !== 'REJECTED');
                                         const refundedSoFar = relatedRefunds.reduce((sum, r) => sum + r.amount, 0);
                                         if (refundedSoFar >= p.amount) {
@@ -1896,7 +1813,7 @@ export default function BillingModule({ onBack }) {
                                         }
                                         return (
                                           <Button size="sm" variant="outline" className="h-6 px-2 text-[10px] text-red-600 border-red-200 hover:bg-red-50" onClick={() => handleRefund({ ...p, invoiceId: showInvoiceModal.dbId })}>
-                                            Refund {refundedSoFar > 0 ? `(Bal ₹${p.amount - refundedSoFar})` : ''}
+                                            Refund {refundedSoFar > 0 ? `(Bal ${fmt(p.amount - refundedSoFar)})` : ''}
                                           </Button>
                                         );
                                       })()}
@@ -1915,7 +1832,7 @@ export default function BillingModule({ onBack }) {
             </div>
           )}
           <DialogFooter className="gap-2">
-            {showInvoiceModal && (!showInvoiceModal.paid || (showInvoiceModal.balanceDue ?? (showInvoiceModal.total - (showInvoiceModal.amountPaid || 0))) > 0) && (
+            {access.canRaise && showInvoiceModal && !showInvoiceModal.cancelled && !showInvoiceModal.archived && (!showInvoiceModal.paid || (showInvoiceModal.balanceDue ?? (showInvoiceModal.total - (showInvoiceModal.amountPaid || 0))) > 0) && (
               <Button onClick={() => { setShowPayModal(showInvoiceModal); setPayMethod('Cash'); setShowInvoiceModal(null) }}>Collect Payment</Button>
             )}
             {(() => {
@@ -2069,7 +1986,7 @@ export default function BillingModule({ onBack }) {
                 </div>
                 <Button className="w-full" disabled={savingPayment}
                   onClick={() => showPayModal && recordPayment(showPayModal, payMethod, payAmount)}>
-                  {savingPayment ? 'Recording…' : `Record ${payAmount ? '₹' + Number(payAmount).toLocaleString('en-IN') : ''} (${payMethod})`}
+                  {savingPayment ? 'Recording…' : `Record ${payAmount ? fmt(payAmount) : ''} (${payMethod})`}
                 </Button>
                 <p className="text-xs text-gray-400 text-center">Tip: pay part now (e.g. ₹500 Cash), then add another method for the rest — balance updates automatically.</p>
               </div>
@@ -2170,11 +2087,11 @@ export default function BillingModule({ onBack }) {
             <div className="bg-gray-50 rounded-xl p-4 flex justify-between items-center border border-gray-100">
               <div>
                 <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Available to Refund</p>
-                <p className="text-2xl font-bold text-gray-900 mt-1">₹{refundDialog?.maxPaid?.toLocaleString()}</p>
+                <p className="text-2xl font-bold text-gray-900 mt-1">{fmt(refundDialog?.maxPaid)}</p>
               </div>
               <div className="text-right">
                 <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Original Payment</p>
-                <p className="text-sm font-medium text-gray-700 mt-1">₹{refundDialog?.amount?.toLocaleString()}</p>
+                <p className="text-sm font-medium text-gray-700 mt-1">{fmt(refundDialog?.amount)}</p>
               </div>
             </div>
 

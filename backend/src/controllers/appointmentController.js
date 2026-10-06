@@ -10,7 +10,8 @@ import { commissionFor } from '../lib/money.js'
 import { parseTimetable } from '../lib/doctorTimetable.js'
 import { scopedDoctorId } from '../utils/scope.js'
 import { computeConsultationFee } from '../services/appointmentFees.js'
-import { upsertQueueForAppointment } from '../lib/queueSync.js'
+import { upsertQueueForAppointment, keepVisitInStep } from '../lib/queueSync.js'
+import { emitDisplayRefresh } from '../lib/realtime.js'
 import { PATIENT_NAME_SELECT, patientFullName } from '../lib/patientName.js'
 
 // Appointment status state-machine. `status` is a free string column, so before
@@ -965,6 +966,13 @@ export async function update(req, res, next) {
         await upsertQueueForAppointment(tx, { organizationId, appointment: updated, requireRoom: true })
       }
 
+      // A new doctor, day or time moves the patient's queue row with it — into
+      // the new doctor's queue and room, at the new slot. Without this an edited
+      // patient stayed in the old doctor's queue and never reached the new one's.
+      if (movingSlot && live) {
+        await upsertQueueForAppointment(tx, { organizationId, appointment: updated, followMove: true })
+      }
+
       // The doctor or the visit type changed, so the money it generated is
       // rebuilt to match: the invoice line names the doctor and the visit, its
       // amount is the appointment's (re-derived) fee, and the commission goes
@@ -1027,17 +1035,12 @@ export async function update(req, res, next) {
         }
       }
 
-      // Cancelling or no-showing an appointment must also drop the patient OUT of
-      // the queue. Check-in creates a 'waiting' QueueManagement row; without this
-      // the row stayed 'waiting' after a cancel, so the patient the receptionist
-      // just cancelled was still called by staff and still shown on the public
-      // display board. updateMany (not update) so it is a harmless no-op when the
-      // appointment was never checked in and has no queue row.
-      if (body.status === 'cancelled' || body.status === 'no_show') {
-        await tx.queueManagement.updateMany({
-          where: { appointmentId: id, status: { notIn: ['completed', 'cancelled', 'no_show'] } },
-          data: { status: body.status },
-        })
+      // The queue row moves with the appointment: started, completed, cancelled
+      // or a no-show here is the same in the queue and on the display board.
+      // Before, only cancel/no-show did — a visit completed here still sat
+      // "waiting" in the queue and could be promoted to "you are next".
+      if (body.status !== undefined && body.status !== existing.status) {
+        await keepVisitInStep(tx, { organizationId, appointmentIds: [id], changed: 'appointment', status: body.status })
       }
 
       // Cancelling the appointment must VOID the money it generated, so reports
@@ -1067,7 +1070,7 @@ export async function update(req, res, next) {
             },
           })
           await tx.doctorCommission.updateMany({
-            where: { invoiceId: { in: invoiceIds }, status: 'pending' },
+            where: { organizationId, invoiceId: { in: invoiceIds }, status: 'pending' },
             data: { status: 'cancelled' },
           })
         }
@@ -1087,6 +1090,8 @@ export async function update(req, res, next) {
       throw err
     })
 
+    // Its queue row may have moved too: the waiting-hall board re-reads.
+    if (body.status !== undefined || (movingSlot && live)) emitDisplayRefresh(organizationId)
     res.json({ success: true, data: appointment })
   } catch (err) {
     // Check-in was refused because the doctor has no room to seat the patient in
@@ -1209,10 +1214,7 @@ export async function reschedule(req, res, next) {
       // otherwise the patient stayed 'waiting' on the OLD slot's board and, on
       // checking into the new slot, showed up twice. updateMany = no-op when
       // there's no queue row.
-      await tx.queueManagement.updateMany({
-        where: { appointmentId: original.id, status: { notIn: ['completed', 'cancelled', 'no_show'] } },
-        data: { status: 'rescheduled' },
-      })
+      await keepVisitInStep(tx, { organizationId, appointmentIds: [original.id], changed: 'appointment', status: 'rescheduled' })
 
       // R2 — carry the draft invoice to the NEW appointment so the visit the
       // patient actually attends is the one that's billed. create() attaches a
@@ -1242,6 +1244,7 @@ export async function reschedule(req, res, next) {
       throw err
     }
 
+    emitDisplayRefresh(organizationId) // the old slot's queue row left the board
     res.status(201).json({ success: true, data: created, message: 'Appointment rescheduled' })
   } catch (err) {
     next(err)
@@ -1286,8 +1289,15 @@ export async function bulkUpdateStatus(req, res, next) {
       })
     }
 
+    // Everything below acts on THESE rows — this hospital's, and for a doctor
+    // only their own — never on the raw ids from the request. The side effects
+    // used `ids`: a doctor's bulk cancel of another doctor's appointment changed
+    // nothing on the appointment (count 0) yet cancelled that patient's bill,
+    // commission and queue row, and the queue update had no hospital filter.
+    const inScope = targets.map((t) => t.id)
+
     const result = await db.$transaction(async (tx) => {
-      const updated = await tx.appointment.updateMany({ where, data })
+      const updated = await tx.appointment.updateMany({ where: { ...where, id: { in: inScope } }, data })
 
       // Checking in here does what checking in one appointment does: each
       // patient joins the queue, in the room their doctor is sitting in. Before
@@ -1298,7 +1308,7 @@ export async function bulkUpdateStatus(req, res, next) {
       // doctor has no room, rather than seating that patient nowhere.
       if (status === 'checked_in') {
         const rows = await tx.appointment.findMany({
-          where: { id: { in: targets.map((t) => t.id) } },
+          where: { id: { in: inScope }, organizationId },
           select: { id: true, patientId: true, doctorId: true, appointmentDate: true, appointmentTime: true, priority: true },
         })
         for (const appointment of rows) {
@@ -1306,19 +1316,15 @@ export async function bulkUpdateStatus(req, res, next) {
         }
       }
 
+      // Each patient's queue row moves with their appointment, as in update().
+      await keepVisitInStep(tx, { organizationId, appointmentIds: inScope, changed: 'appointment', status })
+
       // Mirror the single-cancel money void (see update()): a bulk cancel must
-      // also void the linked draft invoices + pending commissions and drop the
-      // patients from the queue, or bulk becomes a way to leak phantom money and
-      // leave cancelled patients on the board.
-      if (status === 'cancelled' || status === 'no_show') {
-        await tx.queueManagement.updateMany({
-          where: { appointmentId: { in: ids }, status: { notIn: ['completed', 'cancelled', 'no_show'] } },
-          data: { status },
-        })
-      }
+      // also void the linked draft invoices + pending commissions, or bulk
+      // becomes a way to leak phantom money.
       if (status === 'cancelled') {
         const draftInvoices = await tx.invoice.findMany({
-          where: { organizationId, appointmentId: { in: ids }, status: 'draft', paymentStatus: 'unpaid' },
+          where: { organizationId, appointmentId: { in: inScope }, status: 'draft', paymentStatus: 'unpaid' },
           select: { id: true },
         })
         if (draftInvoices.length) {
@@ -1328,7 +1334,7 @@ export async function bulkUpdateStatus(req, res, next) {
             data: { status: 'cancelled', paymentStatus: 'cancelled', cancelledAt: new Date(), cancellationReason: 'Appointment cancelled' },
           })
           await tx.doctorCommission.updateMany({
-            where: { invoiceId: { in: invoiceIds }, status: 'pending' },
+            where: { organizationId, invoiceId: { in: invoiceIds }, status: 'pending' },
             data: { status: 'cancelled' },
           })
         }
@@ -1336,6 +1342,7 @@ export async function bulkUpdateStatus(req, res, next) {
 
       return updated
     })
+    emitDisplayRefresh(organizationId) // the queue rows moved with them
     res.json({ success: true, count: result.count })
   } catch (err) {
     // Same answer as a single check-in when a doctor has no room to seat the

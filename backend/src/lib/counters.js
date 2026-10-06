@@ -187,6 +187,55 @@ const SERIES_MODELS = {
   AMBULANCE_TRIP: [['ambulanceTrip', 'tripNumber']],
   PURCHASE_ORDER: [['pharmacyPurchaseOrder', 'poNumber']],
   OT: [['otBooking', 'caseNumber']],
+  VENDOR: [['vendor', 'code']],
+  ITEM: [['item', 'code']],
+  PURCHASE_REQUEST: [['purchaseRequest', 'number']],
+  // PO-2026-27-000001. Pharmacy's older orders (PURCHASE_ORDER above) number
+  // their own table in another shape; the two never share a number.
+  PURCHASE_PO: [['purchaseOrder', 'number']],
+  PURCHASE_GRN: [['goodsReceipt', 'number']],
+  PURCHASE_BILL: [['vendorBill', 'number']],
+  STORE_INDENT: [['storeIndent', 'number']], // IND-…
+  STORE_ISSUE: [['storeIssue', 'number']], // ISS-…
+  VENDOR_PAYMENT: [['vendorPayment', 'number']], // VPAY-…
+  PURCHASE_RETURN: [['purchaseReturn', 'number']], // RTV-…
+  DEBIT_NOTE: [['purchaseReturn', 'debitNoteNumber']], // DN-…
+  PURCHASE_RFQ: [['rfq', 'number']], // RFQ-…
+}
+
+// The counter row that master codes draw from: one per series, never reset.
+const NO_YEAR = 'ALL'
+
+/**
+ * The next code for a MASTER record — a vendor, an item — e.g. "VEN-0012".
+ *
+ * Documents (invoices, receipts) are numbered per financial year, which is
+ * what nextSeriesNumber does. A master is not a document: a vendor added in
+ * 2026 is the same vendor in 2030, so its code carries no year and never
+ * restarts. Same atomic BillCounter, same probe against rows the counter does
+ * not know about; only the year is fixed. MUST run inside the caller's
+ * `$transaction`.
+ *
+ * `width` pads for tidy lists (VEN-0012). A hospital past 9,999 of one master
+ * still gets unique codes (VEN-10000); only the padding stops lining up.
+ */
+export async function nextMasterCode(tx, organizationId, series, label, width = 4) {
+  const prefix = `${label}-`
+  const probe = probeFor(tx, organizationId, series)
+  const lastSeq = probe ? await probe(prefix) : 0
+  const counter = await tx.billCounter.upsert({
+    where: { organizationId_series_year: { organizationId, series, year: NO_YEAR } },
+    create: { organizationId, series, year: NO_YEAR, value: lastSeq + 1 },
+    update: { value: { increment: 1 } },
+  })
+  let value = counter.value
+  if (value <= lastSeq) {
+    value = (await tx.billCounter.update({
+      where: { organizationId_series_year: { organizationId, series, year: NO_YEAR } },
+      data: { value: lastSeq + 1 },
+    })).value
+  }
+  return `${prefix}${String(value).padStart(width, '0')}`
 }
 
 /** The probe for a series, or null for a series with no rows to probe. */

@@ -12,7 +12,13 @@ const backendOrigin = import.meta.env.VITE_API_URL
 let socket = null
 export function getSocket() {
   if (!socket) {
-    const opts = { path: '/socket.io', transports: ['websocket', 'polling'], reconnection: true }
+    // The login token goes with the connection (read afresh on every reconnect):
+    // the server puts a signed-in socket in its hospital's staff room from the
+    // token itself. Boards and screens without a login still get board pushes.
+    const opts = {
+      path: '/socket.io', transports: ['websocket', 'polling'], reconnection: true, withCredentials: true,
+      auth: (cb) => cb({ token: localStorage.getItem('token') || undefined }),
+    }
     socket = backendOrigin ? io(backendOrigin, opts) : io(opts)
   }
   return socket

@@ -6,6 +6,7 @@ import { Badge } from '@/components/ui/badge'
 import { admissionLabel, getWardName } from '@/lib/inpatientHelpers'
 import { FilterBar } from '@/components/common/FilterBar'
 import { getFullName } from "@/lib/patient";
+import { formatMoney } from '@/lib/format'
 
 // Patient Discharge History tab — paginated cards of past (discharged) admissions.
 export default function PatientHistoryTab({
@@ -50,7 +51,7 @@ export default function PatientHistoryTab({
                       return (
                         <Card key={a.id}>
                           <CardContent className="pt-4 pb-4">
-                            <div className="flex items-start justify-between mb-3">
+                            <div className="flex flex-wrap items-start justify-between gap-2 mb-3">
                               <div className="flex items-center gap-3">
                                 <div className="h-9 w-9 rounded-full bg-gray-200 flex items-center justify-center text-sm font-bold text-gray-700">{initials}</div>
                                 <div>
@@ -58,7 +59,7 @@ export default function PatientHistoryTab({
                                   <div className="text-xs text-gray-500">{a.patient?.mrn} · {a.patient?.dateOfBirth ? Math.floor(differenceInDays(new Date(), new Date(a.patient.dateOfBirth)) / 365) + 'y' : ''}, {a.patient?.gender}</div>
                                 </div>
                               </div>
-                              <div className="flex items-center gap-2">
+                              <div className="flex flex-wrap items-center gap-2">
                                 <span className="text-xs text-gray-400">ADMISSION #</span>
                                 <span className="text-xs font-mono font-medium">{admissionLabel(a)}</span>
                                 <Badge className="bg-green-100 text-green-800 text-xs">Discharged</Badge>
@@ -84,7 +85,7 @@ export default function PatientHistoryTab({
                                 <div className="text-gray-400 uppercase font-semibold mb-1">Bill</div>
                                 {a.billSummary ? (
                                   <>
-                                    <div className="font-medium">₹{(a.billSummary.payableTotal || 0).toLocaleString()}</div>
+                                    <div className="font-medium">{formatMoney(a.billSummary.payableTotal)}</div>
                                     <div className="text-gray-500 text-[11px]">{a.billSummary.billNumber || a.billSummary.status}</div>
                                   </>
                                 ) : <div className="text-gray-400">Not billed</div>}

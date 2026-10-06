@@ -90,7 +90,9 @@ async function main() {
   console.log(`✅ Departments: ${DEPARTMENTS.length}`)
 
   // 3. Staff users (admin + receptionist) — email is the unique identity -------
-  // Re-assert passwordHash on every run so a drifted hash resets to DEMO_PASSWORD.
+  // Created when missing, NEVER changed when present (`update: {}`): this seed
+  // runs on every Render deploy, and re-asserting the hash reset every demo
+  // account's password to DEMO_PASSWORD each time someone pushed.
   const staff = [
     { email: 'admin@gudmed.in', fullName: 'Admin User', role: 'admin' },
     { email: 'reception@gudmed.in', fullName: 'Front Desk', role: 'receptionist' },
@@ -98,7 +100,7 @@ async function main() {
   for (const s of staff) {
     await db.user.upsert({
       where: { email: s.email },
-      update: { passwordHash },
+      update: {},
       create: {
         organizationId: ORG_ID, email: s.email, fullName: s.fullName,
         role: s.role, passwordHash, isActive: true,
@@ -117,7 +119,8 @@ async function main() {
       const consultationFee = 400 + (k % 8) * 50 // ₹400–₹750
       const doc = await db.user.upsert({
         where: { email },
-        update: { passwordHash, departmentId: deptByCode[d.code].id, specialization: d.name, consultationFee, followUpDays: 7 },
+        // An existing doctor is left exactly as the hospital set them up (see 3.).
+        update: {},
         create: {
           organizationId: ORG_ID, email, fullName, role: 'doctor',
           departmentId: deptByCode[d.code].id, specialization: d.name,

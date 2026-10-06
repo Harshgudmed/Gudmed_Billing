@@ -1,4 +1,9 @@
 import { z } from 'zod'
+import { round2 } from '../../lib/money.js'
+
+// Money is kept to the paisa: a cost of ₹4.375 was stored as typed, and every
+// stock value built on it carried the third decimal.
+const rupees = z.number().min(0).transform(round2)
 
 export const createBatchSchema = z.object({
   drugId: z.string().min(1),
@@ -7,8 +12,8 @@ export const createBatchSchema = z.object({
   manufactureDate: z.string().optional(),
   quantityReceived: z.number().int().min(1),
   quantityRemaining: z.number().int().min(0).optional(),
-  costPricePerUnit: z.number().min(0).optional(),
-  totalCost: z.number().min(0).optional(),
+  costPricePerUnit: rupees.optional(),
+  totalCost: rupees.optional(),
   supplierName: z.string().optional(),
   supplierInvoice: z.string().optional(),
   purchaseOrderNumber: z.string().optional(),
@@ -25,8 +30,8 @@ export const updateBatchSchema = z.object({
   // the quantity change vanished. The controller books the difference as stock.
   quantityReceived: z.number().int().min(1).optional(),
   quantityRemaining: z.number().int().min(0).optional(),
-  costPricePerUnit: z.number().min(0).optional(),
-  totalCost: z.number().min(0).optional(),
+  costPricePerUnit: rupees.optional(),
+  totalCost: rupees.optional(),
   supplierName: z.string().optional(),
   supplierInvoice: z.string().optional(),
   purchaseOrderNumber: z.string().optional(),

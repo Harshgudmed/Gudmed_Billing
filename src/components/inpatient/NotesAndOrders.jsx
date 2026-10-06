@@ -65,7 +65,7 @@ export default function NotesAndOrders({ admitted = [] }) {
 
       {/* Sub-Tabs Navigation */}
       <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-        <TabsList className="w-full justify-start h-12 bg-white border border-gray-100 rounded-xl p-1">
+        <TabsList className="w-full justify-start h-auto min-h-12 flex-wrap bg-white border border-gray-100 rounded-xl p-1">
           <TabsTrigger value="notes" className="gap-2 data-[state=active]:bg-cyan-50 data-[state=active]:text-cyan-700 data-[state=active]:shadow-sm">
             <ClipboardList className="h-4 w-4" /> Doctor Notes
           </TabsTrigger>

@@ -1,11 +1,39 @@
 import { patientSearchWhere } from '../lib/patientSearch.js'
-import { dayRange, dayRangeOf, startOfToday as hospitalStartOfToday } from '../lib/dates.js'
+import { dayRange, dayRangeOf, startOfToday as hospitalStartOfToday, todayRange, ymdInZone } from '../lib/dates.js'
+import { emitDataChanged, emitDisplayRefresh } from '../lib/realtime.js'
 import { db } from '../config/db.js'
 import { getOrgId } from "../lib/reqContext.js";
 import { nextSeriesNumber } from "../lib/counters.js";
 import { listResponse } from "../lib/pagination.js";
 import { scopedDoctorId } from '../utils/scope.js'
 import { PATIENT_NAME_SELECT } from '../lib/patientName.js'
+import { roleWorksIn } from '../lib/roleModules.js'
+
+/**
+ * Why this person may not write this consultation, or null. A consultation —
+ * diagnosis and prescription — is written in OPD: by a doctor, as themselves
+ * and on their own patients' records, or by the administrator. A receptionist
+ * or nurse could post a prescription in a doctor's name, and one doctor could
+ * write or change another's.
+ */
+// A follow-up is booked ahead, never in the past (a calendar day in the
+// hospital's zone). `unchanged` lets an old consultation keep its own date when edited.
+function followUpProblem(value, unchanged) {
+  if (!value) return null
+  const day = String(value).slice(0, 10)
+  if (day === unchanged) return null
+  return day < ymdInZone(new Date()) ? 'The follow-up date is in the past' : null
+}
+
+// An appointment still in progress — the visit a consultation closes.
+const OPEN_VISIT = ['scheduled', 'checked_in', 'in_progress']
+
+function writeProblem(req, doctorId) {
+  if (!roleWorksIn(req.user?.role, 'opd')) return 'Consultations are recorded by doctors'
+  const mine = scopedDoctorId(req)
+  if (mine && doctorId && doctorId !== mine) return 'A doctor records and changes only their own consultations'
+  return null
+}
 
 export async function getAll(req, res, next) {
   try {
@@ -78,6 +106,10 @@ export async function create(req, res, next) {
     const organizationId = getOrgId(req)
     const validatedData = req.validatedBody
     const { prescriptionItems, labTests, radiologyExams, ...consultationData } = validatedData
+    const refused = writeProblem(req, consultationData.doctorId)
+    if (refused) return res.status(403).json({ success: false, error: refused })
+    const badFollowUp = followUpProblem(consultationData.followUpDate)
+    if (badFollowUp) return res.status(400).json({ success: false, error: badFollowUp })
 
     // Tenant guard: patientId/doctorId/appointmentId arrive in the body and were
     // only FK-valid, never org-checked. Without this, an actor in one hospital
@@ -109,11 +141,28 @@ export async function create(req, res, next) {
     if (consultationData.appointmentId) {
       const appointment = await db.appointment.findFirst({
         where: { id: consultationData.appointmentId, organizationId },
-        select: { id: true },
+        select: { id: true, patientId: true, doctorId: true },
       })
       if (!appointment) {
         return res.status(404).json({ success: false, error: 'Appointment not found' })
       }
+      if (appointment.patientId !== consultationData.patientId || appointment.doctorId !== consultationData.doctorId) {
+        return res.status(400).json({ success: false, error: 'That appointment is for another patient or doctor' })
+      }
+    } else {
+      // The OPD form does not know which visit it closes, so the visit is found
+      // here: this patient's open appointment with this doctor today. Without
+      // it a saved consultation left the appointment "scheduled" and the patient
+      // waiting in the queue and on the display board.
+      const open = await db.appointment.findFirst({
+        where: {
+          organizationId, patientId: consultationData.patientId, doctorId: consultationData.doctorId,
+          appointmentDate: todayRange(), status: { in: OPEN_VISIT },
+        },
+        orderBy: { appointmentTime: 'asc' },
+        select: { id: true },
+      })
+      if (open) consultationData.appointmentId = open.id
     }
 
     // Use a transaction to ensure consultation, prescriptions, lab orders, radiology orders, and appointment updates all succeed or fail together
@@ -211,6 +260,11 @@ export async function create(req, res, next) {
           where: { id: consultationData.appointmentId, organizationId },
           data: { status: 'completed', completedAt: new Date() },
         })
+        // …and the patient leaves the queue: the visit is over.
+        await tx.queueManagement.updateMany({
+          where: { organizationId, appointmentId: consultationData.appointmentId, status: { notIn: ['completed', 'cancelled', 'no_show', 'rescheduled'] } },
+          data: { status: 'completed', serviceCompletedAt: new Date() },
+        })
       }
 
       // 5. Fetch and return the fully assembled record with all relations inside transaction
@@ -233,6 +287,12 @@ export async function create(req, res, next) {
 
       return { consultation: fullConsultation, prescriptionId, labOrderId, radiologyOrderId }
     })
+
+    // The visit closed: the queue screens and the waiting-hall board move on.
+    if (consultationData.appointmentId) {
+      emitDataChanged(organizationId, 'queue')
+      emitDisplayRefresh(organizationId)
+    }
 
     res.status(201).json({
       success: true,
@@ -263,6 +323,11 @@ export async function update(req, res, next) {
     if (!existingConsultation) {
       return res.status(404).json({ success: false, error: 'Consultation not found' })
     }
+    // The record's own doctor, not one named in the body; and it stays theirs.
+    const refused = writeProblem(req, existingConsultation.doctorId) || (updateData.doctorId && writeProblem(req, updateData.doctorId))
+    if (refused) return res.status(403).json({ success: false, error: refused })
+    const badFollowUp = followUpProblem(updateData.followUpDate, existingConsultation.followUpDate ? ymdInZone(existingConsultation.followUpDate) : null)
+    if (badFollowUp) return res.status(400).json({ success: false, error: badFollowUp })
 
     if (updateData.icd10Codes && Array.isArray(updateData.icd10Codes)) {
       updateData.icd10Codes = JSON.stringify(updateData.icd10Codes)
@@ -406,6 +471,9 @@ export async function remove(req, res, next) {
     if (!id) {
       return res.status(400).json({ success: false, error: 'Consultation ID is required' })
     }
+
+    const refused = writeProblem(req, null)
+    if (refused) return res.status(403).json({ success: false, error: refused })
 
     // Scope to org (and to the doctor's own rows when a doctor is logged in).
     const where = { id, organizationId }

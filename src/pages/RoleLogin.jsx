@@ -26,14 +26,19 @@ const ROLE_VISUAL = {
   housekeeping:         { Icon: Sparkles,      color: '#16a34a' },
 }
 
-// Demo credentials shown on the login screen (so clients don't have to ask).
+// Demo credentials shown on the login screen, tap to fill (so clients don't have
+// to ask). A live hospital turns them off by building with VITE_HIDE_DEMO_LOGIN=true.
 // Falls back to the admin account for any role without its own demo login.
+const SHOW_DEMO_LOGIN = import.meta.env.VITE_HIDE_DEMO_LOGIN !== 'true'
 const DEMO_ACCOUNTS = {
   admin:              { email: 'admin@gudmed.in',       password: 'Gudmed@123' },
   doctor:             { email: 'priya@gudmed.in',       password: 'Gudmed@123' },
   patient_crm:        { email: 'coordinator@gudmed.in', password: 'Gudmed@123' },
   receptionist:       { email: 'reception@gudmed.in',   password: 'Gudmed@123' },
   finance_controller: { email: 'finance@gudmed.in',     password: 'Gudmed@123' },
+  // Made by backend/scripts/seed-purchase-demo.mjs
+  purchase_officer:   { email: 'purchase@gudmed.in',    password: 'Gudmed@123' },
+  store_keeper:       { email: 'store@gudmed.in',       password: 'Gudmed@123' },
 }
 
 // Per-role login page mounted at /:role/login. The hospital is resolved from the
@@ -181,17 +186,18 @@ export default function RoleLogin() {
             </Button>
           </form>
 
-          {/* Demo credentials — visible so clients can sign in without asking. */}
-          <button
-            type="button"
-            onClick={() => { setEmail(demo.email); setPassword(demo.password) }}
-            className="mt-4 w-full rounded-lg border border-dashed border-blue-300 bg-blue-50/60 px-3 py-2 text-left transition hover:bg-blue-50"
-          >
-            <span className="block text-[11px] font-semibold uppercase tracking-wide text-blue-700">🔑 Demo login — tap to fill</span>
-            <span className="mt-1 block text-xs text-gray-700">
-              {demo.email} · <span className="font-mono font-medium">{demo.password}</span>
-            </span>
-          </button>
+          {SHOW_DEMO_LOGIN && (
+            <button
+              type="button"
+              onClick={() => { setEmail(demo.email); setPassword(demo.password) }}
+              className="mt-4 w-full rounded-lg border border-dashed border-blue-300 bg-blue-50/60 px-3 py-2 text-left transition hover:bg-blue-50"
+            >
+              <span className="block text-[11px] font-semibold uppercase tracking-wide text-blue-700">🔑 Demo login — tap to fill</span>
+              <span className="mt-1 block text-xs text-gray-700">
+                {demo.email} · <span className="font-mono font-medium">{demo.password}</span>
+              </span>
+            </button>
+          )}
 
           <div className="mt-5 text-center text-xs text-gray-400">
             Not a {roleLabel.toLowerCase()}?{' '}

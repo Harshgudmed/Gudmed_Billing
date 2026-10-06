@@ -4,6 +4,7 @@ import { db } from '../config/db.js'
 import { getOrgId, safeMoney } from "../lib/reqContext.js";
 import { isOwned } from "../lib/tenant.js";
 import { PATIENT_NAME_SELECT } from '../lib/patientName.js'
+import { listResponse } from '../lib/pagination.js'
 
 const patientSelect = { ...PATIENT_NAME_SELECT, mrn: true, phonePrimary: true }
 
@@ -87,6 +88,45 @@ async function getCases(req, res, ORG_ID) {
     claimsPending: data.reduce((sum, c) => sum + c.claimsPending, 0),
   }
   res.json({ success: true, data, stats })
+}
+
+// The Billing screen's claims list: one page of claims, newest first, filtered
+// by status (one, or a comma list such as "approved,settled" for a tile) and a
+// search, plus how many claims each status holds under the same search. The
+// tiles are summed from those counts, so each one equals the rows its filter
+// shows across the whole hospital — they were counted from the rows the browser
+// held, and the "Approved / Settled" tile opened the approved ones only.
+async function getClaims(req, res, ORG_ID) {
+  const statuses = String(req.query.status || '').split(',').map((s) => s.trim()).filter(Boolean)
+  if (statuses.some((s) => !CLAIM_STATUSES.includes(s))) {
+    return res.status(400).json({ success: false, error: `status must be one of: ${CLAIM_STATUSES.join(', ')}` })
+  }
+  const searched = { organizationId: ORG_ID }
+  const term = String(req.query.search || '').trim()
+  if (term) {
+    // A claim number is one word; the policy, insurer and patient are matched
+    // word by word, as every patient search in the app is.
+    const caseWhere = patientSearchWhere(term, 'patient', (t) => [
+      { insurerName: { contains: t, mode: 'insensitive' } },
+      { tpaName: { contains: t, mode: 'insensitive' } },
+      { policyNumber: { contains: t, mode: 'insensitive' } },
+    ])
+    searched.OR = [{ claimNumber: { contains: term, mode: 'insensitive' } }, { case: caseWhere }]
+  }
+  const body = await listResponse(db.insuranceClaim, {
+    req,
+    where: statuses.length ? { ...searched, status: { in: statuses } } : searched,
+    include: { case: { select: { insurerName: true, tpaName: true, policyNumber: true, patient: { select: patientSelect } } } },
+    orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+    summary: async () => {
+      const groups = await db.insuranceClaim.groupBy({ by: ['status'], where: searched, _count: { _all: true } })
+      return {
+        total: groups.reduce((sum, g) => sum + g._count._all, 0),
+        byStatus: Object.fromEntries(groups.map((g) => [g.status, g._count._all])),
+      }
+    },
+  })
+  res.json(body)
 }
 
 // Optional date field → { ok, value }: absent/empty is null; a valid string is
@@ -270,7 +310,10 @@ async function updateClaim(req, res, ORG_ID) {
 export async function getAll(req, res, next) {
   try {
     const ORG_ID = getOrgId(req)
-    return await getCases(req, res, ORG_ID) // only cases are listed (claims come nested)
+    // ?resource=claims: the Billing screen's paged claims list. Otherwise cases,
+    // each with its claims nested (the Insurance / TPA screen).
+    if (req.query.resource === 'claims') return await getClaims(req, res, ORG_ID)
+    return await getCases(req, res, ORG_ID)
   } catch (err) { next(err) }
 }
 

@@ -6,6 +6,19 @@ import { round2, commissionFor } from '../lib/money.js'
 import { assertValidShift, assertNoSelfOverlap } from '../lib/activeDoctor.js'
 import { roomIdsInTimetable } from '../lib/doctorTimetable.js'
 import { dayRange } from '../lib/dates.js'
+import { roleWorksIn } from '../lib/roleModules.js'
+
+// Who may do what here. This is doctors' pay.
+//  - The hospital's administrator sets rates and fees, records, edits, settles
+//    and removes commissions.
+//  - A doctor reads their own figures and keeps their own timetable.
+//  - Every other role books appointments, so it reads timetables — nothing else.
+// Any staff login used to be able to set a rate to 100%, add a ₹50,000
+// commission, settle commissions as paid and delete settled ones.
+// With login switched off (the demo) there is no role, and the demo may do all.
+const MANAGERS = new Set(['admin', 'super_admin'])
+const managesPay = (req) => !req.user?.role || MANAGERS.has(req.user.role)
+const PAY_REFUSED = 'Doctor commissions and fees are managed by the hospital administrator'
 
 // Accepts an ISO calendar date (YYYY-MM-DD) or a full ISO datetime whose date
 // part is a real calendar date, and returns the canonical YYYY-MM-DD string.
@@ -31,6 +44,11 @@ export async function handleGet(req, res, next) {
 
     // A logged-in doctor only ever sees their own accountability data.
     const myDoctorId = scopedDoctorId(req)
+    // Timetables are read by whoever books appointments; the rest (doctors with
+    // their rates, commissions, earnings) only by the roles that work here.
+    if (resource !== 'timetable' && !roleWorksIn(req.user?.role, 'doctorAccountability')) {
+      return res.status(403).json({ success: false, error: 'You do not have access to doctor accountability' })
+    }
 
     // Pagination is OPT-IN: a caller that passes neither `limit` nor `offset`
     // gets the FULL list. The Doctor-Timetable view and the commission/doctor
@@ -95,9 +113,15 @@ export async function handleGet(req, res, next) {
       // the ten rows on screen (the tab said so in an amber note). Both belong in
       // the database so they reach every page.
       if (search) {
+        // The invoice is searched by its number (INV-…), which is what people
+        // read; a commission keeps only the invoice's id.
+        const invoiceIds = (await db.invoice.findMany({
+          where: { organizationId: ORG_ID, invoiceNumber: { contains: search, mode: 'insensitive' } },
+          select: { id: true }, take: 200,
+        })).map((i) => i.id)
         where.OR = [
           { doctor: { fullName: { contains: search, mode: 'insensitive' } } },
-          { invoiceId: { contains: search, mode: 'insensitive' } },
+          { invoiceId: { in: invoiceIds } },
         ]
       }
       if (startDate || endDate) where.createdAt = dayRange(startDate, endDate)
@@ -119,9 +143,15 @@ export async function handleGet(req, res, next) {
       const page = wantsPaging ? Math.floor(offset / limit) + 1 : 1
       const totalPages = wantsPaging ? Math.ceil(total / limit) : 1
 
+      // Each commission's invoice by its number — the column showed the raw id.
+      const linked = [...new Set(commissions.map((c) => c.invoiceId).filter(Boolean))]
+      const numbers = linked.length
+        ? new Map((await db.invoice.findMany({ where: { id: { in: linked }, organizationId: ORG_ID }, select: { id: true, invoiceNumber: true } })).map((i) => [i.id, i.invoiceNumber]))
+        : new Map()
+
       return res.json({
         success: true,
-        data: commissions,
+        data: commissions.map((c) => ({ ...c, invoiceNumber: numbers.get(c.invoiceId) || null })),
         meta: { total, limit: wantsPaging ? limit : total, offset, page, totalPages, hasMore }
       })
     }
@@ -211,6 +241,14 @@ export async function handlePost(req, res, next) {
     const myDoctorId = scopedDoctorId(req)
     if (myDoctorId && req.body?.doctorId && req.body.doctorId !== myDoctorId) {
       return res.status(403).json({ success: false, error: 'You can only modify your own record' })
+    }
+    // Rates, fees and commissions: the administrator only. A timetable: the
+    // administrator, or the doctor whose it is.
+    if ((resource === 'config' || resource === 'commission') && !managesPay(req)) {
+      return res.status(403).json({ success: false, error: PAY_REFUSED })
+    }
+    if (resource === 'timetable' && !managesPay(req) && !myDoctorId) {
+      return res.status(403).json({ success: false, error: 'A doctor\'s timetable is kept by the doctor or the hospital administrator' })
     }
 
     if (resource === 'config') {
@@ -446,12 +484,17 @@ export async function handlePatch(req, res, next) {
   try {
     const ORG_ID = getOrgId(req)
     const { resource } = req.query
+    // Settling (paying out) and editing commissions: the administrator only.
+    if (!managesPay(req)) return res.status(403).json({ success: false, error: PAY_REFUSED })
 
     if (resource === 'settle') {
       const { commissionIds, settlementNote, settlementRef } = req.body
+      if (!Array.isArray(commissionIds) || !commissionIds.length) {
+        return res.status(400).json({ success: false, error: 'Choose the commissions to settle' })
+      }
       // Tenant guard: restrict the bulk-settle to commissions belonging to
       // this org only — a caller cannot settle another org's commissions.
-      await db.doctorCommission.updateMany({
+      const { count } = await db.doctorCommission.updateMany({
         where: { id: { in: commissionIds }, status: 'pending', organizationId: ORG_ID },
         data: {
           status: 'settled',
@@ -460,7 +503,8 @@ export async function handlePatch(req, res, next) {
           settlementRef: settlementRef || null,
         },
       })
-      return res.json({ success: true, message: `${commissionIds.length} commission(s) settled successfully` })
+      // The count of what was really settled — already-settled or unknown ids are not.
+      return res.json({ success: true, count, message: `${count} commission(s) settled successfully` })
     }
 
     // Edit one commission's invoice figures.
@@ -539,15 +583,22 @@ export async function handleDelete(req, res, next) {
     const ORG_ID = getOrgId(req)
     const { resource, id } = req.query
     if (resource === 'commission') {
+      if (!managesPay(req)) return res.status(403).json({ success: false, error: PAY_REFUSED })
       // Tenant guard: verify the commission belongs to this org before deleting.
       const existing = await db.doctorCommission.findFirst({
         where: { id, organizationId: ORG_ID },
-        select: { id: true },
+        select: { id: true, status: true },
       })
       if (!existing) {
         return res.status(404).json({ success: false, error: 'Commission not found' })
       }
-      await db.doctorCommission.delete({ where: { id } })
+      // Settled means paid: that row is the record of a payment and stays.
+      // Removed only while still pending, and only if it is still pending as
+      // the delete lands (a settle in between wins).
+      const { count } = await db.doctorCommission.deleteMany({ where: { id, organizationId: ORG_ID, status: 'pending' } })
+      if (count === 0) {
+        return res.status(409).json({ success: false, error: 'A settled commission is a payment record and cannot be deleted' })
+      }
       return res.json({ success: true })
     }
     res.status(400).json({ success: false, error: 'Unknown resource' })

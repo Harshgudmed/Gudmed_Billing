@@ -1,5 +1,6 @@
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { formatMoney } from '@/lib/format'
 
 // Payment methods offered at booking — shared so every module lists the same set.
 export const PAYMENT_METHODS = ['cash', 'card', 'upi', 'insurance']
@@ -24,7 +25,7 @@ export default function PaymentFields({
       <hr />
       <div className="text-xs font-semibold text-gray-600">{label}</div>
       {Number(charge) > 0 && (
-        <div className="text-xs text-gray-500">Charge: ₹{Number(charge).toLocaleString('en-IN')}</div>
+        <div className="text-xs text-gray-500">Charge: {formatMoney(charge)}</div>
       )}
       <div className="grid grid-cols-2 gap-3">
         <div>

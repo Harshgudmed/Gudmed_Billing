@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent } from '@/components/ui/card'
+import { StatCard } from '@/components/common/StatCard'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Label } from '@/components/ui/label'
@@ -64,22 +65,17 @@ function printViaIframe(html) {
   }, 300)
 }
 
-function StatCard({ icon: Icon, label, value, color }) {
-  return (
-    <Card>
-      <CardContent className="p-4 flex items-center gap-4">
-        <div className={`p-3 rounded-lg ${color}`}><Icon className="h-5 w-5 text-white" /></div>
-        <div>
-          <p className="text-sm text-gray-500">{label}</p>
-          <p className="text-xl font-bold">{value}</p>
-        </div>
-      </CardContent>
-    </Card>
-  )
+// Unified per-doctor setup: base fee + follow-up day-ranges + commission, all in one place.
+// Rates, fees and commissions are the administrator's — the server refuses
+// anyone else (doctorAccountabilityController, feeSlabRoutes). A doctor here
+// reads their own. No user = the no-login demo, which may do everything.
+function useManagesPay() {
+  const { user } = useAuth()
+  return !user || ['admin', 'super_admin'].includes(user.role)
 }
 
-// Unified per-doctor setup: base fee + follow-up day-ranges + commission, all in one place.
 function DoctorsTab() {
+  const managesPay = useManagesPay()
   const [doctors, setDoctors] = useState([])
   const [slabCounts, setSlabCounts] = useState({})   // doctorId -> number of follow-up ranges
   const [loading, setLoading] = useState(true)
@@ -302,9 +298,11 @@ function DoctorsTab() {
                         : <Badge variant="outline" className="text-amber-600 border-amber-300">Setup needed</Badge>}
                     </TableCell>
                     <TableCell className="text-right">
-                      <Button size="sm" variant="outline" onClick={() => openConfigure(doc)}>
-                        <Edit2 className="h-3.5 w-3.5 mr-1" />Configure
-                      </Button>
+                      {managesPay && (
+                        <Button size="sm" variant="outline" onClick={() => openConfigure(doc)}>
+                          <Edit2 className="h-3.5 w-3.5 mr-1" />Configure
+                        </Button>
+                      )}
                     </TableCell>
                   </TableRow>
                 )
@@ -383,7 +381,7 @@ function DoctorsTab() {
                       <TableRow>
                         <TableCell className="text-gray-400 text-sm font-medium">30+</TableCell>
                         <TableCell className="text-gray-400 text-sm">—</TableCell>
-                        <TableCell className="text-gray-500 text-sm">{baseFee ? `₹${baseFee}` : 'base'}</TableCell>
+                        <TableCell className="text-gray-500 text-sm">{baseFee ? fmt(baseFee) : 'base'}</TableCell>
                         <TableCell colSpan={3} className="text-gray-400 text-sm italic">After 30 days → New Patient (base fee)</TableCell>
                       </TableRow>
                     </TableBody>
@@ -440,6 +438,7 @@ function DoctorsTab() {
 }
 
 function CommissionsTab({ openAddSignal }) {
+  const managesPay = useManagesPay()
   const [commissions, setCommissions] = useState([])
   const [doctors, setDoctors] = useState([])
   const [loading, setLoading] = useState(true)
@@ -683,7 +682,7 @@ function CommissionsTab({ openAddSignal }) {
 </div>
 <div class="title">Commission Settlement Receipt</div>
 <div class="row"><span class="lbl">Doctor</span><span class="val">${drName(c.doctor.fullName)}</span></div>
-<div class="row"><span class="lbl">Invoice ID</span><span class="val">${c.invoiceId || '—'}</span></div>
+<div class="row"><span class="lbl">Invoice</span><span class="val">${c.invoiceNumber || c.invoiceId || '—'}</span></div>
 <div class="row"><span class="lbl">Invoice Amount</span><span class="val">${fmt(c.invoiceAmount)}</span></div>
 <div class="row"><span class="lbl">Commission Rate</span><span class="val">${c.commissionType === 'percentage' ? `${c.commissionRate}%` : fmt(c.commissionRate)}</span></div>
 <div class="row"><span class="lbl">Settlement Reference</span><span class="val">${c.settlementRef || '—'}</span></div>
@@ -701,9 +700,9 @@ function CommissionsTab({ openAddSignal }) {
       ...displayed.map(c => [
         format(new Date(c.createdAt), 'dd/MM/yyyy'),
         drName(c.doctor.fullName),
-        c.invoiceId || '',
+        c.invoiceNumber || c.invoiceId || '',
         c.invoiceAmount,
-        c.commissionType === 'percentage' ? `${c.commissionRate}%` : `₹${c.commissionRate}`,
+        c.commissionType === 'percentage' ? `${c.commissionRate}%` : fmt(c.commissionRate),
         c.commissionAmount,
         c.status,
         c.settlementRef || '',
@@ -740,9 +739,11 @@ function CommissionsTab({ openAddSignal }) {
             <Button variant="outline" onClick={exportCSV} title="Export the commissions shown on this page">
               <FileDown className="h-4 w-4 mr-1" />Export This Page
             </Button>
-            <Button onClick={() => setAddDialog(true)}>
-              <Plus className="h-4 w-4 mr-1" />Add Commission
-            </Button>
+            {managesPay && (
+              <Button onClick={() => setAddDialog(true)}>
+                <Plus className="h-4 w-4 mr-1" />Add Commission
+              </Button>
+            )}
           </>
         }
       >
@@ -752,7 +753,7 @@ function CommissionsTab({ openAddSignal }) {
       </FilterBar>
 
       {/* Bulk settle bar */}
-      {selected.size > 0 && (
+      {managesPay && selected.size > 0 && (
         <div className="flex items-center justify-between bg-blue-50 border border-blue-200 rounded-lg px-4 py-2">
           <span className="text-sm text-blue-800 font-medium">
             {selected.size} selected across all pages — total {fmt(selectedTotal)}
@@ -790,14 +791,14 @@ function CommissionsTab({ openAddSignal }) {
               ) : displayed.map(c => (
                 <TableRow key={c.id} className={selected.has(c.id) ? 'bg-blue-50/50' : ''}>
                   <TableCell>
-                    {c.status === 'pending' ? (
+                    {c.status === 'pending' && managesPay ? (
                       <input type="checkbox" className="h-4 w-4 rounded border-gray-300"
                         checked={selected.has(c.id)} onChange={() => toggleSelect(c)} />
                     ) : null}
                   </TableCell>
                   <TableCell className="text-sm">{format(new Date(c.createdAt), 'dd MMM yyyy')}</TableCell>
                   <TableCell className="font-medium">{drName(c.doctor.fullName)}</TableCell>
-                  <TableCell className="text-gray-500 text-sm">{c.invoiceId || '—'}</TableCell>
+                  <TableCell className="text-gray-500 text-sm font-mono">{c.invoiceNumber || c.invoiceId || '—'}</TableCell>
                   <TableCell>{fmt(c.invoiceAmount)}</TableCell>
                   <TableCell className="text-gray-500 text-sm">{c.commissionType === 'percentage' ? `${c.commissionRate}%` : fmt(c.commissionRate)}</TableCell>
                   <TableCell className="font-semibold text-green-700">{fmt(c.commissionAmount)}</TableCell>
@@ -808,7 +809,7 @@ function CommissionsTab({ openAddSignal }) {
                   </TableCell>
                   <TableCell className="text-right">
                     <div className="flex gap-1 justify-end">
-                      {c.status === 'pending' && (
+                      {c.status === 'pending' && managesPay && (
                         <>
                           {/* Edit */}
                           <Button size="sm" variant="ghost" className="h-7 px-2 text-blue-600" title="Edit" onClick={() => openEdit(c)}>
@@ -1219,7 +1220,7 @@ function FeeStructureTab() {
                       <TableCell className="text-gray-400 text-sm font-medium">30+</TableCell>
                       <TableCell className="text-gray-400 text-sm">—</TableCell>
                       <TableCell className="text-gray-500 text-sm">
-                        {selectedDoc?.consultationFee != null ? `₹${selectedDoc.consultationFee}` : 'base fee'}
+                        {selectedDoc?.consultationFee != null ? fmt(selectedDoc.consultationFee) : 'base fee'}
                       </TableCell>
                       <TableCell colSpan={3} className="text-gray-400 text-sm italic">
                         After 30 days → charged as a New Patient (base fee)
@@ -1273,7 +1274,7 @@ function ReportsTab() {
       ['Doctor', 'Rate', 'Commission Type', 'Total Invoiced (₹)', 'Total Entries', 'Pending (₹)', 'Pending Count', 'Settled (₹)', 'Settled Count', 'Status'],
       ...filteredStats.map(s => [
         drName(s.doctorName),
-        s.isActive ? (s.commissionType === 'percentage' ? `${s.commissionRate}%` : `₹${s.commissionRate}`) : 'Not configured',
+        s.isActive ? (s.commissionType === 'percentage' ? `${s.commissionRate}%` : fmt(s.commissionRate)) : 'Not configured',
         s.commissionType || '',
         s.totalInvoiceAmount,
         s.totalCommissions,
@@ -1451,9 +1452,11 @@ export default function DoctorAccountabilityModule() {
           <p className="text-gray-500 mt-1">Track and settle doctor commissions for services rendered.</p>
         </div>
         <div className="flex gap-2">
-          <Button variant="outline" onClick={() => { setTab('commissions'); setAddCommissionSignal(s => s + 1) }}>
-            <IndianRupee className="h-4 w-4 mr-2" />Add Commission
-          </Button>
+          {(!user || ['admin', 'super_admin'].includes(user.role)) && (
+            <Button variant="outline" onClick={() => { setTab('commissions'); setAddCommissionSignal(s => s + 1) }}>
+              <IndianRupee className="h-4 w-4 mr-2" />Add Commission
+            </Button>
+          )}
           {/* Creating a login is the administrator's (the server refuses anyone
               else) — a doctor viewing their own accountability gets no button
               that can only fail. No user = the no-login demo, which allows it. */}
@@ -1464,12 +1467,13 @@ export default function DoctorAccountabilityModule() {
           )}
         </div>
       </div>
-      <div className="flex border-b gap-1">
+      {/* scrolls inside itself at phone width, never the page */}
+      <div className="flex border-b gap-1 overflow-x-auto">
         {TABS.map(t => (
           <button
             key={t.id}
             onClick={() => setTab(t.id)}
-            className={`flex items-center gap-2 px-4 py-2.5 text-sm font-medium border-b-2 transition-colors ${tab === t.id ? 'border-blue-600 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700'
+            className={`flex shrink-0 items-center gap-2 px-4 py-2.5 text-sm font-medium border-b-2 transition-colors whitespace-nowrap ${tab === t.id ? 'border-blue-600 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700'
               }`}
           >
             <t.icon className="h-4 w-4" />

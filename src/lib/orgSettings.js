@@ -14,20 +14,20 @@ let _raw = null
 
 const FALLBACK = { name: 'Hospital', address: '', city: '', phone: '', email: '', logoUrl: '' }
 
-export async function getOrgSettings() {
-  if (_cache) return _cache
-  if (_pending) return _pending
-
-  _pending = (async () => {
-    try {
-      // Use the shared axios client (not raw fetch) so this respects VITE_API_URL
-      // in production instead of always hitting a same-origin relative path.
-      const res = await client.get('/settings')
+// The one /settings request every reader shares. A failed one is not kept:
+// caching it left the whole session without the hospital's module switches,
+// so a store keeper (whose only module must be switched on) got a blank app
+// until a reload. The next reader simply asks again.
+function loadOrg() {
+  if (!_pending) {
+    // Use the shared axios client (not raw fetch) so this respects VITE_API_URL
+    // in production instead of always hitting a same-origin relative path.
+    _pending = client.get('/settings').then((res) => {
       const org = res?.data || {}
-      _raw = org
       const settings = typeof org.settings === 'string'
         ? (() => { try { return JSON.parse(org.settings) } catch { return {} } })()
         : (org.settings || {})
+      _raw = org
       _cache = {
         name:     org.name     || FALLBACK.name,
         address:  org.address  || '',
@@ -42,26 +42,36 @@ export async function getOrgSettings() {
         // derive from it, so a new setting cannot reach one and miss another.
         ...readOrgSettings(settings),
       }
-      return _cache
-    } catch (err) {
-      console.error('Failed to load organization settings:', err)
-      _cache = { ...FALLBACK }
-      return _cache
-    }
-  })()
-
+      return org
+    }, (err) => {
+      _pending = null
+      throw err
+    })
+  }
   return _pending
+}
+
+/** Name, address and settings for prints. Never throws: a print still works with the fallback. */
+export async function getOrgSettings() {
+  if (_cache) return _cache
+  try {
+    await loadOrg()
+    return _cache
+  } catch (err) {
+    console.error('Failed to load organization settings:', err)
+    return { ...FALLBACK }
+  }
 }
 
 /**
  * The organisation row exactly as /settings returned it — branding columns and
  * all. Shares the single cached fetch with getOrgSettings(), so asking for both
- * costs one request, not two.
+ * costs one request, not two. Rejects when the request fails, so a caller can
+ * tell "nothing switched on" from "not known yet" and try again.
  */
 export async function getOrgRaw() {
   if (_raw) return _raw
-  await getOrgSettings()
-  return _raw || {}
+  return loadOrg()
 }
 
 /** Call after saving organisation settings so next print picks up new values */

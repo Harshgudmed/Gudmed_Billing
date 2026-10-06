@@ -45,6 +45,15 @@ export function formatDateTime(value, { withTime = true } = {}) {
   return `${date}, ${time}`;
 }
 
+// A day as an <input type="date"> holds it, "2026-10-01", in the reader's own
+// calendar — not toISOString(), which is UTC and gives yesterday before 5:30 AM
+// in India. `days` moves it: localYmd(new Date(), 60) is 60 days from today.
+export function localYmd(d = new Date(), days = 0) {
+  const x = new Date(d);
+  x.setDate(x.getDate() + days);
+  return `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, "0")}-${String(x.getDate()).padStart(2, "0")}`;
+}
+
 // A stored "HH:mm" clock time -> how a patient reads it.
 //   formatTime12h("13:45") -> "1:45 PM"
 //   formatTime12h("09:00") -> "9:00 AM"

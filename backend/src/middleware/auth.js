@@ -1,6 +1,7 @@
 import jwt from 'jsonwebtoken'
 import { JWT_SECRET } from '../config/security.js'
 import { db } from '../config/db.js'
+import { roleWorksIn } from '../lib/roleModules.js'
 
 // Access-control master switch.
 // FAIL-CLOSED IN PRODUCTION (C7): in production the API is enforced UNLESS you
@@ -13,6 +14,9 @@ const AUTH_ENFORCED = IS_PROD
   : process.env.AUTH_ENFORCED === 'true' // dev/demo: off unless explicitly enabled
 
 const DEFAULT_ORG = process.env.ORGANIZATION_ID || 'org-demo'
+
+/** Is login required? (The realtime socket asks too: lib/realtime.js.) */
+export const isAuthEnforced = () => AUTH_ENFORCED
 
 /**
  * Decode the JWT (httpOnly cookie preferred, Authorization header as fallback)
@@ -126,6 +130,34 @@ export function authorize(...roles) {
     if (roles.length === 0 || roles.includes(role)) return next()
 
     return res.status(403).json({ success: false, error: 'You do not have access to this resource', code: 'FORBIDDEN' })
+  }
+}
+
+/**
+ * Route guard: only the roles that work in `module` (lib/roleModules.js, the
+ * server's copy of the sidebar) get through; admin and super_admin always do.
+ * The sidebar alone kept no one out: a Finance Controller could sell medicine
+ * at /pharmacy/sales and a doctor could read every invoice in the hospital.
+ *
+ * Screens of other modules that use this API are named, never guessed: `read`
+ * lets those roles GET (Billing's line picker reads the drug list), `write`
+ * lets them write too (the billing counter books appointments). Who may do
+ * which write inside a module stays with its controller.
+ *
+ * No-op while AUTH_ENFORCED is off, like authorize().
+ */
+export function requireModule(module, { read = [], write = [] } = {}) {
+  return (req, res, next) => {
+    if (!AUTH_ENFORCED) return next()
+    const role = req.user?.role
+    if (roleWorksIn(role, module)) return next()
+    const others = req.method === 'GET' ? [...read, ...write] : write
+    if (others.some((m) => roleWorksIn(role, m))) return next()
+    return res.status(403).json({
+      success: false,
+      error: 'Your role does not work in this module — ask an administrator if you need it',
+      code: 'FORBIDDEN',
+    })
   }
 }
 

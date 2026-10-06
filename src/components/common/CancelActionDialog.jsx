@@ -27,10 +27,11 @@ export const CANCEL_MODULES = {
     reschedule: true,
     rescheduleVerb: 'Reschedule',
     rescheduleHint: 'Moves the payment due date. The bill itself is unchanged.',
-    // A draft has been raised but nothing was fulfilled from it yet. Guarded on
-    // the status being PRESENT: `undefined !== 'draft'` is true, so a record that
-    // forgot to carry its status would silently be charged the after-work rate.
-    workStarted: (r) => !!r?.status && r.status !== 'draft',
+    // A bill's status says whether it is PAID, not whether the service was
+    // given: reading "paid" as "work started" charged 100% and refunded ₹0 on
+    // every paid bill. The doctor having written the consultation is the sign
+    // the visit took place (the bill row carries consultationId).
+    workStarted: (r) => !!r?.consultationId,
   },
   pharmacy: {
     label: 'Sale',

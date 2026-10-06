@@ -12,6 +12,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Loader2, Users, CalendarDays, Microscope, ScanLine, BedDouble, FileText, IndianRupee, Clock, XCircle, FlaskConical, Scan, AlertCircle, Printer, Eye, Edit } from 'lucide-react';
 import { getFullName, calculateAge, initials } from '../utils/patientUtils';
 import { useLiveData } from '@/lib/useLiveData';
+import { useEnabledModules } from '@/lib/useEnabledModules';
 import { toast } from 'sonner';
 
 // The strip was a 6-column grid, so every tab got the same 115px whatever its
@@ -43,6 +44,10 @@ export default function PatientProfile({
   openEdit,
   orgInfo
 }) {
+  // Cancelling is booking work: a nurse opens Patients but not Appointments,
+  // and the server refuses the change.
+  const { canOpen } = useEnabledModules();
+  const canCancel = canOpen('appointments') || canOpen('billing');
   // The profile is a live view of one patient while it is open: a lab report
   // filed, a bill raised or an appointment booked at another desk appears in
   // its tab on its own, which is why the header has no Refresh button. The
@@ -319,7 +324,7 @@ body{font-family:Arial,Helvetica,sans-serif;font-size:10.5pt;color:#000;backgrou
                             {upcoming.length === 0 ? (
                               <p className="text-sm text-gray-400 italic px-1">No upcoming appointments</p>
                             ) : (
-                              <div className="space-y-2">{upcoming.map(a => <ApptRow key={a.id} a={a} cancellable />)}</div>
+                              <div className="space-y-2">{upcoming.map(a => <ApptRow key={a.id} a={a} cancellable={canCancel} />)}</div>
                             )}
                           </div>
                           <div>

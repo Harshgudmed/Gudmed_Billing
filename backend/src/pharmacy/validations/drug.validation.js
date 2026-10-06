@@ -1,4 +1,9 @@
 import { z } from 'zod'
+import { round2 } from '../../lib/money.js'
+
+// Money to the paisa, as on a batch (batch.validation.js): ₹4.375 was stored as
+// typed and every bill priced from it carried a fraction of a paisa.
+const rupees = z.number().min(0).transform(round2)
 
 export const createDrugSchema = z.object({
   drugName: z.string().min(1),
@@ -14,10 +19,10 @@ export const createDrugSchema = z.object({
   reorderLevel: z.number().int().min(0).optional(),
   maximumStockLevel: z.number().int().min(0).optional(),
   quantityInStock: z.number().int().min(0).optional(),
-  sellingPrice: z.number().min(0).optional(),
-  costPrice: z.number().min(0).optional(),
-  purchasePrice: z.number().min(0).optional(),
-  mrp: z.number().min(0).optional(),
+  sellingPrice: rupees.optional(),
+  costPrice: rupees.optional(),
+  purchasePrice: rupees.optional(),
+  mrp: rupees.optional(),
   gstRate: z.number().min(0).optional(),
   markupPercentage: z.number().min(0).optional(),
   requiresPrescription: z.boolean().optional(),

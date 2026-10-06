@@ -50,7 +50,10 @@ export async function listResponse(model, { where, include, select, orderBy, req
   const wantsPage = req.query.page != null || req.query.limit != null
   if (!wantsPage) {
     const data = await model.findMany({ ...args, ...(fullListTake == null ? {} : { take: fullListTake }) })
-    return { success: true, data, meta: { total: data.length } }
+    // A full cap may hide more rows: count them, so `meta.total` is the real
+    // number and `truncated` tells a caller it holds only the first ones.
+    const total = fullListTake != null && data.length === fullListTake ? await model.count({ where }) : data.length
+    return { success: true, data, meta: { total, ...(total > data.length ? { truncated: true } : {}) } }
   }
 
   const { page, limit, skip } = getPagination(req.query)

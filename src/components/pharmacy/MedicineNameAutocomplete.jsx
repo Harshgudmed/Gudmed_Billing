@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Input } from "@/components/ui/input";
 import { Loader2, Search } from "lucide-react";
 import client from "@/api/client";
+import { formatMoney } from '@/lib/format'
 
 // Type-ahead over the open-source Indian medicine catalog (~254k rows).
 // As the user types a medicine name, suggestions appear; picking one fires
@@ -114,7 +115,7 @@ export default function MedicineNameAutocomplete({ value, onChange, onSelect, pl
               <div className="font-medium text-gray-900">{r.name}</div>
               <div className="text-xs text-muted-foreground">
                 {[r.manufacturer, r.composition].filter(Boolean).join(" · ")}
-                {r.price ? ` · ₹${r.price}` : ""}
+                {r.price ? ` · ${formatMoney(r.price)}` : ""}
               </div>
             </button>
           ))}

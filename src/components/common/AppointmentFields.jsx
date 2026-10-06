@@ -7,6 +7,7 @@ import { cn, drName } from '@/lib/utils'
 import { useDoctorTimetable } from './hooks/useDoctorTimetable'
 import { useSlotCheck } from './hooks/useSlotCheck'
 import { FieldError } from './PatientDetailsFields'
+import { formatMoney } from '@/lib/format'
 
 // "Book an appointment now" — the checkbox and the booking fields under it.
 //
@@ -179,7 +180,7 @@ export default function AppointmentFields({
             className="w-full"
             options={availableDoctors.map(d => ({
               value: d.id,
-              label: `${drName(d.fullName)}${d.consultationFee != null ? ` (₹${d.consultationFee})` : ''}`,
+              label: `${drName(d.fullName)}${d.consultationFee != null ? ` (${formatMoney(d.consultationFee)})` : ''}`,
               sublabel: d.specialization || undefined,
             }))}
             value={patientForm.doctor}
@@ -253,7 +254,7 @@ export default function AppointmentFields({
                   : !patientForm.appointmentDate
                   ? "Select date first"
                   : availableTimeSlots.length === 0
-                  ? "Sorry! Doctor not available on this date"
+                  ? "No free time left with this doctor on this date"
                   : "Select appointment time"
               } />
             </SelectTrigger>

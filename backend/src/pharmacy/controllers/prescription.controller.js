@@ -197,8 +197,15 @@ export async function dispense(req, res, next) {
       // Bill whatever was actually dispensed. Same default as a Direct Sale
       // (paid at the counter) — pharmacy collects payment when handing over
       // the medicine. Nothing was dispensed (e.g. zero stock) → no bill.
+      //
+      // Except a prescription billed at the Billing counter ([INV:…], see
+      // lib/invoiceFulfillment.js): it is paid on that invoice, so handing it
+      // over moves stock, not money. A sale here recorded the same medicine as
+      // a second cash payment. The prescription and the stock ledger are the
+      // record of the handover.
+      const billedOn = invoiceOfPrescription(rx.notes)
       let sale = null
-      if (saleItems.length > 0) {
+      if (saleItems.length > 0 && !billedOn) {
         const totalAmount = saleItems.reduce((sum, i) => sum + i.total, 0)
         sale = await tx.pharmacySale.create({
           data: {
@@ -220,7 +227,7 @@ export async function dispense(req, res, next) {
         })
       }
 
-      return { prescription: updated, status, shortages, sale }
+      return { prescription: updated, status, shortages, sale, billedOn }
     })
 
     res.json({
@@ -229,7 +236,9 @@ export async function dispense(req, res, next) {
       status: result.status,
       shortages: result.shortages,
       sale: result.sale,
-      message: result.status === 'partially_dispensed' ? 'Partially dispensed (limited stock)' : 'Dispensed successfully',
+      billedOn: result.billedOn,
+      message: (result.status === 'partially_dispensed' ? 'Partially dispensed (limited stock)' : 'Dispensed successfully')
+        + (result.billedOn ? ` — already paid on ${result.billedOn}` : ''),
     })
   } catch (err) {
     if (handleServiceError(res, err)) return
