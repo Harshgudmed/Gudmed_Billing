@@ -6,6 +6,7 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { getOrgSettings } from '@/lib/orgSettings'
 import { getFullName, calcAge as getAge, initials } from '@/lib/patient'
 import { useServerPagination } from '@/lib/useServerPagination'
+import { useDebounce } from '@/lib/useDebounce'
 import { Pagination } from '@/components/common/Pagination'
 import { FilterBar } from '@/components/common/FilterBar'
 import { useLiveData } from '@/lib/useLiveData'
@@ -175,6 +176,7 @@ export default function OpdModule() {
   const [customStart, setCustomStart] = useState('')
   const [customEnd, setCustomEnd] = useState('')
   const [filterHasRx, setFilterHasRx] = useState(false)
+  const debouncedFilterSearch = useDebounce(filterSearch, 300)
 
   // Turn the today/week/month/specific/custom date modes into a concrete
   // {startDate,endDate} the server can filter on.
@@ -192,7 +194,7 @@ export default function OpdModule() {
   const consultationsPagination = useServerPagination('/consultations', {
     perPage: ITEMS_PER_PAGE,
     params: {
-      search: filterSearch,
+      search: debouncedFilterSearch,
       doctorId: filterDoctor === 'all' ? '' : filterDoctor,
       startDate: opdDateRange.startDate,
       endDate: opdDateRange.endDate,
