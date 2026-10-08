@@ -1,12 +1,19 @@
 import { Router } from 'express'
 import multer from 'multer'
 import path from 'path'
+import fs from 'fs'
+import { fileURLToPath } from 'url'
 import { getMyDashboard, uploadDocument, deleteDocument } from '../controllers/patientPortalController.js'
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url))
+const UPLOAD_ROOT = path.join(__dirname, '..', '..', 'uploads')
 
 // Configure multer for local file uploads
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
-    cb(null, 'uploads/patient-documents/')
+    const uploadPath = path.join(UPLOAD_ROOT, 'patient-documents')
+    fs.mkdirSync(uploadPath, { recursive: true })
+    cb(null, uploadPath)
   },
   filename: (req, file, cb) => {
     const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9)
