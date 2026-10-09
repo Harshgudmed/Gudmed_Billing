@@ -496,6 +496,11 @@ model PatientDocument {
   fileType     String? // mime type
   uploadedAt   DateTime @default(now())
 
+  // Verification fields
+  verificationStatus String   @default("PENDING") // PENDING, VERIFIED, REJECTED
+  rejectionReason    String?
+
+
   // Relations
   organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   patient      Patient      @relation(fields: [patientId], references: [id], onDelete: Cascade)

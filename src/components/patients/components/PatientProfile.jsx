@@ -9,11 +9,12 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { Loader2, Users, CalendarDays, Microscope, ScanLine, BedDouble, FileText, IndianRupee, Clock, XCircle, FlaskConical, Scan, AlertCircle, Printer, Eye, Edit } from 'lucide-react';
+import { Loader2, Users, CalendarDays, Microscope, ScanLine, BedDouble, FileText, IndianRupee, Clock, XCircle, FlaskConical, Scan, AlertCircle, Printer, Eye, Edit, CheckCircle2 } from 'lucide-react';
 import { getFullName, calculateAge, initials } from '../utils/patientUtils';
 import { useLiveData } from '@/lib/useLiveData';
 import { useEnabledModules } from '@/lib/useEnabledModules';
 import { toast } from 'sonner';
+import client from '@/api/client';
 
 // The strip was a 6-column grid, so every tab got the same 115px whatever its
 // label — and "Lab / Pathology" plus its icon and count needs ~160px at any font
@@ -62,7 +63,7 @@ export default function PatientProfile({
 
   const handlePrintLabReport = (order) => {
     const results = order.results || [];
-    
+
     // We need to shape `order` to have the necessary patient fields since the new util expects it.
     const p = selectedPatient;
     const enrichedOrder = {
@@ -72,7 +73,7 @@ export default function PatientProfile({
       patientAge: p.dateOfBirth ? calculateAge(p.dateOfBirth) : '',
       patientGender: p.gender || ''
     };
-    
+
     printLabReport(enrichedOrder, results, orgInfo, drName);
   };
 
@@ -271,12 +272,14 @@ body{font-family:Arial,Helvetica,sans-serif;font-size:10.5pt;color:#000;backgrou
                     { label: 'Email', val: selectedPatient.email || '—' },
                     // One readable line, the way an address is actually read out:
                     // "A-1204, Block G, Andheri West, Mumbai, Mumbai Suburban, Maharashtra - 400053"
-                    { label: 'Address', val: [
+                    {
+                      label: 'Address', val: [
                         selectedPatient.houseNumber, selectedPatient.street, selectedPatient.locality,
                         selectedPatient.city, selectedPatient.district, selectedPatient.state,
                       ].filter(Boolean).join(', ')
                         + (selectedPatient.pincode ? ` - ${selectedPatient.pincode}` : '')
-                      || selectedPatient.addressDescription || '—' },
+                        || selectedPatient.addressDescription || '—'
+                    },
                     { label: 'Insurance', val: selectedPatient.hasInsurance ? (selectedPatient.insuranceProvider || 'Yes') : 'No' },
                     { label: 'Emergency Contact', val: selectedPatient.emergencyContactName || '—' },
                     { label: 'Contact Phone', val: selectedPatient.emergencyContactPhone || '—' },
@@ -538,10 +541,23 @@ body{font-family:Arial,Helvetica,sans-serif;font-size:10.5pt;color:#000;backgrou
                             ) : (
                               <FileText className="h-10 w-10 text-gray-400" />
                             )}
-                            <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity">
+                            <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex flex-col items-center justify-center transition-opacity gap-2">
                               <a href={`http://localhost:5000${doc.fileUrl}`} target="_blank" rel="noreferrer" className="bg-white text-blue-600 rounded-full p-2 hover:scale-110 transition-transform shadow-lg">
                                 <Eye className="h-4 w-4" />
                               </a>
+                            </div>
+
+                            {/* Verification Badge */}
+                            <div className="absolute top-2 right-2">
+                              {(!doc.verificationStatus || doc.verificationStatus === 'VERIFIED') && (
+                                <Badge className="bg-green-100 text-green-700 hover:bg-green-100 border-none">Verified</Badge>
+                              )}
+                              {doc.verificationStatus === 'PENDING' && (
+                                <Badge className="bg-yellow-100 text-yellow-700 hover:bg-yellow-100 border-none">Pending</Badge>
+                              )}
+                              {doc.verificationStatus === 'REJECTED' && (
+                                <Badge className="bg-red-100 text-red-700 hover:bg-red-100 border-none" title={doc.rejectionReason}>Rejected</Badge>
+                              )}
                             </div>
                           </div>
                           <div className="flex items-start justify-between gap-2">
@@ -550,8 +566,44 @@ body{font-family:Arial,Helvetica,sans-serif;font-size:10.5pt;color:#000;backgrou
                               <p className="text-xs text-gray-500 capitalize">{doc.documentType.replace('_', ' ')}</p>
                             </div>
                           </div>
-                          <div className="text-[10px] text-gray-400 mt-2">
-                            Uploaded: {format(new Date(doc.uploadedAt), 'dd MMM yyyy')}
+                          <div className="text-[10px] text-gray-400 mt-2 flex justify-between items-center">
+                            <span>{format(new Date(doc.uploadedAt), 'dd MMM yyyy')}</span>
+
+                            {/* Admin Action Buttons */}
+                            {doc.verificationStatus === 'PENDING' && (
+                              <div className="flex gap-1">
+                                <Button
+                                  size="icon"
+                                  variant="ghost"
+                                  className="h-6 w-6 text-green-600 hover:text-green-700 hover:bg-green-50"
+                                  onClick={async () => {
+                                    try {
+                                      await client.patch(`/patients/${selectedPatient.id}/documents/${doc.id}/verify`, { status: 'VERIFIED' });
+                                      toast.success('Document verified');
+                                      fetchRecords(selectedPatient.id);
+                                    } catch (err) { toast.error(err.message || 'Error verifying document') }
+                                  }}
+                                >
+                                  <CheckCircle2 className="h-4 w-4" />
+                                </Button>
+                                <Button
+                                  size="icon"
+                                  variant="ghost"
+                                  className="h-6 w-6 text-red-600 hover:text-red-700 hover:bg-red-50"
+                                  onClick={async () => {
+                                    const reason = window.prompt("Rejection reason (e.g. Blurry image):");
+                                    if (!reason) return;
+                                    try {
+                                      await client.patch(`/patients/${selectedPatient.id}/documents/${doc.id}/verify`, { status: 'REJECTED', reason });
+                                      toast.success('Document rejected');
+                                      fetchRecords(selectedPatient.id);
+                                    } catch (err) { toast.error(err.message || 'Error rejecting document') }
+                                  }}
+                                >
+                                  <XCircle className="h-4 w-4" />
+                                </Button>
+                              </div>
+                            )}
                           </div>
                         </div>
                       ))}

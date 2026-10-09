@@ -620,3 +620,35 @@ export async function setStatus(req, res, next) {
     next(err)
   }
 }
+
+export async function verifyDocument(req, res, next) {
+  try {
+    const organizationId = getOrgId(req)
+    const { id, docId } = req.params
+    const { status, reason } = req.body
+
+    if (!['VERIFIED', 'REJECTED', 'PENDING'].includes(status)) {
+      return res.status(400).json({ success: false, error: "Invalid verification status" })
+    }
+
+    const doc = await db.patientDocument.findFirst({
+      where: { id: docId, patientId: id, organizationId }
+    })
+
+    if (!doc) {
+      return res.status(404).json({ success: false, error: "Document not found" })
+    }
+
+    const updated = await db.patientDocument.update({
+      where: { id: docId },
+      data: {
+        verificationStatus: status,
+        rejectionReason: status === 'REJECTED' ? reason : null
+      }
+    })
+
+    res.json({ success: true, data: updated })
+  } catch (err) {
+    next(err)
+  }
+}

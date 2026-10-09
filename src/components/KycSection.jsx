@@ -1,5 +1,5 @@
 import { useState, useRef } from 'react'
-import { UploadCloud, CheckCircle2, FileText, FileImage, File, Loader2, Trash2, Eye } from 'lucide-react'
+import { UploadCloud, CheckCircle2, FileText, FileImage, File, Loader2, Trash2, Eye, Clock, XCircle } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
@@ -109,18 +109,36 @@ export default function KycSection({ documents = [], onUploadSuccess, primaryCol
           {KYC_DOCS.map(doc => {
             const uploadedDoc = uploadedDocs[doc.id]
             const isUploaded = !!uploadedDoc
+            const isPending = isUploaded && uploadedDoc.verificationStatus === 'PENDING'
+            const isVerified = isUploaded && uploadedDoc.verificationStatus === 'VERIFIED'
+            const isRejected = isUploaded && uploadedDoc.verificationStatus === 'REJECTED'
+            
+            // Fallback for older documents before this feature
+            const isLegacy = isUploaded && !uploadedDoc.verificationStatus
+            const treatedAsVerified = isVerified || isLegacy
+
+            let cardStyle = 'border-dashed border-gray-200 hover:border-gray-300 hover:bg-gray-50'
+            if (treatedAsVerified) cardStyle = 'border-green-200 bg-green-50/30'
+            else if (isPending) cardStyle = 'border-yellow-200 bg-yellow-50/30'
+            else if (isRejected) cardStyle = 'border-red-200 bg-red-50/30'
             
             return (
               <div 
                 key={doc.id} 
-                className={`relative flex flex-col items-center justify-center p-4 rounded-xl border-2 transition-all ${
-                  isUploaded ? 'border-green-200 bg-green-50/30' : 'border-dashed border-gray-200 hover:border-gray-300 hover:bg-gray-50'
-                }`}
+                className={`relative flex flex-col items-center justify-center p-4 rounded-xl border-2 transition-all ${cardStyle}`}
               >
                 {/* Status indicator */}
-                {isUploaded ? (
+                {treatedAsVerified ? (
                   <div className="absolute top-3 right-3 text-green-500 bg-white rounded-full">
                     <CheckCircle2 className="h-5 w-5 fill-current text-white bg-green-500 rounded-full" />
+                  </div>
+                ) : isPending ? (
+                  <div className="absolute top-3 right-3 text-yellow-500 bg-white rounded-full">
+                    <Clock className="h-5 w-5" />
+                  </div>
+                ) : isRejected ? (
+                  <div className="absolute top-3 right-3 text-red-500 bg-white rounded-full">
+                    <XCircle className="h-5 w-5" />
                   </div>
                 ) : (
                   <div className="absolute top-3 right-3 text-gray-300">
@@ -150,16 +168,38 @@ export default function KycSection({ documents = [], onUploadSuccess, primaryCol
 
                 <div className="mb-3 p-3 rounded-full bg-white shadow-sm border border-gray-100 mt-2">
                   {doc.id.includes('report') || doc.id.includes('history') || doc.id.includes('prescription') ? (
-                    <FileText className={`h-6 w-6 ${isUploaded ? 'text-green-600' : 'text-gray-400'}`} />
+                    <FileText className={`h-6 w-6 ${treatedAsVerified ? 'text-green-600' : isPending ? 'text-yellow-600' : isRejected ? 'text-red-600' : 'text-gray-400'}`} />
                   ) : (
-                    <FileImage className={`h-6 w-6 ${isUploaded ? 'text-green-600' : 'text-gray-400'}`} />
+                    <FileImage className={`h-6 w-6 ${treatedAsVerified ? 'text-green-600' : isPending ? 'text-yellow-600' : isRejected ? 'text-red-600' : 'text-gray-400'}`} />
                   )}
                 </div>
                 
                 <h3 className="text-sm font-medium text-center text-gray-800 mb-1">{doc.label}</h3>
                 
-                {isUploaded ? (
+                {treatedAsVerified ? (
                   <span className="text-xs text-green-600 font-medium">Verified / Uploaded</span>
+                ) : isPending ? (
+                  <span className="text-xs text-yellow-600 font-medium">Verification Pending</span>
+                ) : isRejected ? (
+                  <div className="flex flex-col items-center w-full">
+                    <span className="text-xs text-red-600 font-medium">Rejected</span>
+                    {uploadedDoc.rejectionReason && (
+                      <span className="text-[10px] text-red-500 text-center mt-1 leading-tight">{uploadedDoc.rejectionReason}</span>
+                    )}
+                    <Button 
+                      variant="outline" 
+                      size="sm" 
+                      className="mt-2 text-xs w-full border-red-200 text-red-600 hover:bg-red-50"
+                      disabled={uploading && selectedDocType === doc.id}
+                      onClick={() => handleUploadClick(doc.id)}
+                    >
+                      {uploading && selectedDocType === doc.id ? (
+                        <><Loader2 className="h-3 w-3 mr-2 animate-spin" /> Uploading...</>
+                      ) : (
+                        'Upload Again'
+                      )}
+                    </Button>
+                  </div>
                 ) : (
                   <Button 
                     variant="outline" 

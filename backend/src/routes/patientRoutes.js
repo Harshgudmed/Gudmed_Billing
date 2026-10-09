@@ -1,5 +1,5 @@
 import { Router } from 'express'
-import { getAll, getOne, getRecords, create, update, remove, setStatus } from '../controllers/patientController.js'
+import { getAll, getOne, getRecords, create, update, remove, setStatus, verifyDocument } from '../controllers/patientController.js'
 import { getOrgId } from '../lib/reqContext.js'
 
 const router = Router()
@@ -21,6 +21,7 @@ router.post('/', create)
 router.patch('/:id/status', setStatus)
 router.patch('/:id', update)
 router.put('/:id', update)
+router.patch('/:id/documents/:docId/verify', verifyDocument)
 router.delete('/:id', remove)
 
 export default router
