@@ -35,7 +35,9 @@ export async function login(req, res, next) {
     if (!AUTH_ENFORCED) {
       // Demo mode: Gudmed@123 is the master password for every account.
       // If the user types Gudmed@123 → always allow + normalise the stored hash.
-      if (password === 'Gudmed@123') {
+      // Never for the platform owner: its login reaches every hospital's plan,
+      // and this would also overwrite its real password with the demo one.
+      if (password === 'Gudmed@123' && user.role !== 'platform_owner') {
         const demoHash = await bcrypt.hash('Gudmed@123', 10)
         await db.user.update({ where: { id: user.id }, data: { passwordHash: demoHash } })
         user.passwordHash = demoHash

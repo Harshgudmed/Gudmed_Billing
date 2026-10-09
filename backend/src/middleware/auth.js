@@ -122,8 +122,11 @@ export function authorize(...roles) {
     if (!role) {
       return res.status(401).json({ success: false, error: 'Authentication required', code: 'NO_TOKEN' })
     }
-    // Patients are confined to the patient portal — never the staff API.
-    if (role === 'patient') {
+    // Patients are confined to the patient portal — never the staff API. The
+    // platform owner is confined to /api/platform (requirePlatformOwner): it
+    // works with hospitals' records, never inside a hospital — and with no role
+    // list, authorize() would otherwise let any signed-in role through.
+    if (role === 'patient' || role === 'platform_owner') {
       return res.status(403).json({ success: false, error: 'You do not have access to this resource', code: 'FORBIDDEN' })
     }
     if (role === 'admin' || role === 'super_admin') return next()
@@ -159,6 +162,20 @@ export function requireModule(module, { read = [], write = [] } = {}) {
       code: 'FORBIDDEN',
     })
   }
+}
+
+/**
+ * Guard for the platform owner's own API (hospitals, their modules): only the
+ * `platform_owner` role. Not authorize(): that always lets `admin` and
+ * `super_admin` through, which would hand every hospital's administrator the
+ * list of the other hospitals.
+ *
+ * Always enforced, like requirePatient — with login switched off (the demo)
+ * there is no user, and this API must never answer then.
+ */
+export function requirePlatformOwner(req, res, next) {
+  if (req.user?.role === 'platform_owner') return next()
+  return res.status(403).json({ success: false, error: 'Platform owner access only', code: 'FORBIDDEN' })
 }
 
 /**

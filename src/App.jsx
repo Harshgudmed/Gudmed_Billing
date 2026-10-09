@@ -57,6 +57,10 @@ const NotFoundPage             = lazy(() => import('./pages/NotFoundPage.jsx'))
 const DisplayBoardPage         = lazy(() => import('./pages/DisplayBoardPage.jsx'))
 const DisplayAutoPage          = lazy(() => import('./pages/DisplayAutoPage.jsx'))
 const SelfRegisterPage         = lazy(() => import('./pages/SelfRegisterPage.jsx'))
+// The GudMed team's own pages (hospitals and the modules each has bought) — not
+// a hospital role, so outside both Shell trees and the role routes.
+const PlatformLoginPage        = lazy(() => import('./pages/PlatformLogin.jsx'))
+const PlatformPage             = lazy(() => import('./pages/PlatformPage.jsx'))
 
 // Module key → page component. Shared by both legacy and role-based routing.
 const PAGE_BY_MODULE = {
@@ -625,6 +629,10 @@ export default function App() {
               details from the hospital's QR code. No Shell, no login: mounted
               here, outside the authenticated tree. */}
           <Route path="/self-register" element={<SelfRegisterPage />} />
+          {/* Platform owner: ahead of the /:role routes, which would read
+              "platform" as a hospital role. */}
+          <Route path="/platform/login" element={<PlatformLoginPage />} />
+          <Route path="/platform" element={<PlatformPage />} />
           <Route path="*" element={AUTH_ENFORCED ? <AuthedApp /> : <LegacyApp />} />
         </Routes>
       </Suspense>
