@@ -22,6 +22,8 @@ export const INSURANCE_PROVIDERS = [
   'Max Bupa', 'Reliance Health', 'SBI Health', 'Tata AIG',
 ];
 
+export const MARITAL_STATUSES = ['Single', 'Married', 'Divorced', 'Widowed', 'Other'];
+
 // The Edit Patient form's rules are registration's own: patientEditSchema in
 // src/lib/schemas/patientFormSchema.js. (A looser copy lived here and let an edit
 // save a name with digits, a date of birth in 1800 and an emptied city.)

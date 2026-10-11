@@ -8,7 +8,7 @@ import { PhoneInput } from './PhoneInput'
 import AddressFields, { INDIAN_STATES } from './AddressFields'
 import { FieldError } from './FieldError'
 import { sanitizeTextInput, sanitizeMultilineInput } from './textFieldUtils'
-import { BLOOD_GROUPS } from '@/components/patients/utils/patientUtils'
+import { BLOOD_GROUPS, INSURANCE_PROVIDERS, MARITAL_STATUSES } from '@/components/patients/utils/patientUtils'
 import { dobInputBounds } from '@/lib/schemas/patientFormSchema'
 
 // The patient half of registration — who the person is, how to reach them,
@@ -29,18 +29,9 @@ import { dobInputBounds } from '@/lib/schemas/patientFormSchema'
 // decides what happens on submit: reception creates the patient and books the
 // appointment, the QR page only files a pending self-registration.
 
-// Moved to their own files (the address is shared with the vendor form);
-// re-exported so every existing import from here keeps working.
-export { INDIAN_STATES, FieldError }
-
-export const INSURANCE_PROVIDERS = [
-  'CGHS', 'ESIC', 'PM-JAY (Ayushman Bharat)', 'Star Health', 'HDFC ERGO',
-  'Niva Bupa', 'Care Health', 'ICICI Lombard', 'Bajaj Allianz', 'LIC Health',
-  'United India', 'New India Assurance', 'Oriental Insurance', 'National Insurance',
-  'Max Bupa', 'Reliance Health', 'SBI Health', 'Tata AIG',
-]
-
-export const MARITAL_STATUSES = ['Single', 'Married', 'Divorced', 'Widowed', 'Other']
+// The lists live in patients/utils/patientUtils.js (one copy); re-exported so
+// every existing import from here keeps working.
+export { INDIAN_STATES, FieldError, INSURANCE_PROVIDERS, MARITAL_STATUSES }
 
 // The date-of-birth picker's range comes from the shared dobInputBounds() —
 // the same limit the schema and the server enforce (it used to be a separate

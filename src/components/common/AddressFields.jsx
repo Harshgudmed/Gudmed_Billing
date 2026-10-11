@@ -4,15 +4,12 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { MapPin } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { FieldError } from './FieldError'
+// One list of states, in src/components/patients/utils/patientUtils.js. Re-exported
+// here so the existing `import { INDIAN_STATES } from './AddressFields'` callers
+// keep working, without a second copy that could drift.
+import { INDIAN_STATES } from '@/components/patients/utils/patientUtils'
 
-export const INDIAN_STATES = [
-  'Andhra Pradesh', 'Arunachal Pradesh', 'Assam', 'Bihar', 'Chhattisgarh',
-  'Goa', 'Gujarat', 'Haryana', 'Himachal Pradesh', 'Jharkhand', 'Karnataka',
-  'Kerala', 'Madhya Pradesh', 'Maharashtra', 'Manipur', 'Meghalaya', 'Mizoram',
-  'Nagaland', 'Odisha', 'Punjab', 'Rajasthan', 'Sikkim', 'Tamil Nadu',
-  'Telangana', 'Tripura', 'Uttar Pradesh', 'Uttarakhand', 'West Bengal',
-  'Delhi', 'Jammu & Kashmir', 'Ladakh', 'Chandigarh', 'Puducherry',
-]
+export { INDIAN_STATES }
 
 /**
  * The Indian address, in the parts a front desk asks for: house, street,
