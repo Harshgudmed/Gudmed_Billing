@@ -209,3 +209,44 @@ export async function updateHospital(req, res, next) {
     res.json({ success: true, data: toRow(updated) })
   } catch (e) { next(e) }
 }
+
+// Removing a hospital is for an EMPTY one only — a code typed by mistake, a
+// cancelled onboarding. A hospital that has seen a patient, a bill or a booking
+// keeps its records (they are medical and tax documents): switch it off instead
+// (PATCH isActive). Never a cascade that erases real data behind one dialog.
+export async function deleteHospital(req, res, next) {
+  try {
+    const id = String(req.params.id)
+    const confirmSlug = String(req.body?.confirmSlug || '').trim().toLowerCase()
+    const org = await db.organization.findFirst({
+      where: { id, slug: { notIn: [PLATFORM_SLUG, 'gudmed'] } },
+      select: { id: true, name: true, slug: true, _count: { select: { patients: true, invoices: true, appointments: true, users: true } } },
+    })
+    if (!org) return res.status(404).json({ success: false, error: 'Hospital not found, or it is the platform itself and cannot be removed' })
+    if (confirmSlug !== org.slug) {
+      return res.status(400).json({ success: false, error: `Type the hospital code "${org.slug}" to confirm removal` })
+    }
+    // Real records block removal — the hospital is switched off instead.
+    const has = []
+    if (org._count.patients) has.push(`${org._count.patients} patient${org._count.patients === 1 ? '' : 's'}`)
+    if (org._count.invoices) has.push(`${org._count.invoices} bill${org._count.invoices === 1 ? '' : 's'}`)
+    if (org._count.appointments) has.push(`${org._count.appointments} appointment${org._count.appointments === 1 ? '' : 's'}`)
+    if (has.length) {
+      return res.status(409).json({
+        success: false,
+        error: `This hospital has ${has.join(', ')}. Its records are kept — switch the hospital off instead of removing it.`,
+      })
+    }
+    // Empty but for its own staff logins: those go with it, in one transaction.
+    await db.$transaction(async (tx) => {
+      await tx.user.deleteMany({ where: { organizationId: id } })
+      await tx.organization.delete({ where: { id } })
+      await auditIpd(req, getOrgId(req), {
+        action: 'delete', entityType: 'platform.hospital', entityId: id,
+        before: { name: org.name, slug: org.slug, staffRemoved: org._count.users },
+      }, tx)
+    })
+    res.json({ success: true })
+  } catch (e) { next(e) }
+}
+

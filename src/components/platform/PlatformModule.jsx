@@ -1,8 +1,10 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
-import { Building2, CheckCircle2, PauseCircle, Plus, Pencil, LogOut, Copy, Loader2 } from 'lucide-react'
+import { Building2, CheckCircle2, PauseCircle, Plus, Pencil, Trash2, LogOut, Copy, Loader2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
 import { TableCell, TableRow } from '@/components/ui/table'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
@@ -59,6 +61,9 @@ export default function PlatformModule() {
   const { rows, loading, error, summary, page, totalPages, setPage, refresh } = hospitals
   const [dialog, setDialog] = useState({ open: false, hospital: null })
   const [created, setCreated] = useState(null)
+  const [deleteTarget, setDeleteTarget] = useState(null)
+  const [confirmText, setConfirmText] = useState('')
+  const [deleting, setDeleting] = useState(false)
   const [signingOut, setSigningOut] = useState(false)
 
   async function save(payload) {
@@ -72,6 +77,25 @@ export default function PlatformModule() {
     setDialog({ open: false, hospital: null })
     refresh()
   }
+
+  async function removeHospital() {
+    if (!deleteTarget) return
+    setDeleting(true)
+    try {
+      await platformApi.delete(deleteTarget.id, confirmText.trim())
+      toast.success(`${deleteTarget.name} removed`)
+      closeDelete()
+      refresh()
+    } catch (e) {
+      // The client throws an Error with `.message` (api/client.js); the server's
+      // reason (records kept, wrong code) is in it.
+      toast.error(e?.message || 'Could not remove the hospital')
+    } finally {
+      setDeleting(false)
+    }
+  }
+
+  const closeDelete = () => { setDeleteTarget(null); setConfirmText('') }
 
   async function signOut() {
     setSigningOut(true)
@@ -159,7 +183,10 @@ export default function PlatformModule() {
                     </TableCell>
                     <TableCell className="text-right tabular-nums">{h.staffCount}</TableCell>
                     <TableCell>
-                      <Button variant="outline" size="sm" onClick={() => openEdit(h)} aria-label={`Edit ${h.name}`}><Pencil className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />Edit</Button>
+                      <div className="flex items-center gap-1.5">
+                        <Button variant="outline" size="sm" onClick={() => openEdit(h)} aria-label={`Edit ${h.name}`}><Pencil className="mr-1 h-3.5 w-3.5" aria-hidden="true" />Edit</Button>
+                        <Button variant="ghost" size="sm" className="text-red-600 hover:bg-red-50 hover:text-red-700" onClick={() => setDeleteTarget(h)} aria-label={`Delete ${h.name}`}><Trash2 className="h-4 w-4" aria-hidden="true" /></Button>
+                      </div>
                     </TableCell>
                   </TableRow>
                 )
@@ -189,7 +216,10 @@ export default function PlatformModule() {
                           <p className="truncate font-medium text-slate-900">{h.name}</p>
                           <p className="truncate text-xs text-slate-500"><span className="font-mono">{h.slug}</span>{h.city ? ` · ${h.city}` : ''}</p>
                         </div>
-                        <Button variant="outline" size="sm" onClick={() => openEdit(h)} aria-label={`Edit ${h.name}`}><Pencil className="h-3.5 w-3.5" aria-hidden="true" /></Button>
+                        <div className="flex items-center gap-1">
+                          <Button variant="outline" size="sm" onClick={() => openEdit(h)} aria-label={`Edit ${h.name}`}><Pencil className="h-3.5 w-3.5" aria-hidden="true" /></Button>
+                          <Button variant="ghost" size="sm" className="text-red-600 hover:bg-red-50 hover:text-red-700" onClick={() => setDeleteTarget(h)} aria-label={`Delete ${h.name}`}><Trash2 className="h-4 w-4" aria-hidden="true" /></Button>
+                        </div>
                       </div>
                       <PlanBadges hospital={h} />
                       <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-600">
@@ -208,6 +238,30 @@ export default function PlatformModule() {
       </main>
 
       <HospitalDialog open={dialog.open} hospital={dialog.hospital} onOpenChange={(open) => setDialog((d) => ({ ...d, open }))} onSubmit={save} />
+
+      {/* Remove an empty hospital. One with patients, bills or bookings keeps
+          its records — the server refuses and says so; switch it off instead. */}
+      <Dialog open={!!deleteTarget} onOpenChange={(open) => { if (!open && !deleting) closeDelete() }}>
+        <DialogContent className="w-[calc(100%-1rem)] max-w-md">
+          <DialogHeader>
+            <DialogTitle>Remove {deleteTarget?.name}?</DialogTitle>
+            <DialogDescription>
+              This removes the hospital and its staff logins. A hospital that has any patient, bill or appointment keeps its records — switch it off instead of removing it.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-1.5">
+            <Label htmlFor="confirm-slug">Type the hospital code <span className="font-mono font-semibold text-slate-900">{deleteTarget?.slug}</span> to confirm</Label>
+            <Input id="confirm-slug" value={confirmText} onChange={(e) => setConfirmText(e.target.value)} autoComplete="off" className="font-mono" />
+          </div>
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button variant="outline" onClick={closeDelete} disabled={deleting}>Cancel</Button>
+            <Button variant="destructive" onClick={removeHospital} disabled={deleting || confirmText.trim().toLowerCase() !== deleteTarget?.slug}>
+              {deleting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Trash2 className="mr-2 h-4 w-4" />}
+              Remove hospital
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Shown once, right after a hospital is added: what to hand over. */}
       <Dialog open={!!created} onOpenChange={(open) => { if (!open) setCreated(null) }}>

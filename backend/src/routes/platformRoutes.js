@@ -3,7 +3,7 @@
 // `authenticate` in routes/index.js — the guard reads who is signed in.
 import { Router } from 'express'
 import { requirePlatformOwner } from '../middleware/auth.js'
-import { listHospitals, createHospital, updateHospital } from '../controllers/platformController.js'
+import { listHospitals, createHospital, updateHospital, deleteHospital } from '../controllers/platformController.js'
 
 const router = Router()
 
@@ -14,5 +14,6 @@ router.use(requirePlatformOwner)
 router.get('/hospitals', listHospitals)
 router.post('/hospitals', createHospital)
 router.patch('/hospitals/:id', updateHospital)
+router.delete('/hospitals/:id', deleteHospital)
 
 export default router
