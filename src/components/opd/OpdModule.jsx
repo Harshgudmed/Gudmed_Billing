@@ -632,7 +632,7 @@ export default function OpdModule() {
               <h3 className="text-lg font-semibold text-gray-600">No Prescriptions Found</h3>
               <p className="text-gray-400 text-sm mt-1 mb-6">{filterSearch || filterDoctor !== 'all' ? 'Try changing the filters' : 'Start by creating a new OPD prescription'}</p>
               {!filterSearch && filterDoctor === 'all' && (
-                <Button onClick={() => { resetForm(); setView('form') }} className="bg-[#2E4168] hover:bg-[#24344f]"><Plus className="h-4 w-4 mr-2" />New Prescription</Button>
+                <Button onClick={() => { resetForm(); setView('form') }}><Plus className="h-4 w-4 mr-2" />New Prescription</Button>
               )}
             </CardContent>
           </Card>
@@ -788,8 +788,8 @@ export default function OpdModule() {
 
   return (
     <div className="space-y-4 pb-10">
-      {/* Premium gradient header */}
-      <div className="sticky top-0 z-20 -mx-6 px-6 py-4 bg-gradient-to-r from-[#2E4168] via-[#34497a] to-[#24344f] text-white shadow-md flex items-center justify-between">
+      {/* Dynamic branding header */}
+      <div className="sticky top-0 z-20 -mx-6 px-6 py-4 module-header text-white shadow-md flex items-center justify-between">
         <div className="flex items-center gap-3">
           <Button variant="ghost" size="sm" className="text-white hover:bg-white/15" onClick={() => { resetForm(); setView('list') }}><ArrowLeft className="h-4 w-4 mr-1" />Back</Button>
           <div>
@@ -1076,7 +1076,7 @@ export default function OpdModule() {
         <div className="xl:col-span-1">
           <div className="xl:sticky xl:top-24">
             <Card className="rounded-2xl border-slate-200/70 shadow-md overflow-hidden">
-              <div className="bg-gradient-to-r from-[#2E4168] to-[#3b5488] text-white px-4 py-3 flex items-center justify-between">
+              <div className="module-header text-white px-4 py-3 flex items-center justify-between">
                 <span className="font-semibold flex items-center gap-2"><span className="text-xl font-serif">℞</span> Live Prescription</span>
                 <Badge className="bg-white/20 text-white hover:bg-white/20 border-0">{prescriptionItems.length} med · {labOrderItems.length + radiologyOrderItems.length} test</Badge>
               </div>
@@ -1089,7 +1089,7 @@ export default function OpdModule() {
                       <p className="text-xs text-gray-500">UHID {selectedPatient.mrn} · {getAge(selectedPatient.dateOfBirth)}y · {selectedPatient.gender}</p>
                     </>
                   ) : <p className="text-gray-400 italic">No patient selected</p>}
-                  {selectedDoctor && <p className="text-xs text-[#2E4168] mt-1">{drName(selectedDoctor.fullName)}</p>}
+                  {selectedDoctor && <p className="text-xs text-primary font-medium mt-1">{drName(selectedDoctor.fullName)}</p>}
                 </div>
 
                 {/* Vitals line */}
@@ -1105,7 +1105,7 @@ export default function OpdModule() {
 
                 {/* Diagnosis */}
                 <div>
-                  <p className="text-[11px] font-bold uppercase tracking-wide text-[#2E4168]">Diagnosis</p>
+                  <p className="text-[11px] font-bold uppercase tracking-wide text-primary">Diagnosis</p>
                   <p className="font-medium">{wDiagnosis || <span className="text-gray-400 italic font-normal">—</span>}</p>
                   {wComplaint && <p className="text-xs text-gray-500 mt-0.5">C/O: {wComplaint}</p>}
                 </div>
@@ -1144,7 +1144,7 @@ export default function OpdModule() {
               </CardContent>
             </Card>
             <div className="mt-3 hidden xl:block">
-              <Button onClick={saveConsultation} disabled={isSaving} className="w-full bg-[#2E4168] hover:bg-[#24344f]" size="lg">
+              <Button onClick={saveConsultation} disabled={isSaving} className="w-full" size="lg">
                 {isSaving ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Save className="h-4 w-4 mr-2" />}
                 {isSaving ? 'Saving...' : editingId ? 'Update Prescription' : 'Save Prescription'}
               </Button>
@@ -1163,7 +1163,7 @@ export default function OpdModule() {
 
       {/* Mobile save */}
       <div className="flex justify-end xl:hidden">
-        <Button onClick={saveConsultation} disabled={isSaving} size="lg" className="bg-[#2E4168] hover:bg-[#24344f]">
+        <Button onClick={saveConsultation} disabled={isSaving} size="lg">
           {isSaving ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Save className="h-4 w-4 mr-2" />}
           {isSaving ? 'Saving...' : editingId ? 'Update Prescription' : 'Save Prescription'}
         </Button>

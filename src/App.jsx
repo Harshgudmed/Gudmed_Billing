@@ -131,14 +131,77 @@ const MODULE_BY_PATH = {
   '/doctor-accountability': 'doctorAccountability',
 }
 
+function hexToHsl(hex) {
+  if (!hex || typeof hex !== 'string') return null
+  let c = hex.trim().replace('#', '')
+  if (c.length === 3) c = c.split('').map(x => x + x).join('')
+  if (c.length !== 6) return null
+  const r = parseInt(c.substring(0, 2), 16) / 255
+  const g = parseInt(c.substring(2, 4), 16) / 255
+  const b = parseInt(c.substring(4, 6), 16) / 255
+
+  const max = Math.max(r, g, b), min = Math.min(r, g, b)
+  let h = 0, s = 0, l = (max + min) / 2
+
+  if (max !== min) {
+    const d = max - min
+    s = l > 0.5 ? d / (2 - max - min) : d / (max + min)
+    switch (max) {
+      case r: h = (g - b) / d + (g < b ? 6 : 0); break
+      case g: h = (b - r) / d + 2; break
+      case b: h = (r - g) / d + 4; break
+    }
+    h /= 6
+  }
+  return `${Math.round(h * 360)} ${Math.round(s * 100)}% ${Math.round(l * 100)}%`
+}
+
+function isLightHex(hex) {
+  if (!hex) return true
+  const h = hex.replace('#', '')
+  if (h.length !== 6) return true
+  const r = parseInt(h.slice(0, 2), 16)
+  const g = parseInt(h.slice(2, 4), 16)
+  const b = parseInt(h.slice(4, 6), 16)
+  return (r * 299 + g * 587 + b * 114) / 1000 > 128
+}
+
 function applyBranding(settings) {
-  if (!settings) return
   const root = document.documentElement
-  if (settings.primaryColor)   root.style.setProperty('--color-primary', settings.primaryColor)
-  if (settings.secondaryColor) root.style.setProperty('--color-secondary', settings.secondaryColor)
-  if (settings.navbarColor)    root.style.setProperty('--color-navbar', settings.navbarColor)
-  if (settings.headerColor)    root.style.setProperty('--color-header', settings.headerColor)
-  if (settings.hospitalName) {
+  const primary = settings?.primaryColor || settings?.primary || '#2563eb'
+  const secondary = settings?.secondaryColor || settings?.secondary || '#7c3aed'
+  const navbar = settings?.navbarColor || '#ffffff'
+  const header = settings?.headerColor || settings?.moduleHeaderColor || ''
+
+  // Primary
+  root.style.setProperty('--color-primary', primary)
+  const primaryHsl = hexToHsl(primary) || '221.2 83.2% 53.3%'
+  root.style.setProperty('--primary', primaryHsl)
+  root.style.setProperty('--ring', primaryHsl)
+  const primaryLight = isLightHex(primary)
+  // Replaced with Dark Pine Green (160 80% 15%) so the user can easily see a visible change compared to the black/navy!
+  root.style.setProperty('--primary-foreground', primaryLight ? '160 80% 15%' : '210 40% 98%')
+
+  // Secondary
+  root.style.setProperty('--color-secondary', secondary)
+  const secondaryHsl = hexToHsl(secondary) || '262.1 83.3% 57.8%'
+  root.style.setProperty('--secondary', secondaryHsl)
+  const secondaryLight = isLightHex(secondary)
+  root.style.setProperty('--secondary-foreground', secondaryLight ? '222.2 47.4% 11.2%' : '210 40% 98%')
+
+  // Navbar / Sidebar
+  root.style.setProperty('--color-navbar', navbar)
+
+  // Module Header
+  root.style.setProperty('--color-header', header || 'transparent')
+  if (header) {
+    const headerLight = isLightHex(header)
+    root.style.setProperty('--color-header-text', headerLight ? '#0f172a' : '#ffffff')
+  } else {
+    root.style.setProperty('--color-header-text', 'inherit')
+  }
+
+  if (settings?.hospitalName) {
     document.title = settings.hospitalName
   }
 }
@@ -178,7 +241,7 @@ function useBranding() {
         // This was reading them off `s`, where they never existed, so
         // --color-primary/--color-secondary were never actually set — any
         // CSS relying on them (this screen's brand colour) silently failed.
-        applyBranding({ ...s, primaryColor: res.data?.primaryColor, secondaryColor: res.data?.secondaryColor, hospitalName: orgName })
+        applyBranding({ ...s, primaryColor: res.data?.primaryColor, secondaryColor: res.data?.secondaryColor, headerColor: s.moduleHeaderColor, hospitalName: orgName })
         setModulesLoaded(true)
       } catch (err) {
         if (!live) return

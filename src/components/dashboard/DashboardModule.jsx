@@ -237,7 +237,7 @@ export default function DashboardModule() {
           </Card>
         )}
 
-        {canOpen('opd') && <Card className="cursor-pointer hover:shadow-lg hover:border-red-300 transition-all" onClick={() => navigate(`${base}/opd`)}>
+        {canOpen('inpatient') && <Card className="cursor-pointer hover:shadow-lg hover:border-red-300 transition-all" onClick={() => navigate(`${base}/inpatient`)}>
           <CardHeader className="flex flex-row items-center justify-between pb-2">
             <CardTitle className="text-sm font-medium text-gray-600">Critical Alerts</CardTitle>
             <AlertCircle className="h-5 w-5 text-red-600" />

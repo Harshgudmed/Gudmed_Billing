@@ -362,6 +362,51 @@ export async function createDepartment(req, res, next) {
   } catch (err) { next(err) }
 }
 
+export async function deleteDepartment(req, res, next) {
+  try {
+    const ORG_ID = getOrgId(req)
+    const id = String(req.body?.id || '')
+    const dept = await db.department.findFirst({ where: { id, organizationId: ORG_ID }, select: { id: true, name: true } })
+    if (!dept) return res.status(404).json({ success: false, error: 'Department not found' })
+
+    // What is attached to the department. Some links are blocked by the database
+    // (purchase documents); others would be silently detached (staff lose their
+    // department, a ward its department) — both are refused here, so a delete
+    // never quietly changes records elsewhere. Counted in one round trip.
+    const [staff, wards, rooms, theatres, ipdConsults, purchaseRequests, storeIndents, storeIssues] = await Promise.all([
+      db.user.count({ where: { organizationId: ORG_ID, departmentId: id } }),
+      db.ward.count({ where: { departmentId: id } }).catch(() => 0),
+      db.room.count({ where: { departmentId: id } }).catch(() => 0),
+      db.operatingTheatre.count({ where: { departmentId: id } }).catch(() => 0),
+      db.ipdConsultation.count({ where: { departmentId: id } }).catch(() => 0),
+      db.purchaseRequest.count({ where: { departmentId: id } }).catch(() => 0),
+      db.storeIndent.count({ where: { departmentId: id } }).catch(() => 0),
+      db.storeIssue.count({ where: { departmentId: id } }).catch(() => 0),
+    ])
+    const attached = []
+    if (staff) attached.push(`${staff} staff member${staff === 1 ? '' : 's'}`)
+    if (wards) attached.push(`${wards} ward${wards === 1 ? '' : 's'}`)
+    if (rooms) attached.push(`${rooms} room${rooms === 1 ? '' : 's'}`)
+    if (theatres) attached.push(`${theatres} operation theatre${theatres === 1 ? '' : 's'}`)
+    if (ipdConsults) attached.push(`${ipdConsults} inpatient consultation${ipdConsults === 1 ? '' : 's'}`)
+    if (purchaseRequests || storeIndents || storeIssues) attached.push('purchase records')
+    if (attached.length) {
+      return res.status(409).json({
+        success: false,
+        error: `Cannot delete "${dept.name}" — it still has ${attached.join(', ')}. Move or remove those first.`,
+      })
+    }
+    await db.department.delete({ where: { id } })
+    res.json({ success: true })
+  } catch (err) {
+    // A reference added elsewhere and not counted above still blocks it, cleanly.
+    if (err?.code === 'P2003') {
+      return res.status(409).json({ success: false, error: 'Cannot delete this department — other records still use it.' })
+    }
+    next(err)
+  }
+}
+
 export async function getBillingServices(req, res, next) {
   try {
     const ORG_ID = getOrgId(req)

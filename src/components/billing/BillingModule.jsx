@@ -1297,7 +1297,7 @@ export default function BillingModule({ onBack }) {
         <div className="flex gap-2">
           {/* No Refresh button: this screen is live (useLiveData below). */}
           {access.canRaise && <Button variant="outline" onClick={() => setActiveTab('new-invoice')}><Plus className="h-4 w-4 mr-1" />New Invoice</Button>}
-          {access.canEditCatalog && <Button onClick={() => { setActiveTab('catalog'); openAddServiceDialog() }} className="bg-gray-900 hover:bg-gray-800"><Plus className="h-4 w-4 mr-1" />Add Service</Button>}
+          {access.canEditCatalog && <Button onClick={() => { setActiveTab('catalog'); openAddServiceDialog() }}><Plus className="h-4 w-4 mr-1" />Add Service</Button>}
         </div>
       </div>
 

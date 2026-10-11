@@ -16,10 +16,8 @@ import { resetRealtime } from '@/lib/realtimeSocket'
 function forgetHospital() {
   clearOrgCache()
   clearBookingSourceCache()
-  // Including which hospital's live updates this browser is listening to. Left
-  // behind, the next person to sign in here kept receiving the previous
-  // hospital's socket room, so their own screens stopped updating by themselves.
   resetRealtime()
+  window.dispatchEvent(new CustomEvent('brandingChange', { detail: null }))
 }
 
 const AuthContext = createContext(null)

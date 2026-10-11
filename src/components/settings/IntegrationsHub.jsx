@@ -1,4 +1,4 @@
-﻿import { useState, useEffect } from 'react'
+import { useState, useEffect } from 'react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -29,6 +29,7 @@ const CATALOG = [
     icon: Cpu,
     description: 'Connect analyzers / equipment (HL7/ASTM). Results flow in automatically.',
     kind: 'panel', // custom screen
+    requiresModule: 'laboratory',
   },
   {
     key: 'pacs',
@@ -36,6 +37,7 @@ const CATALOG = [
     icon: Server,
     description: 'Medical imaging (X-ray/CT/MRI) — Orthanc PACS + OHIF viewer.',
     kind: 'config',
+    requiresModule: 'radiology',
     fields: [
       { name: 'enabled', label: 'Enabled', type: 'switch' },
       { name: 'orthancUrl', label: 'Orthanc Server URL', placeholder: 'http://localhost:8042' },
@@ -51,6 +53,7 @@ const CATALOG = [
     icon: Pill,
     description: 'Government narcotics / drug tracking sync for pharmacy.',
     kind: 'config',
+    requiresModule: 'pharmacy',
     fields: [
       { name: 'enabled', label: 'Enabled', type: 'switch' },
       { name: 'apiUrl', label: 'eAPTS API URL', placeholder: 'https://eapts.gov.in/api' },
@@ -416,16 +419,16 @@ export default function IntegrationsHub({ settings = {}, onSaved, modules = {} }
             key={def.key}
             type="button"
             onClick={() => setView(def.key)}
-            className="text-left p-5 border rounded-lg hover:shadow-md hover:border-blue-300 transition group"
+            className="text-left p-5 border rounded-lg hover:shadow-md hover:border-primary/50 transition group"
           >
             <div className="flex items-center justify-between mb-2">
               <span className="font-medium flex items-center gap-2">
-                <Icon className="h-5 w-5 text-blue-600" />{def.name}
+                <Icon className="h-5 w-5 text-primary" />{def.name}
               </span>
               <Badge className={badge.cls || undefined} variant={badge.cls ? undefined : 'secondary'}>{badge.label}</Badge>
             </div>
             <p className="text-sm text-gray-500 mb-3">{def.description}</p>
-            <span className="text-sm text-blue-600 inline-flex items-center group-hover:gap-1.5 gap-1">
+            <span className="text-sm text-primary inline-flex items-center group-hover:gap-1.5 gap-1">
               Open <ChevronRight className="h-4 w-4" />
             </span>
           </button>

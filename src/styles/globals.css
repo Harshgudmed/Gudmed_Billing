@@ -61,6 +61,29 @@
   }
 }
 
+@layer utilities {
+  .bg-primary-custom {
+    background-color: var(--color-primary, hsl(var(--primary)));
+  }
+  .text-primary-custom {
+    color: var(--color-primary, hsl(var(--primary)));
+  }
+  .bg-secondary-custom {
+    background-color: var(--color-secondary, hsl(var(--secondary)));
+  }
+  .text-secondary-custom {
+    color: var(--color-secondary, hsl(var(--secondary)));
+  }
+  .module-header, .module-header-bg {
+    background-color: var(--color-header, transparent);
+    color: var(--color-header-text, inherit);
+    border-radius: 0.75rem;
+    padding: 0.75rem 1rem;
+    margin-bottom: 1rem;
+    transition: background-color 0.2s ease, color 0.2s ease;
+  }
+}
+
 @layer base {
   * {
     @apply border-border;
