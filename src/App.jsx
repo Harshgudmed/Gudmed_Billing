@@ -4,7 +4,7 @@ import { Routes, Route, NavLink, Navigate, useParams, Link } from 'react-router-
 import { Toaster, toast } from 'sonner'
 import { LogOut, ShieldCheck, Stethoscope, ConciergeBell, HeartPulse, ChevronRight, ClipboardList, Pill, Receipt, Landmark, ShoppingCart, Warehouse, UserRoundCog, Menu, X, Lock, Activity, Building2 } from 'lucide-react'
 import client from '@/api/client'
-import { getOrgRaw } from '@/lib/orgSettings'
+import { getOrgRaw, clearOrgCache } from '@/lib/orgSettings'
 import { HOSPITAL_NAME } from '@/lib/brand'
 import Logo from '@/components/Logo'
 // The app's one spinner — see components/ui/spinner.jsx for the
@@ -208,6 +208,10 @@ function applyBranding(settings) {
 
 // Shared branding/modules state for both routing modes.
 function useBranding() {
+  // The signed-in hospital. When it changes (sign out of one, into another in
+  // the same tab), its own colours must replace the last hospital's — otherwise
+  // the page kept the previous hospital's branding until a full reload.
+  const { user } = useAuth()
   const [navbarColor, setNavbarColor] = useState('#2E4168')
   const [hospitalName, setHospitalName] = useState('Hospital HMS')
   const [modulesEnabled, setModulesEnabled] = useState({})
@@ -255,6 +259,9 @@ function useBranding() {
       }
     }
 
+    // Drop the previous hospital's cached /settings so this hospital's own
+    // colours, name and modules are fetched and applied, not the last one's.
+    clearOrgCache()
     loadSettings()
 
     const onColorChange = (e) => { setNavbarColor(e.detail.navbarColor || e.detail); applyBranding(e.detail) }
@@ -273,7 +280,7 @@ function useBranding() {
       window.removeEventListener('brandingChange', onColorChange)
       window.removeEventListener('modulesChange', onModulesChange)
     }
-  }, [])
+  }, [user?.organizationId])
 
   // A fresh object here would be a new reference on every render of the caller,
   // so any consumer that passes the whole thing down as a prop would defeat
