@@ -31,6 +31,6 @@ export const editAppointmentSchema = z.object({
     "no_show",
     "rescheduled",
   ]),
-  chiefComplaint: z.string().min(5, "Chief complaint is required"),
+  // chiefComplaint: z.string().min(5, "Chief complaint is required"),
   notes: z.string().optional(),
 });

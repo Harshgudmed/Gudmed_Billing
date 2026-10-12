@@ -57,9 +57,9 @@ const screeningSchema = z.object({
   phone: z.string().optional(),
   // The rule was always 5 characters, but the message said "required" — so
   // "Cold" was refused as if the box were empty. Spaces alone don't count.
-  chiefComplaint: z.string().trim()
-    .min(1, 'Chief complaint is required')
-    .min(5, 'Chief complaint must be at least 5 characters'),
+  // chiefComplaint: z.string().trim()
+  //   .min(1, 'Chief complaint is required')
+  //   .min(5, 'Chief complaint must be at least 5 characters'),
   briefHistory: z.string().optional(),
   // Typed in °F; the server's 20–45 °C is 68–113 °F.
   temperature: reading('Temperature', 68, 113, { unit: ' °F' }),
@@ -79,9 +79,9 @@ const screeningSchema = z.object({
 // ── Helpers ──────────────────────────────────────────────────────────────────
 function getBmiCategory(bmi) {
   if (bmi < 18.5) return { label: 'Underweight', color: 'text-blue-600' }
-  if (bmi < 25)   return { label: 'Normal',      color: 'text-green-600' }
-  if (bmi < 30)   return { label: 'Overweight',  color: 'text-yellow-600' }
-  return                  { label: 'Obese',       color: 'text-red-600' }
+  if (bmi < 25) return { label: 'Normal', color: 'text-green-600' }
+  if (bmi < 30) return { label: 'Overweight', color: 'text-yellow-600' }
+  return { label: 'Obese', color: 'text-red-600' }
 }
 
 function formatRoutedTo(val) {
@@ -89,16 +89,16 @@ function formatRoutedTo(val) {
   return val.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
 }
 
-const isAbnormalTemp  = v => v != null && (v > 37.5 || v < 36)
-const isAbnormalSpo2  = v => v != null && v < 95
+const isAbnormalTemp = v => v != null && (v > 37.5 || v < 36)
+const isAbnormalSpo2 = v => v != null && v < 95
 const isAbnormalPulse = v => v != null && (v < 60 || v > 100)
-const isAbnormalResp  = v => v != null && (v < 12 || v > 20)
+const isAbnormalResp = v => v != null && (v < 12 || v > 20)
 
 // ── Print Slip ────────────────────────────────────────────────────────────────
 function printSlip(s, orgInfo = { name: 'Hospital', address: '', phone: '', email: '' }) {
   const routedTo = formatRoutedTo(s.routedTo)
   const screenedAt = s.screenedAt ? format(new Date(s.screenedAt), 'dd MMM yyyy, HH:mm') : '—'
-  const printedAt  = format(new Date(), 'dd MMM yyyy, HH:mm')
+  const printedAt = format(new Date(), 'dd MMM yyyy, HH:mm')
 
   const vitalRow = (label, value, unit, abnormal) =>
     `<div class="field">
@@ -150,12 +150,12 @@ function printSlip(s, orgInfo = { name: 'Hospital', address: '', phone: '', emai
   <div class="section">
     <div class="sec-title">Vital Signs</div>
     <div class="grid3">
-      ${vitalRow('Temperature',    cToF(s.temperature),    '°F',   isAbnormalTemp(s.temperature))}
-      ${vitalRow('Pulse Rate',     s.pulseRate,            'bpm',  isAbnormalPulse(s.pulseRate))}
-      ${vitalRow('SpO₂',          s.spo2,                 '%',    isAbnormalSpo2(s.spo2))}
-      ${vitalRow('Resp. Rate',    s.respiratoryRate,       '/min', isAbnormalResp(s.respiratoryRate))}
-      ${vitalRow('BP Systolic',   s.bloodPressureSystolic, 'mmHg', false)}
-      ${vitalRow('BP Diastolic',  s.bloodPressureDiastolic,'mmHg', false)}
+      ${vitalRow('Temperature', cToF(s.temperature), '°F', isAbnormalTemp(s.temperature))}
+      ${vitalRow('Pulse Rate', s.pulseRate, 'bpm', isAbnormalPulse(s.pulseRate))}
+      ${vitalRow('SpO₂', s.spo2, '%', isAbnormalSpo2(s.spo2))}
+      ${vitalRow('Resp. Rate', s.respiratoryRate, '/min', isAbnormalResp(s.respiratoryRate))}
+      ${vitalRow('BP Systolic', s.bloodPressureSystolic, 'mmHg', false)}
+      ${vitalRow('BP Diastolic', s.bloodPressureDiastolic, 'mmHg', false)}
     </div>
   </div>
 
@@ -269,11 +269,11 @@ function ViewDetailsDialog({ screening, onClose, onEdit, orgInfo = {} }) {
           <div>
             <p className="text-[10px] font-bold uppercase tracking-wider text-gray-400 mb-2">Vital Signs</p>
             <div className="grid grid-cols-3 gap-2">
-              <VitalCard label="Temperature"  value={cToF(s.temperature)}    unit="°F"   abnormal={isAbnormalTemp(s.temperature)} />
-              <VitalCard label="Pulse Rate"   value={s.pulseRate}            unit="bpm"  abnormal={isAbnormalPulse(s.pulseRate)} />
-              <VitalCard label="SpO₂"         value={s.spo2}                 unit="%"    abnormal={isAbnormalSpo2(s.spo2)} />
-              <VitalCard label="Resp. Rate"   value={s.respiratoryRate}      unit="/min" abnormal={isAbnormalResp(s.respiratoryRate)} />
-              <VitalCard label="BP Systolic"  value={s.bloodPressureSystolic}  unit="mmHg" abnormal={false} />
+              <VitalCard label="Temperature" value={cToF(s.temperature)} unit="°F" abnormal={isAbnormalTemp(s.temperature)} />
+              <VitalCard label="Pulse Rate" value={s.pulseRate} unit="bpm" abnormal={isAbnormalPulse(s.pulseRate)} />
+              <VitalCard label="SpO₂" value={s.spo2} unit="%" abnormal={isAbnormalSpo2(s.spo2)} />
+              <VitalCard label="Resp. Rate" value={s.respiratoryRate} unit="/min" abnormal={isAbnormalResp(s.respiratoryRate)} />
+              <VitalCard label="BP Systolic" value={s.bloodPressureSystolic} unit="mmHg" abnormal={false} />
               <VitalCard label="BP Diastolic" value={s.bloodPressureDiastolic} unit="mmHg" abnormal={false} />
             </div>
           </div>
@@ -307,8 +307,8 @@ function ViewDetailsDialog({ screening, onClose, onEdit, orgInfo = {} }) {
             <span className="text-gray-500">Status:</span>
             <Badge className={
               s.status === 'screening' ? 'bg-blue-100 text-blue-800 border-0' :
-              s.status === 'routed' ? 'bg-orange-100 text-orange-800 border-0' :
-              'bg-green-100 text-green-800 border-0'
+                s.status === 'routed' ? 'bg-orange-100 text-orange-800 border-0' :
+                  'bg-green-100 text-green-800 border-0'
             }>
               {s.status === 'screening' ? 'Pending' : s.status === 'routed' ? 'Routed' : 'Registered'}
             </Badge>
@@ -335,22 +335,22 @@ function ViewDetailsDialog({ screening, onClose, onEdit, orgInfo = {} }) {
 
 // ── Main Component ────────────────────────────────────────────────────────────
 const FILTERS = [
-  { key: 'all',        label: 'All' },
-  { key: 'pending',    label: 'Pending' },
-  { key: 'routed',     label: 'Routed' },
+  { key: 'all', label: 'All' },
+  { key: 'pending', label: 'Pending' },
+  { key: 'routed', label: 'Routed' },
   { key: 'registered', label: 'Registered' },
 ]
 
 const STATUS_DB_MAP = {
-  pending:    'screening',
-  routed:     'routed',
+  pending: 'screening',
+  routed: 'routed',
   registered: 'registered_as_patient',
 }
 
 export default function PreTriageModule() {
   const [orgInfo, setOrgInfo] = useState({ name: 'Hospital', address: '', city: '', phone: '', email: '' })
-  const [searchQuery,     setSearchQuery]     = useState('')
-  const [activeFilter,    setActiveFilter]    = useState('all')
+  const [searchQuery, setSearchQuery] = useState('')
+  const [activeFilter, setActiveFilter] = useState('all')
   const dateFilter = useDateFilter()
   const ITEMS_PER_PAGE = 10
 
@@ -371,10 +371,10 @@ export default function PreTriageModule() {
 
   const screenings = screeningsPagination.rows
   const stats = screeningsPagination.summary || { total: 0, pending: 0, routed: 0, registered: 0 }
-  const [showFormDialog,  setShowFormDialog]  = useState(false)
+  const [showFormDialog, setShowFormDialog] = useState(false)
   const [editingScreening, setEditingScreening] = useState(null)
-  const [viewScreening,   setViewScreening]   = useState(null)
-  const [isSubmitting,    setIsSubmitting]    = useState(false)
+  const [viewScreening, setViewScreening] = useState(null)
+  const [isSubmitting, setIsSubmitting] = useState(false)
   const [selectedPatient, setSelectedPatient] = useState(null)
 
   const form = useForm({
@@ -416,12 +416,12 @@ export default function PreTriageModule() {
   // ── Patient lookup helpers ──────────────────────────────────────────────────
   const fillFromPatient = (patient) => {
     setSelectedPatient(patient)
-    form.setValue('patientId',  patient.id)
-    form.setValue('firstName',  patient.firstName || '')
-    form.setValue('lastName',   patient.lastName || '')
-    form.setValue('age',        calculatePatientAge(patient.dateOfBirth))
-    form.setValue('gender',     patient.gender || 'male')
-    form.setValue('phone',      patient.phonePrimary || '')
+    form.setValue('patientId', patient.id)
+    form.setValue('firstName', patient.firstName || '')
+    form.setValue('lastName', patient.lastName || '')
+    form.setValue('age', calculatePatientAge(patient.dateOfBirth))
+    form.setValue('gender', patient.gender || 'male')
+    form.setValue('phone', patient.phonePrimary || '')
   }
 
   const clearPatient = () => {
@@ -575,47 +575,39 @@ export default function PreTriageModule() {
               <div className="flex flex-wrap rounded-md border overflow-hidden">
                 <button
                   onClick={() => setActiveFilter('all')}
-                  className={`px-3 py-1.5 text-sm font-medium transition-colors flex items-center gap-1.5 ${
-                    activeFilter === 'all' ? 'bg-blue-600 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'
-                  }`}
+                  className={`px-3 py-1.5 text-sm font-medium transition-colors flex items-center gap-1.5 ${activeFilter === 'all' ? 'bg-blue-600 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'
+                    }`}
                 >
                   All
-                  <span className={`text-xs rounded-full px-1.5 py-0 ${
-                    activeFilter === 'all' ? 'bg-blue-500 text-white' : 'bg-gray-200 text-gray-700'
-                  }`}>{stats.total}</span>
+                  <span className={`text-xs rounded-full px-1.5 py-0 ${activeFilter === 'all' ? 'bg-blue-500 text-white' : 'bg-gray-200 text-gray-700'
+                    }`}>{stats.total}</span>
                 </button>
                 <button
                   onClick={() => setActiveFilter('pending')}
-                  className={`px-3 py-1.5 text-sm font-medium transition-colors flex items-center gap-1.5 ${
-                    activeFilter === 'pending' ? 'bg-blue-600 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'
-                  }`}
+                  className={`px-3 py-1.5 text-sm font-medium transition-colors flex items-center gap-1.5 ${activeFilter === 'pending' ? 'bg-blue-600 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'
+                    }`}
                 >
                   Pending
-                  <span className={`text-xs rounded-full px-1.5 py-0 ${
-                    activeFilter === 'pending' ? 'bg-blue-500 text-white' : 'bg-blue-100 text-blue-700'
-                  }`}>{stats.pending}</span>
+                  <span className={`text-xs rounded-full px-1.5 py-0 ${activeFilter === 'pending' ? 'bg-blue-500 text-white' : 'bg-blue-100 text-blue-700'
+                    }`}>{stats.pending}</span>
                 </button>
                 <button
                   onClick={() => setActiveFilter('routed')}
-                  className={`px-3 py-1.5 text-sm font-medium transition-colors flex items-center gap-1.5 ${
-                    activeFilter === 'routed' ? 'bg-blue-600 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'
-                  }`}
+                  className={`px-3 py-1.5 text-sm font-medium transition-colors flex items-center gap-1.5 ${activeFilter === 'routed' ? 'bg-blue-600 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'
+                    }`}
                 >
                   Routed
-                  <span className={`text-xs rounded-full px-1.5 py-0 ${
-                    activeFilter === 'routed' ? 'bg-blue-500 text-white' : 'bg-orange-100 text-orange-700'
-                  }`}>{stats.routed}</span>
+                  <span className={`text-xs rounded-full px-1.5 py-0 ${activeFilter === 'routed' ? 'bg-blue-500 text-white' : 'bg-orange-100 text-orange-700'
+                    }`}>{stats.routed}</span>
                 </button>
                 <button
                   onClick={() => setActiveFilter('registered')}
-                  className={`px-3 py-1.5 text-sm font-medium transition-colors flex items-center gap-1.5 ${
-                    activeFilter === 'registered' ? 'bg-blue-600 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'
-                  }`}
+                  className={`px-3 py-1.5 text-sm font-medium transition-colors flex items-center gap-1.5 ${activeFilter === 'registered' ? 'bg-blue-600 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'
+                    }`}
                 >
                   Registered
-                  <span className={`text-xs rounded-full px-1.5 py-0 ${
-                    activeFilter === 'registered' ? 'bg-blue-500 text-white' : 'bg-green-100 text-green-700'
-                  }`}>{stats.registered}</span>
+                  <span className={`text-xs rounded-full px-1.5 py-0 ${activeFilter === 'registered' ? 'bg-blue-500 text-white' : 'bg-green-100 text-green-700'
+                    }`}>{stats.registered}</span>
                 </button>
               </div>
             </div>
@@ -693,9 +685,9 @@ export default function PreTriageModule() {
                     </TableCell>
                     <TableCell>
                       <Badge className={
-                        s.status === 'screening'             ? 'bg-blue-100 text-blue-800 border-0' :
-                        s.status === 'routed'                ? 'bg-orange-100 text-orange-800 border-0' :
-                        'bg-green-100 text-green-800 border-0'
+                        s.status === 'screening' ? 'bg-blue-100 text-blue-800 border-0' :
+                          s.status === 'routed' ? 'bg-orange-100 text-orange-800 border-0' :
+                            'bg-green-100 text-green-800 border-0'
                       }>
                         {s.status === 'screening' ? 'Pending' : s.status === 'routed' ? 'Routed' : 'Registered'}
                       </Badge>
@@ -848,12 +840,12 @@ export default function PreTriageModule() {
                   </div>
                   <div className="grid grid-cols-3 gap-3">
                     {[
-                      { name: 'temperature',          label: 'Temp (°F)',       placeholder: '98.6', step: '0.1' },
-                      { name: 'bloodPressureSystolic', label: 'BP Systolic',    placeholder: '120' },
-                      { name: 'bloodPressureDiastolic',label: 'BP Diastolic',   placeholder: '80' },
-                      { name: 'pulseRate',             label: 'Pulse (bpm)',    placeholder: '72' },
-                      { name: 'respiratoryRate',       label: 'Resp. Rate (/min)', placeholder: '16' },
-                      { name: 'spo2',                  label: 'SpO₂ (%)',       placeholder: '98', step: '0.1' },
+                      { name: 'temperature', label: 'Temp (°F)', placeholder: '98.6', step: '0.1' },
+                      { name: 'bloodPressureSystolic', label: 'BP Systolic', placeholder: '120' },
+                      { name: 'bloodPressureDiastolic', label: 'BP Diastolic', placeholder: '80' },
+                      { name: 'pulseRate', label: 'Pulse (bpm)', placeholder: '72' },
+                      { name: 'respiratoryRate', label: 'Resp. Rate (/min)', placeholder: '16' },
+                      { name: 'spo2', label: 'SpO₂ (%)', placeholder: '98', step: '0.1' },
                     ].map(({ name, label, placeholder, step }) => (
                       <FormField key={name} control={form.control} name={name} render={({ field }) => (
                         <FormItem>

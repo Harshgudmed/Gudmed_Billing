@@ -49,7 +49,7 @@ const vitalsSchema = z.object({
 })
 
 const clinicalSchema = z.object({
-  chiefComplaint: z.string().min(3, 'Chief complaint required'),
+  // chiefComplaint: z.string().min(3, 'Chief complaint required'),
   diagnosis: z.string().min(3, 'Diagnosis required'),
   icd10Code: z.string().optional(),
   advice: z.string().optional(),
@@ -475,10 +475,10 @@ export default function OpdModule() {
     if (!selectedDoctorId) { toast.error('Please select an attending doctor'); return }
     const clinical = clinicalForm.getValues()
     const vitals = vitalsForm.getValues()
-    if (!clinical.chiefComplaint || !clinical.diagnosis) {
-      toast.error('Please fill in chief complaint and diagnosis')
-      return
-    }
+    // if (!clinical.chiefComplaint || !clinical.diagnosis) {
+    //   toast.error('Please fill in chief complaint and diagnosis')
+    //   return
+    // }
     setIsSaving(true)
     try {
       const payload = {
@@ -971,7 +971,7 @@ export default function OpdModule() {
           <Section icon={<ClipboardList className="h-5 w-5" />} title="Complaint & Diagnosis" accent="cyan">
             <Form {...clinicalForm}>
               <form className="grid grid-cols-1 gap-4">
-                <FormField control={clinicalForm.control} name="chiefComplaint" render={({ field }) => (<FormItem><FormLabel>Chief Complaint *</FormLabel><FormControl><Input className="rounded-xl" placeholder="Main reason for visit..." {...field} /></FormControl><FormMessage /></FormItem>)} />
+                <FormField control={clinicalForm.control} name="chiefComplaint" render={({ field }) => (<FormItem><FormLabel>Chief Complaint</FormLabel><FormControl><Input className="rounded-xl" placeholder="Main reason for visit..." {...field} /></FormControl><FormMessage /></FormItem>)} />
                 <FormField control={clinicalForm.control} name="diagnosis" render={({ field }) => (<FormItem><FormLabel>Diagnosis *</FormLabel><FormControl><Input className="rounded-xl" placeholder="Working diagnosis..." {...field} /></FormControl><FormMessage /></FormItem>)} />
               </form>
             </Form>
