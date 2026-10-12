@@ -670,9 +670,9 @@ export default function OpdModule() {
                             {c.pulseRate && <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 px-2 py-0.5 text-xs"><Activity className="h-3 w-3" />{c.pulseRate} bpm</span>}
                             {c.oxygenSaturation && <span className="inline-flex items-center gap-1 rounded-full bg-sky-50 text-sky-700 border border-sky-200 px-2 py-0.5 text-xs"><Droplet className="h-3 w-3" />{c.oxygenSaturation}%</span>}
                             {c.weight && c.height && (() => {
-                               const m = c.height / 100
-                               const bmi = (c.weight / (m * m)).toFixed(1)
-                               return <span className="inline-flex items-center gap-1 rounded-full bg-violet-50 text-violet-700 border border-violet-200 px-2 py-0.5 text-xs"><Scale className="h-3 w-3" />BMI {bmi}</span>
+                              const m = c.height / 100
+                              const bmi = (c.weight / (m * m)).toFixed(1)
+                              return <span className="inline-flex items-center gap-1 rounded-full bg-violet-50 text-violet-700 border border-violet-200 px-2 py-0.5 text-xs"><Scale className="h-3 w-3" />BMI {bmi}</span>
                             })()}
                           </div>
                           {c.followUpDate && (() => {
@@ -791,10 +791,10 @@ export default function OpdModule() {
       {/* Dynamic branding header */}
       <div className="sticky top-0 z-20 -mx-6 px-6 py-4 module-header text-white shadow-md flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <Button variant="ghost" size="sm" className="text-white hover:bg-white/15" onClick={() => { resetForm(); setView('list') }}><ArrowLeft className="h-4 w-4 mr-1" />Back</Button>
+          <Button variant="ghost" size="sm" className="text-gray-600 hover:bg-white/15" onClick={() => { resetForm(); setView('list') }}><ArrowLeft className="h-4 w-4 mr-1" />Back</Button>
           <div>
             <h1 className="text-lg font-bold flex items-center gap-2"><Stethoscope className="h-5 w-5" />{editingId ? 'Edit OPD Prescription' : 'New OPD Prescription'}</h1>
-            <p className="text-white/75 text-xs">Department → Problem → add medicines &amp; tests → save</p>
+            <p className="text-black text-xs">Department → Problem → add medicines &amp; tests → save</p>
           </div>
         </div>
         <SaveBtn />
@@ -820,10 +820,26 @@ export default function OpdModule() {
               </div>
               <div>
                 <Label className="text-sm font-medium mb-2 block">Attending Doctor *</Label>
-                <Select value={selectedDoctorId} onValueChange={setSelectedDoctorId} disabled={!!myDoctorId}>
-                  <SelectTrigger className="rounded-xl"><SelectValue placeholder="Select doctor" /></SelectTrigger>
-                  <SelectContent>{doctors.map(d => <SelectItem key={d.id} value={d.id}>{drName(d.fullName)}{d.specialization ? ` — ${d.specialization}` : ''}</SelectItem>)}</SelectContent>
-                </Select>
+                <SearchableSelect
+                  className="w-full rounded-xl"
+                  value={selectedDoctorId}
+                  onChange={setSelectedDoctorId}
+                  disabled={!!myDoctorId}
+                  options={doctors.map(d => ({
+                    value: d.id,
+                    label: `${drName(d.fullName)}${d.specialization ? ` — ${d.specialization}` : ''}`,
+                  }))}
+                  selectedLabel={
+                    selectedDoctor
+                      ? `${drName(selectedDoctor.fullName)}${selectedDoctor.specialization ? ` — ${selectedDoctor.specialization}` : ''}`
+                      : (user?.role === 'doctor' && user.id === selectedDoctorId
+                        ? `${drName(user.fullName)}${user.specialization ? ` — ${user.specialization}` : ''}`
+                        : undefined)
+                  }
+                  placeholder="Select doctor"
+                  searchPlaceholder="Type to search doctors..."
+                  emptyText="No matching doctor"
+                />
               </div>
             </div>
           </Section>
@@ -1078,7 +1094,7 @@ export default function OpdModule() {
             <Card className="rounded-2xl border-slate-200/70 shadow-md overflow-hidden">
               <div className="module-header text-white px-4 py-3 flex items-center justify-between">
                 <span className="font-semibold flex items-center gap-2"><span className="text-xl font-serif">℞</span> Live Prescription</span>
-                <Badge className="bg-white/20 text-white hover:bg-white/20 border-0">{prescriptionItems.length} med · {labOrderItems.length + radiologyOrderItems.length} test</Badge>
+                <Badge className="bg-white/20 text-black hover:bg-white/20 border-0">{prescriptionItems.length} med · {labOrderItems.length + radiologyOrderItems.length} test</Badge>
               </div>
               <CardContent className="p-4 space-y-3 text-sm">
                 {/* Patient */}
