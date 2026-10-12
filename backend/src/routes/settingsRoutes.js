@@ -3,7 +3,7 @@ import { authorize } from '../middleware/auth.js'
 import {
   getOrganization, updateOrganization,
   getUsers, createUser, updateUser, toggleUserStatus,
-  getDepartments, createDepartment, getBillingServices,
+  getDepartments, createDepartment, deleteDepartment, getBillingServices,
 } from '../controllers/settingsController.js'
 
 const router = Router()
@@ -37,6 +37,12 @@ router.patch('/', (req, res, next) => {
   if (resource === 'user') return updateUser(req, res, next)
   if (resource === 'user-status') return toggleUserStatus(req, res, next)
   if (resource === 'organization') return updateOrganization(req, res, next)
+  return res.status(400).json({ success: false, error: 'Unknown resource' })
+})
+
+router.delete('/', adminOnly, (req, res, next) => {
+  const { resource } = req.body
+  if (resource === 'department') return deleteDepartment(req, res, next)
   return res.status(400).json({ success: false, error: 'Unknown resource' })
 })
 

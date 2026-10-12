@@ -45,6 +45,13 @@ model Organization {
   // Modules enabled (JSON string)
   modulesEnabled String @default("{\"pharmacy\":true,\"laboratory\":true,\"radiology\":true,\"inpatient\":false,\"inventory\":true,\"accounting\":false}")
 
+  // Modules the hospital has bought (JSON string, e.g. {"queue":true}) — set only
+  // by the platform owner. The hospital's administrator may switch a module in
+  // modulesEnabled off, and back on, but never on beyond what is bought here.
+  // NULL = no limit yet: every hospital that existed before this column keeps
+  // all its modules, so adding it changes nothing for them.
+  modulesAllowed String?
+
   isActive    Boolean  @default(true)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt

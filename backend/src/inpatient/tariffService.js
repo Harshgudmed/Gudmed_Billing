@@ -111,7 +111,7 @@ export async function resolvePrice(organizationId, admissionId, { itemCode, base
   // skip the tariff engine entirely (no plan markup, same for every payer plan).
   if (group && !TARIFFABLE_GROUPS.has(group)) {
     return {
-      price: Math.round(basePrice * 100) / 100,
+      price: round2(basePrice),
       base: basePrice,
       serviceGroup: group,
       bedCategoryId: null,
@@ -127,7 +127,7 @@ export async function resolvePrice(organizationId, admissionId, { itemCode, base
   const rules = await db.tariffRule.findMany({ where: { organizationId, planId: plan.id } })
   const rule = pickBestRule(rules, { bedCategoryId, serviceGroup: group, serviceItemId: itemId }, when)
 
-  const price = Math.round(applyAdjustment(basePrice, rule) * 100) / 100
+  const price = round2(applyAdjustment(basePrice, rule))
   return {
     price,
     base: basePrice,
@@ -141,7 +141,6 @@ export async function resolvePrice(organizationId, admissionId, { itemCode, base
   }
 }
 
-const round2pub = (n) => Math.round(n * 100) / 100
 
 /**
  * Hidden, backend-driven price for a PHARMACY item (medicine / injection / consumable).
@@ -176,11 +175,11 @@ export async function priceForPharmacyItem(organizationId, admissionId, drugId, 
   })
 
   const qty = Math.max(1, Number(quantity) || 1)
-  const unitPrice = round2pub(priced.price) // catalog price, pre-tax (no markup for pharmacy)
-  const lineSubtotal = round2pub(unitPrice * qty)
+  const unitPrice = round2(priced.price) // catalog price, pre-tax (no markup for pharmacy)
+  const lineSubtotal = round2(unitPrice * qty)
   const taxPct = drug.gstRate || 0
-  const taxAmount = round2pub(lineSubtotal * taxPct / 100)
-  const lineTotal = round2pub(lineSubtotal + taxAmount)
+  const taxAmount = round2(lineSubtotal * taxPct / 100)
+  const lineTotal = round2(lineSubtotal + taxAmount)
 
   return {
     drug: { id: drug.id, name: drug.drugName, category: drug.drugCategory, form: drug.dosageForm, uom: drug.unitOfMeasure },
@@ -194,7 +193,7 @@ export async function priceForPharmacyItem(organizationId, admissionId, drugId, 
     inStock: drug.quantityInStock >= qty,
     // Internal calculation — caller decides whether to expose (admins only).
     breakdown: {
-      basePrice: round2pub(basePrice),
+      basePrice: round2(basePrice),
       markup: priced.rule ? { type: priced.rule.type, value: priced.rule.value } : null,
       adjustedUnitPrice: unitPrice,
       plan: priced.plan,
@@ -276,7 +275,7 @@ export async function computeBedCharges(organizationId, admissionId, { upToDate 
     const cat = seg.bedCategoryId ? catById[seg.bedCategoryId] : null
     const rule = pickBestRule(rules, { bedCategoryId: seg.bedCategoryId, serviceGroup: 'BED' }, segEnd)
     const baseRate = cat?.defaultBedDayRate ?? 0
-    const rate = Math.round(applyAdjustment(baseRate, rule) * 100) / 100
+    const rate = round2(applyAdjustment(baseRate, rule))
 
     // H7: warn when the BED override rule diverges from the category's own day-rate
     // (silent stale pricing — admin edited one but not the other).
@@ -285,11 +284,11 @@ export async function computeBedCharges(organizationId, admissionId, { upToDate 
     }
     if (!cat) warnings.push('A stay segment has no bed category — bed-day billed at ₹0. Assign a category to this bed.')
 
-    const amount = Math.round(rate * days * 100) / 100
+    const amount = round2(rate * days)
     total += amount
     lines.push({ bedCategory: cat?.name || 'Unspecified', from: segStart, to: segEnd, days, dailyRate: rate, amount })
   })
-  return { lines, total: Math.round(total * 100) / 100, totalDays, warnings }
+  return { lines, total: round2(total), totalDays, warnings }
 }
 
 // Full running bill: bed charges (segment-aware) + posted IpdCharge line items,

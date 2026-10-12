@@ -212,6 +212,8 @@ export function isKnownRole(role) {
 export function homePathFor(role) {
   // Patients live in their own portal, not the staff role layout.
   if (role === 'patient') return '/patient'
+  // The platform owner works with hospitals, not inside one: no ROLES entry.
+  if (role === 'platform_owner') return '/platform'
   const cfg = ROLES[role]
   if (!cfg) return '/'
   const home = MODULES[cfg.home]?.path || ''

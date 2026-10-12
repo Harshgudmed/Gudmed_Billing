@@ -52,28 +52,11 @@ const walkInPatientSchema = z.object({
   insuranceId: optionalTextSchema,
 })
 
-const INSURANCE_PROVIDERS = [
-  'CGHS', 'ESIC', 'PM-JAY (Ayushman Bharat)', 'Star Health', 'HDFC ERGO',
-  'Niva Bupa', 'Care Health', 'ICICI Lombard', 'Bajaj Allianz', 'LIC Health',
-  'United India', 'New India Assurance', 'Oriental Insurance', 'National Insurance',
-  'Max Bupa', 'Reliance Health', 'SBI Health', 'Tata AIG',
-]
-
-const INDIAN_STATES = [
-  'Andhra Pradesh', 'Arunachal Pradesh', 'Assam', 'Bihar', 'Chhattisgarh',
-  'Goa', 'Gujarat', 'Haryana', 'Himachal Pradesh', 'Jharkhand', 'Karnataka',
-  'Kerala', 'Madhya Pradesh', 'Maharashtra', 'Manipur', 'Meghalaya', 'Mizoram',
-  'Nagaland', 'Odisha', 'Punjab', 'Rajasthan', 'Sikkim', 'Tamil Nadu',
-  'Telangana', 'Tripura', 'Uttar Pradesh', 'Uttarakhand', 'West Bengal',
-  'Delhi', 'Jammu & Kashmir', 'Ladakh', 'Chandigarh', 'Puducherry',
-]
-
-const MARITAL_STATUSES = ['Single', 'Married', 'Divorced', 'Widowed', 'Other']
-
-function FieldError({ message }) {
-  if (!message) return null
-  return <p className="mt-1 text-xs text-red-600">{message}</p>
-}
+// One copy of each list (patients/utils/patientUtils.js) and of FieldError
+// (common/FieldError.jsx) — this screen used to carry its own, which could drift
+// from registration's.
+import { INDIAN_STATES, INSURANCE_PROVIDERS, MARITAL_STATUSES } from '@/components/patients/utils/patientUtils'
+import { FieldError } from './FieldError'
 
 // Imported (not re-exported straight through) so this module can use the name
 // itself as well as expose it — `export ... from` creates no local binding.

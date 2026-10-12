@@ -77,7 +77,7 @@ function AddFloorDialog({ onCreated }) {
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
-        <Button size="sm" className="bg-[#2E4168] hover:bg-[#243352]"><Plus className="h-4 w-4 mr-1" />Add Floor</Button>
+        <Button size="sm"><Plus className="h-4 w-4 mr-1" />Add Floor</Button>
       </DialogTrigger>
       <DialogContent>
         <DialogHeader><DialogTitle>Add Floor</DialogTitle></DialogHeader>
@@ -475,17 +475,17 @@ export default function RoomsManager() {
                 {floors.map((f) => {
                   const selected = activeFloorId === f.id
                   return (
-                    <div key={f.id} className={`group flex items-center rounded-md transition-colors ${selected ? 'bg-[#2E4168] text-white' : 'hover:bg-gray-100'}`}>
+                    <div key={f.id} className={`group flex items-center rounded-md transition-colors ${selected ? 'bg-primary text-primary-foreground' : 'hover:bg-gray-100'}`}>
                       <button type="button" className="flex-1 text-left px-3 py-2 min-w-0" onClick={() => selectFloor(f.id)}>
                         <div className="text-sm font-medium truncate">{f.name}</div>
-                        <div className={`text-xs ${selected ? 'text-white/70' : 'text-gray-500'}`}>{f.roomCount} room{f.roomCount === 1 ? '' : 's'}</div>
+                        <div className={`text-xs ${selected ? 'text-primary-foreground/70' : 'text-gray-500'}`}>{f.roomCount} room{f.roomCount === 1 ? '' : 's'}</div>
                       </button>
                       <button
                         type="button"
                         title={`Delete ${f.name}`}
                         aria-label={`Delete ${f.name}`}
                         onClick={() => deleteFloor(f)}
-                        className={`px-2 py-2 rounded-r-md opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity ${selected ? 'text-white/60 hover:text-white' : 'text-gray-400 hover:text-red-600'}`}
+                        className={`px-2 py-2 rounded-r-md opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity ${selected ? 'text-primary-foreground/60 hover:text-primary-foreground' : 'text-gray-400 hover:text-red-600'}`}
                       >
                         <Trash2 className="h-3.5 w-3.5" />
                       </button>
@@ -509,7 +509,7 @@ export default function RoomsManager() {
                 {activeFloorId && (
                   <RoomDialog
                     floorId={activeFloorId} departments={departments} onSaved={refreshRooms}
-                    trigger={<Button size="sm" className="bg-[#2E4168] hover:bg-[#243352]"><Plus className="h-4 w-4 mr-1" />Add Room</Button>}
+                    trigger={<Button size="sm"><Plus className="h-4 w-4 mr-1" />Add Room</Button>}
                   />
                 )}
               </div>

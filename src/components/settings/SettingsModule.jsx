@@ -1,4 +1,4 @@
-﻿import { useState, useEffect, lazy, Suspense } from 'react'
+import { useState, useEffect, lazy, Suspense } from 'react'
 import { toFormValues, fromFormValues } from '@/lib/orgSettingsSchema'
 import { clearOrgCache } from '@/lib/orgSettings'
 import { isModuleOn } from '@/lib/roleConfig'
@@ -14,7 +14,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import {
   Settings, Building2, Users, Package, Link2, Database, Search,
   Save, Plus, Edit, Eye, CheckCircle, XCircle, AlertCircle, RefreshCw, Loader2, Clock, Palette,
-  MessageCircle, Bell, DoorOpen, MonitorPlay, ShieldCheck, Zap, Landmark, UserCog, Undo2,
+  MessageCircle, Bell, DoorOpen, Network, MonitorPlay, ShieldCheck, Zap, Landmark, UserCog, Undo2,
 } from 'lucide-react'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -38,6 +38,7 @@ import { Pagination } from '@/components/common/Pagination'
 import { FilterBar, FilterSelect } from '@/components/common/FilterBar'
 import IntegrationsHub from './IntegrationsHub'
 import RoomsManager from './RoomsManager'
+import DepartmentsManager from './DepartmentsManager'
 import { ChoiceCards, ToggleCard } from '@/components/common/ChoiceCards'
 import { CancellationCharges } from './CancellationCharges'
 // lazy: the display-board manager is a module in its own right, sitting in one
@@ -98,14 +99,7 @@ const ROLE_FILTER_OPTIONS = [
   ...Object.entries(ROLE_LABELS).map(([value, label]) => ({ value, label })),
 ]
 
-const INDIAN_STATES = [
-  'Andhra Pradesh', 'Arunachal Pradesh', 'Assam', 'Bihar', 'Chhattisgarh',
-  'Goa', 'Gujarat', 'Haryana', 'Himachal Pradesh', 'Jharkhand', 'Karnataka',
-  'Kerala', 'Madhya Pradesh', 'Maharashtra', 'Manipur', 'Meghalaya', 'Mizoram',
-  'Nagaland', 'Odisha', 'Punjab', 'Rajasthan', 'Sikkim', 'Tamil Nadu',
-  'Telangana', 'Tripura', 'Uttar Pradesh', 'Uttarakhand', 'West Bengal',
-  'Delhi', 'Jammu & Kashmir', 'Ladakh', 'Chandigarh', 'Puducherry',
-]
+import { INDIAN_STATES } from '@/components/patients/utils/patientUtils'
 
 // Staff are people with names and mobile numbers, exactly like patients, so the
 // rules come from the same place the patient form uses rather than being
@@ -148,6 +142,7 @@ const ALL_MODULES = [
 export default function SettingsModule() {
   const [activeTab, setActiveTab] = useState('organization')
   const [showUserDialog, setShowUserDialog] = useState(false)
+  const [showDeptDialog, setShowDeptDialog] = useState(false)
   const [editingUser, setEditingUser] = useState(null)
   const [savingOrg, setSavingOrg] = useState(false)
   const [departments, setDepartments] = useState([])
@@ -389,13 +384,13 @@ export default function SettingsModule() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between module-header px-6 py-4 shadow-sm -mx-6 mb-6">
         <div>
           <h1 className="text-3xl font-bold flex items-center gap-2">
-            <Settings className="h-8 w-8 text-gray-600" />
+            <Settings className="h-8 w-8 opacity-80" />
             Settings
           </h1>
-          <p className="text-gray-500">Configure your hospital management system</p>
+          <p className="opacity-80">Configure your hospital management system</p>
         </div>
       </div>
 
@@ -510,15 +505,35 @@ export default function SettingsModule() {
                 <div className="space-y-2">
                   <Label>Primary Color</Label>
                   <div className="flex gap-2">
-                    <Input type="color" value={orgForm.primaryColor} onChange={e => setOrgForm(p => ({ ...p, primaryColor: e.target.value }))} className="w-16 h-10" />
-                    <Input value={orgForm.primaryColor} onChange={e => setOrgForm(p => ({ ...p, primaryColor: e.target.value }))} className="flex-1" />
+                    <Input type="color" value={orgForm.primaryColor} onChange={e => {
+                      const val = e.target.value
+                      setOrgForm(p => ({ ...p, primaryColor: val }))
+                      window.dispatchEvent(new CustomEvent('brandingChange', { detail: { ...orgForm, primaryColor: val } }))
+                    }} className="w-16 h-10 cursor-pointer" />
+                    <Input value={orgForm.primaryColor} onChange={e => {
+                      const val = e.target.value
+                      setOrgForm(p => ({ ...p, primaryColor: val }))
+                      if (/^#[0-9A-Fa-f]{6}$/.test(val)) {
+                        window.dispatchEvent(new CustomEvent('brandingChange', { detail: { ...orgForm, primaryColor: val } }))
+                      }
+                    }} className="flex-1" />
                   </div>
                 </div>
                 <div className="space-y-2">
                   <Label>Secondary Color</Label>
                   <div className="flex gap-2">
-                    <Input type="color" value={orgForm.secondaryColor} onChange={e => setOrgForm(p => ({ ...p, secondaryColor: e.target.value }))} className="w-16 h-10" />
-                    <Input value={orgForm.secondaryColor} onChange={e => setOrgForm(p => ({ ...p, secondaryColor: e.target.value }))} className="flex-1" />
+                    <Input type="color" value={orgForm.secondaryColor} onChange={e => {
+                      const val = e.target.value
+                      setOrgForm(p => ({ ...p, secondaryColor: val }))
+                      window.dispatchEvent(new CustomEvent('brandingChange', { detail: { ...orgForm, secondaryColor: val } }))
+                    }} className="w-16 h-10 cursor-pointer" />
+                    <Input value={orgForm.secondaryColor} onChange={e => {
+                      const val = e.target.value
+                      setOrgForm(p => ({ ...p, secondaryColor: val }))
+                      if (/^#[0-9A-Fa-f]{6}$/.test(val)) {
+                        window.dispatchEvent(new CustomEvent('brandingChange', { detail: { ...orgForm, secondaryColor: val } }))
+                      }
+                    }} className="flex-1" />
                   </div>
                 </div>
               </div>
@@ -528,12 +543,25 @@ export default function SettingsModule() {
                 <Label>Sidebar / Navbar Color</Label>
                 <p className="text-xs text-gray-500">Sets the background color of the left navigation sidebar across all pages.</p>
                 <div className="flex gap-2 items-center">
-                  <Input type="color" value={orgForm.navbarColor} onChange={e => setOrgForm(p => ({ ...p, navbarColor: e.target.value }))} className="w-16 h-10" />
-                  <Input value={orgForm.navbarColor} onChange={e => setOrgForm(p => ({ ...p, navbarColor: e.target.value }))} className="w-36" placeholder="#ffffff" />
+                  <Input type="color" value={orgForm.navbarColor} onChange={e => {
+                    const val = e.target.value
+                    setOrgForm(p => ({ ...p, navbarColor: val }))
+                    window.dispatchEvent(new CustomEvent('brandingChange', { detail: { ...orgForm, navbarColor: val } }))
+                  }} className="w-16 h-10 cursor-pointer" />
+                  <Input value={orgForm.navbarColor} onChange={e => {
+                    const val = e.target.value
+                    setOrgForm(p => ({ ...p, navbarColor: val }))
+                    if (/^#[0-9A-Fa-f]{6}$/.test(val)) {
+                      window.dispatchEvent(new CustomEvent('brandingChange', { detail: { ...orgForm, navbarColor: val } }))
+                    }
+                  }} className="w-36" placeholder="#ffffff" />
                   <button
                     type="button"
                     className="text-xs text-gray-400 hover:text-gray-600 underline"
-                    onClick={() => setOrgForm(p => ({ ...p, navbarColor: '#ffffff' }))}
+                    onClick={() => {
+                      setOrgForm(p => ({ ...p, navbarColor: '#ffffff' }))
+                      window.dispatchEvent(new CustomEvent('brandingChange', { detail: { ...orgForm, navbarColor: '#ffffff' } }))
+                    }}
                   >
                     Reset to white
                   </button>
@@ -546,10 +574,21 @@ export default function SettingsModule() {
                 <Label>Module Header Color</Label>
                 <p className="text-xs text-gray-500">Applied to the title bar at the top of every module. Leave blank to keep the default transparent background.</p>
                 <div className="flex gap-2 items-center">
-                  <Input type="color" value={orgForm.moduleHeaderColor || '#f0f4f8'} onChange={e => setOrgForm(p => ({ ...p, moduleHeaderColor: e.target.value }))} className="w-16 h-10" />
-                  <Input value={orgForm.moduleHeaderColor} onChange={e => setOrgForm(p => ({ ...p, moduleHeaderColor: e.target.value }))} placeholder="Leave blank for default" className="flex-1" />
+                  <Input type="color" value={orgForm.moduleHeaderColor || '#f0f4f8'} onChange={e => {
+                    const val = e.target.value
+                    setOrgForm(p => ({ ...p, moduleHeaderColor: val }))
+                    window.dispatchEvent(new CustomEvent('brandingChange', { detail: { ...orgForm, moduleHeaderColor: val } }))
+                  }} className="w-16 h-10 cursor-pointer" />
+                  <Input value={orgForm.moduleHeaderColor} onChange={e => {
+                    const val = e.target.value
+                    setOrgForm(p => ({ ...p, moduleHeaderColor: val }))
+                    window.dispatchEvent(new CustomEvent('brandingChange', { detail: { ...orgForm, moduleHeaderColor: val } }))
+                  }} placeholder="Leave blank for default" className="flex-1" />
                   {orgForm.moduleHeaderColor && (
-                    <Button variant="outline" size="sm" onClick={() => setOrgForm(p => ({ ...p, moduleHeaderColor: '' }))}>Reset</Button>
+                    <Button variant="outline" size="sm" onClick={() => {
+                      setOrgForm(p => ({ ...p, moduleHeaderColor: '' }))
+                      window.dispatchEvent(new CustomEvent('brandingChange', { detail: { ...orgForm, moduleHeaderColor: '' } }))
+                    }}>Reset</Button>
                   )}
                 </div>
                 {orgForm.moduleHeaderColor && (() => {
@@ -621,7 +660,7 @@ export default function SettingsModule() {
           <Card className="overflow-hidden shadow-sm">
             <CardHeader className="border-b bg-gray-50/70">
               <div className="flex items-start gap-3">
-                <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-blue-50 text-blue-600"><Undo2 className="h-5 w-5" /></span>
+                <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary"><Undo2 className="h-5 w-5" /></span>
                 <div>
                   <CardTitle>Cancellation &amp; Refund</CardTitle>
                   <CardDescription>
@@ -660,34 +699,36 @@ export default function SettingsModule() {
             </CardContent>
           </Card>
 
-          <Card>
-            <CardHeader>
-              <CardTitle>Purchase &amp; Supply Chain</CardTitle>
-              <CardDescription>How this hospital pays vendors, returns goods and asks vendors for rates.</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-6">
-              <ChoiceCards
-                legend="Who pays vendors"
-                name="purchasePaymentMode"
-                value={orgForm.purchasePaymentMode}
-                onChange={v => setOrgForm(p => ({ ...p, purchasePaymentMode: v }))}
-                options={PAYMENT_MODE_CHOICES}
-              />
-              <ChoiceCards
-                legend="Returns to vendors"
-                name="purchaseReturnMode"
-                value={orgForm.purchaseReturnMode}
-                onChange={v => setOrgForm(p => ({ ...p, purchaseReturnMode: v }))}
-                options={RETURN_MODE_CHOICES}
-              />
-              <ToggleCard
-                title="E-mail RFQs to vendors"
-                description="When an RFQ is sent, each vendor with an e-mail address gets the list of items by e-mail. Needs E-mail (SMTP) set up in Settings → Integrations. Vendors' rates are still entered here."
-                checked={orgForm.rfqEmailVendors}
-                onChange={v => setOrgForm(p => ({ ...p, rfqEmailVendors: v }))}
-              />
-            </CardContent>
-          </Card>
+          {isModuleOn('purchase', modules) && (
+            <Card>
+              <CardHeader>
+                <CardTitle>Purchase &amp; Supply Chain</CardTitle>
+                <CardDescription>How this hospital pays vendors, returns goods and asks vendors for rates.</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-6">
+                <ChoiceCards
+                  legend="Who pays vendors"
+                  name="purchasePaymentMode"
+                  value={orgForm.purchasePaymentMode}
+                  onChange={v => setOrgForm(p => ({ ...p, purchasePaymentMode: v }))}
+                  options={PAYMENT_MODE_CHOICES}
+                />
+                <ChoiceCards
+                  legend="Returns to vendors"
+                  name="purchaseReturnMode"
+                  value={orgForm.purchaseReturnMode}
+                  onChange={v => setOrgForm(p => ({ ...p, purchaseReturnMode: v }))}
+                  options={RETURN_MODE_CHOICES}
+                />
+                <ToggleCard
+                  title="E-mail RFQs to vendors"
+                  description="When an RFQ is sent, each vendor with an e-mail address gets the list of items by e-mail. Needs E-mail (SMTP) set up in Settings → Integrations. Vendors' rates are still entered here."
+                  checked={orgForm.rfqEmailVendors}
+                  onChange={v => setOrgForm(p => ({ ...p, rfqEmailVendors: v }))}
+                />
+              </CardContent>
+            </Card>
+          )}
 
 
           <div className="flex justify-end">
@@ -766,12 +807,26 @@ export default function SettingsModule() {
                       <FormField control={userForm.control} name="departmentId" render={({ field }) => (
                         <FormItem>
                           <FormLabel>Department</FormLabel>
-                          <Select onValueChange={field.onChange} value={field.value}>
-                            <FormControl><SelectTrigger><SelectValue placeholder="Select department" /></SelectTrigger></FormControl>
-                            <SelectContent>
-                              {departments.map(d => <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>)}
-                            </SelectContent>
-                          </Select>
+                          <div className="flex gap-2 items-center w-full">
+                            <div className="flex-1 min-w-0">
+                              <Select onValueChange={field.onChange} value={field.value}>
+                                <FormControl><SelectTrigger className="w-full truncate"><SelectValue placeholder="Select department" /></SelectTrigger></FormControl>
+                                <SelectContent>
+                                  {departments.map(d => <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>)}
+                                </SelectContent>
+                              </Select>
+                            </div>
+                            <Button 
+                              type="button" 
+                              variant="outline" 
+                              className="shrink-0 h-10 border-dashed text-gray-500 hover:text-primary hover:border-primary transition-colors" 
+                              onClick={() => setShowDeptDialog(true)} 
+                              title="Add or Manage Departments"
+                            >
+                              <Plus className="h-4 w-4 mr-1" />
+                              Add
+                            </Button>
+                          </div>
                         </FormItem>
                       )} />
                       {/* PhoneInput, not Input: it strips +91, leading zeros,
@@ -800,6 +855,13 @@ export default function SettingsModule() {
                   </Form>
                 </DialogContent>
               </Dialog>
+
+              <Dialog open={showDeptDialog} onOpenChange={setShowDeptDialog}>
+                <DialogContent className="max-w-2xl">
+                  <DepartmentsManager departments={departments} onChanged={() => fetchAll()} />
+                </DialogContent>
+              </Dialog>
+
             </CardHeader>
             <CardContent>
               {!usersPagination.loading && usersPagination.rows.length === 0 ? (
@@ -888,7 +950,7 @@ export default function SettingsModule() {
                   return (
                     <div key={key} className="flex items-center justify-between p-4 border rounded-lg">
                       <div className="flex items-center gap-4">
-                        <div className={`h-10 w-10 rounded-lg flex items-center justify-center ${enabled ? 'bg-green-100 text-green-600' : 'bg-gray-100 text-gray-400'}`}>
+                        <div className={`h-10 w-10 rounded-lg flex items-center justify-center ${enabled ? 'bg-primary/20 text-primary' : 'bg-gray-100 text-gray-400'}`}>
                           <Package className="h-5 w-5" />
                         </div>
                         <div>
@@ -1008,12 +1070,12 @@ export default function SettingsModule() {
               <CardDescription>Manage database backups and data recovery</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg">
+              <div className="p-4 bg-primary/10 border border-primary/20 rounded-lg">
                 <div className="flex items-center gap-2 mb-2">
-                  <CheckCircle className="h-5 w-5 text-blue-600" />
-                  <span className="font-medium text-blue-800">Automatic Backups</span>
+                  <CheckCircle className="h-5 w-5 text-primary" />
+                  <span className="font-medium text-primary">Automatic Backups</span>
                 </div>
-                <p className="text-sm text-blue-700">Daily backups are automatically created at 2:00 AM. Last backup: Today at 2:00 AM</p>
+                <p className="text-sm text-primary/80">Daily backups are automatically created at 2:00 AM. Last backup: Today at 2:00 AM</p>
               </div>
               <div className="mt-4">
                 <h4 className="font-medium mb-2">Recent Backups</h4>

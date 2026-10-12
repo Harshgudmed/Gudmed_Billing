@@ -36,6 +36,7 @@ import otRoutes from './otRoutes.js'
 import otClinicalRoutes from './otClinicalRoutes.js'
 import purchaseRoutes from './purchaseRoutes.js'
 import storeIndentRoutes from './storeIndentRoutes.js'
+import platformRoutes from './platformRoutes.js'
 import { createPreRegistration, getPublicOrg } from '../controllers/preRegistrationController.js'
 import { publicDepartments, publicDoctors, publicDoctorTimetable, publicCheckSlot, publicFindPatient, publicRegisterAndBook } from '../controllers/publicBookingController.js'
 import { rateLimit } from '../middleware/rateLimit.js'
@@ -199,3 +200,7 @@ router.use('/purchase',              authorize('purchase_officer', 'store_keeper
 // A department asking the store for goods it holds: every department that
 // uses store goods (the storeIndent module). The store issues in /purchase.
 router.use('/store-indents',         authorize(), requireModule('storeIndent'), storeIndentRoutes)
+// The platform owner's own work — the hospitals and their modules. Below
+// `authenticate` (the guard reads who is signed in); the router itself refuses
+// everyone but the platform_owner role, administrators included.
+router.use('/platform',              platformRoutes)
