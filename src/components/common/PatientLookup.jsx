@@ -143,21 +143,21 @@ export default function PatientLookup({
     }
     let cancelled = false
     const searchTerm = debouncedSearch
-    ;(async () => {
-      try {
-        const res = await client.get(searchUrl, {
-          params: { search: debouncedSearch, limit: 8, status: 'active', ...JSON.parse(extraKey) },
-        })
-        if (!cancelled && searchTerm === debouncedSearch) {
-          setResults(res.data ?? [])
-          setOpen(true)
+      ; (async () => {
+        try {
+          const res = await client.get(searchUrl, {
+            params: { search: debouncedSearch, limit: 8, status: 'active', ...JSON.parse(extraKey) },
+          })
+          if (!cancelled && searchTerm === debouncedSearch) {
+            setResults(res.data ?? [])
+            setOpen(true)
+          }
+        } catch {
+          if (!cancelled && searchTerm === debouncedSearch) setResults([])
+        } finally {
+          if (!cancelled && searchTerm === debouncedSearch) setLoading(false)
         }
-      } catch {
-        if (!cancelled && searchTerm === debouncedSearch) setResults([])
-      } finally {
-        if (!cancelled && searchTerm === debouncedSearch) setLoading(false)
-      }
-    })()
+      })()
     return () => { cancelled = true }
   }, [debouncedSearch, searchUrl, extraKey, minSearchLength])
 
@@ -251,7 +251,7 @@ export default function PatientLookup({
           </div>
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
             <div>
-              <Label className="text-xs">First Name *</Label>
+              <Label className="text-xs">First Name <span className="text-red-500">*</span></Label>
               <Input className={cn('mt-1', newFormErrors.firstName && 'border-red-500')} placeholder="e.g. Rahul"
                 value={newForm.firstName} onChange={(e) => setNameField('firstName', e.target.value)} />
               <FieldError message={newFormErrors.firstName} />
@@ -262,13 +262,13 @@ export default function PatientLookup({
                 value={newForm.middleName} onChange={(e) => setNameField('middleName', e.target.value)} />
             </div>
             <div>
-              <Label className="text-xs">Last Name *</Label>
+              <Label className="text-xs">Last Name <span className="text-red-500">*</span></Label>
               <Input className={cn('mt-1', newFormErrors.lastName && 'border-red-500')} placeholder="e.g. Sharma"
                 value={newForm.lastName} onChange={(e) => setNameField('lastName', e.target.value)} />
               <FieldError message={newFormErrors.lastName} />
             </div>
             <div>
-              <Label className="text-xs">Date of Birth *</Label>
+              <Label className="text-xs">Date of Birth <span className="text-red-500">*</span></Label>
               {/* min/max keep the calendar itself inside the allowed range; the
                   shared dateOfBirthSchema still checks a typed-in date on save. */}
               <Input className={cn('mt-1', newFormErrors.dateOfBirth && 'border-red-500')} type="date"
@@ -277,7 +277,7 @@ export default function PatientLookup({
               <FieldError message={newFormErrors.dateOfBirth} />
             </div>
             <div>
-              <Label className="text-xs">Gender *</Label>
+              <Label className="text-xs">Gender <span className="text-red-500">*</span></Label>
               <Select value={newForm.gender} onValueChange={(v) => setNewField('gender', v)}>
                 <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
                 <SelectContent>
@@ -327,7 +327,7 @@ export default function PatientLookup({
           </div>
           <div className="grid grid-cols-2 gap-2">
             <div>
-              <Label className="text-xs">Primary Phone *</Label>
+              <Label className="text-xs">Primary Phone <span className="text-red-500">*</span></Label>
               <PhoneInput className={cn('mt-1', newFormErrors.phonePrimary && 'border-red-500')} placeholder="Enter mobile number"
                 value={newForm.phonePrimary} onChange={(v) => setNewField('phonePrimary', v)} />
               <FieldError message={newFormErrors.phonePrimary} />
@@ -374,7 +374,7 @@ export default function PatientLookup({
                 value={newForm.district} onChange={(e) => setNameField('district', e.target.value)} />
             </div>
             <div>
-              <Label className="text-xs">State</Label>
+              <Label className="text-xs">State <span className="text-red-500">*</span></Label>
               <Select value={newForm.state} onValueChange={(v) => setNewField('state', v)}>
                 <SelectTrigger className={cn('mt-1', newFormErrors.state && 'border-red-500')}><SelectValue placeholder="Select state" /></SelectTrigger>
                 <SelectContent>
@@ -384,7 +384,7 @@ export default function PatientLookup({
               <FieldError message={newFormErrors.state} />
             </div>
             <div>
-              <Label className="text-xs">PIN Code</Label>
+              <Label className="text-xs">PIN Code <span className="text-red-500">*</span></Label>
               <Input className={cn('mt-1', newFormErrors.pincode && 'border-red-500')} placeholder="6-digit PIN" inputMode="numeric" maxLength={6}
                 value={newForm.pincode} onChange={(e) => setNewField('pincode', e.target.value.replace(/\D/g, ''))} />
               <FieldError message={newFormErrors.pincode} />
@@ -487,15 +487,15 @@ export default function PatientLookup({
             <div className="p-3 text-center">
               <p className="text-sm text-gray-500 mb-2">{emptyText || <>No patients found for &ldquo;{search}&rdquo;</>}</p>
               {allowAddNew && (
-              <Button type="button" size="sm" variant="outline" className="gap-1.5"
-                onClick={() => {
-                  // prefill name from the search text if it looks like a name
-                  const parts = search.trim().split(/\s+/)
-                  setNewForm({ ...emptyNew, firstName: parts[0] || '', lastName: parts.slice(1).join(' ') || '' })
-                  setAddingNew(true); setOpen(false)
-                }}>
-                <UserPlus className="h-3.5 w-3.5" /> Add as new patient
-              </Button>
+                <Button type="button" size="sm" variant="outline" className="gap-1.5"
+                  onClick={() => {
+                    // prefill name from the search text if it looks like a name
+                    const parts = search.trim().split(/\s+/)
+                    setNewForm({ ...emptyNew, firstName: parts[0] || '', lastName: parts.slice(1).join(' ') || '' })
+                    setAddingNew(true); setOpen(false)
+                  }}>
+                  <UserPlus className="h-3.5 w-3.5" /> Add as new patient
+                </Button>
               )}
             </div>
           ) : (

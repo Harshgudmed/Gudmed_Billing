@@ -21,16 +21,16 @@ export default function AppointmentFormDialog({
   onOpenChange,
   form,
   onSubmit,
-  isEdit = false,              
-  editingAppointment = null,   
-  selectedPatient,             
-  setSelectedPatient,          
-  setPatients,                 
-  uniqueDepartments,           
-  availableDoctors,            
-  doctors,                     
-  feeCalculation,              
-  feeCalculationLoading,       
+  isEdit = false,
+  editingAppointment = null,
+  selectedPatient,
+  setSelectedPatient,
+  setPatients,
+  uniqueDepartments,
+  availableDoctors,
+  doctors,
+  feeCalculation,
+  feeCalculationLoading,
   isSubmitting,
   onCancel,
   getPatient,
@@ -83,7 +83,7 @@ export default function AppointmentFormDialog({
         <DialogHeader>
           <DialogTitle>{isEdit ? "Edit Appointment" : "Create New Appointment"}</DialogTitle>
           <DialogDescription>
-            {isEdit 
+            {isEdit
               ? `Patient: ${getPatientFullName(editingAppointment?.patient || getPatient(editingAppointment?.patientId) || null)}`
               : "Schedule a new appointment for a patient"
             }
@@ -91,7 +91,7 @@ export default function AppointmentFormDialog({
         </DialogHeader>
         <Form {...form}>
           <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
-            
+
             {/* PATIENT SELECTION (Only for New) */}
             {!isEdit && (
               <FormField
@@ -149,10 +149,10 @@ export default function AppointmentFormDialog({
                 name="doctorId"
                 render={({ field }) => (
                   <FormItem className="flex flex-col">
-                    <FormLabel>Doctor *</FormLabel>
+                    <FormLabel>Doctor <span className="text-red-500">*</span></FormLabel>
                     <SearchableSelect
                       className="w-full"
-                      options={isEdit 
+                      options={isEdit
                         ? (doctors || []).map(d => ({ value: d.id, label: `${drName(d.fullName)} - ${d.specialization}` }))
                         : (availableDoctors || []).map(d => ({ value: d.id, label: `${drName(d.fullName)}${d.consultationFee != null ? ` (${formatMoney(d.consultationFee)})` : ""}`, sublabel: d.specialization }))
                       }
@@ -227,7 +227,7 @@ export default function AppointmentFormDialog({
                 name="appointmentDate"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Date *</FormLabel>
+                    <FormLabel>Date <span className="text-red-500">*</span></FormLabel>
                     <FormControl>
                       <Input type="date" value={field.value ? format(field.value, "yyyy-MM-dd") : ""} onChange={(e) => field.onChange(e.target.value ? new Date(e.target.value) : null)} />
                     </FormControl>
@@ -240,7 +240,7 @@ export default function AppointmentFormDialog({
                 name="appointmentTime"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Time *</FormLabel>
+                    <FormLabel>Time <span className="text-red-500">*</span></FormLabel>
                     <Select
                       onValueChange={field.onChange}
                       value={field.value}
@@ -251,9 +251,9 @@ export default function AppointmentFormDialog({
                           <SelectValue placeholder={
                             !doctorId ? "Select a doctor first"
                               : !appointmentDate ? "Select a date first"
-                              : timetableLoading ? "Loading slots…"
-                              : timeOptions.length === 0 ? "No free time left with this doctor on this date"
-                              : "Select time"
+                                : timetableLoading ? "Loading slots…"
+                                  : timeOptions.length === 0 ? "No free time left with this doctor on this date"
+                                    : "Select time"
                           } />
                         </SelectTrigger>
                       </FormControl>

@@ -807,7 +807,7 @@ export default function OpdModule() {
           <Section icon={<User className="h-5 w-5" />} title="Patient & Doctor" desc="Who is this prescription for">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
-                <Label className="text-sm font-medium mb-2 block">Patient *</Label>
+                <Label className="text-sm font-medium mb-2 block">Patient <span className="text-red-500">*</span></Label>
                 {selectedPatient ? (
                   <div className="flex items-center gap-3 p-3 bg-[#2E4168]/5 rounded-xl border border-[#2E4168]/25">
                     <div className="h-10 w-10 rounded-xl bg-gradient-to-br from-[#2E4168] to-[#3b5488] flex items-center justify-center text-white text-sm font-bold">{initials(getFullName(selectedPatient))}</div>
@@ -819,7 +819,7 @@ export default function OpdModule() {
                 )}
               </div>
               <div>
-                <Label className="text-sm font-medium mb-2 block">Attending Doctor *</Label>
+                <Label className="text-sm font-medium mb-2 block">Attending Doctor <span className="text-red-500">*</span></Label>
                 <SearchableSelect
                   className="w-full rounded-xl"
                   value={selectedDoctorId}
@@ -972,7 +972,7 @@ export default function OpdModule() {
             <Form {...clinicalForm}>
               <form className="grid grid-cols-1 gap-4">
                 <FormField control={clinicalForm.control} name="chiefComplaint" render={({ field }) => (<FormItem><FormLabel>Chief Complaint</FormLabel><FormControl><Input className="rounded-xl" placeholder="Main reason for visit..." {...field} /></FormControl><FormMessage /></FormItem>)} />
-                <FormField control={clinicalForm.control} name="diagnosis" render={({ field }) => (<FormItem><FormLabel>Diagnosis *</FormLabel><FormControl><Input className="rounded-xl" placeholder="Working diagnosis..." {...field} /></FormControl><FormMessage /></FormItem>)} />
+                <FormField control={clinicalForm.control} name="diagnosis" render={({ field }) => (<FormItem><FormLabel>Diagnosis <span className="text-red-500">*</span></FormLabel><FormControl><Input className="rounded-xl" placeholder="Working diagnosis..." {...field} /></FormControl><FormMessage /></FormItem>)} />
               </form>
             </Form>
           </Section>
