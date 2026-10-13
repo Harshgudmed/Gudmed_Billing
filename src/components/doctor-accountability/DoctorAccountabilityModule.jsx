@@ -859,7 +859,7 @@ function CommissionsTab({ openAddSignal }) {
           <DialogHeader><DialogTitle>Add Commission Entry</DialogTitle></DialogHeader>
           <div className="space-y-4 pt-2">
             <div>
-              <Label>Doctor *</Label>
+              <Label>Doctor <span className="text-red-500">*</span></Label>
               <SearchableSelect
                 className="mt-1 w-full"
                 value={form.doctorId}
@@ -878,7 +878,7 @@ function CommissionsTab({ openAddSignal }) {
               {doctors.length === 0 && <p className="text-xs text-amber-600 mt-1">No doctors found. Add doctors in Settings → Users first.</p>}
             </div>
             <div>
-              <Label>Invoice Amount (₹) *</Label>
+              <Label>Invoice Amount (₹) <span className="text-red-500">*</span></Label>
               <Input className="mt-1" type="number" value={form.invoiceAmount} onChange={e => setForm(f => ({ ...f, invoiceAmount: e.target.value }))} placeholder="e.g. 5000" />
             </div>
             {form.doctorId && form.invoiceAmount && (() => {
@@ -1402,6 +1402,7 @@ export default function DoctorAccountabilityModule() {
   const [departments, setDepartments] = useState([])
   const [docForm, setDocForm] = useState({ fullName: '', email: '', specialization: '', phone: '', departmentId: '', password: '' })
   const [showDocPassword, setShowDocPassword] = useState(false)
+  const [docErrors, setDocErrors] = useState({})
 
   useEffect(() => {
     const loadDepartments = async () => {
@@ -1419,14 +1420,17 @@ export default function DoctorAccountabilityModule() {
   }, [])
 
   async function addDoctor() {
-    if (!docForm.fullName.trim() || !docForm.email.trim()) {
-      toast.error('Full name and email are required')
+    const errors = {}
+    if (!docForm.fullName.trim()) errors.fullName = 'Full name is required'
+    if (!docForm.email.trim()) errors.email = 'Email is required'
+    if (!docForm.password || docForm.password.length < 6) errors.password = 'Password must be at least 6 characters'
+    if (Object.keys(errors).length) {
+      setDocErrors(errors)
+      if (errors.fullName || errors.email) toast.error('Full name and email are required')
+      else if (errors.password) toast.error('Password must be at least 6 characters')
       return
     }
-    if (!docForm.password || docForm.password.length < 6) {
-      toast.error('Password must be at least 6 characters')
-      return
-    }
+    setDocErrors({})
     setSavingDoc(true)
     try {
       const res = await client.post('/settings', { resource: 'user', role: 'doctor', ...docForm })
@@ -1434,6 +1438,7 @@ export default function DoctorAccountabilityModule() {
         toast.success(`Doctor ${res.data.fullName} added`)
         setAddOpen(false)
         setDocForm({ fullName: '', email: '', specialization: '', phone: '', departmentId: '', password: '' })
+        setDocErrors({})
         setTab('doctors')
         setReloadKey(k => k + 1)   // remount DoctorsTab so the new doctor appears
       } else toast.error(res.error || 'Failed to add doctor')
@@ -1489,18 +1494,20 @@ export default function DoctorAccountabilityModule() {
       </div>
 
       {/* Add Doctor Dialog */}
-      <Dialog open={addOpen} onOpenChange={setAddOpen}>
+      <Dialog open={addOpen} onOpenChange={v => { setAddOpen(v); if (!v) setDocErrors({}) }}>
         <DialogContent className="max-w-md">
           <DialogHeader><DialogTitle>Add Doctor</DialogTitle></DialogHeader>
           <div className="space-y-4 pt-2">
             <div className="grid grid-cols-2 gap-4">
               <div>
-                <Label>Full Name *</Label>
-                <Input className="mt-1" value={docForm.fullName} onChange={e => setDocForm(f => ({ ...f, fullName: e.target.value }))} placeholder="Dr. John Doe" />
+                <Label>Full Name <span className="text-red-500">*</span></Label>
+                <Input className={`mt-1 ${docErrors.fullName ? 'border-red-500 focus-visible:ring-red-500' : ''}`} value={docForm.fullName} onChange={e => { setDocForm(f => ({ ...f, fullName: e.target.value })); setDocErrors(er => ({ ...er, fullName: '' })) }} placeholder="Dr. John Doe" />
+                {docErrors.fullName && <p className="text-xs text-red-500 mt-1">{docErrors.fullName}</p>}
               </div>
               <div>
-                <Label>Email *</Label>
-                <Input className="mt-1" type="email" value={docForm.email} onChange={e => setDocForm(f => ({ ...f, email: e.target.value }))} placeholder="doctor@hospital.com" />
+                <Label>Email <span className="text-red-500">*</span></Label>
+                <Input className={`mt-1 ${docErrors.email ? 'border-red-500 focus-visible:ring-red-500' : ''}`} type="email" value={docForm.email} onChange={e => { setDocForm(f => ({ ...f, email: e.target.value })); setDocErrors(er => ({ ...er, email: '' })) }} placeholder="doctor@hospital.com" />
+                {docErrors.email && <p className="text-xs text-red-500 mt-1">{docErrors.email}</p>}
               </div>
             </div>
             <div className="grid grid-cols-2 gap-4">
@@ -1510,7 +1517,7 @@ export default function DoctorAccountabilityModule() {
               </div>
               <div>
                 <Label>Phone</Label>
-                <Input className="mt-1" value={docForm.phone} onChange={e => setDocForm(f => ({ ...f, phone: e.target.value }))} placeholder="+91XXXXXXXXXX" />
+                <Input className="mt-1" value={docForm.phone} onChange={e => setDocForm(f => ({ ...f, phone: e.target.value }))} placeholder="+91XXXXXXXXXX" maxLength={15} />
               </div>
             </div>
             <div>
@@ -1525,13 +1532,13 @@ export default function DoctorAccountabilityModule() {
               />
             </div>
             <div>
-              <Label>Password *</Label>
+              <Label>Password <span className="text-red-500">*</span></Label>
               <div className="relative mt-1">
                 <Input
-                  className="pr-9"
+                  className={`pr-9 ${docErrors.password ? 'border-red-500 focus-visible:ring-red-500' : ''}`}
                   type={showDocPassword ? 'text' : 'password'}
                   value={docForm.password}
-                  onChange={e => setDocForm(f => ({ ...f, password: e.target.value }))}
+                  onChange={e => { setDocForm(f => ({ ...f, password: e.target.value })); setDocErrors(er => ({ ...er, password: '' })) }}
                   placeholder="Min. 6 characters"
                 />
                 <button
@@ -1543,6 +1550,7 @@ export default function DoctorAccountabilityModule() {
                   {showDocPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                 </button>
               </div>
+              {docErrors.password && <p className="text-xs text-red-500 mt-1">{docErrors.password}</p>}
             </div>
             <div className="flex gap-2 justify-end pt-2">
               <Button variant="outline" onClick={() => setAddOpen(false)}>Cancel</Button>
