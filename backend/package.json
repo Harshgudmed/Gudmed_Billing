@@ -26,6 +26,7 @@
     "cookie-parser": "^1.4.7",
     "cors": "^2.8.5",
     "dotenv": "^16.4.7",
+    "exceljs": "^4.4.0",
     "express": "^4.21.2",
     "helmet": "^8.0.0",
     "jsonwebtoken": "^9.0.3",
@@ -37,6 +38,7 @@
     "simple-hl7": "^3.3.0",
     "socket.io": "^4.8.3",
     "uuid": "^11.1.0",
+    "xlsx": "^0.18.5",
     "zod": "^3.25.28"
   },
   "devDependencies": {
