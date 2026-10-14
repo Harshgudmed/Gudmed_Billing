@@ -74,7 +74,7 @@ function useManagesPay() {
   return !user || ['admin', 'super_admin'].includes(user.role)
 }
 
-function DoctorsTab() {
+function DoctorsTab({ actions }) {
   const managesPay = useManagesPay()
   const [doctors, setDoctors] = useState([])
   const [slabCounts, setSlabCounts] = useState({})   // doctorId -> number of follow-up ranges
@@ -240,6 +240,7 @@ function DoctorsTab() {
         placeholder="Search doctor by name or specialization..."
         active={!!search || filterStatus !== 'all' || filterSpecialization !== 'all'}
         onClear={() => { setSearch(''); setFilterStatus('all'); setFilterSpecialization('all') }}
+        actions={actions}
       >
         <FilterSelect value={filterStatus} onChange={setFilterStatus} options={DOCTOR_SETUP_OPTIONS} />
         <FilterSelect
@@ -1523,6 +1524,38 @@ export default function DoctorAccountabilityModule() {
     }).catch(() => toast.error('Export failed'))
   }
 
+  // Bulk upload buttons — admin only, same guard as Add Doctor. Rendered in the
+  // Doctors tab's filter row, beside the Status / Specialization filters.
+  const bulkActions = (!user || ['admin', 'super_admin'].includes(user.role)) && (
+    <div className="flex gap-2">
+      {/* Template: download the pre-filled .xlsx so the admin knows the format */}
+      <Button variant="outline" onClick={downloadTemplate}>
+        <FileSpreadsheet className="h-4 w-4 mr-2" />Template
+      </Button>
+      {/* Import: hidden file input triggered by the button */}
+      <label className="inline-flex">
+        <input
+          type="file"
+          accept=".xlsx,.csv"
+          className="hidden"
+          onChange={handleBulkUpload}
+          disabled={bulkUploading}
+        />
+        <Button variant="outline" asChild disabled={bulkUploading} className="cursor-pointer">
+          <span>
+            {bulkUploading
+              ? <><Upload className="h-4 w-4 mr-2 animate-pulse" />Uploading...</>
+              : <><Upload className="h-4 w-4 mr-2" />Import</>}
+          </span>
+        </Button>
+      </label>
+      {/* Export: download current doctor list as CSV */}
+      <Button variant="outline" onClick={exportDoctors}>
+        <Download className="h-4 w-4 mr-2" />Export
+      </Button>
+    </div>
+  )
+
   return (
     <div className="space-y-6">
       <div className="flex items-start justify-between flex-wrap gap-4">
@@ -1536,39 +1569,6 @@ export default function DoctorAccountabilityModule() {
               <IndianRupee className="h-4 w-4 mr-2" />Add Commission
             </Button>
           )}
-          {/* Bulk upload buttons — admin only, same guard as Add Doctor */}
-          {(!user || ['admin', 'super_admin'].includes(user.role)) && (<>
-            {/* Template: download the pre-filled .xlsx so the admin knows the format */}
-            <Button variant="outline" onClick={downloadTemplate}>
-              <FileSpreadsheet className="h-4 w-4 mr-2" />Template
-            </Button>
-            {/* Import: hidden file input triggered by the button */}
-            <label className="inline-flex">
-              <input
-                type="file"
-                accept=".xlsx,.csv"
-                className="hidden"
-                onChange={handleBulkUpload}
-                disabled={bulkUploading}
-              />
-              <Button
-                variant="outline"
-                asChild
-                disabled={bulkUploading}
-                className="cursor-pointer"
-              >
-                <span>
-                  {bulkUploading
-                    ? <><Upload className="h-4 w-4 mr-2 animate-pulse" />Uploading...</>
-                    : <><Upload className="h-4 w-4 mr-2" />Import</>}
-                </span>
-              </Button>
-            </label>
-            {/* Export: download current doctor list as CSV */}
-            <Button variant="outline" onClick={exportDoctors}>
-              <Download className="h-4 w-4 mr-2" />Export
-            </Button>
-          </>)}
           {/* Creating a login is the administrator's (the server refuses anyone
               else) — a doctor viewing their own accountability gets no button
               that can only fail. No user = the no-login demo, which allows it. */}
@@ -1594,7 +1594,7 @@ export default function DoctorAccountabilityModule() {
         ))}
       </div>
       <div>
-        {tab === 'doctors' && <DoctorsTab key={reloadKey} />}
+        {tab === 'doctors' && <DoctorsTab key={reloadKey} actions={bulkActions} />}
         {tab === 'commissions' && <CommissionsTab openAddSignal={addCommissionSignal} />}
         {tab === 'reports' && <ReportsTab />}
         {tab === 'doctors-timetable' && <DoctorTiming />}
