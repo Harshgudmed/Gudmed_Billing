@@ -23,7 +23,8 @@ function parseFile(buffer, originalname) {
   const raw = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' })
   if (!raw || raw.length < 2) return { headers: [], rows: [] }
 
-  const headerRow = raw[0].map((h) => String(h).trim().toLowerCase())
+  // Template headers carry a required marker ("Full Name *") — drop it so they match HEADER_MAP
+  const headerRow = raw[0].map((h) => String(h).replace(/\*/g, '').trim().toLowerCase())
   const dataRows = raw.slice(1)
 
   const rows = dataRows.map((cells, idx) => {
@@ -112,18 +113,6 @@ export async function downloadBulkDoctorTemplate(req, res, next) {
       phone:          '9876543210',
       department:     'Cardiology',
       password:       DEFAULT_PASSWORD,
-    })
-
-    const noteRow = sheet.addRow({
-      fullName:       'Delete this row before uploading',
-      email:          '',
-      specialization: 'Must match an existing specialization',
-      phone:          'Optional',
-      department:     'Must match an existing department name exactly',
-      password:       'Leave blank to use default: Gudmed@123',
-    })
-    noteRow.eachCell((cell) => {
-      cell.font = { italic: true, color: { argb: 'FF9CA3AF' } }
     })
 
     sheet.views = [{ state: 'frozen', ySplit: 1 }]

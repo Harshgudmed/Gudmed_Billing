@@ -16,7 +16,7 @@ import {
   UserCog, IndianRupee, CheckCircle2, BarChart3,
   Search, Plus, Edit2, Trash2,
   Users, Clock, Wallet, Printer, FileDown, CheckCheck, ChevronLeft, ChevronRight,
-  Eye, EyeOff,
+  Eye, EyeOff, Upload, Download, FileSpreadsheet, AlertTriangle, CheckCircle, AlertCircle,
 } from 'lucide-react'
 import client from '@/api/client'
 import { useAuth } from '@/lib/auth'
@@ -1404,6 +1404,11 @@ export default function DoctorAccountabilityModule() {
   const [showDocPassword, setShowDocPassword] = useState(false)
   const [docErrors, setDocErrors] = useState({})
 
+  // Bulk upload
+  const [bulkUploading, setBulkUploading] = useState(false)
+  const [bulkResult, setBulkResult] = useState(null)   // null = no result yet
+  const [bulkResultOpen, setBulkResultOpen] = useState(false)
+
   useEffect(() => {
     const loadDepartments = async () => {
       try {
@@ -1449,6 +1454,75 @@ export default function DoctorAccountabilityModule() {
     }
   }
 
+  // ── Bulk upload ──────────────────────────────────────────────────────────
+  async function handleBulkUpload(e) {
+    const file = e.target.files?.[0]
+    e.target.value = ''
+    if (!file) return
+    const ext = file.name.split('.').pop()?.toLowerCase()
+    if (ext !== 'xlsx' && ext !== 'csv') { toast.error('Please select an .xlsx or .csv file'); return }
+    setBulkUploading(true)
+    try {
+      const fd = new FormData()
+      fd.append('resource', 'bulk-upload-doctors')
+      fd.append('file', file)
+      const res = await client.postForm('/settings', fd)
+      if (res.success) {
+        setBulkResult(res)
+        setBulkResultOpen(true)
+        if (res.summary?.success > 0) { setReloadKey(k => k + 1); toast.success(`${res.summary.success} doctor(s) added successfully`) }
+        if (res.summary?.failed > 0) toast.warning(`${res.summary.failed} row(s) had errors — see the report`)
+      } else {
+        toast.error(res.error || 'Upload failed')
+      }
+    } catch (err) {
+      toast.error(err.message || 'Upload failed')
+    } finally {
+      setBulkUploading(false)
+    }
+  }
+
+  function downloadTemplate() {
+    client.get('/settings?resource=bulk-doctor-template', { responseType: 'blob' }).then(blob => {
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url; a.download = 'doctor-bulk-upload-template.xlsx'; a.click()
+      URL.revokeObjectURL(url)
+    }).catch(() => toast.error('Failed to download template'))
+  }
+
+  function downloadErrorFile(errorFile) {
+    if (!errorFile?.base64) return
+    const bytes = atob(errorFile.base64)
+    const arr = new Uint8Array(bytes.length)
+    for (let i = 0; i < bytes.length; i++) arr[i] = bytes.charCodeAt(i)
+    const blob = new Blob([arr], { type: errorFile.mimeType })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url; a.download = errorFile.filename; a.click()
+    URL.revokeObjectURL(url)
+  }
+
+  function exportDoctors() {
+    client.get('/doctor-accountability?resource=doctors').then(res => {
+      if (!res.success || !res.data?.length) { toast.info('No doctors to export'); return }
+      const headers = ['Full Name', 'Email', 'Specialization', 'Phone', 'Department', 'Status']
+      const rows = res.data.map(d => [
+        d.fullName, d.email || '', d.specialization || '',
+        d.phone || '', d.department?.name || '', d.isActive ? 'Active' : 'Inactive',
+      ])
+      const csv = [headers, ...rows]
+        .map(r => r.map(v => `"${String(v).replace(/"/g, '""')}"`).join(','))
+        .join('\n')
+      const blob = new Blob([csv], { type: 'text/csv' })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url; a.download = `doctors-${new Date().toISOString().slice(0, 10)}.csv`; a.click()
+      URL.revokeObjectURL(url)
+      toast.success(`Exported ${res.data.length} doctor(s)`)
+    }).catch(() => toast.error('Export failed'))
+  }
+
   return (
     <div className="space-y-6">
       <div className="flex items-start justify-between flex-wrap gap-4">
@@ -1456,12 +1530,45 @@ export default function DoctorAccountabilityModule() {
           <h2 className="text-2xl font-bold text-gray-900">Doctor Accountability</h2>
           <p className="text-gray-500 mt-1">Track and settle doctor commissions for services rendered.</p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           {(!user || ['admin', 'super_admin'].includes(user.role)) && (
             <Button variant="outline" onClick={() => { setTab('commissions'); setAddCommissionSignal(s => s + 1) }}>
               <IndianRupee className="h-4 w-4 mr-2" />Add Commission
             </Button>
           )}
+          {/* Bulk upload buttons — admin only, same guard as Add Doctor */}
+          {(!user || ['admin', 'super_admin'].includes(user.role)) && (<>
+            {/* Template: download the pre-filled .xlsx so the admin knows the format */}
+            <Button variant="outline" onClick={downloadTemplate}>
+              <FileSpreadsheet className="h-4 w-4 mr-2" />Template
+            </Button>
+            {/* Import: hidden file input triggered by the button */}
+            <label className="inline-flex">
+              <input
+                type="file"
+                accept=".xlsx,.csv"
+                className="hidden"
+                onChange={handleBulkUpload}
+                disabled={bulkUploading}
+              />
+              <Button
+                variant="outline"
+                asChild
+                disabled={bulkUploading}
+                className="cursor-pointer"
+              >
+                <span>
+                  {bulkUploading
+                    ? <><Upload className="h-4 w-4 mr-2 animate-pulse" />Uploading...</>
+                    : <><Upload className="h-4 w-4 mr-2" />Import</>}
+                </span>
+              </Button>
+            </label>
+            {/* Export: download current doctor list as CSV */}
+            <Button variant="outline" onClick={exportDoctors}>
+              <Download className="h-4 w-4 mr-2" />Export
+            </Button>
+          </>)}
           {/* Creating a login is the administrator's (the server refuses anyone
               else) — a doctor viewing their own accountability gets no button
               that can only fail. No user = the no-login demo, which allows it. */}
@@ -1557,6 +1664,75 @@ export default function DoctorAccountabilityModule() {
               <Button onClick={addDoctor} disabled={savingDoc}>{savingDoc ? 'Adding...' : 'Add Doctor'}</Button>
             </div>
           </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Bulk Upload Result Dialog */}
+      <Dialog open={bulkResultOpen} onOpenChange={setBulkResultOpen}>
+        <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
+          <DialogHeader><DialogTitle>Bulk Upload Result</DialogTitle></DialogHeader>
+          {bulkResult && (
+            <div className="space-y-4 pt-2">
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                <div className="rounded-lg border p-3">
+                  <p className="text-xs text-gray-500">Total Rows</p>
+                  <p className="text-xl font-semibold">{bulkResult.summary?.total ?? 0}</p>
+                </div>
+                <div className="rounded-lg border border-green-200 bg-green-50 p-3">
+                  <p className="text-xs text-green-700 flex items-center gap-1"><CheckCircle className="h-3 w-3" />Added</p>
+                  <p className="text-xl font-semibold text-green-700">{bulkResult.summary?.success ?? 0}</p>
+                </div>
+                <div className="rounded-lg border border-amber-200 bg-amber-50 p-3">
+                  <p className="text-xs text-amber-700 flex items-center gap-1"><AlertTriangle className="h-3 w-3" />Warnings</p>
+                  <p className="text-xl font-semibold text-amber-700">{bulkResult.summary?.warnings ?? 0}</p>
+                </div>
+                <div className="rounded-lg border border-red-200 bg-red-50 p-3">
+                  <p className="text-xs text-red-700 flex items-center gap-1"><AlertCircle className="h-3 w-3" />Failed</p>
+                  <p className="text-xl font-semibold text-red-700">{bulkResult.summary?.failed ?? 0}</p>
+                </div>
+              </div>
+
+              {bulkResult.warnings?.length > 0 && (
+                <div>
+                  <p className="text-sm font-medium text-amber-700 mb-2">Warnings</p>
+                  <div className="rounded-lg border divide-y text-sm">
+                    {bulkResult.warnings.map((w, i) => (
+                      <div key={i} className="p-2">
+                        <span className="font-medium">Row {w.row}</span> · {w.email}
+                        <p className="text-xs text-gray-500 mt-0.5">{w.reason}</p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {bulkResult.errors?.length > 0 && (
+                <div>
+                  <div className="flex items-center justify-between mb-2">
+                    <p className="text-sm font-medium text-red-700">Failed Rows</p>
+                    {bulkResult.errorFile && (
+                      <Button size="sm" variant="outline" onClick={() => downloadErrorFile(bulkResult.errorFile)}>
+                        <Download className="h-4 w-4 mr-2" />Download Error Report
+                      </Button>
+                    )}
+                  </div>
+                  <div className="rounded-lg border divide-y text-sm">
+                    {bulkResult.errors.map((er, i) => (
+                      <div key={i} className="p-2">
+                        <span className="font-medium">Row {er.row}</span>
+                        {(er.name || er.email) && <> · {[er.name, er.email].filter(Boolean).join(' · ')}</>}
+                        <p className="text-xs text-red-600 mt-0.5">{er.reason}</p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <div className="flex justify-end pt-2">
+                <Button onClick={() => setBulkResultOpen(false)}>Close</Button>
+              </div>
+            </div>
+          )}
         </DialogContent>
       </Dialog>
     </div>
