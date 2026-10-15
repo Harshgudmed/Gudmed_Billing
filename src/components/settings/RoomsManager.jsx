@@ -53,7 +53,7 @@ function groupSchedule(schedule = []) {
   return [...byShift.values()].sort((a, b) => a.start.localeCompare(b.start) || a.doctorName.localeCompare(b.doctorName))
 }
 
-// ── Bulk Upload Floors ───────────────────────────────────────────────────
+// ── Bulk Upload (Template / Import / Export) ────────────────────────────────────────────────────────────────────────────────
 function saveBlob(blob, filename) {
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
@@ -61,22 +61,62 @@ function saveBlob(blob, filename) {
   URL.revokeObjectURL(url)
 }
 
-function BulkFloorMenu({ onImported }) {
+// Each bulk menu is the same Template / Import / Export trio against a
+// different endpoint; only the labels and the result counters differ.
+const BULK_FLOORS = {
+  label: 'Bulk Upload Floor',
+  title: 'Floor Import Result',
+  path: '/rooms/floors',
+  templateFile: 'floors_template.xlsx',
+  exportPrefix: 'floors_export',
+  stats: [
+    { key: 'total', label: 'Total Rows' },
+    { key: 'success', label: 'Added', tone: 'green' },
+    { key: 'failed', label: 'Failed', tone: 'red' },
+  ],
+  changed: (s) => s.success > 0,
+  successToast: (s) => `${s.success} floor(s) added`,
+}
+
+const BULK_SETUP = {
+  label: 'Bulk Setup',
+  title: 'Room Setup Import Result',
+  path: '/rooms/setup',
+  templateFile: 'room_setup_template.xlsx',
+  exportPrefix: 'room_setup_export',
+  stats: [
+    { key: 'total', label: 'Total Rows' },
+    { key: 'floorsCreated', label: 'Floors Created', tone: 'green' },
+    { key: 'roomsCreated', label: 'Rooms Created', tone: 'green' },
+    { key: 'shiftsAdded', label: 'Shifts Added', tone: 'green' },
+    { key: 'skipped', label: 'Skipped (already exist)' },
+    { key: 'failed', label: 'Failed', tone: 'red' },
+  ],
+  changed: (s) => s.floorsCreated + s.roomsCreated + s.shiftsAdded > 0,
+  successToast: (s) => `Added ${s.floorsCreated} floor(s), ${s.roomsCreated} room(s), ${s.shiftsAdded} shift(s)`,
+}
+
+const STAT_TONE = {
+  green: { box: 'border-green-200 bg-green-50', text: 'text-green-700' },
+  red:   { box: 'border-red-200 bg-red-50',     text: 'text-red-700' },
+}
+
+function BulkMenu({ config, onImported }) {
   const fileRef = useRef(null)
   const [uploading, setUploading] = useState(false)
   const [result, setResult] = useState(null)
 
   function downloadTemplate() {
-    client.get('/rooms/floors/template', { responseType: 'blob' })
-      .then((blob) => saveBlob(blob, 'floors_template.xlsx'))
+    client.get(`${config.path}/template`, { responseType: 'blob' })
+      .then((blob) => saveBlob(blob, config.templateFile))
       .catch(() => toast.error('Failed to download template'))
   }
 
-  function exportFloors() {
+  function exportData() {
     const date = new Date().toISOString().slice(0, 10)
-    client.get('/rooms/floors/export', { responseType: 'blob' })
-      .then((blob) => saveBlob(blob, `floors_export_${date}.xlsx`))
-      .catch(() => toast.error('Failed to export floors'))
+    client.get(`${config.path}/export`, { responseType: 'blob' })
+      .then((blob) => saveBlob(blob, `${config.exportPrefix}_${date}.xlsx`))
+      .catch(() => toast.error('Export failed'))
   }
 
   function downloadErrorFile(errorFile) {
@@ -97,10 +137,11 @@ function BulkFloorMenu({ onImported }) {
     try {
       const fd = new FormData()
       fd.append('file', file)
-      const res = await client.postForm('/rooms/floors/import', fd)
+      const res = await client.postForm(`${config.path}/import`, fd)
       setResult(res)
-      if (res.summary?.success > 0) { toast.success(`${res.summary.success} floor(s) added`); onImported?.() }
-      if (res.summary?.failed > 0) toast.warning(`${res.summary.failed} row(s) had errors — see the report`)
+      const s = res.summary || {}
+      if (config.changed(s)) { toast.success(config.successToast(s)); onImported?.() }
+      if (s.failed > 0) toast.warning(`${s.failed} row(s) had errors — see the report`)
     } catch (err) {
       toast.error(err.message || 'Upload failed')
     } finally {
@@ -114,35 +155,46 @@ function BulkFloorMenu({ onImported }) {
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
           <Button size="sm" variant="outline" disabled={uploading}>
-            <FileSpreadsheet className="h-4 w-4 mr-1" />{uploading ? 'Uploading…' : 'Bulk Upload Floor'}<ChevronDown className="h-4 w-4 ml-1" />
+            <FileSpreadsheet className="h-4 w-4 mr-1" />{uploading ? 'Uploading…' : config.label}<ChevronDown className="h-4 w-4 ml-1" />
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end">
           <DropdownMenuItem onClick={downloadTemplate}><Download className="h-4 w-4 mr-2" />Template</DropdownMenuItem>
           <DropdownMenuItem onClick={() => fileRef.current?.click()}><Upload className="h-4 w-4 mr-2" />Import</DropdownMenuItem>
-          <DropdownMenuItem onClick={exportFloors}><FileSpreadsheet className="h-4 w-4 mr-2" />Export</DropdownMenuItem>
+          <DropdownMenuItem onClick={exportData}><FileSpreadsheet className="h-4 w-4 mr-2" />Export</DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
 
       <Dialog open={!!result} onOpenChange={(o) => !o && setResult(null)}>
-        <DialogContent className="max-w-lg">
-          <DialogHeader><DialogTitle>Floor Import Result</DialogTitle></DialogHeader>
+        <DialogContent className="max-w-xl">
+          <DialogHeader><DialogTitle>{config.title}</DialogTitle></DialogHeader>
           {result && (
             <div className="space-y-4">
               <div className="grid grid-cols-3 gap-3">
-                <div className="rounded-lg border p-3">
-                  <p className="text-xs text-gray-500">Total Rows</p>
-                  <p className="text-xl font-semibold">{result.summary?.total ?? 0}</p>
-                </div>
-                <div className="rounded-lg border border-green-200 bg-green-50 p-3">
-                  <p className="text-xs text-green-700">Added</p>
-                  <p className="text-xl font-semibold text-green-700">{result.summary?.success ?? 0}</p>
-                </div>
-                <div className="rounded-lg border border-red-200 bg-red-50 p-3">
-                  <p className="text-xs text-red-700">Failed</p>
-                  <p className="text-xl font-semibold text-red-700">{result.summary?.failed ?? 0}</p>
-                </div>
+                {config.stats.map((st) => {
+                  const tone = STAT_TONE[st.tone]
+                  return (
+                    <div key={st.key} className={`rounded-lg border p-3 ${tone?.box || ''}`}>
+                      <p className={`text-xs ${tone?.text || 'text-gray-500'}`}>{st.label}</p>
+                      <p className={`text-xl font-semibold ${tone?.text || ''}`}>{result.summary?.[st.key] ?? 0}</p>
+                    </div>
+                  )
+                })}
               </div>
+
+              {result.warnings?.length > 0 && (
+                <div>
+                  <p className="text-sm font-medium text-amber-700 mb-2">Warnings</p>
+                  <div className="rounded-lg border divide-y text-sm max-h-40 overflow-y-auto">
+                    {result.warnings.map((w, i) => (
+                      <div key={i} className="p-2">
+                        <span className="font-medium">Row {w.row}</span>{w.name && <> · {w.name}</>}
+                        <p className="text-xs text-amber-700 mt-0.5">{w.reason}</p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
 
               {result.errors?.length > 0 && (
                 <div>
@@ -575,7 +627,8 @@ export default function RoomsManager() {
             <CardDescription>Set up floors, departments, and consulting rooms for the queue display board. Doctor scheduling happens on each doctor's own Timetable.</CardDescription>
           </div>
           <div className="flex items-center gap-2">
-            <BulkFloorMenu onImported={async () => { const f = await loadFloors(); if (!activeFloorId) selectFloor(f[0]?.id) }} />
+            <BulkMenu config={BULK_SETUP} onImported={async () => { const f = await loadFloors(); if (activeFloorId) refreshRooms(); else selectFloor(f[0]?.id) }} />
+            <BulkMenu config={BULK_FLOORS} onImported={async () => { const f = await loadFloors(); if (!activeFloorId) selectFloor(f[0]?.id) }} />
             <AddFloorDialog onCreated={async () => { const f = await loadFloors(); if (!activeFloorId) selectFloor(f[0]?.id) }} />
           </div>
         </div>

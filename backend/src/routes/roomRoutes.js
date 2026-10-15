@@ -5,6 +5,7 @@ import {
   setOverride, clearOverride,
 } from '../controllers/roomController.js'
 import { downloadFloorTemplate, importFloors, exportFloors } from '../controllers/bulkFloorController.js'
+import { downloadRoomSetupTemplate, importRoomSetup, exportRoomSetup } from '../controllers/bulkRoomSetupController.js'
 import { uploadSingleExcel } from '../lib/uploadExcel.js'
 
 const router = Router()
@@ -16,6 +17,11 @@ router.get('/floors/template', downloadFloorTemplate)
 router.get('/floors/export', exportFloors)
 router.post('/floors/import', uploadSingleExcel, importFloors)
 router.delete('/floors/:id', deleteFloor)
+
+// Bulk setup (floors + rooms + doctor shifts in one sheet) — before /:id.
+router.get('/setup/template', downloadRoomSetupTemplate)
+router.get('/setup/export', exportRoomSetup)
+router.post('/setup/import', uploadSingleExcel, importRoomSetup)
 
 router.get('/suggest-number', suggestRoomNumber)
 router.get('/picker-list', getRoomsPickerList)
