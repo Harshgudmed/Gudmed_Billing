@@ -1,5 +1,4 @@
 import { Router } from 'express'
-import multer from 'multer'
 import { authorize } from '../middleware/auth.js'
 import {
   getOrganization, updateOrganization,
@@ -10,27 +9,7 @@ import {
   bulkUploadDoctors,
   downloadBulkDoctorTemplate,
 } from '../controllers/bulkDoctorUploadController.js'
-
-// Multer instance for bulk-doctor uploads — kept in memory (no temp file) so
-// the controller reads req.file.buffer directly and nothing touches the disk.
-// Accepts only .xlsx and .csv; caps at 10 MB to prevent DoS via a huge sheet.
-const ALLOWED_UPLOAD_MIME = new Set([
-  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-  'application/vnd.ms-excel',
-  'text/csv',
-  'application/csv',
-])
-const uploadExcel = multer({
-  storage: multer.memoryStorage(),
-  limits: { fileSize: 10 * 1024 * 1024, files: 1 }, // 10 MB
-  fileFilter: (_req, file, cb) => {
-    const ext = file.originalname?.split('.').pop()?.toLowerCase()
-    if (ALLOWED_UPLOAD_MIME.has(file.mimetype) || ext === 'xlsx' || ext === 'csv') {
-      return cb(null, true)
-    }
-    cb(new Error('Only .xlsx or .csv files are accepted'))
-  },
-})
+import { uploadExcel } from '../lib/uploadExcel.js'
 
 const router = Router()
 

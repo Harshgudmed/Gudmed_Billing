@@ -4,11 +4,17 @@ import {
   getRooms, getRoom, createRoom, updateRoom, deleteRoom, suggestRoomNumber, getRoomsPickerList,
   setOverride, clearOverride,
 } from '../controllers/roomController.js'
+import { downloadFloorTemplate, importFloors, exportFloors } from '../controllers/bulkFloorController.js'
+import { uploadSingleExcel } from '../lib/uploadExcel.js'
 
 const router = Router()
 
 router.get('/floors', getFloors)
 router.post('/floors', createFloor)
+// Bulk routes sit before /floors/:id so "template"/"export" aren't read as ids.
+router.get('/floors/template', downloadFloorTemplate)
+router.get('/floors/export', exportFloors)
+router.post('/floors/import', uploadSingleExcel, importFloors)
 router.delete('/floors/:id', deleteFloor)
 
 router.get('/suggest-number', suggestRoomNumber)
