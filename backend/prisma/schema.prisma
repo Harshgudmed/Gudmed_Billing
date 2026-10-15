@@ -1104,6 +1104,9 @@ model Vendor {
   bankName          String? // State Bank of India — the form fills it from the IFSC's first four letters
   bankAccountNumber String?
   bankIfsc          String?
+  // Razorpay contact/fund-account IDs cached so they are not re-created on every payment.
+  razorpayContactId     String?
+  razorpayFundAccountId String?
   paymentTermsDays  Int? // 30 → a bill is due 30 days after its date
   vendorType        String? // goods | services | both
   msmeNumber        String? // an MSME must be paid within 45 days by law
@@ -4394,6 +4397,10 @@ model VendorPayment {
   decisionRemark String?
   cancelledAt    DateTime?
   cancelReason   String?
+
+  // RazorpayX payout tracking — null when paid by cheque/manual NEFT.
+  razorpayPayoutId String?
+  payoutStatus     String? // queued | pending | processing | processed | failed | cancelled
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

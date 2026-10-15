@@ -30,12 +30,15 @@ const VIEWS = [
   { key: 'approvals', label: 'Approval rules', hint: 'Who approves how much', Icon: ShieldCheck },
 ]
 
+const EMPTY_STATUS = { activeUnits: 0, liveGroups: 0, vendors: 0, items: 0, rulesSet: false }
+
 export default function PurchaseSettings() {
   const [view, setView] = useState('units')
   const [units, setUnits] = useState([])
   const [categories, setCategories] = useState([])
-  const [counts, setCounts] = useState({ vendors: 0, items: 0 })
-  const [rulesSet, setRulesSet] = useState(false)
+  // Checklist counts come from the server in one call — not computed from
+  // downloaded lists — so the ticks reflect the actual database state.
+  const [status, setStatus] = useState(EMPTY_STATUS)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
 
@@ -43,17 +46,14 @@ export default function PurchaseSettings() {
     if (!quiet) setLoading(true)
     setError(null)
     try {
-      const [u, c, v, it, rules] = await Promise.all([
+      const [s, u, c] = await Promise.all([
+        purchaseApi.getSetupStatus(),
         purchaseApi.getUnits({ includeInactive: true }),
         purchaseApi.getCategories({ includeInactive: true }),
-        purchaseApi.getVendors({ status: 'active', page: 1, limit: 1 }),
-        purchaseApi.getItems({ status: 'active', page: 1, limit: 1 }),
-        purchaseApi.getApprovalRules(),
       ])
+      setStatus(s?.data ?? EMPTY_STATUS)
       setUnits(u?.data ?? [])
       setCategories(c?.data ?? [])
-      setCounts({ vendors: v?.meta?.total ?? 0, items: it?.meta?.total ?? 0 })
-      setRulesSet(rules?.data ? !rules.data.isDefault : false)
     } catch (err) {
       setError(err?.message || 'Could not load the purchase setup')
       showApiError(err, 'Could not load the purchase setup')
@@ -69,15 +69,13 @@ export default function PurchaseSettings() {
   if (loading) return <div className="flex items-center justify-center py-16 text-gray-500"><Loader2 className="h-5 w-5 mr-2 animate-spin" />Loading…</div>
   if (error) return <div className="flex items-center justify-center py-16 text-red-600"><AlertCircle className="h-5 w-5 mr-2" />{error}</div>
 
-  const activeUnits = units.filter((u) => u.isActive !== false).length
-  const liveGroups = categories.filter((c) => c.isActive !== false)
-  const activeCategories = liveGroups.reduce((n, c) => n + 1 + c.children.filter((x) => x.isActive !== false).length, 0)
+  const { activeUnits, liveGroups, vendors, items, rulesSet } = status
   const steps = [
     { label: 'Units of measure', Icon: Ruler, note: `${activeUnits} active`, done: activeUnits > 0, opens: 'units' },
-    { label: 'Item categories', Icon: FolderTree, note: `${activeCategories} in ${liveGroups.length} groups`, done: liveGroups.length > 0, opens: 'categories' },
+    { label: 'Item categories', Icon: FolderTree, note: `${liveGroups} group${liveGroups !== 1 ? 's' : ''}`, done: liveGroups > 0, opens: 'categories' },
     { label: 'Approval rules', Icon: ShieldCheck, note: rulesSet ? 'Set' : 'Not set — an administrator approves every request', done: rulesSet, opens: 'approvals' },
-    { label: 'Vendors', Icon: Truck, note: counts.vendors ? `${counts.vendors} active · added in Purchase → Masters` : 'None yet — add them in Purchase → Masters', done: counts.vendors > 0 },
-    { label: 'Items', Icon: Package, note: counts.items ? `${counts.items} active · added in Purchase → Masters` : 'None yet — add them in Purchase → Masters', done: counts.items > 0 },
+    { label: 'Vendors', Icon: Truck, note: vendors ? `${vendors} active · added in Purchase → Masters` : 'None yet — add them in Purchase → Masters', done: vendors > 0 },
+    { label: 'Items', Icon: Package, note: items ? `${items} active · added in Purchase → Masters` : 'None yet — add them in Purchase → Masters', done: items > 0 },
   ]
   const doneCount = steps.filter((s) => s.done).length
   const percent = Math.round((doneCount / steps.length) * 100)
@@ -132,7 +130,7 @@ export default function PurchaseSettings() {
         <nav aria-label="Purchase setup" className="flex gap-2 overflow-x-auto lg:flex-col lg:overflow-visible">
           {VIEWS.map(({ key, label, hint, Icon }) => {
             const on = view === key
-            const count = { units: activeUnits, categories: activeCategories, approvals: null }[key]
+            const count = { units: activeUnits, categories: liveGroups, approvals: null }[key]
             return (
               <button key={key} type="button" onClick={() => setView(key)} aria-current={on ? 'page' : undefined}
                 className={`group flex min-w-[14rem] flex-1 items-center gap-3 rounded-xl border px-3 py-3.5 text-left transition lg:min-w-0 lg:flex-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 ${

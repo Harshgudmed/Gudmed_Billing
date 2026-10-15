@@ -461,9 +461,19 @@ export async function poUpdate(req, res, next) {
         await checkVendor(ORG_ID, po.vendorId)
         const levels = await openSteps(tx, ORG_ID, DOC, id, po.total)
         const now = new Date()
+        // Admin submitting → approve all steps at once, same as purchase requests.
+        const adminSelf = levels && isAdmin(req)
+        if (adminSelf) {
+          await tx.approvalStep.updateMany({
+            where: { organizationId: ORG_ID, documentType: DOC, documentId: id, status: 'pending' },
+            data: { status: 'approved', actedById: actor.id, actedByName: actor.name, actedAt: now },
+          })
+        }
         await tx.purchaseOrder.update({
           where: { id },
-          data: levels ? { status: 'submitted', submittedAt: now, decidedAt: null } : { status: 'approved', submittedAt: now, decidedAt: now },
+          data: (!levels || adminSelf)
+            ? { status: 'approved', submittedAt: now, decidedAt: now }
+            : { status: 'submitted', submittedAt: now, decidedAt: null },
         })
       })
     } else if (action === 'approve' || action === 'reject') {

@@ -257,7 +257,7 @@ export default function PurchaseModule() {
             )}
 
             {me.canSeeRfqs && (
-              <TabsContent value="rfqs" className="mt-4"><Suspense fallback={tabLoading}><RfqTab key={docLink.n} openId={linked('rfq')} onChanged={refreshDashboard} /></Suspense></TabsContent>
+              <TabsContent value="rfqs" className="mt-4"><Suspense fallback={tabLoading}><RfqTab key={docLink.n} openId={linked('rfq')} onChanged={refreshDashboard} onAwardDone={(orderId) => openOrders({ openId: orderId })} /></Suspense></TabsContent>
             )}
             {me.canSeeIndents && (
               <TabsContent value="indents" className="mt-4"><Suspense fallback={tabLoading}><IndentsTab key={docLink.n} openId={linked('indent')} issueId={linked('issue')} onChanged={refreshDashboard} /></Suspense></TabsContent>

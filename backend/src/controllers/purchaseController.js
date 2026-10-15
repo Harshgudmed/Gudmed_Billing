@@ -660,6 +660,30 @@ export async function getAll(req, res, next) {
   if (req.query?.resource === 'purchase-settings') {
     return loadPurchaseSettings(db, getOrgId(req)).then((data) => res.json({ success: true, data })).catch(next)
   }
+  if (req.query?.resource === 'setup-status') {
+    // Single server-side check: is this hospital ready to buy?
+    // Five parallel counts replace the five separate API calls the Settings
+    // screen used to make — the checklist now reflects DB state, not a
+    // frontend calculation from downloaded lists.
+    try {
+      const ORG_ID = getOrgId(req)
+      await ensurePurchaseDefaults(ORG_ID)
+      const [activeUnits, liveGroups, vendors, items, prRuleCount] = await Promise.all([
+        db.unit.count({ where: { organizationId: ORG_ID, isActive: true } }),
+        db.itemCategory.count({ where: { organizationId: ORG_ID, parentId: null, isActive: true } }),
+        db.vendor.count({ where: { organizationId: ORG_ID, isActive: true } }),
+        db.item.count({ where: { organizationId: ORG_ID, isActive: true } }),
+        // rulesSet = at least one PR approval rule exists (mirrors isDefault: rows===0 in prGet)
+        db.approvalRule.count({ where: { organizationId: ORG_ID, documentType: 'PR' } }),
+      ])
+      return res.json({
+        success: true,
+        data: { activeUnits, liveGroups, vendors, items, rulesSet: prRuleCount > 0 },
+      })
+    } catch (err) {
+      return next(err)
+    }
+  }
   try {
     const ORG_ID = getOrgId(req)
     const { resource } = req.query

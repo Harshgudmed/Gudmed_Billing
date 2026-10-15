@@ -43,7 +43,7 @@ export function sentText(r) {
   return r.emailed.failed ? `${base}. E-mailed ${r.emailed.sent}; ${r.emailed.failed} not e-mailed — see why on the RFQ.` : `${base}. E-mailed to all ${r.emailed.sent}.`
 }
 
-export default function RfqDetail({ id, open, onOpenChange, onEdit, onChanged }) {
+export default function RfqDetail({ id, open, onOpenChange, onEdit, onChanged, onAwardDone }) {
   const me = useMe()
   const [rfq, setRfq] = useState(null)
   const [loading, setLoading] = useState(false)
@@ -275,7 +275,10 @@ export default function RfqDetail({ id, open, onOpenChange, onEdit, onChanged })
                       </Button>
                     ) : (
                       <Button size="sm" className="bg-green-600 hover:bg-green-700" disabled={!!busy || (needsReason && text.trim().length < 3)}
-                        onClick={() => run('award', () => rfqApi.award(rfq.id, awardTo.id, text.trim()), (r) => `Awarded to ${awardTo.vendorName} — draft order ${r.data.order?.number} made. Check it on the Orders tab and send it for approval.`)}>
+                        onClick={() => run('award', () => rfqApi.award(rfq.id, awardTo.id, text.trim()), (r) => {
+                          if (r.data.order?.id) onAwardDone?.(r.data.order.id)
+                          return `Awarded to ${awardTo.vendorName} — purchase order ${r.data.order?.number} is ready.`
+                        })}>
                         {busy && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}Award and make the order
                       </Button>
                     )}
