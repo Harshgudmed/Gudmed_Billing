@@ -34,7 +34,7 @@ const STATUS_OPTIONS = [{ value: 'all', label: 'All statuses' }, ...Object.entri
 const day = (v) => formatDateTime(v, { withTime: false })
 
 // `openId` (optional): an RFQ to open — from a notification.
-export default function RfqTab({ onChanged, openId: openIdLink = null }) {
+export default function RfqTab({ onChanged, openId: openIdLink = null, onAwardDone }) {
   const me = useMe()
   // The officer starts on what is out with vendors; Finance, which only reads, on everything.
   const [view, setView] = useState(me.canRfq ? 'open' : 'all')
@@ -124,7 +124,7 @@ export default function RfqTab({ onChanged, openId: openIdLink = null }) {
       <RfqForm open={formOpen} onOpenChange={setFormOpen} rfq={editing} onSaved={(saved) => { changed(); setOpenId(saved.id) }} />
       {/* One dialog at a time: editing a draft closes it, saving brings it back. */}
       <RfqDetail id={openId} open={!!openId && !formOpen} onOpenChange={(v) => { if (!v) setOpenId(null) }}
-        onEdit={(rfq) => { setEditing(rfq); setFormOpen(true) }} onChanged={changed} />
+        onEdit={(rfq) => { setEditing(rfq); setFormOpen(true) }} onChanged={changed} onAwardDone={onAwardDone} />
     </div>
   )
 }

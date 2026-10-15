@@ -518,10 +518,21 @@ export async function prUpdate(req, res, next) {
         if (problem) throw bad(problem)
         const levels = await openSteps(tx, ORG_ID, DOC, id, pr.estimatedTotal)
         const now = new Date()
-        // An amount under every level's threshold needs nobody's approval.
+        // No steps created → amount below every threshold, auto-approved on send.
+        // Admin submitting → they can satisfy every level; approve all steps at once
+        // so a small-hospital admin doesn't have to click Approve after every Send.
+        const adminSelf = levels && isAdmin(req)
+        if (adminSelf) {
+          await tx.approvalStep.updateMany({
+            where: { organizationId: ORG_ID, documentType: DOC, documentId: id, status: 'pending' },
+            data: { status: 'approved', actedById: actor.id, actedByName: actor.name, actedAt: now },
+          })
+        }
         await tx.purchaseRequest.update({
           where: { id },
-          data: levels ? { status: 'submitted', submittedAt: now, decidedAt: null } : { status: 'approved', submittedAt: now, decidedAt: now },
+          data: (!levels || adminSelf)
+            ? { status: 'approved', submittedAt: now, decidedAt: now }
+            : { status: 'submitted', submittedAt: now, decidedAt: null },
         })
       })
     } else if (action === 'approve' || action === 'reject') {

@@ -26,7 +26,7 @@ import { sentText } from './RfqDetail'
 let nextKey = 1
 const handLine = (categoryId = '') => ({ key: nextKey++, categoryId, itemId: '', itemName: '', item: null, unitId: '', unitCode: '', quantity: '', requestLineId: null })
 
-export default function RfqForm({ open, onOpenChange, rfq, onSaved }) {
+export default function RfqForm({ open, onOpenChange, rfq, onSaved, preSelectRequestId }) {
   const editing = !!rfq
   const [vendors, setVendors] = useState([])
   const [categories, setCategories] = useState([])
@@ -61,6 +61,20 @@ export default function RfqForm({ open, onOpenChange, rfq, onSaved }) {
         } else {
           setForm({ title: '', dueDate: localYmd(new Date(), 3), notes: '' })
           setVendorIds([]); setRequestId(''); setLines([])
+          // Pre-select a request that was opened from the PR detail button.
+          if (preSelectRequestId) {
+            const map = new Map()
+            for (const c of cand?.data ?? []) {
+              if (!map.has(c.request.id)) map.set(c.request.id, { ...c.request, lines: [] })
+              map.get(c.request.id).lines.push(c)
+            }
+            const pr = map.get(preSelectRequestId)
+            if (pr) {
+              setRequestId(preSelectRequestId)
+              setLines(pr.lines.map((c) => ({ key: nextKey++, itemId: c.itemId, itemName: c.itemName, unitId: c.unitId, unitCode: c.unitCode, quantity: String(c.quantity), requestLineId: c.id, requestNumber: pr.number, fixed: true })))
+              setForm({ title: `Items for ${pr.department?.name || 'the department'} — ${pr.number}`, dueDate: localYmd(new Date(), 3), notes: '' })
+            }
+          }
         }
       })
       .catch((err) => { if (alive) { setLoadFailed(true); showApiError(err, 'Could not open the RFQ form') } })

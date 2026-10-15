@@ -44,6 +44,11 @@ import {
   PAY_MODES, REFERENCE_NAME, BUCKETS, BUCKET_KEYS, MSME_MAX_DAYS, MSME_WARN_DAYS, DEFAULT_TERMS_DAYS,
   paymentRules, stillDue, payableNow,
 } from '../lib/vendorPayments.js'
+import { ensureContact, ensureFundAccount, createPayout } from '../services/razorpayPayoutService.js'
+
+// Payout is attempted when RazorpayX is configured and mode is electronic.
+const PAYOUT_MODES = new Set(['neft', 'imps', 'rtgs'])
+const razorpayXEnabled = () => !!(process.env.RAZORPAY_KEY_ID && process.env.RAZORPAY_ACCOUNT_NUMBER)
 
 export const PAYMENT_READS = new Set(['payments', 'payment', 'payables'])
 export const PAYMENT_WRITES = new Set(['payment'])
@@ -482,8 +487,30 @@ export async function paymentCreate(req, res, next) {
       return { id: created.id }
     })
 
+    // Initiate RazorpayX payout when mode is NEFT/IMPS/RTGS and RazorpayX is configured.
+    // This runs outside the transaction so a Razorpay failure never rolls back the payment record.
+    let payoutWarning = null
+    if (razorpayXEnabled() && PAYOUT_MODES.has(input.mode) && payment.status === 'posted') {
+      try {
+        const vendor = await db.vendor.findUnique({ where: { id: payment.vendorId } })
+        const contactId    = await ensureContact(vendor)
+        const fundAcctId   = await ensureFundAccount(contactId, vendor)
+        const payout       = await createPayout({ fundAccountId: fundAcctId, amount: payment.amount, referenceId: payment.number, narration: `Gudmed ${payment.number}` })
+        // Cache IDs on Vendor so next payment skips contact/fund-account creation.
+        await db.vendor.update({ where: { id: vendor.id }, data: { razorpayContactId: contactId, razorpayFundAccountId: fundAcctId } })
+        await db.vendorPayment.update({ where: { id: payment.id }, data: { razorpayPayoutId: payout.payoutId, payoutStatus: payout.status, reference: payout.utr || payment.reference } })
+        payment.razorpayPayoutId = payout.payoutId
+        payment.payoutStatus     = payout.status
+      } catch (payoutErr) {
+        // Payment is recorded; payout failed — show a warning, Finance can retry or pay manually.
+        await db.vendorPayment.update({ where: { id: payment.id }, data: { payoutStatus: 'failed' } })
+        payoutWarning = `Payment recorded but the bank transfer could not be initiated: ${payoutErr.message}. You can retry from the payment record or pay ${payment.vendorName} manually.`
+      }
+    }
+
     const warning = await paymentChanged(ORG_ID, 'create', payment, actor)
-    return res.status(201).json({ success: true, data: payment, ...(warning ? { warning } : {}) })
+    const combinedWarning = [payoutWarning, warning].filter(Boolean).join(' ')
+    return res.status(201).json({ success: true, data: payment, ...(combinedWarning ? { warning: combinedWarning } : {}) })
   } catch (e) {
     sendError(res, e, next)
   }

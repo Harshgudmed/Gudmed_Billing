@@ -4,7 +4,7 @@ import { Badge } from '@/components/ui/badge'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
-import { Loader2, CheckCircle2, XCircle, Pencil, Send, Trash2, RotateCcw, Ban, PackagePlus } from 'lucide-react'
+import { Loader2, CheckCircle2, XCircle, Pencil, Send, Trash2, RotateCcw, Ban, PackagePlus, MailQuestion } from 'lucide-react'
 import { toast } from 'sonner'
 import { purchaseApi } from '@/api/purchaseApi'
 import { showApiError } from '@/lib/apiRequest'
@@ -35,7 +35,7 @@ function LineOrder({ o }) {
   )
 }
 
-export default function RequestDetail({ id, open, onOpenChange, onEdit, onChanged, onMakeOrder }) {
+export default function RequestDetail({ id, open, onOpenChange, onEdit, onChanged, onMakeOrder, onMakeRfq }) {
   const me = useMe()
   // The store reads its requests in quantities: the server sends it no prices.
   const money = me.seesMoney
@@ -216,9 +216,9 @@ export default function RequestDetail({ id, open, onOpenChange, onEdit, onChange
                     </Button>
                   </>
                 )}
-                {/* Approved: the next step is the order — one per vendor, made for you. */}
-                {pr.status === 'approved' && me.canOrder && onMakeOrder && (
-                  <Button onClick={() => onMakeOrder(pr)}><PackagePlus className="h-4 w-4 mr-1" />Make purchase order</Button>
+                {/* Approved: ask vendors for price first. Once RFQ is awarded the PO is made automatically. */}
+                {pr.status === 'approved' && me.canRfq && onMakeRfq && (
+                  <Button onClick={() => onMakeRfq(pr)}><MailQuestion className="h-4 w-4 mr-1" />Ask vendors for price (RFQ)</Button>
                 )}
                 {pr.status === 'rejected' && mine && (
                   <Button variant="outline" disabled={!!busy} onClick={() => run('reopen', () => purchaseApi.reopenRequest(pr.id), `${pr.number} is a draft again — change it and send it`)}>

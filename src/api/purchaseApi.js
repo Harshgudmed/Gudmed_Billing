@@ -18,6 +18,9 @@ export const PURCHASE_ENDPOINT = '/purchase'
 export const purchaseApi = {
   // ── Masters ────────────────────────────────────────────────────────────────
   // The first call for a hospital also creates its default units and categories.
+  // Single server-side readiness check — replaces five separate list calls in PurchaseSettings.
+  getSetupStatus: () => get('setup-status'),
+
   getUnits:      (params) => get('units', params),       // { includeInactive }
   getCategories: (params) => get('categories', params),  // { includeInactive } → nested tree
 

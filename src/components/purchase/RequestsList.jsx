@@ -14,6 +14,7 @@ import { PURCHASE_ENDPOINT } from '@/api/purchaseApi'
 import { STATUS, PRIORITY, APPROVER_LABEL, useMe } from './requestMeta'
 import RequestForm from './RequestForm'
 import RequestDetail from './RequestDetail'
+import RfqForm from './RfqForm'
 
 // Purchase requests — the start of every purchase. Three views of one list,
 // chosen with tiles that show how many each holds (the Queue's status tiles
@@ -76,6 +77,8 @@ export default function RequestsList({ counts = {}, onChanged, intent = {}, onMa
   const [formOpen, setFormOpen] = useState(!!intent.startNew)
   const [editing, setEditing] = useState(null)
   const [openId, setOpenId] = useState(intent.openId || null)
+  const [rfqFormOpen, setRfqFormOpen] = useState(false)
+  const [rfqPreselect, setRfqPreselect] = useState(null)
 
   const changed = useCallback(() => { requests.refresh(); onChanged?.() }, [requests, onChanged])
 
@@ -159,7 +162,15 @@ export default function RequestsList({ counts = {}, onChanged, intent = {}, onMa
         onOpenChange={(v) => { if (!v) setOpenId(null) }}
         onEdit={(pr) => { setEditing(pr); setFormOpen(true) }}
         onMakeOrder={onMakeOrder ? (pr) => { setOpenId(null); onMakeOrder(pr) } : undefined}
+        onMakeRfq={(pr) => { setOpenId(null); setRfqPreselect(pr.id); setRfqFormOpen(true) }}
         onChanged={changed}
+      />
+      <RfqForm
+        open={rfqFormOpen}
+        onOpenChange={(v) => { setRfqFormOpen(v); if (!v) setRfqPreselect(null) }}
+        rfq={null}
+        preSelectRequestId={rfqPreselect}
+        onSaved={changed}
       />
     </div>
   )

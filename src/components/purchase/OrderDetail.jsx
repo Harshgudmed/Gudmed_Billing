@@ -20,7 +20,7 @@ import { printOrder } from './orderPrint'
 // it arrives, "Close short" when the rest will not come. The store sees the
 // order without its money (the server sends none).
 
-const RECEIVING = ['approved', 'sent', 'partly_received']
+const RECEIVING = ['sent', 'partly_received']
 
 export default function OrderDetail({ id, open, onOpenChange, onEdit, onChanged, onReceive, onOpenReceipt, onMakeBill }) {
   const me = useMe()
@@ -71,6 +71,7 @@ export default function OrderDetail({ id, open, onOpenChange, onEdit, onChanged,
   // Goods in that the vendor's bill has not covered yet.
   // The server's own rule for what is still billable (returns included).
   const toBill = po?.lines.some((l) => (l.billable ?? (l.receivedQty || 0) - (l.billedQty || 0)) > 1e-9)
+  const missingRates = po?.status === 'draft' && money && po.lines.some((l) => !l.rate)
 
   const confirmAsked = () => {
     const text = remark.trim()
@@ -189,6 +190,16 @@ export default function OrderDetail({ id, open, onOpenChange, onEdit, onChanged,
                 </section>
               )}
 
+              {missingRates && (
+                <div className="rounded-md bg-amber-50 border border-amber-200 px-4 py-3 text-sm text-amber-800 flex items-start gap-2">
+                  <span className="text-lg leading-none mt-0.5">⚠️</span>
+                  <div>
+                    <p className="font-semibold">Prices missing — order cannot be sent yet</p>
+                    <p className="mt-0.5">Click <strong>Edit</strong> to enter the rate for each item. An order must have prices before it goes for approval.</p>
+                  </div>
+                </div>
+              )}
+
               <ApprovalTrail steps={po.steps} currentStepId={po.currentStep?.id}
                 emptyText={po.status === 'draft' ? 'Not sent for approval yet. The levels are worked out from the total when it is sent.'
                   : ['approved', 'sent', 'partly_received', 'received', 'closed'].includes(po.status) ? 'Approved on sending — the total is under every approval limit.' : 'No approval steps.'} />
@@ -217,8 +228,8 @@ export default function OrderDetail({ id, open, onOpenChange, onEdit, onChanged,
                       onClick={() => window.confirm(`Delete draft ${po.number}? Its items go back to "ready to order".`) && run('delete', () => purchaseApi.deleteOrder(po.id), `${po.number} deleted`)}>
                       <Trash2 className="h-4 w-4 mr-1" />Delete draft
                     </Button>
-                    <Button variant="outline" disabled={!!busy} onClick={() => onEdit?.(po)}><Pencil className="h-4 w-4 mr-1" />Edit</Button>
-                    <Button disabled={!!busy} onClick={() => run('submit', () => purchaseApi.submitOrder(po.id), (d) => (d.status === 'approved' ? `${po.number} approved — under every approval limit` : `${po.number} sent for approval`))}>
+                    <Button variant={missingRates ? 'default' : 'outline'} disabled={!!busy} onClick={() => onEdit?.(po)}><Pencil className="h-4 w-4 mr-1" />{missingRates ? 'Edit — add prices' : 'Edit'}</Button>
+                    <Button variant={missingRates ? 'outline' : 'default'} disabled={!!busy} onClick={() => run('submit', () => purchaseApi.submitOrder(po.id), (d) => (d.status === 'approved' ? `${po.number} approved — under every approval limit` : `${po.number} sent for approval`))}>
                       {busy === 'submit' ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Send className="h-4 w-4 mr-1" />}Send for approval
                     </Button>
                   </>
