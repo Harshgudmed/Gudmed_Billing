@@ -342,6 +342,57 @@ export async function setOverride(req, res, next) {
   } catch (err) { next(err) }
 }
 
+// ---------- Unlink one doctor from one room ----------
+
+// The link is derived from the doctor's timetable, so unlinking means
+// detaching this room from every shift of theirs that points here. Shift
+// times are kept (roomId → null) so their working hours aren't lost.
+export async function removeDoctorFromRoom(req, res, next) {
+  try {
+    const ORG_ID = getOrgId(req)
+    const { id: roomId, doctorId } = req.params
+
+    const room = await db.room.findFirst({ where: { id: roomId, organizationId: ORG_ID }, select: { id: true, overrideDoctorId: true } })
+    if (!room) return res.status(404).json({ success: false, error: 'Room not found' })
+    const doctor = await db.user.findFirst({ where: { id: doctorId, organizationId: ORG_ID }, select: { id: true, preferences: true, updatedAt: true } })
+    if (!doctor) return res.status(404).json({ success: false, error: 'Doctor not found' })
+
+    let prefs = {}
+    try { if (doctor.preferences) prefs = JSON.parse(doctor.preferences) } catch {}
+    for (const day of Object.values(prefs.timetable?.weeklySlots || {})) {
+      for (const shift of day?.shifts || []) {
+        if (shift.roomId === roomId) shift.roomId = null
+      }
+    }
+
+    try {
+      await db.$transaction(async (tx) => {
+        // Same updatedAt guard as the timetable save — don't clobber an edit
+        // that landed between our read and this write.
+        const { count } = await tx.user.updateMany({
+          where: { id: doctorId, updatedAt: doctor.updatedAt },
+          data: { preferences: JSON.stringify(prefs) },
+        })
+        if (count === 0) {
+          const conflictErr = new Error('This doctor\'s timetable was just changed by someone else — reload and try again')
+          conflictErr.isConflict = true
+          throw conflictErr
+        }
+        await tx.doctorRoomAssignment.deleteMany({ where: { doctorId, roomId } })
+        if (room.overrideDoctorId === doctorId) {
+          await tx.room.update({ where: { id: roomId }, data: { overrideDoctorId: null, overrideSetAt: null, overrideSetById: null } })
+        }
+      })
+    } catch (e) {
+      if (e.isConflict) return res.status(409).json({ success: false, code: 'STALE_TIMETABLE', error: e.message })
+      throw e
+    }
+
+    const updated = await db.room.findUnique({ where: { id: roomId }, include: ROOM_INCLUDE })
+    res.json({ success: true, data: toRoomDTO(updated) })
+  } catch (err) { next(err) }
+}
+
 export async function clearOverride(req, res, next) {
   try {
     const ORG_ID = getOrgId(req)

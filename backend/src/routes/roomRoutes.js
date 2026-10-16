@@ -2,7 +2,7 @@ import { Router } from 'express'
 import {
   getFloors, createFloor, deleteFloor,
   getRooms, getRoom, createRoom, updateRoom, deleteRoom, suggestRoomNumber, getRoomsPickerList,
-  setOverride, clearOverride,
+  setOverride, clearOverride, removeDoctorFromRoom,
 } from '../controllers/roomController.js'
 import { downloadFloorTemplate, importFloors, exportFloors } from '../controllers/bulkFloorController.js'
 import { downloadRoomSetupTemplate, importRoomSetup, exportRoomSetup } from '../controllers/bulkRoomSetupController.js'
@@ -34,5 +34,6 @@ router.delete('/:id', deleteRoom)
 
 router.post('/:id/override', setOverride)
 router.delete('/:id/override', clearOverride)
+router.delete('/:id/doctors/:doctorId', removeDoctorFromRoom)
 
 export default router

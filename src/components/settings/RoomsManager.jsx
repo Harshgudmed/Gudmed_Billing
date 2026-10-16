@@ -61,23 +61,6 @@ function saveBlob(blob, filename) {
   URL.revokeObjectURL(url)
 }
 
-// Each bulk menu is the same Template / Import / Export trio against a
-// different endpoint; only the labels and the result counters differ.
-const BULK_FLOORS = {
-  label: 'Bulk Upload Floor',
-  title: 'Floor Import Result',
-  path: '/rooms/floors',
-  templateFile: 'floors_template.xlsx',
-  exportPrefix: 'floors_export',
-  stats: [
-    { key: 'total', label: 'Total Rows' },
-    { key: 'success', label: 'Added', tone: 'green' },
-    { key: 'failed', label: 'Failed', tone: 'red' },
-  ],
-  changed: (s) => s.success > 0,
-  successToast: (s) => `${s.success} floor(s) added`,
-}
-
 const BULK_SETUP = {
   label: 'Bulk Setup',
   title: 'Room Setup Import Result',
@@ -422,6 +405,18 @@ function RoomRow({ room, floorId, departments, doctors, onChanged }) {
     }
   }
 
+  const removeDoctor = async (link) => {
+    if (!window.confirm(`Remove ${drName(link.doctorName)} from Room ${room.roomNumber}? Their shift times are kept, just without this room.`)) return
+    try {
+      await client.delete(`/rooms/${room.id}/doctors/${link.doctorId}`)
+      toast.success('Doctor removed from room')
+      onChanged()
+    } catch (err) {
+      toast.error(err.message || 'Failed to remove doctor')
+      if (err.status === 409) onChanged()
+    }
+  }
+
   const clearOverride = async () => {
     try {
       await client.delete(`/rooms/${room.id}/override`, { data: { expectedOverrideSetAt: room.override?.setAt ?? null } })
@@ -515,6 +510,22 @@ function RoomRow({ room, floorId, departments, doctors, onChanged }) {
                 </div>
               )}
             </div>
+
+            {room.doctorLinks?.length > 0 && (
+              <div onClick={(e) => e.stopPropagation()}>
+                <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5">Linked doctors</div>
+                <div className="flex flex-wrap gap-2">
+                  {room.doctorLinks.map((l) => (
+                    <span key={l.doctorId} className="inline-flex items-center gap-1.5 rounded-full border bg-white pl-3 pr-1 py-0.5 text-sm">
+                      {drName(l.doctorName)}
+                      <Button size="sm" variant="ghost" className="h-6 px-2 text-red-600 hover:text-red-700" onClick={() => removeDoctor(l)}>
+                        <X className="h-3.5 w-3.5 mr-0.5" />Remove
+                      </Button>
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
           </TableCell>
         </TableRow>
       )}
@@ -628,7 +639,6 @@ export default function RoomsManager() {
           </div>
           <div className="flex items-center gap-2">
             <BulkMenu config={BULK_SETUP} onImported={async () => { const f = await loadFloors(); if (activeFloorId) refreshRooms(); else selectFloor(f[0]?.id) }} />
-            <BulkMenu config={BULK_FLOORS} onImported={async () => { const f = await loadFloors(); if (!activeFloorId) selectFloor(f[0]?.id) }} />
             <AddFloorDialog onCreated={async () => { const f = await loadFloors(); if (!activeFloorId) selectFloor(f[0]?.id) }} />
           </div>
         </div>
