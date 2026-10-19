@@ -508,9 +508,12 @@ export async function deptIndentGet(req, res, next) {
     if (resource === 'form') {
       // Someone with a department raises for it; anyone else (and an
       // administrator) picks one of the hospital's open departments.
-      const departments = await db.department.findMany({ where: { organizationId: ORG_ID, isActive: true }, select: { id: true, name: true }, orderBy: { name: 'asc' } })
+      const [departments, categories] = await Promise.all([
+        db.department.findMany({ where: { organizationId: ORG_ID, isActive: true }, select: { id: true, name: true }, orderBy: { name: 'asc' } }),
+        db.itemCategory.findMany({ where: { organizationId: ORG_ID, isActive: true }, select: { id: true, name: true }, orderBy: { name: 'asc' } }),
+      ])
       const fixed = !isAdmin(req) && dept?.isActive ? { id: dept.id, name: dept.name } : null
-      return res.json({ success: true, data: { departments, myDepartment: fixed } })
+      return res.json({ success: true, data: { departments, categories, myDepartment: fixed } })
     }
 
     if (resource === 'items') {

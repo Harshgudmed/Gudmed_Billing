@@ -17,12 +17,15 @@
 // hospital never opens Purchase to an empty screen. Every query is filtered by
 // the caller's hospital (getOrgId); who may reach this route at all is decided
 // where it is mounted (routes/index.js).
+import path from 'path'
+import fs from 'fs'
+import { fileURLToPath } from 'url'
 import { z } from 'zod'
 import { db } from '../config/db.js'
 import { getOrgId, getActor } from '../lib/reqContext.js'
 import { ensurePurchaseDefaults } from '../lib/purchaseDefaults.js'
 import { parseGstin, isValidPan, isValidIfsc, cleanId, GST_STATES, stateCodeByName } from '../lib/gst.js'
-import { nextMasterCode } from '../lib/counters.js'
+import { nextMasterCode, nextSeriesNumber } from '../lib/counters.js'
 import { listResponse } from '../lib/pagination.js'
 import { auditIpd } from '../inpatient/audit.js'
 import { prGet, prCreate, prUpdate, prRemove, PR_READS, PR_WRITES } from './purchaseRequestController.js'
@@ -419,7 +422,40 @@ export async function create(req, res, next) {
       return res.status(201).json({ success: true, data: item })
     }
 
-    return res.status(400).json({ success: false, error: 'Unknown resource. Use: vendor, item' })
+    if (resource === 'budget') {
+      if (!canManageMasters(req)) return res.status(403).json({ success: false, error: 'Only the purchase officer or an administrator manages budgets' })
+      const { name, budgetType, departmentId, projectName, financialYear, allocatedAmount, approvedDate, approvedById, notes } = req.body
+      if (!name?.trim()) return res.status(400).json({ success: false, error: 'Budget name is required' })
+      if (!['capex', 'opex', 'project'].includes(budgetType)) return res.status(400).json({ success: false, error: 'budgetType must be capex, opex, or project' })
+      if (!financialYear?.trim()) return res.status(400).json({ success: false, error: 'Financial year is required (e.g. 2026-27)' })
+      if (!allocatedAmount || Number(allocatedAmount) <= 0) return res.status(400).json({ success: false, error: 'Allocated amount must be greater than 0' })
+      if (departmentId) {
+        const dept = await db.department.findFirst({ where: { id: departmentId, organizationId: ORG_ID }, select: { id: true } })
+        if (!dept) return res.status(400).json({ success: false, error: 'Department not found' })
+      }
+      const budget = await db.$transaction(async (tx) => {
+        const code = await nextSeriesNumber(tx, ORG_ID, 'BUDGET', 'BUD')
+        return tx.budget.create({
+          data: {
+            organizationId: ORG_ID,
+            code,
+            name: name.trim(),
+            budgetType,
+            departmentId: departmentId || null,
+            projectName: budgetType === 'project' ? (projectName?.trim() || null) : null,
+            financialYear: financialYear.trim(),
+            allocatedAmount: Number(allocatedAmount),
+            approvedDate: approvedDate ? new Date(approvedDate) : null,
+            approvedById: approvedById?.trim() || null,
+            notes: notes?.trim() || null,
+          },
+          include: { department: { select: { id: true, name: true } } },
+        })
+      })
+      return res.status(201).json({ success: true, data: budget })
+    }
+
+    return res.status(400).json({ success: false, error: 'Unknown resource. Use: vendor, item, budget' })
   } catch (err) {
     next(err)
   }
@@ -444,6 +480,20 @@ export async function remove(req, res, next) {
     const ORG_ID = getOrgId(req)
     const { resource } = req.query
     const id = String(req.query.id || '')
+
+    if (resource === 'vendor-document') {
+      if (!canManageMasters(req)) return res.status(403).json({ success: false, error: 'Only the purchase officer or an administrator can remove vendor documents' })
+      const doc = await db.vendorDocument.findFirst({ where: { id, organizationId: ORG_ID } })
+      if (!doc) return res.status(404).json({ success: false, error: 'Document not found' })
+      await db.vendorDocument.delete({ where: { id } })
+      // Remove file from disk; ignore if already gone
+      const uploadRoot = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'uploads')
+      const filename = doc.fileUrl.split('/').pop()
+      const filePath = path.join(uploadRoot, 'vendor-documents', filename)
+      fs.unlink(filePath, () => {})
+      return res.json({ success: true })
+    }
+
     if (!isAdmin(req)) return adminOnly(res)
 
     if (resource === 'unit') {
@@ -623,7 +673,34 @@ export async function update(req, res, next) {
       return res.json({ success: true, data: item })
     }
 
-    return res.status(400).json({ success: false, error: 'Unknown resource. Use: vendor, item' })
+    if (resource === 'budget') {
+      if (!canManageMasters(req)) return res.status(403).json({ success: false, error: 'Only the purchase officer or an administrator manages budgets' })
+      const { id, name, budgetType, departmentId, projectName, financialYear, allocatedAmount, approvedDate, approvedById, notes, isActive } = req.body
+      const existing = await db.budget.findFirst({ where: { id: String(id || ''), organizationId: ORG_ID } })
+      if (!existing) return res.status(404).json({ success: false, error: 'Budget not found' })
+      const patch = {}
+      if (name !== undefined) patch.name = String(name).trim()
+      if (budgetType !== undefined) {
+        if (!['capex', 'opex', 'project'].includes(budgetType)) return res.status(400).json({ success: false, error: 'budgetType must be capex, opex, or project' })
+        patch.budgetType = budgetType
+      }
+      if (financialYear !== undefined) patch.financialYear = String(financialYear).trim()
+      if (allocatedAmount !== undefined) patch.allocatedAmount = Number(allocatedAmount)
+      if (departmentId !== undefined) patch.departmentId = departmentId || null
+      if (projectName !== undefined) patch.projectName = projectName?.trim() || null
+      if (approvedDate !== undefined) patch.approvedDate = approvedDate ? new Date(approvedDate) : null
+      if (approvedById !== undefined) patch.approvedById = approvedById?.trim() || null
+      if (notes !== undefined) patch.notes = notes?.trim() || null
+      if (isActive !== undefined) patch.isActive = Boolean(isActive)
+      const updated = await db.budget.update({
+        where: { id: String(id) },
+        data: patch,
+        include: { department: { select: { id: true, name: true } } },
+      })
+      return res.json({ success: true, data: updated })
+    }
+
+    return res.status(400).json({ success: false, error: 'Unknown resource. Use: vendor, item, budget' })
   } catch (err) {
     next(err)
   }
@@ -740,6 +817,18 @@ export async function getAll(req, res, next) {
       return res.json({ success: true, data: withBank(vendor, canSeeBank(req)) })
     }
 
+    if (resource === 'vendor-documents') {
+      const vendorId = String(req.query.vendorId || '')
+      const vendor = await db.vendor.findFirst({ where: { id: vendorId, organizationId: ORG_ID }, select: { id: true } })
+      if (!vendor) return res.status(404).json({ success: false, error: 'Vendor not found' })
+      const docs = await db.vendorDocument.findMany({
+        where: { vendorId, organizationId: ORG_ID },
+        orderBy: { uploadedAt: 'desc' },
+        select: { id: true, docType: true, label: true, fileName: true, fileUrl: true, uploadedAt: true },
+      })
+      return res.json({ success: true, data: docs })
+    }
+
     if (resource === 'items') {
       await ensurePurchaseDefaults(ORG_ID)
       const { search, status, categoryId } = req.query
@@ -772,7 +861,42 @@ export async function getAll(req, res, next) {
       return res.json({ success: true, data })
     }
 
-    return res.status(400).json({ success: false, error: 'Unknown resource. Use: units, categories, vendors, vendor, items, item, states, gst-rates, requests, request, dashboard, approval-rules, orders, order, order-candidates' })
+    if (resource === 'budgets') {
+      const { financialYear, budgetType, departmentId, includeInactive } = req.query
+      const where = { organizationId: ORG_ID }
+      if (!includeInactive) where.isActive = true
+      if (financialYear) where.financialYear = String(financialYear)
+      if (budgetType) where.budgetType = String(budgetType)
+      if (departmentId) where.departmentId = String(departmentId)
+      const budgets = await db.budget.findMany({
+        where,
+        include: {
+          department: { select: { id: true, name: true } },
+          _count: { select: { requests: true } },
+        },
+        orderBy: [{ financialYear: 'desc' }, { budgetType: 'asc' }, { name: 'asc' }],
+      })
+      // Attach spent amount (sum of approved request estimatedTotals) to each budget
+      const spentMap = await db.purchaseRequest.groupBy({
+        by: ['budgetId'],
+        where: { organizationId: ORG_ID, budgetId: { not: null }, status: { in: ['approved', 'ordered'] } },
+        _sum: { estimatedTotal: true },
+      })
+      const spentByBudget = Object.fromEntries(spentMap.map((r) => [r.budgetId, r._sum.estimatedTotal || 0]))
+      const data = budgets.map((b) => ({ ...b, spentAmount: spentByBudget[b.id] || 0 }))
+      return res.json({ success: true, data })
+    }
+
+    if (resource === 'budget') {
+      const budget = await db.budget.findFirst({
+        where: { id: String(req.query.id || ''), organizationId: ORG_ID },
+        include: { department: { select: { id: true, name: true } } },
+      })
+      if (!budget) return res.status(404).json({ success: false, error: 'Budget not found' })
+      return res.json({ success: true, data: budget })
+    }
+
+    return res.status(400).json({ success: false, error: 'Unknown resource. Use: units, categories, vendors, vendor, items, item, states, gst-rates, budgets, budget, requests, request, dashboard, approval-rules, orders, order, order-candidates' })
   } catch (err) {
     next(err)
   }

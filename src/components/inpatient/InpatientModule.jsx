@@ -3,10 +3,11 @@ import { useDebounce } from '@/lib/useDebounce'
 import { useLiveData } from '@/lib/useLiveData'
 import { format } from 'date-fns'
 import { PatientTimeline } from '@/components/inpatient/PatientTimeline'
+import PatientDocumentsPanel from '@/components/common/PatientDocumentsPanel'
 import { getOrgSettings } from '@/lib/orgSettings'
 import { toast } from 'sonner'
 import {
-  BedDouble, ArrowRight, Printer, FileText, ClipboardList, IndianRupee, UserPlus, History
+  BedDouble, ArrowRight, Printer, FileText, ClipboardList, IndianRupee, UserPlus, History, Paperclip
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -729,7 +730,7 @@ export default function InpatientModule() {
             </DialogTitle>
           </DialogHeader>
           <div className="flex border-b mb-4">
-            {[{ id: 'details', label: 'Details', Icon: FileText }, { id: 'notes', label: 'Clinical Notes', Icon: ClipboardList }, { id: 'timeline', label: 'Timeline Logs', Icon: History }, { id: 'billing', label: 'IPD Billing', Icon: IndianRupee }].map(({ id, label, Icon }) => (
+            {[{ id: 'details', label: 'Details', Icon: FileText }, { id: 'notes', label: 'Clinical Notes', Icon: ClipboardList }, { id: 'documents', label: 'Documents', Icon: Paperclip }, { id: 'timeline', label: 'Timeline Logs', Icon: History }, { id: 'billing', label: 'IPD Billing', Icon: IndianRupee }].map(({ id, label, Icon }) => (
               <button key={id} onClick={() => handleViewTabChange(id)}
                 className={`flex items-center gap-1.5 px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${viewTab === id ? 'border-blue-600 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700'}`}>
                 <Icon className="h-4 w-4" />{label}
@@ -756,6 +757,9 @@ export default function InpatientModule() {
                 </Button>
               )}
             </div>
+          )}
+          {viewAdmission && viewTab === 'documents' && (
+            <PatientDocumentsPanel patientId={viewAdmission.patientId || viewAdmission.patient?.id} admissionId={viewAdmission.id} />
           )}
           {viewAdmission && viewTab === 'notes' && (
             <div className="space-y-4">

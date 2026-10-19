@@ -201,18 +201,18 @@ export default function RequestForm({ open, onOpenChange, request, onSaved }) {
                 />
               </div>
               <div className="space-y-1">
-                <Label htmlFor="pr-by">Needed by</Label>
+                <Label htmlFor="pr-by">Required By (Date)</Label>
                 <Input id="pr-by" type="date" min={localYmd()} value={form.requiredBy} onChange={(e) => setForm((f) => ({ ...f, requiredBy: e.target.value }))} />
               </div>
               <div className="space-y-1">
-                <Label htmlFor="pr-priority">Priority</Label>
+                <Label htmlFor="pr-priority">Urgency Level</Label>
                 <Select value={form.priority} onValueChange={(v) => setForm((f) => ({ ...f, priority: v }))}>
                   <SelectTrigger id="pr-priority"><SelectValue /></SelectTrigger>
                   <SelectContent>{Object.entries(PRIORITY).map(([v, p]) => <SelectItem key={v} value={v}>{p.label}</SelectItem>)}</SelectContent>
                 </Select>
               </div>
               <div className="space-y-1 md:col-span-4">
-                <Label htmlFor="pr-purpose">Why is it needed?{form.priority !== 'normal' && ' *'}</Label>
+                <Label htmlFor="pr-purpose">Purpose / Reason for Request{form.priority !== 'normal' && <span className="text-red-500"> *</span>}</Label>
                 <Textarea id="pr-purpose" rows={2} value={form.purpose} onChange={(e) => setForm((f) => ({ ...f, purpose: e.target.value }))}
                   placeholder="e.g. Monthly restock for ICU — current stock lasts 5 days" />
               </div>
@@ -220,92 +220,99 @@ export default function RequestForm({ open, onOpenChange, request, onSaved }) {
 
             <div className="space-y-2">
               <div className="flex items-center justify-between">
-                <h3 className="text-sm font-semibold text-gray-700">Items</h3>
+                <div>
+                  <h3 className="text-sm font-semibold text-gray-700">Items Requested</h3>
+                  <p className="text-xs text-gray-500 mt-0.5">Select a category to narrow the item list, then fill in quantity and rate.</p>
+                </div>
                 <Button type="button" size="sm" variant="outline" onClick={() => setLines((ls) => [...ls, blankLine(ls[ls.length - 1]?.categoryId || '')])} disabled={lines.length >= 100}>
-                  <Plus className="h-4 w-4 mr-1" />Add item
+                  <Plus className="h-4 w-4 mr-1" />Add Another Item
                 </Button>
               </div>
-              <div className="overflow-x-auto rounded-md border">
-                <table className="w-full text-sm">
-                  <thead className="bg-gray-50 text-xs text-gray-500">
-                    <tr>
-                      <th className="text-left font-medium px-2 py-2 w-48">Category</th>
-                      <th className="text-left font-medium px-2 py-2 min-w-[240px]">Item</th>
-                      <th className="text-left font-medium px-2 py-2 w-28">Unit</th>
-                      <th className="text-center font-medium px-2 py-2 w-36">Qty</th>
-                      {money && <th className="text-right font-medium px-2 py-2 w-32">Approx. rate ₹ <span className="font-normal text-gray-400">(optional)</span></th>}
-                      {money && <th className="text-right font-medium px-2 py-2 w-32">Approx. cost</th>}
-                      <th className="w-10" />
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y">
-                    {lines.map((l, i) => {
-                      const units = unitsOf(l.item)
-                      return (
-                        <tr key={l.key} className="align-top">
-                          <td className="px-2 py-2">
-                            <SearchableSelect
-                              className="w-full"
-                              options={categoryOptions}
-                              value={l.categoryId || ALL}
-                              onChange={(v) => pickCategory(l, v)}
-                              placeholder="All categories"
-                              searchPlaceholder="Furniture, Linen, Electrical…"
-                              contentClassName="w-[300px]"
-                            />
-                          </td>
-                          <td className="px-2 py-2">
-                            <SearchableSelect
-                              className="w-full"
-                              options={itemOptions[l.key] || []}
-                              onSearch={(q) => searchItems(l.key, q, l.categoryId)}
-                              // Items show as soon as it opens; typing narrows from the first letter.
-                              minSearchLength={0}
-                              loading={searchingLine === l.key}
-                              value={l.itemId}
-                              selectedLabel={l.itemName}
-                              onChange={(v) => pickItem(l.key, v)}
-                              placeholder="Choose or search an item…"
-                              searchPlaceholder="Item name, code or other name"
-                              emptyText={l.categoryId ? 'No item in this category — add it in the Items tab' : 'No item found — add it in the Items tab'}
-                              contentClassName="w-[420px]"
-                            />
-                            <Input className="mt-1 h-8 text-xs" aria-label={`Note for line ${i + 1}`} placeholder="Note (size, brand…) — optional"
-                              value={l.note} onChange={(e) => setLine(l.key, { note: e.target.value })} />
-                          </td>
-                          <td className="px-2 py-2">
-                            <Select value={l.unitId} onValueChange={(v) => pickUnit(l, v)} disabled={!l.item}>
-                              <SelectTrigger aria-label={`Unit for line ${i + 1}`}><SelectValue placeholder={l.item ? 'Unit' : 'Pick item first'} /></SelectTrigger>
-                              <SelectContent>
-                                {units.map((u) => (
-                                  <SelectItem key={u.id} value={u.id}>{u.code}{u.factor !== 1 ? ` (${u.factor} ${l.item.stockUnit.code})` : ''}</SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
-                          </td>
-                          <td className="px-2 py-2">
-                            <QuantityInput aria-label={`Quantity for line ${i + 1}`} value={l.quantity}
-                              onChange={(v) => setLine(l.key, { quantity: v })} />
-                          </td>
-                          {money && (
-                            <td className="px-2 py-2">
-                              <Input aria-label={`Rate for line ${i + 1}`} className="text-right" inputMode="decimal" value={l.estimatedRate}
-                                placeholder="If known"
-                                onChange={(e) => setLine(l.key, { estimatedRate: e.target.value, rateTyped: true })} />
-                            </td>
-                          )}
-                          {money && <td className="px-2 py-2 text-right font-medium tabular-nums pt-4">{l.itemId && Number(l.estimatedRate) > 0 ? formatMoney(lineTotal(l)) : <span className="font-normal text-gray-400">—</span>}</td>}
-                          <td className="px-1 py-2">
-                            <Button type="button" size="icon" variant="ghost" aria-label={`Remove line ${i + 1}`}
-                              onClick={() => setLines((ls) => (ls.length === 1 ? [blankLine()] : ls.filter((x) => x.key !== l.key)))}>
-                              <Trash2 className="h-4 w-4 text-red-500" />
-                            </Button>
-                          </td>
-                        </tr>
-                      )
-                    })}
-                  </tbody>
-                </table>
+              <div className="divide-y rounded-md border">
+                {lines.map((l, i) => {
+                  const units = unitsOf(l.item)
+                  return (
+                    <div key={l.key} className="p-3 space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-semibold text-gray-500">Item {i + 1}</span>
+                        <Button type="button" size="icon" variant="ghost" aria-label={`Remove line ${i + 1}`}
+                          onClick={() => setLines((ls) => (ls.length === 1 ? [blankLine()] : ls.filter((x) => x.key !== l.key)))}>
+                          <Trash2 className="h-4 w-4 text-red-500" />
+                        </Button>
+                      </div>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                        <div className="space-y-1">
+                          <Label className="text-xs text-gray-500">Category</Label>
+                          <SearchableSelect
+                            className="w-full"
+                            options={categoryOptions}
+                            value={l.categoryId || ALL}
+                            onChange={(v) => pickCategory(l, v)}
+                            placeholder="All categories"
+                            searchPlaceholder="Furniture, Linen, Electrical…"
+                            contentClassName="w-[300px]"
+                          />
+                        </div>
+                        <div className="space-y-1">
+                          <Label className="text-xs text-gray-500">Item <span className="text-red-500">*</span></Label>
+                          <SearchableSelect
+                            className="w-full"
+                            options={itemOptions[l.key] || []}
+                            onSearch={(q) => searchItems(l.key, q, l.categoryId)}
+                            minSearchLength={0}
+                            loading={searchingLine === l.key}
+                            value={l.itemId}
+                            selectedLabel={l.itemName}
+                            onChange={(v) => pickItem(l.key, v)}
+                            placeholder="Choose or search an item…"
+                            searchPlaceholder="Item name, code or other name"
+                            emptyText={l.categoryId ? 'No item in this category — add it in the Items tab' : 'No item found — add it in the Items tab'}
+                            contentClassName="w-[420px]"
+                          />
+                        </div>
+                      </div>
+                      <div className={`grid gap-2 ${money ? 'grid-cols-2 sm:grid-cols-4' : 'grid-cols-2'}`}>
+                        <div className="space-y-1">
+                          <Label className="text-xs text-gray-500">Unit</Label>
+                          <Select value={l.unitId} onValueChange={(v) => pickUnit(l, v)} disabled={!l.item}>
+                            <SelectTrigger aria-label={`Unit for line ${i + 1}`}><SelectValue placeholder={l.item ? 'Unit' : 'Pick item first'} /></SelectTrigger>
+                            <SelectContent>
+                              {units.map((u) => (
+                                <SelectItem key={u.id} value={u.id}>{u.code}{u.factor !== 1 ? ` (${u.factor} ${l.item.stockUnit.code})` : ''}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div className="space-y-1">
+                          <Label className="text-xs text-gray-500">Quantity <span className="text-red-500">*</span></Label>
+                          <QuantityInput aria-label={`Quantity for line ${i + 1}`} value={l.quantity}
+                            onChange={(v) => setLine(l.key, { quantity: v })} />
+                        </div>
+                        {money && (
+                          <div className="space-y-1">
+                            <Label className="text-xs text-gray-500">Approx. Rate ₹ <span className="font-normal text-gray-400">(optional)</span></Label>
+                            <Input aria-label={`Rate for line ${i + 1}`} className="text-right" inputMode="decimal" value={l.estimatedRate}
+                              placeholder="If known"
+                              onChange={(e) => setLine(l.key, { estimatedRate: e.target.value, rateTyped: true })} />
+                          </div>
+                        )}
+                        {money && (
+                          <div className="space-y-1">
+                            <Label className="text-xs text-gray-500">Approx. Cost</Label>
+                            <div className="flex h-9 items-center rounded-md border bg-gray-50 px-3 text-sm font-medium tabular-nums justify-end">
+                              {l.itemId && Number(l.estimatedRate) > 0 ? formatMoney(lineTotal(l)) : <span className="font-normal text-gray-400">—</span>}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                      <div className="space-y-1">
+                        <Label className="text-xs text-gray-500">Specifications / Note <span className="font-normal text-gray-400">(size, brand, colour — optional)</span></Label>
+                        <Input className="h-8 text-xs" aria-label={`Note for line ${i + 1}`} placeholder="e.g. A4 size, blue colour, Camlin brand"
+                          value={l.note} onChange={(e) => setLine(l.key, { note: e.target.value })} />
+                      </div>
+                    </div>
+                  )
+                })}
               </div>
             </div>
 
@@ -347,7 +354,7 @@ export default function RequestForm({ open, onOpenChange, request, onSaved }) {
         )}
 
         <DialogFooter className="gap-2">
-          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={!!saving}>Close</Button>
+          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={!!saving}>Cancel</Button>
           <Button variant="outline" onClick={() => save(false)} disabled={!!saving || loading || loadFailed || !form.departmentId}>
             {saving === 'draft' && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}Save draft
           </Button>

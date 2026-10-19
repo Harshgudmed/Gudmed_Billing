@@ -79,10 +79,11 @@ export const APPROVER_LABEL = {
 }
 
 // Mirrors backend/src/lib/purchaseAccess.js.
+const REQUEST_CREATORS = new Set(['admin', 'super_admin', 'purchase_officer', 'store_keeper', 'doctor', 'nurse'])
 const BUYERS = new Set(['admin', 'super_admin', 'purchase_officer', 'store_keeper'])
 const ADMINS = new Set(['admin', 'super_admin'])
 const ORDERERS = new Set(['admin', 'super_admin', 'purchase_officer'])
-const NO_MONEY = new Set(['store_keeper'])
+const NO_MONEY = new Set(['store_keeper', 'doctor', 'nurse'])
 const BILLERS = new Set(['admin', 'super_admin', 'purchase_officer'])
 const RECEIVERS = new Set(['admin', 'super_admin', 'store_keeper'])
 const VENDOR_READERS = new Set(['admin', 'super_admin', 'purchase_officer', 'finance_controller'])
@@ -124,11 +125,12 @@ const REPORT_READERS = new Set(['admin', 'super_admin', 'purchase_officer', 'fin
  */
 export function useMe() {
   const { user } = useAuth()
-  if (!user) return { id: null, role: null, isAdmin: true, canBuy: true, canOrder: true, canReceive: true, seesMoney: true, canBill: true, canDecideBill: true, canManageMasters: true, canSeeVendors: true, seesEverything: true, canSeeStock: true, canIssue: true, canSeeIndents: true, canSeePayments: true, canRaiseReturn: true, canDecideReturn: true, canSeeReturns: true, canRfq: true, canSeeRfqs: true, canSeeReports: true }
+  if (!user) return { id: null, role: null, isAdmin: true, canBuy: true, canRaiseRequest: true, canOrder: true, canReceive: true, seesMoney: true, canBill: true, canDecideBill: true, canManageMasters: true, canSeeVendors: true, seesEverything: true, canSeeStock: true, canIssue: true, canSeeIndents: true, canSeePayments: true, canRaiseReturn: true, canDecideReturn: true, canSeeReturns: true, canRfq: true, canSeeRfqs: true, canSeeReports: true }
   const id = user.id || user.userId || null
   const canBuy = BUYERS.has(user.role)
+  const canRaiseRequest = REQUEST_CREATORS.has(user.role)
   return {
-    id, role: user.role, isAdmin: ADMINS.has(user.role), canBuy,
+    id, role: user.role, isAdmin: ADMINS.has(user.role), canBuy, canRaiseRequest,
     canOrder: ORDERERS.has(user.role), canReceive: RECEIVERS.has(user.role), seesMoney: !NO_MONEY.has(user.role),
     canManageMasters: ORDERERS.has(user.role), canSeeVendors: VENDOR_READERS.has(user.role), seesEverything: OVERSEERS.has(user.role),
     canSeeStock: STOCK_READERS.has(user.role),

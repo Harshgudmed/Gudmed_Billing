@@ -36,11 +36,36 @@ export const purchaseApi = {
 
   // Vendors. The list masks bank account numbers; getVendor returns them in
   // full to admin / purchase officer (what the edit form needs).
-  getVendors:    (params) => get('vendors', params),     // { search, status, page, limit }
-  getVendor:     (id)     => get('vendor', { id }),
-  getStates:     ()       => get('states'),              // GST state codes, for the state picker
-  createVendor:  (body)   => post('vendor', body),
-  updateVendor:  (id, body) => patch('vendor', { id, ...body }), // also { isActive } to retire / restore
+  getVendors:          (params)     => get('vendors', params),     // { search, status, page, limit }
+  getVendor:           (id)         => get('vendor', { id }),
+  getStates:           ()           => get('states'),              // GST state codes, for the state picker
+  createVendor:        (body)       => post('vendor', body),
+  updateVendor:        (id, body)   => patch('vendor', { id, ...body }), // also { isActive } to retire / restore
+  // Budgets (CapEx / OpEx / Project)
+  getBudgets:    (params) => get('budgets', params),   // { financialYear, budgetType, departmentId }
+  getBudget:     (id)     => get('budget', { id }),
+  createBudget:  (body)   => post('budget', body),
+  updateBudget:  (id, body) => patch('budget', { id, ...body }),
+
+  // Vendor bulk import
+  downloadVendorTemplate: () => client.get('/purchase/vendor-import/template', { responseType: 'blob' }),
+  importVendors: (file) => {
+    const fd = new FormData()
+    fd.append('file', file)
+    return client.post('/purchase/vendor-import', fd, { headers: { 'Content-Type': 'multipart/form-data' } })
+  },
+  // Vendor documents (PAN cert, GST cert, other compliance papers)
+  getVendorDocs:       (vendorId)   => get('vendor-documents', { vendorId }),
+  deleteVendorDoc:     (id)         => del('vendor-document', id),
+  // Upload goes directly to /uploads/vendor-documents (not /purchase) — see uploadRoutes.js
+  uploadVendorDoc:     (vendorId, docType, label, file) => {
+    const fd = new FormData()
+    fd.append('document', file)
+    fd.append('vendorId', vendorId)
+    fd.append('docType', docType)
+    if (label) fd.append('label', label)
+    return client.post('/uploads/vendor-documents', fd, { headers: { 'Content-Type': 'multipart/form-data' } })
+  },
 
   // Items. Each carries its category (+ parent), stock unit, usual vendor and
   // unit conversions. A top-level categoryId also matches its sub-categories.

@@ -1,13 +1,7 @@
 import { useMemo } from "react";
 import { Card, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { SearchableSelect } from "@/components/ui/searchable-select";
 import { User, ChevronLeft, ChevronRight } from "lucide-react";
 import { format, addDays, addWeeks, subWeeks, isToday, endOfDay } from "date-fns";
 import { drName } from "@/lib/utils";
@@ -106,23 +100,28 @@ export default function DoctorSlotsView({
               Doctor Slot Availability
             </CardTitle>
             <div className="flex flex-wrap items-center gap-3">
-              <Select value={selectedDoctor} onValueChange={setSelectedDoctor}>
-                <SelectTrigger className="w-full sm:w-[220px]">
-                  <SelectValue placeholder="Select Doctor" />
-                </SelectTrigger>
-                <SelectContent>
-                  {/* Offered only when there is actually a choice. A doctor's
-                      list is scoped to themselves, so "All Doctors" would name
-                      their own week as if it were the whole hospital's. */}
-                  {doctors.length > 1 && <SelectItem value="all">All Doctors</SelectItem>}
-                  {doctors.map((doctor) => (
-                    <SelectItem key={doctor.id} value={doctor.id}>
-                      {drName(doctor.fullName)}
-                      {doctor.specialization ? ` — ${doctor.specialization}` : ""}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              {/* Type-to-search: a plain dropdown of 1000+ doctors is unusable.
+                  "All Doctors" is offered only when there is actually a choice —
+                  a doctor's list is scoped to themselves, so it would otherwise
+                  name their own week as if it were the whole hospital's. */}
+              <SearchableSelect
+                className="w-full sm:w-[220px]"
+                contentClassName="w-[280px]"
+                value={selectedDoctor}
+                onChange={setSelectedDoctor}
+                placeholder="Select Doctor"
+                searchPlaceholder="Search doctor..."
+                emptyText="No matching doctor"
+                options={[
+                  ...(doctors.length > 1 ? [{ value: "all", label: "All Doctors" }] : []),
+                  ...doctors.map((doctor) => ({
+                    value: doctor.id,
+                    label: drName(doctor.fullName),
+                    sublabel: doctor.specialization || undefined,
+                    keywords: doctor.specialization || "",
+                  })),
+                ]}
+              />
               <div className="flex items-center gap-1">
                 <Button
                   variant="outline"

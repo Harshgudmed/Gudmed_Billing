@@ -35,6 +35,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, Di
 import client from '@/api/client'
 import { drName, cToF, fToC } from '@/lib/utils'
 import PatientLookup from '@/components/common/PatientLookup'
+import PatientDocumentsPanel from '@/components/common/PatientDocumentsPanel'
 import { printPrescription } from './utils/printOpd'
 import { useAuth } from '@/lib/auth'
 import { localYmd } from '@/lib/format'
@@ -743,6 +744,10 @@ export default function OpdModule() {
                   {rads.length > 0 && <div><p className="font-semibold text-gray-700 uppercase text-xs tracking-wide mb-1">Radiology</p><div className="flex flex-wrap gap-2">{rads.map((n, i) => <span key={i} className="bg-purple-50 text-purple-700 border border-purple-200 rounded px-2 py-0.5 text-xs">{n}</span>)}</div></div>}
                   {c.notes && <div><p className="font-semibold text-gray-700 uppercase text-xs tracking-wide mb-1">Advice</p><p className="whitespace-pre-wrap">{c.notes}</p></div>}
                   {c.followUpDate && <div className="bg-green-50 border border-green-200 rounded p-2 text-green-800 font-medium">Follow-up: {format(new Date(c.followUpDate), 'dd MMM yyyy')}</div>}
+                  <div className="pt-3 border-t">
+                    <p className="font-semibold text-gray-700 uppercase text-xs tracking-wide mb-2">Documents / Reports</p>
+                    <PatientDocumentsPanel patientId={c.patientId || c.patient?.id} consultationId={c.id} />
+                  </div>
                 </div>
               )
             })()}

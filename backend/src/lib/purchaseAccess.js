@@ -46,6 +46,12 @@ export async function requirePurchaseOn(req, res, next) {
 
 // Who raises requests and orders and keeps the masters. A Finance Controller
 // reaches Purchase to approve and to read, but does not buy.
+// Doctors and nurses may raise a purchase request (they need something from
+// the store); they cannot order, receive, bill or pay — and they see only
+// their own requests with no money fields.
+export const REQUEST_CREATOR_ROLES = new Set(['admin', 'super_admin', 'purchase_officer', 'store_keeper', 'doctor', 'nurse'])
+export const canRaiseRequest = (req) => !req.user || REQUEST_CREATOR_ROLES.has(getActor(req).role)
+
 export const BUYER_ROLES = new Set(['admin', 'super_admin', 'purchase_officer', 'store_keeper'])
 export const ADMIN_ROLES = new Set(['admin', 'super_admin'])
 
@@ -141,7 +147,7 @@ export const canSeeReports = (req) => !req.user || REPORT_ROLES.has(getActor(req
 // The store works in quantities. Rates, order totals and stock value are
 // taken out of every response it gets — not hidden by the screen, absent from
 // the data — so a store login cannot read what a vendor is paid.
-const NO_MONEY_ROLES = new Set(['store_keeper'])
+const NO_MONEY_ROLES = new Set(['store_keeper', 'doctor', 'nurse'])
 export const seesMoney = (req) => !req.user || !NO_MONEY_ROLES.has(getActor(req).role)
 
 /**

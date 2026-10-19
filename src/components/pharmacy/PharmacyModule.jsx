@@ -164,12 +164,16 @@ export default function PharmacyModule() {
   });
 
   const [stats, setStats] = useState(null);
+  // The search narrows only the dashboard's low-stock / expiring preview lists
+  // (done in the DB now, so a match past the first 20 is still found); the KPI
+  // counts it returns stay whole-pharmacy. Re-reads when the debounced search
+  // changes because fetchStats is a dependency of the effect below.
   const fetchStats = useCallback(async () => {
     try {
-      const res = await client.get("/pharmacy/stats");
+      const res = await client.get("/pharmacy/stats", { params: { search: debouncedDashSearch } });
       if (res.success) setStats(res.data);
     } catch { /* ignore */ }
-  }, []);
+  }, [debouncedDashSearch]);
 
   // Live over the app's WebSocket: the server announces every write in this
   // hospital (middleware/liveUpdates.js) and every list here re-reads itself —
@@ -180,7 +184,7 @@ export default function PharmacyModule() {
     drugPage.refresh(); batchPage.refresh(); poPage.refresh();
     rxPage.refresh(); pendingRxPage.refresh(); salePage.refresh();
     fetchStats();
-  }, [drugPage.refresh, batchPage.refresh, poPage.refresh, rxPage.refresh, pendingRxPage.refresh, salePage.refresh, fetchStats]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [drugPage.refresh, batchPage.refresh, poPage.refresh, rxPage.refresh, pendingRxPage.refresh, salePage.refresh, fetchStats]);
   useLiveData(["pharmacy", "consultations", "billing"], reloadAll);
 
   const [showDrugDialog, setShowDrugDialog] = useState(false);
@@ -680,9 +684,12 @@ ${rx.notes ? `<div class="note-bar"><strong>Notes:</strong> ${escapeHtml(rx.note
   };
 
   const expiringBatches = stats?.expiringBatches ?? [];
+  const expiringCount = stats?.expiringCount ?? 0;
   const totalStockValue = stats?.stockValue ?? 0;
   const inStockCount = stats?.inStock ?? 0;
-  const lowStockCount = stats ? Math.max(0, stats.lowStock - stats.outOfStock) : 0;
+  // The server now excludes empties from lowStock (they are Out of Stock), so no
+  // more subtracting outOfStock to undo the double-count here.
+  const lowStockCount = stats?.lowStock ?? 0;
   const outStockCount = stats?.outOfStock ?? 0;
   const lowStockDrugs = stats?.lowStockDrugs ?? [];
 
@@ -753,6 +760,7 @@ ${rx.notes ? `<div class="note-bar"><strong>Notes:</strong> ${escapeHtml(rx.note
           prescriptions={rxPage.rows}
           pendingRx={pendingRx}
           expiringBatches={expiringBatches}
+          expiringCount={expiringCount}
           totalStockValue={totalStockValue}
           todaySalesTotal={todaySalesTotal}
           inStockCount={inStockCount}

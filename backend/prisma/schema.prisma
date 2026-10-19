@@ -87,6 +87,7 @@ model Organization {
   doctorCommissions       DoctorCommission[]
   pharmacyPurchaseOrders  PharmacyPurchaseOrder[]
   vendors                 Vendor[]
+  vendorDocuments         VendorDocument[]
   machineIntegrations     MachineIntegration[]
   machineResultsQueue     MachineResultsQueue[]
 
@@ -149,6 +150,7 @@ model Organization {
   itemCategories      ItemCategory[]
   items               Item[]
   itemUnitConversions ItemUnitConversion[]
+  budgets             Budget[]
 
   // Purchase & Supply Chain — documents
   purchaseRequests     PurchaseRequest[]
@@ -309,6 +311,7 @@ model Department {
   // rows that the frontend used to compensate for.
   operatingTheatres OperatingTheatre[]
   purchaseRequests  PurchaseRequest[]
+  budgets           Budget[]
   storeIndents      StoreIndent[]
   storeIssues       StoreIssue[]
 
@@ -496,11 +499,20 @@ model PatientDocument {
   id             String @id @default(cuid())
   organizationId String
   patientId      String
+  // Optional link to the visit the document was uploaded from, so the same file
+  // shows on the patient's profile AND on that OPD consultation / IPD admission.
+  // A document can still be patient-level (both null) — e.g. KYC from the portal.
+  consultationId String?
+  admissionId    String?
 
-  documentType String // aadhaar, pan, insurance, referral, lab_report, prescription, history, other
+  // KYC: aadhaar, pan, insurance. Clinical (doctor/nurse): lab_report, radiology,
+  // prescription, referral, ecg_echo, operative_notes, consent, discharge_summary,
+  // clinical_photo, history, other.
+  documentType String
   title        String?
   fileUrl      String
   fileType     String? // mime type
+  uploadedById String? // the doctor / nurse / staff who uploaded it (audit)
   uploadedAt   DateTime @default(now())
 
   // Verification fields
@@ -509,11 +521,15 @@ model PatientDocument {
 
 
   // Relations
-  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  patient      Patient      @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  organization Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  patient      Patient       @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  consultation Consultation? @relation(fields: [consultationId], references: [id], onDelete: SetNull)
+  admission    Admission?    @relation(fields: [admissionId], references: [id], onDelete: SetNull)
 
   @@index([organizationId])
   @@index([patientId])
+  @@index([consultationId])
+  @@index([admissionId])
 }
 
 /// Appointment
@@ -646,6 +662,7 @@ model Consultation {
   labOrders       LabOrder[]
   radiologyOrders RadiologyOrder[]
   invoices        Invoice[]
+  documents       PatientDocument[]
 
   @@index([organizationId])
   @@index([patientId])
@@ -785,6 +802,7 @@ model Admission {
   ipdConsultations          IpdConsultation[]
   orderTasks                OrderTask[]
   otBookings                OtBooking[]
+  documents                 PatientDocument[]
 
   @@index([organizationId])
   @@index([patientId])
@@ -1135,6 +1153,33 @@ model Vendor {
   // approved against each. Vendors without a GSTIN (NULL) never collide.
   @@unique([organizationId, gstNumber])
   @@index([organizationId])
+
+  documents VendorDocument[]
+}
+
+/// A document attached to a vendor — PAN certificate, GST certificate, or any
+/// other compliance paper. Stored in uploads/vendor-documents/. Sensitive:
+/// served only to finance and purchase roles.
+model VendorDocument {
+  id             String @id @default(cuid())
+  organizationId String
+  vendorId       String
+
+  // pan_cert | gst_cert | other
+  docType  String
+  // user-supplied label, e.g. "GST cert Nov 2026"; falls back to fileName on display
+  label    String?
+  fileName String  // original filename shown in the UI
+  fileUrl  String  // /uploads/vendor-documents/<uuid>.<ext>
+
+  uploadedById String?
+  uploadedAt   DateTime @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  vendor       Vendor        @relation(fields: [vendorId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@index([vendorId])
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1302,6 +1347,39 @@ model ItemUnitConversion {
 // after an item is renamed or its price changes.
 // ─────────────────────────────────────────────────────────────────────────────
 
+/// An approved budget allocation — CapEx, OpEx, or a named project.
+/// Purchase requests are optionally linked to a budget so spending can be
+/// tracked against the allocation that covers it.
+model Budget {
+  id             String @id @default(cuid())
+  organizationId String
+
+  code         String  // BUD-2026-27-000001
+  name         String  // "ICU Annual Budget 2026-27"
+  // capex (capital — new machine, building) | opex (operational — consumables) | project (named initiative)
+  budgetType   String
+  departmentId String? // for capex/opex scoped to one department; null = hospital-wide
+  projectName  String? // only for budgetType = project, e.g. "New Wing Construction"
+  financialYear String // "2026-27" — the Indian financial year this covers
+
+  allocatedAmount Float   // total budget sanctioned
+  approvedDate    DateTime? // when the budget was formally approved
+  approvedById    String?   // who approved (free text or user id)
+  notes           String?
+
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  organization Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  department   Department?     @relation(fields: [departmentId], references: [id])
+  requests     PurchaseRequest[]
+
+  @@unique([organizationId, code])
+  @@index([organizationId])
+  @@index([departmentId])
+}
+
 /// A department asking for things to be bought: "ICU needs 20 boxes of gloves
 /// by Friday". Nothing is ordered until it is approved.
 model PurchaseRequest {
@@ -1322,6 +1400,12 @@ model PurchaseRequest {
   // Sum of the lines including GST. Decides which approval levels apply.
   estimatedTotal  Float     @default(0)
 
+  // Budget link — optional. The approver or requestor picks the budget this
+  // spend should be charged against. budgetApproved is a flag the approver
+  // sets to confirm the budget covers this request.
+  budgetId       String?
+  budgetApproved Boolean @default(false)
+
   submittedAt  DateTime?
   decidedAt    DateTime? // approved or rejected
   cancelledAt  DateTime?
@@ -1332,6 +1416,7 @@ model PurchaseRequest {
 
   organization Organization          @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   department   Department            @relation(fields: [departmentId], references: [id], onDelete: Restrict)
+  budget       Budget?               @relation(fields: [budgetId], references: [id])
   lines        PurchaseRequestLine[]
   rfqs         Rfq[]
 
