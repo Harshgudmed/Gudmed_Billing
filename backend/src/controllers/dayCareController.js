@@ -33,6 +33,7 @@ export async function getAll(req, res, next) {
       where.admissionDate = todayRange()
     }
     const searchWhere = patientSearchWhere(search, 'patient', (term) => [
+      { caseNumber: { contains: term, mode: 'insensitive' } }, // the ID column (DC0002 / DAY-2026-27-…)
       { procedure: { contains: term, mode: 'insensitive' } },
       { notes: { contains: term, mode: 'insensitive' } },
     ])

@@ -219,39 +219,39 @@ body{font-family:Arial,Helvetica,sans-serif;font-size:10.5pt;color:#000;backgrou
 
             <Tabs value={viewTab} onValueChange={setViewTab}>
               <TabsList className="flex w-full flex-wrap items-center justify-start h-auto gap-1 p-1 bg-gray-100">
-                <TabsTrigger value="overview" className={`${TAB_TRIGGER} data-[state=active]:text-blue-700`}>
+                <TabsTrigger value="overview" className={`${TAB_TRIGGER}`}>
                   <Users className={TAB_ICON} />
                   <span>Patient Details</span>
                 </TabsTrigger>
-                <TabsTrigger value="appointments" className={`${TAB_TRIGGER} data-[state=active]:text-green-700`}>
+                <TabsTrigger value="appointments" className={`${TAB_TRIGGER}`}>
                   <CalendarDays className={TAB_ICON} />
                   <span>Appointments</span>
                   {records.appointments.length > 0 && (
                     <Badge className={`${TAB_COUNT} bg-green-100 text-green-700`}>{records.appointments.length}</Badge>
                   )}
                 </TabsTrigger>
-                <TabsTrigger value="lab" className={`${TAB_TRIGGER} data-[state=active]:text-teal-700`}>
+                <TabsTrigger value="lab" className={`${TAB_TRIGGER}`}>
                   <Microscope className={TAB_ICON} />
                   <span>Lab / Pathology</span>
                   {records.labOrders.length > 0 && (
                     <Badge className={`${TAB_COUNT} bg-cyan-100 text-cyan-700`}>{records.labOrders.length}</Badge>
                   )}
                 </TabsTrigger>
-                <TabsTrigger value="radiology" className={`${TAB_TRIGGER} data-[state=active]:text-indigo-700`}>
+                <TabsTrigger value="radiology" className={`${TAB_TRIGGER}`}>
                   <ScanLine className={TAB_ICON} />
                   <span>Radiology</span>
                   {records.radiologyOrders.length > 0 && (
                     <Badge className={`${TAB_COUNT} bg-indigo-100 text-indigo-700`}>{records.radiologyOrders.length}</Badge>
                   )}
                 </TabsTrigger>
-                <TabsTrigger value="ipd" className={`${TAB_TRIGGER} data-[state=active]:text-rose-700`}>
+                <TabsTrigger value="ipd" className={`${TAB_TRIGGER}`}>
                   <BedDouble className={TAB_ICON} />
                   <span>IPD</span>
                   {records.admissions.length > 0 && (
                     <Badge className={`${TAB_COUNT} bg-rose-100 text-rose-700`}>{records.admissions.length}</Badge>
                   )}
                 </TabsTrigger>
-                <TabsTrigger value="documents" className={`${TAB_TRIGGER} data-[state=active]:text-sky-700`}>
+                <TabsTrigger value="documents" className={`${TAB_TRIGGER}`}>
                   <FileText className={TAB_ICON} />
                   <span>Documents</span>
                   {records.patientDocuments?.length > 0 && (
