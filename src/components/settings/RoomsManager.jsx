@@ -1,6 +1,6 @@
-import { useState, useEffect, useCallback, useMemo } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { toast } from 'sonner'
-import { Plus, Trash2, Clock, ShieldAlert, X, Info, Search, ChevronDown, ChevronRight, Building2 } from 'lucide-react'
+import { Plus, Trash2, Clock, ShieldAlert, X, Info, Search, ChevronDown, ChevronRight, Building2, Download, Upload, FileSpreadsheet } from 'lucide-react'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import client from '@/api/client'
 import { Button } from '@/components/ui/button'
@@ -14,6 +14,7 @@ import { FilterBar } from '@/components/common/FilterBar'
 import { useLiveData } from '@/lib/useLiveData'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogTrigger } from '@/components/ui/dialog'
 import { drName } from '@/lib/utils'
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 
 const DAY_SHORT = { Sunday: 'Sun', Monday: 'Mon', Tuesday: 'Tue', Wednesday: 'Wed', Thursday: 'Thu', Friday: 'Fri', Saturday: 'Sat' }
 // Week starts Monday for display — a clinic's week does, and it makes
@@ -50,6 +51,161 @@ function groupSchedule(schedule = []) {
     byShift.get(key).days.push(s.dayName)
   }
   return [...byShift.values()].sort((a, b) => a.start.localeCompare(b.start) || a.doctorName.localeCompare(b.doctorName))
+}
+
+// ── Bulk Upload (Template / Import / Export) ────────────────────────────────────────────────────────────────────────────────
+function saveBlob(blob, filename) {
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url; a.download = filename; a.click()
+  URL.revokeObjectURL(url)
+}
+
+const BULK_SETUP = {
+  label: 'Bulk Setup',
+  title: 'Room Setup Import Result',
+  path: '/rooms/setup',
+  templateFile: 'room_setup_template.xlsx',
+  exportPrefix: 'room_setup_export',
+  stats: [
+    { key: 'total', label: 'Total Rows' },
+    { key: 'floorsCreated', label: 'Floors Created', tone: 'green' },
+    { key: 'roomsCreated', label: 'Rooms Created', tone: 'green' },
+    { key: 'shiftsAdded', label: 'Shifts Added', tone: 'green' },
+    { key: 'skipped', label: 'Skipped (already exist)' },
+    { key: 'failed', label: 'Failed', tone: 'red' },
+  ],
+  changed: (s) => s.floorsCreated + s.roomsCreated + s.shiftsAdded > 0,
+  successToast: (s) => `Added ${s.floorsCreated} floor(s), ${s.roomsCreated} room(s), ${s.shiftsAdded} shift(s)`,
+}
+
+const STAT_TONE = {
+  green: { box: 'border-green-200 bg-green-50', text: 'text-green-700' },
+  red:   { box: 'border-red-200 bg-red-50',     text: 'text-red-700' },
+}
+
+function BulkMenu({ config, onImported }) {
+  const fileRef = useRef(null)
+  const [uploading, setUploading] = useState(false)
+  const [result, setResult] = useState(null)
+
+  function downloadTemplate() {
+    client.get(`${config.path}/template`, { responseType: 'blob' })
+      .then((blob) => saveBlob(blob, config.templateFile))
+      .catch(() => toast.error('Failed to download template'))
+  }
+
+  function exportData() {
+    const date = new Date().toISOString().slice(0, 10)
+    client.get(`${config.path}/export`, { responseType: 'blob' })
+      .then((blob) => saveBlob(blob, `${config.exportPrefix}_${date}.xlsx`))
+      .catch(() => toast.error('Export failed'))
+  }
+
+  function downloadErrorFile(errorFile) {
+    if (!errorFile?.base64) return
+    const bytes = atob(errorFile.base64)
+    const arr = new Uint8Array(bytes.length)
+    for (let i = 0; i < bytes.length; i++) arr[i] = bytes.charCodeAt(i)
+    saveBlob(new Blob([arr], { type: errorFile.mimeType }), errorFile.filename)
+  }
+
+  async function handleFile(e) {
+    const file = e.target.files?.[0]
+    e.target.value = ''
+    if (!file) return
+    const ext = file.name.split('.').pop()?.toLowerCase()
+    if (ext !== 'xlsx' && ext !== 'csv') return toast.error('Please select an .xlsx or .csv file')
+    setUploading(true)
+    try {
+      const fd = new FormData()
+      fd.append('file', file)
+      const res = await client.postForm(`${config.path}/import`, fd)
+      setResult(res)
+      const s = res.summary || {}
+      if (config.changed(s)) { toast.success(config.successToast(s)); onImported?.() }
+      if (s.failed > 0) toast.warning(`${s.failed} row(s) had errors — see the report`)
+    } catch (err) {
+      toast.error(err.message || 'Upload failed')
+    } finally {
+      setUploading(false)
+    }
+  }
+
+  return (
+    <>
+      <input ref={fileRef} type="file" accept=".xlsx,.csv" className="hidden" onChange={handleFile} />
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button size="sm" variant="outline" disabled={uploading}>
+            <FileSpreadsheet className="h-4 w-4 mr-1" />{uploading ? 'Uploading…' : config.label}<ChevronDown className="h-4 w-4 ml-1" />
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end">
+          <DropdownMenuItem onClick={downloadTemplate}><Download className="h-4 w-4 mr-2" />Template</DropdownMenuItem>
+          <DropdownMenuItem onClick={() => fileRef.current?.click()}><Upload className="h-4 w-4 mr-2" />Import</DropdownMenuItem>
+          <DropdownMenuItem onClick={exportData}><FileSpreadsheet className="h-4 w-4 mr-2" />Export</DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+
+      <Dialog open={!!result} onOpenChange={(o) => !o && setResult(null)}>
+        <DialogContent className="max-w-xl">
+          <DialogHeader><DialogTitle>{config.title}</DialogTitle></DialogHeader>
+          {result && (
+            <div className="space-y-4">
+              <div className="grid grid-cols-3 gap-3">
+                {config.stats.map((st) => {
+                  const tone = STAT_TONE[st.tone]
+                  return (
+                    <div key={st.key} className={`rounded-lg border p-3 ${tone?.box || ''}`}>
+                      <p className={`text-xs ${tone?.text || 'text-gray-500'}`}>{st.label}</p>
+                      <p className={`text-xl font-semibold ${tone?.text || ''}`}>{result.summary?.[st.key] ?? 0}</p>
+                    </div>
+                  )
+                })}
+              </div>
+
+              {result.warnings?.length > 0 && (
+                <div>
+                  <p className="text-sm font-medium text-amber-700 mb-2">Warnings</p>
+                  <div className="rounded-lg border divide-y text-sm max-h-40 overflow-y-auto">
+                    {result.warnings.map((w, i) => (
+                      <div key={i} className="p-2">
+                        <span className="font-medium">Row {w.row}</span>{w.name && <> · {w.name}</>}
+                        <p className="text-xs text-amber-700 mt-0.5">{w.reason}</p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {result.errors?.length > 0 && (
+                <div>
+                  <div className="flex items-center justify-between mb-2">
+                    <p className="text-sm font-medium text-red-700">Failed Rows</p>
+                    {result.errorFile && (
+                      <Button size="sm" variant="outline" onClick={() => downloadErrorFile(result.errorFile)}>
+                        <Download className="h-4 w-4 mr-2" />Download Error Report
+                      </Button>
+                    )}
+                  </div>
+                  <div className="rounded-lg border divide-y text-sm max-h-64 overflow-y-auto">
+                    {result.errors.map((er, i) => (
+                      <div key={i} className="p-2">
+                        <span className="font-medium">Row {er.row}</span>{er.name && <> · {er.name}</>}
+                        <p className="text-xs text-red-600 mt-0.5">{er.reason}</p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+          <DialogFooter><Button onClick={() => setResult(null)}>Close</Button></DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
+  )
 }
 
 // ── Add Floor ────────────────────────────────────────────────────────────
@@ -249,6 +405,18 @@ function RoomRow({ room, floorId, departments, doctors, onChanged }) {
     }
   }
 
+  const removeDoctor = async (link) => {
+    if (!window.confirm(`Remove ${drName(link.doctorName)} from Room ${room.roomNumber}? Their shift times are kept, just without this room.`)) return
+    try {
+      await client.delete(`/rooms/${room.id}/doctors/${link.doctorId}`)
+      toast.success('Doctor removed from room')
+      onChanged()
+    } catch (err) {
+      toast.error(err.message || 'Failed to remove doctor')
+      if (err.status === 409) onChanged()
+    }
+  }
+
   const clearOverride = async () => {
     try {
       await client.delete(`/rooms/${room.id}/override`, { data: { expectedOverrideSetAt: room.override?.setAt ?? null } })
@@ -342,6 +510,22 @@ function RoomRow({ room, floorId, departments, doctors, onChanged }) {
                 </div>
               )}
             </div>
+
+            {room.doctorLinks?.length > 0 && (
+              <div onClick={(e) => e.stopPropagation()}>
+                <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5">Linked doctors</div>
+                <div className="flex flex-wrap gap-2">
+                  {room.doctorLinks.map((l) => (
+                    <span key={l.doctorId} className="inline-flex items-center gap-1.5 rounded-full border bg-white pl-3 pr-1 py-0.5 text-sm">
+                      {drName(l.doctorName)}
+                      <Button size="sm" variant="ghost" className="h-6 px-2 text-red-600 hover:text-red-700" onClick={() => removeDoctor(l)}>
+                        <X className="h-3.5 w-3.5 mr-0.5" />Remove
+                      </Button>
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
           </TableCell>
         </TableRow>
       )}
@@ -455,7 +639,10 @@ export default function RoomsManager() {
             <CardTitle>Floors & Rooms</CardTitle>
             <CardDescription>Set up floors, departments, and consulting rooms for the queue display board. Doctor scheduling happens on each doctor's own Timetable.</CardDescription>
           </div>
-          <AddFloorDialog onCreated={async () => { const f = await loadFloors(); if (!activeFloorId) selectFloor(f[0]?.id) }} />
+          <div className="flex items-center gap-2">
+            <BulkMenu config={BULK_SETUP} onImported={async () => { const f = await loadFloors(); if (activeFloorId) refreshRooms(); else selectFloor(f[0]?.id) }} />
+            <AddFloorDialog onCreated={async () => { const f = await loadFloors(); if (!activeFloorId) selectFloor(f[0]?.id) }} />
+          </div>
         </div>
       </CardHeader>
       <CardContent>

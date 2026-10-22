@@ -1692,9 +1692,14 @@ ${rx.notes ? `<div class="note-bar"><strong>Notes:</strong> ${escapeHtml(rx.note
             )}
             <div className="space-y-2 max-h-72 overflow-y-auto">
               {(selectedPrescription?.items || []).map((item, idx) => (
-                <div key={idx} className="flex items-start gap-2 border rounded-md p-2">
+                <div
+                  key={idx}
+                  onClick={() => toggleItemDispensed(idx)}
+                  className={`flex items-start gap-2 border rounded-md p-2 cursor-pointer select-none hover:bg-gray-50 ${item.dispensed ? "bg-green-50 border-green-200" : ""}`}
+                >
                   <Checkbox
                     checked={!!item.dispensed}
+                    onClick={(e) => e.stopPropagation()}
                     onCheckedChange={() => toggleItemDispensed(idx)}
                     className="mt-1"
                   />
