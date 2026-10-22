@@ -16,8 +16,8 @@ const round2 = (n) => Math.round((Number(n) || 0) * 100) / 100
 export function unitsOf(item) {
   if (!item) return []
   return [
-    { id: item.stockUnit.id, code: item.stockUnit.code, factor: 1 },
-    ...item.conversions.map((c) => ({ id: c.unitId, code: c.unit.code, factor: c.factor, isPurchaseDefault: c.isPurchaseDefault })),
+    { id: item.stockUnit.id, code: item.stockUnit.code, factor: 1, allowsFraction: item.stockUnit.allowsFraction },
+    ...item.conversions.map((c) => ({ id: c.unitId, code: c.unit.code, factor: c.factor, isPurchaseDefault: c.isPurchaseDefault, allowsFraction: c.unit.allowsFraction })),
   ]
 }
 
