@@ -443,7 +443,9 @@ export default function RoomsManager() {
 
   const activeFloor = floors.find((f) => f.id === activeFloorId)
 
-  if (loading) return <p className="text-gray-400 text-sm py-8 text-center">Loading rooms…</p>
+  // First load only — a live refresh or a floor switch keeps the current view
+  // instead of blanking the whole panel to this spinner.
+  if (loading && floors.length === 0) return <p className="text-gray-400 text-sm py-8 text-center">Loading rooms…</p>
 
   return (
     <Card>

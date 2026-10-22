@@ -18,8 +18,11 @@ export function useAppointments() {
   const bumpMutations = useCallback(() => setMutationCount((c) => c + 1), []);
 
   // Reference data only (users → doctors, departments, OPD services).
-  const fetchData = useCallback(async () => {
-    setLoading(true);
+  // `silent` skips the full-screen spinner: a live update or a status change
+  // refreshes this in the background, so the whole screen must not blank out
+  // and flash "Loading appointments…" on every click.
+  const fetchData = useCallback(async ({ silent = false } = {}) => {
+    if (!silent) setLoading(true);
     setError(null);
     const [usersResult, departmentsResult] =
       await Promise.allSettled([
@@ -38,7 +41,7 @@ export function useAppointments() {
           ? usersResult.reason.message
           : "Some data failed to load",
       );
-    setLoading(false);
+    if (!silent) setLoading(false);
   }, []);
 
   useEffect(() => {

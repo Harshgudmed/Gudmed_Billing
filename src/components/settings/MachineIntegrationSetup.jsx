@@ -187,7 +187,7 @@ export default function MachineIntegrationSetup() {
           </div>
         </CardHeader>
         <CardContent>
-          {loading ? (
+          {loading && machines.length === 0 ? (
             <div className="flex items-center gap-2 text-gray-500 py-6"><Loader2 className="h-4 w-4 animate-spin" />Loading…</div>
           ) : machines.length === 0 ? (
             <div className="text-center py-8 text-gray-500">

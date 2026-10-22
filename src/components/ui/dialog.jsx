@@ -28,6 +28,13 @@ export function DialogContent({ className, children, ...props }) {
         {...props}
       >
         {children}
+        {/* A fallback description so Radix (which warns in dev when a dialog has
+            no <Description>) is satisfied for the many simple confirm/detail
+            dialogs that need none. A dialog with its own DialogDescription
+            renders it BEFORE this, so getElementById resolves to the real one
+            and screen readers still read it — this hidden one is only used when
+            there is nothing else. */}
+        <DialogPrimitive.Description className="sr-only">Dialog</DialogPrimitive.Description>
         <DialogPrimitive.Close className="absolute right-4 top-4 flex h-8 w-8 items-center justify-center rounded-md text-slate-700 opacity-90 ring-offset-background transition-colors hover:bg-slate-100 hover:text-slate-950 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:pointer-events-none data-[state=open]:bg-accent data-[state=open]:text-muted-foreground">
           <X className="h-5 w-5" />
           <span className="sr-only">Close</span>

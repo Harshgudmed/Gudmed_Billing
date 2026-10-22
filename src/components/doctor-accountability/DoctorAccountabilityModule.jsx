@@ -251,7 +251,7 @@ function DoctorsTab({ actions }) {
         />
       </FilterBar>
 
-      {loading ? (
+      {loading && doctors.length === 0 ? (
         <div className="text-center py-12 text-gray-400">Loading doctors...</div>
       ) : filtered.length === 0 ? (
         <div className="text-center py-12 text-gray-400">No doctors found. Click "Add Doctor" above to create one.</div>
@@ -769,7 +769,7 @@ function CommissionsTab({ openAddSignal }) {
       )}
 
       {/* Table */}
-      {loading ? (
+      {loading && commissions.length === 0 ? (
         <div className="text-center py-12 text-gray-400">Loading...</div>
       ) : commissions.length === 0 ? (
         <div className="text-center py-12 text-gray-400">No commission entries found.</div>
@@ -1319,7 +1319,7 @@ function ReportsTab() {
       >
         <FilterSelect value={filterStatus} onChange={setFilterStatus} options={REPORT_STATUS_OPTIONS} />
       </FilterBar>
-      {loading ? (
+      {loading && stats.length === 0 ? (
         <div className="text-center py-8 text-gray-400">Loading stats...</div>
       ) : filteredStats.length === 0 ? (
         <div className="text-center py-8 text-gray-400">
