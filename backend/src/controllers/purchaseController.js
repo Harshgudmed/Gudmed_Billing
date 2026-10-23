@@ -59,10 +59,9 @@ const optText = (max) => z.string().trim().max(max).optional().nullable().transf
 const optEnum = (values) => z.preprocess(emptyToNull, z.enum(values).nullable().optional())
 // Landlines are normal for suppliers (0522-2345678), so this is not the
 // mobile-only rule patients use: 8 to 15 digits, with the usual separators.
-const phone = z.string().trim().optional().nullable()
-  .refine((v) => blank(v) || (/^[0-9+\-()\s]+$/.test(v) && v.replace(/\D/g, '').length >= 8 && v.replace(/\D/g, '').length <= 15),
+const phone = z.string().trim().min(1, 'Phone number is required')
+  .refine((v) => /^[0-9+\-()\s]+$/.test(v) && v.replace(/\D/g, '').length >= 8 && v.replace(/\D/g, '').length <= 15,
     'Enter a phone number of 8 to 15 digits')
-  .transform(emptyToNull)
 
 const vendorFields = {
   name: z.string().trim().min(2, 'Vendor name is required').max(120),
@@ -96,7 +95,13 @@ const vendorFields = {
   defaultTdsSection: optEnum(['194C', '194J', '194I', '194H', '194Q']),
 }
 const vendorCreateSchema = z.object(vendorFields)
-const vendorUpdateSchema = z.object({ id: z.string().min(1), isActive: z.boolean().optional(), ...vendorFields }).partial({ name: true })
+const vendorUpdateSchema = z.object({ id: z.string().min(1), isActive: z.boolean().optional(), ...vendorFields }).partial({ name: true }).superRefine((data, ctx) => {
+  const onlyToggle = Object.keys(data).every((k) => ['id', 'isActive'].includes(k))
+  if (onlyToggle) return
+  if (!data.phone || String(data.phone).trim() === '') {
+    ctx.addIssue({ code: 'custom', path: ['phone'], message: 'Phone number is required' })
+  }
+})
 
 /**
  * The checks a format cannot express, and the fields that follow from others.

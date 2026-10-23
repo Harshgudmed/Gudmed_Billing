@@ -105,6 +105,15 @@ export default function VendorsMaster({ onChanged }) {
   }
 
   const save = async () => {
+    const digits = String(form.phone || '').replace(/\D/g, '')
+    const phoneValid = digits.length >= 8 && digits.length <= 15
+    const requiredOk = !!form.name.trim() && !!form.phone.trim() && phoneValid
+
+    if (!requiredOk) {
+      toast.error('Phone number is required and must be 8 to 15 digits.')
+      return
+    }
+
     setSaving(true)
     // With a GSTIN the server reads the state and PAN from it. Sending the
     // boxes' older values instead (typed before the GSTIN) would be refused as
@@ -139,6 +148,9 @@ export default function VendorsMaster({ onChanged }) {
   }
 
   const gst = readGstin(form.gstNumber, statesByCode)
+  const phoneDigits = String(form.phone || '').replace(/\D/g, '')
+  const phoneValid = phoneDigits.length >= 8 && phoneDigits.length <= 15
+  const requiredFieldsComplete = !!form.name.trim() && !!form.phone.trim() && phoneValid
 
   return (
     // The HMS list layout, as on Pharmacy's tabs: the filter row with the Add
@@ -207,7 +219,7 @@ export default function VendorsMaster({ onChanged }) {
             <Section title="Vendor">
               <Field label="Name *" id="v-name" className="md:col-span-2"><Input id="v-name" value={form.name} onChange={set('name')} placeholder="e.g. ABC Medical Supplies" /></Field>
               <Field label="Contact person" id="v-contact"><Input id="v-contact" value={form.contactPerson} onChange={set('contactPerson')} /></Field>
-              <Field label="Phone" id="v-phone"><Input id="v-phone" value={form.phone} onChange={set('phone')} placeholder="Mobile or landline" /></Field>
+              <Field label="Phone Number *" id="v-phone"><Input id="v-phone" value={form.phone} onChange={set('phone')} placeholder="Mobile or landline" maxLength={15} minLength={10} /></Field>
               <Field label="Email" id="v-email"><Input id="v-email" type="email" value={form.email} onChange={set('email')} /></Field>
               <Field label="Supplies" id="v-type">
                 <Select value={form.vendorType || NONE} onValueChange={(v) => set('vendorType')(v === NONE ? '' : v)}>
@@ -270,7 +282,7 @@ export default function VendorsMaster({ onChanged }) {
 
           <DialogFooter>
             <Button variant="outline" onClick={() => setOpen(false)} disabled={saving}>Cancel</Button>
-            <Button onClick={save} disabled={saving || !form.name.trim()}>
+            <Button onClick={save} disabled={saving || !requiredFieldsComplete}>
               {saving && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}{editingId ? 'Save changes' : 'Add vendor'}
             </Button>
           </DialogFooter>
