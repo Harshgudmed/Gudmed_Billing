@@ -48,7 +48,8 @@ function validate(form, lines, { send, money }) {
   const fields = {}
   const byLine = {}
   if (!form.departmentId) fields.departmentId = 'Choose the department asking for it'
-  if (form.requiredBy && form.requiredBy < localYmd()) fields.requiredBy = 'The required-by date is in the past'
+  if (!form.requiredBy) fields.requiredBy = 'Choose when it is needed'
+  else if (form.requiredBy < localYmd()) fields.requiredBy = 'The required-by date is in the past'
   if (form.purpose.trim().length > 500) fields.purpose = 'At most 500 characters'
   else if (send && form.priority !== 'normal' && blank(form.purpose)) fields.purpose = `Say why it is ${form.priority} — the approver reads that first`
 
@@ -58,6 +59,7 @@ function validate(form, lines, { send, money }) {
   if (send && !picked.length) fields.lines = 'Add at least one item before sending the request'
   picked.forEach((l) => {
     const e = {}
+    if (!l.categoryId) e.categoryId = 'Choose a category for this item'
     const unit = unitsOf(l.item).find((u) => u.id === l.unitId)
     const q = Number(l.quantity)
     if (blank(l.quantity)) e.quantity = 'Enter a quantity'
@@ -188,7 +190,7 @@ export default function RequestForm({ open, onOpenChange, request, onSaved }) {
     priority: form.priority,
     purpose: form.purpose,
     lines: lines.filter((l) => l.itemId).map((l) => ({
-      itemId: l.itemId, unitId: l.unitId, quantity: l.quantity,
+      categoryId: l.categoryId, itemId: l.itemId, unitId: l.unitId, quantity: l.quantity,
       // the store's request carries no rate: the server starts from the last price paid
       estimatedRate: !money || l.estimatedRate === '' ? undefined : l.estimatedRate, note: l.note,
     })),
@@ -262,9 +264,9 @@ export default function RequestForm({ open, onOpenChange, request, onSaved }) {
                 <FieldError>{errors.fields.departmentId}</FieldError>
               </div>
               <div className="space-y-1">
-                <Label htmlFor="pr-by">Needed by</Label>
+                <Label htmlFor="pr-by">Needed by <span className="text-red-500">*</span></Label>
                 <Input id="pr-by" type="date" min={localYmd()} value={form.requiredBy} onChange={(e) => setForm((f) => ({ ...f, requiredBy: e.target.value }))}
-                  aria-invalid={!!errors.fields.requiredBy} />
+                  required aria-invalid={!!errors.fields.requiredBy} />
                 <FieldError>{errors.fields.requiredBy}</FieldError>
               </div>
               <div className="space-y-1">
@@ -303,7 +305,7 @@ export default function RequestForm({ open, onOpenChange, request, onSaved }) {
                 <table className="w-full text-sm">
                   <thead className="bg-gray-50 text-xs text-gray-500">
                     <tr>
-                      <th className="text-left font-medium px-2 py-2 w-48">Category</th>
+                      <th className="text-left font-medium px-2 py-2 w-48">Category <span className="text-red-500">*</span></th>
                       <th className="text-left font-medium px-2 py-2 min-w-[240px]">Item</th>
                       <th className="text-left font-medium px-2 py-2 w-28">Unit</th>
                       <th className="text-center font-medium px-2 py-2 w-36">Qty <span className="text-red-500">*</span></th>
@@ -328,6 +330,7 @@ export default function RequestForm({ open, onOpenChange, request, onSaved }) {
                               searchPlaceholder="Furniture, Linen, Electrical…"
                               contentClassName="w-[300px]"
                             />
+                            <FieldError>{le.categoryId}</FieldError>
                           </td>
                           <td className="px-2 py-2">
                             <SearchableSelect
