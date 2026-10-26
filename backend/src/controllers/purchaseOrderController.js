@@ -31,7 +31,7 @@
 import { z } from 'zod'
 import { db } from '../config/db.js'
 import { getOrgId, getActor, bad, notFound, conflict, forbidden } from '../lib/reqContext.js'
-import { startOfToday } from '../lib/dates.js'
+import { startOfToday, dayRange } from '../lib/dates.js'
 import { nextSeriesNumber } from '../lib/counters.js'
 import { listResponse } from '../lib/pagination.js'
 import { round2 } from '../lib/money.js'
@@ -269,8 +269,9 @@ export async function poGet(req, res, next) {
     const { resource } = req.query
 
     if (resource === 'orders') {
-      const { status, vendorId, search, view } = req.query
+      const { status, vendorId, search, view, startDate, endDate } = req.query
       const where = { organizationId: ORG_ID }
+      if (startDate || endDate) where.createdAt = dayRange(startDate, endDate)
       if (status && status !== 'all') where.status = { in: String(status).split(',') }
       if (vendorId) where.vendorId = String(vendorId)
       if (view === 'mine') where.createdById = actor.id ?? '__none__'

@@ -6,6 +6,7 @@ import { PaginatedTable } from '@/components/common/PaginatedTable'
 import { StatCard } from '@/components/common/StatCard'
 import { Clock, ClipboardList, UserRound, FilePen, XCircle } from 'lucide-react'
 import { FilterBar, FilterSelect } from '@/components/common/FilterBar'
+import { useDateFilter } from '@/components/common/DateFilter'
 import { useServerPagination } from '@/lib/useServerPagination'
 import { useDebounce } from '@/lib/useDebounce'
 import { useLiveData } from '@/lib/useLiveData'
@@ -63,6 +64,7 @@ export default function RequestsList({ counts = {}, onChanged, intent = {}, onMa
   const [status, setStatus] = useState(intent.status || 'all')
   const [priority, setPriority] = useState(intent.priority || 'all')
   const [search, setSearch] = useState(intent.search || '')
+  const dateFilter = useDateFilter('all', { showClear: false })
   const debounced = useDebounce(search, 300)
   const requests = useServerPagination(PURCHASE_ENDPOINT, {
     params: {
@@ -70,6 +72,8 @@ export default function RequestsList({ counts = {}, onChanged, intent = {}, onMa
       view: view === 'all' ? '' : view,
       status: view === 'to-approve' || status === 'all' ? '' : status,
       priority: priority === 'all' ? '' : priority,
+      startDate: dateFilter.range.startDate,
+      endDate: dateFilter.range.endDate,
     },
   })
   useLiveData('purchase', requests.refresh)
@@ -102,18 +106,19 @@ export default function RequestsList({ counts = {}, onChanged, intent = {}, onMa
           search={search}
           onSearchChange={setSearch}
           placeholder="Search number, item, reason or who raised it…"
-          active={!!search || status !== 'all' || priority !== 'all'}
-          onClear={() => { setSearch(''); setStatus('all'); setPriority('all') }}
+          active={!!search || status !== 'all' || priority !== 'all' || dateFilter.active}
+          onClear={() => { setSearch(''); setStatus('all'); setPriority('all'); dateFilter.reset() }}
         >
           <FilterSelect value={priority} onChange={setPriority} options={PRIORITY_OPTIONS} className="w-48" />
           {view !== 'to-approve' && <FilterSelect value={status} onChange={setStatus} options={STATUS_OPTIONS} className="w-48" />}
+          {dateFilter.control}
         </FilterBar>
 
       <Card>
         <CardContent className="p-0">
         <PaginatedTable
           pagination={requests}
-          empty={view === 'to-approve' ? 'Nothing is waiting for your approval' : search || status !== 'all' || priority !== 'all' ? 'No request matches this search' : 'No purchase requests yet'}
+          empty={search || status !== 'all' || priority !== 'all' || dateFilter.active ? 'No request matches these filters' : view === 'to-approve' ? 'Nothing is waiting for your approval' : 'No purchase requests yet'}
           columns={[
             { header: 'Request' }, { header: 'Department' }, { header: 'Items', className: 'text-right' },
             ...(me.seesMoney ? [{ header: 'Estimated', className: 'text-right' }] : []), { header: 'Status' }, { header: own ? 'Raised on' : 'Raised by' },

@@ -36,7 +36,7 @@ import { z } from 'zod'
 import { db } from '../config/db.js'
 import { getOrgId, getActor, bad, notFound, conflict, forbidden } from '../lib/reqContext.js'
 import { round2, formatRupee } from '../lib/money.js'
-import { parseUserDate, ymdInZone } from '../lib/dates.js'
+import { parseUserDate, ymdInZone, dayRange } from '../lib/dates.js'
 import { nextSeriesNumber } from '../lib/counters.js'
 import { listResponse } from '../lib/pagination.js'
 import { auditIpd } from '../inpatient/audit.js'
@@ -439,8 +439,9 @@ export async function billGet(req, res, next) {
     if (resource === 'bill-candidates') return await candidates(req, res, ORG_ID)
 
     if (resource === 'bills') {
-      const { search, status, view, orderId } = req.query
+      const { search, status, view, orderId, startDate, endDate } = req.query
       const where = { organizationId: ORG_ID }
+      if (startDate || endDate) where.vendorInvoiceDate = dayRange(startDate, endDate)
       if (status && status !== 'all') where.status = { in: String(status).split(',') }
       if (orderId) where.orderId = String(orderId)
       if (view === 'on-hold') where.status = 'on_hold'

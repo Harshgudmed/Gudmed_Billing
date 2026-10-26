@@ -6,6 +6,7 @@ import { TableCell, TableRow } from '@/components/ui/table'
 import { PaginatedTable } from '@/components/common/PaginatedTable'
 import { StatCard } from '@/components/common/StatCard'
 import { FilterBar, FilterSelect } from '@/components/common/FilterBar'
+import { useDateFilter } from '@/components/common/DateFilter'
 import { Receipt, Wallet, ReceiptText, FilePlus2, CheckCircle2, AlertTriangle } from 'lucide-react'
 import { useServerPagination } from '@/lib/useServerPagination'
 import { useDebounce } from '@/lib/useDebounce'
@@ -52,9 +53,16 @@ export default function BillsList({ intent = {}, onChanged, onOpenOrder }) {
   const [view, setView] = useState(VIEWS.some((v) => v.value === intent.view) ? intent.view : me.canBill ? 'all' : 'on-hold')
   const [status, setStatus] = useState('all')
   const [search, setSearch] = useState('')
+  const dateFilter = useDateFilter('all', { showClear: false })
   const debounced = useDebounce(search, 300)
   const bills = useServerPagination(PURCHASE_ENDPOINT, {
-    params: { resource: 'bills', search: debounced, view: view === 'all' ? '' : view, status: view === 'all' && status !== 'all' ? status : '' },
+    params: {
+      resource: 'bills', search: debounced,
+      view: view === 'all' ? '' : view,
+      status: view === 'all' && status !== 'all' ? status : '',
+      startDate: dateFilter.range.startDate,
+      endDate: dateFilter.range.endDate,
+    },
   })
   useLiveData('purchase', bills.refresh)
 
@@ -77,7 +85,7 @@ export default function BillsList({ intent = {}, onChanged, onOpenOrder }) {
     all: { value: allCount ?? '—', sublabel: me.canBill && s.drafts ? `${s.drafts} draft${s.drafts === 1 ? '' : 's'} not submitted` : 'Every vendor, every status' },
   }
   const tiles = VIEWS.length + (me.canBill ? 1 : 0)
-  const filtered = !!search || (view === 'all' && status !== 'all')
+  const filtered = !!search || (view === 'all' && status !== 'all') || dateFilter.active
 
   return (
     <div className="min-w-0 space-y-4">
@@ -98,10 +106,11 @@ export default function BillsList({ intent = {}, onChanged, onOpenOrder }) {
         onSearchChange={setSearch}
         placeholder="Search bill no., vendor, invoice no. or PO…"
         active={filtered}
-        onClear={() => { setSearch(''); setStatus('all') }}
+        onClear={() => { setSearch(''); setStatus('all'); dateFilter.reset() }}
         actions={me.canBill && <Button onClick={() => openForm()}><FilePlus2 className="h-4 w-4 mr-2" />Enter vendor bill</Button>}
       >
         {view === 'all' && <FilterSelect value={status} onChange={setStatus} options={STATUS_OPTIONS} className="w-48" />}
+        {dateFilter.control}
       </FilterBar>
 
       <Card>

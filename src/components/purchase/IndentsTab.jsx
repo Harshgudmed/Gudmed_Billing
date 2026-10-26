@@ -6,6 +6,7 @@ import { TableCell, TableRow } from '@/components/ui/table'
 import { PaginatedTable } from '@/components/common/PaginatedTable'
 import { StatCard } from '@/components/common/StatCard'
 import { FilterBar, FilterSelect } from '@/components/common/FilterBar'
+import { useDateFilter } from '@/components/common/DateFilter'
 import { useServerPagination } from '@/lib/useServerPagination'
 import { useDebounce } from '@/lib/useDebounce'
 import { useLiveData } from '@/lib/useLiveData'
@@ -48,11 +49,18 @@ export default function IndentsTab({ onChanged, openId: openIdLink = null, issue
   const [issueStatus, setIssueStatus] = useState('all')
   const [departmentId, setDepartmentId] = useState('all')
   const [search, setSearch] = useState('')
+  const dateFilter = useDateFilter('all', { showClear: false })
   const debounced = useDebounce(search, 300)
   const departments = usePickList(loadDepartments)
 
-  const indents = useServerPagination(PURCHASE_INDENT_ENDPOINT, { params: { resource: 'indents', status, departmentId, search: view === 'indents' ? debounced : '' } })
-  const issues = useServerPagination(PURCHASE_INDENT_ENDPOINT, { params: { resource: 'issues', status: issueStatus, departmentId, search: view === 'issues' ? debounced : '' } })
+  const indents = useServerPagination(PURCHASE_INDENT_ENDPOINT, { params: {
+    resource: 'indents', status, departmentId, search: view === 'indents' ? debounced : '',
+    startDate: dateFilter.range.startDate, endDate: dateFilter.range.endDate,
+  } })
+  const issues = useServerPagination(PURCHASE_INDENT_ENDPOINT, { params: {
+    resource: 'issues', status: issueStatus, departmentId, search: view === 'issues' ? debounced : '',
+    startDate: dateFilter.range.startDate, endDate: dateFilter.range.endDate,
+  } })
   // New indents arrive through /store-indents; issues and closes through /purchase.
   const refreshAll = useCallback(() => { indents.refresh(); issues.refresh() }, [indents, issues])
   useLiveData(['store-indents', 'purchase'], refreshAll)
@@ -63,7 +71,7 @@ export default function IndentsTab({ onChanged, openId: openIdLink = null, issue
   const changed = useCallback(() => { refreshAll(); onChanged?.() }, [refreshAll, onChanged])
 
   const deptOptions = [{ value: 'all', label: 'All departments' }, ...departments.list.map((d) => ({ value: d.id, label: d.name }))]
-  const filtered = !!search || departmentId !== 'all' || (view === 'issues' && issueStatus !== 'all')
+  const filtered = !!search || departmentId !== 'all' || (view === 'issues' && issueStatus !== 'all') || dateFilter.active
 
   return (
     <div className="space-y-4">
@@ -85,9 +93,10 @@ export default function IndentsTab({ onChanged, openId: openIdLink = null, issue
       {departments.failed && <LoadFailed onRetry={departments.reload}>Could not load the departments for the filter.</LoadFailed>}
       <FilterBar search={search} onSearchChange={setSearch}
         placeholder={view === 'indents' ? 'Search indent number, item or who raised it…' : 'Search issue or indent number, item or who collected it…'}
-        active={filtered} onClear={() => { setSearch(''); setDepartmentId('all'); setIssueStatus('all') }}>
+        active={filtered} onClear={() => { setSearch(''); setDepartmentId('all'); setIssueStatus('all'); dateFilter.reset() }}>
         <FilterSelect value={departmentId} onChange={setDepartmentId} options={deptOptions} className="w-48" />
         {view === 'issues' && <FilterSelect value={issueStatus} onChange={setIssueStatus} options={ISSUE_STATUS_OPTIONS} className="w-40" />}
+        {dateFilter.control}
       </FilterBar>
 
       <Card>
