@@ -11,6 +11,7 @@ import { Plus, Pencil, Loader2, Ban, RotateCcw } from 'lucide-react'
 import { toast } from 'sonner'
 import { PaginatedTable } from '@/components/common/PaginatedTable'
 import { FilterBar, FilterSelect } from '@/components/common/FilterBar'
+import { useDateFilter } from '@/components/common/DateFilter'
 import { useServerPagination } from '@/lib/useServerPagination'
 import { useDebounce } from '@/lib/useDebounce'
 import { useLiveData } from '@/lib/useLiveData'
@@ -66,9 +67,16 @@ export default function VendorsMaster({ onChanged }) {
   const { canManageMasters } = useMe()
   const [search, setSearch] = useState('')
   const [status, setStatus] = useState('all')
+  const dateFilter = useDateFilter('all', { showClear: false })
   const debouncedSearch = useDebounce(search, 300)
   const vendors = useServerPagination(PURCHASE_ENDPOINT, {
-    params: { resource: 'vendors', search: debouncedSearch, status: status === 'all' ? '' : status },
+    params: {
+      resource: 'vendors',
+      search: debouncedSearch,
+      status: status === 'all' ? '' : status,
+      startDate: dateFilter.range.startDate,
+      endDate: dateFilter.range.endDate,
+    },
   })
   // A vendor added on another screen appears here on its own.
   useLiveData('purchase', vendors.refresh)
@@ -160,18 +168,19 @@ export default function VendorsMaster({ onChanged }) {
         search={search}
         onSearchChange={setSearch}
         placeholder="Search vendor name, code, GSTIN, phone or city…"
-        active={!!search || status !== 'all'}
-        onClear={() => { setSearch(''); setStatus('all') }}
+        active={!!search || status !== 'all' || dateFilter.active}
+        onClear={() => { setSearch(''); setStatus('all'); dateFilter.reset() }}
         actions={canManageMasters && <Button onClick={startAdd}><Plus className="h-4 w-4 mr-1" />Add Vendor</Button>}
       >
         <FilterSelect value={status} onChange={setStatus} options={STATUS_OPTIONS} />
+        {dateFilter.control}
       </FilterBar>
 
       <Card>
         <CardContent className="p-0">
         <PaginatedTable
           pagination={vendors}
-          empty={search || status !== 'all' ? 'No vendor matches this search' : 'No vendors yet — add the first one'}
+          empty={search || status !== 'all' || dateFilter.active ? 'No vendor matches these filters' : 'No vendors yet — add the first one'}
           columns={[
             { header: 'Code' }, { header: 'Vendor' }, { header: 'GSTIN' }, { header: 'State' },
             { header: 'Phone' }, { header: 'Terms' }, { header: 'Status' }, ...(canManageMasters ? [{ header: 'Actions' }] : []),

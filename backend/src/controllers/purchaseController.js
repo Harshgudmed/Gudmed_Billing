@@ -20,6 +20,7 @@
 import { z } from 'zod'
 import { db } from '../config/db.js'
 import { getOrgId, getActor } from '../lib/reqContext.js'
+import { dayRange } from '../lib/dates.js'
 import { ensurePurchaseDefaults } from '../lib/purchaseDefaults.js'
 import { parseGstin, isValidPan, isValidIfsc, cleanId, GST_STATES, stateCodeByName } from '../lib/gst.js'
 import { nextMasterCode } from '../lib/counters.js'
@@ -725,10 +726,11 @@ export async function getAll(req, res, next) {
     }
 
     if (resource === 'vendors') {
-      const { search, status } = req.query
+      const { search, status, startDate, endDate } = req.query
       const where = { organizationId: ORG_ID }
       if (status === 'active') where.isActive = true
       else if (status === 'inactive') where.isActive = false
+      if (startDate || endDate) where.createdAt = dayRange(startDate, endDate)
       const term = String(search || '').trim()
       if (term) {
         where.OR = ['name', 'code', 'gstNumber', 'phone', 'city', 'locality', 'district', 'contactPerson']
@@ -747,10 +749,11 @@ export async function getAll(req, res, next) {
 
     if (resource === 'items') {
       await ensurePurchaseDefaults(ORG_ID)
-      const { search, status, categoryId } = req.query
+      const { search, status, categoryId, startDate, endDate } = req.query
       const where = { organizationId: ORG_ID }
       if (status === 'active') where.isActive = true
       else if (status === 'inactive') where.isActive = false
+      if (startDate || endDate) where.createdAt = dayRange(startDate, endDate)
       itemSearchWhere(where, { search, categoryId })
       const body = await listResponse(db.item, { where, include: ITEM_INCLUDE, orderBy: { name: 'asc' }, req })
       // The store searches items to raise requests, without what the vendor was paid.

@@ -12,6 +12,7 @@ import { Plus, Pencil, Loader2, Trash2, Ban, RotateCcw } from 'lucide-react'
 import { toast } from 'sonner'
 import { PaginatedTable } from '@/components/common/PaginatedTable'
 import { FilterBar, FilterSelect } from '@/components/common/FilterBar'
+import { useDateFilter } from '@/components/common/DateFilter'
 import { useServerPagination } from '@/lib/useServerPagination'
 import { useDebounce } from '@/lib/useDebounce'
 import { useLiveData } from '@/lib/useLiveData'
@@ -61,12 +62,15 @@ export default function ItemsMaster({ units, categories, onChanged }) {
   const [search, setSearch] = useState('')
   const [status, setStatus] = useState('all')
   const [categoryFilter, setCategoryFilter] = useState(ALL)
+  const dateFilter = useDateFilter('all', { showClear: false })
   const debouncedSearch = useDebounce(search, 300)
   const items = useServerPagination(PURCHASE_ENDPOINT, {
     params: {
       resource: 'items', search: debouncedSearch,
       status: status === 'all' ? '' : status,
       categoryId: categoryFilter === ALL ? '' : categoryFilter,
+      startDate: dateFilter.range.startDate,
+      endDate: dateFilter.range.endDate,
     },
   })
   useLiveData('purchase', items.refresh)
@@ -179,19 +183,20 @@ export default function ItemsMaster({ units, categories, onChanged }) {
         search={search}
         onSearchChange={setSearch}
         placeholder="Search item name, code, HSN or other names (e.g. chadar)…"
-        active={!!search || status !== 'all' || categoryFilter !== ALL}
-        onClear={() => { setSearch(''); setStatus('all'); setCategoryFilter(ALL) }}
+        active={!!search || status !== 'all' || categoryFilter !== ALL || dateFilter.active}
+        onClear={() => { setSearch(''); setStatus('all'); setCategoryFilter(ALL); dateFilter.reset() }}
         actions={canManageMasters && <Button onClick={startAdd}><Plus className="h-4 w-4 mr-1" />Add Item</Button>}
       >
         <FilterSelect value={categoryFilter} onChange={setCategoryFilter} options={topCategoryOptions} className="w-64" />
         <FilterSelect value={status} onChange={setStatus} options={STATUS_OPTIONS} />
+        {dateFilter.control}
       </FilterBar>
 
       <Card>
         <CardContent className="p-0">
         <PaginatedTable
           pagination={items}
-          empty={search || status !== 'all' || categoryFilter !== ALL ? 'No item matches this search' : 'No items yet — add the first one'}
+          empty={search || status !== 'all' || categoryFilter !== ALL || dateFilter.active ? 'No item matches these filters' : 'No items yet — add the first one'}
           columns={[
             { header: 'Code' }, { header: 'Item' }, { header: 'Category' }, { header: 'Unit' },
             { header: 'GST' }, { header: 'Usual vendor' }, { header: 'Status' }, ...(canManageMasters ? [{ header: 'Actions' }] : []),
