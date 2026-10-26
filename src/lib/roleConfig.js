@@ -60,7 +60,7 @@ export const ROLES = {
     // the query, so this cannot widen what they see. Without it the dashboard's
     // "Today's Appointments → View All" button pointed at a route this role has
     // no entry for, and the catch-all bounced them back to OPD.
-    modules: ['dashboard', 'opd', 'appointments', 'queue', 'patients', 'doctorAccountability', 'ot', 'storeIndent'],
+    modules: ['dashboard', 'opd', 'appointments', 'queue', 'patients', 'doctorAccountability', 'ot', 'storeIndent', 'purchase'],
   },
   receptionist: {
     label: 'Receptionist',
@@ -73,7 +73,7 @@ export const ROLES = {
   nurse: {
     label: 'Nurse',
     home: 'dashboard',
-    modules: ['dashboard', 'preTriage', 'patients', 'ot', 'storeIndent'],
+    modules: ['dashboard', 'preTriage', 'patients', 'ot', 'storeIndent', 'purchase'],
   },
   pharmacist: {
     label: 'Pharmacist',

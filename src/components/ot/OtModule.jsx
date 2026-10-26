@@ -231,7 +231,7 @@ export default function OtModule() {
         {/* One loading / error / empty treatment for both views, so they can
             never disagree about what an empty day looks like. */}
         <div className="mt-4">
-          {loading ? (
+          {loading && bookings.length === 0 ? (
             <PanelMessage icon={<Loader2 className="h-5 w-5 mr-2 animate-spin" />} text="Loading cases…" />
           ) : error ? (
             <PanelMessage icon={<AlertCircle className="h-5 w-5 mr-2" />} text={error} tone="text-red-600" />

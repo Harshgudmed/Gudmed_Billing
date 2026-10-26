@@ -33,6 +33,7 @@ export async function getAll(req, res, next) {
       where.admissionDate = todayRange()
     }
     const searchWhere = patientSearchWhere(search, 'patient', (term) => [
+      { caseNumber: { contains: term, mode: 'insensitive' } }, // the ID column (DC0002 / DAY-2026-27-…)
       { procedure: { contains: term, mode: 'insensitive' } },
       { notes: { contains: term, mode: 'insensitive' } },
     ])
@@ -41,6 +42,7 @@ export async function getAll(req, res, next) {
       where,
       include: caseInclude,
       orderBy: { admissionDate: 'desc' },
+      take: 1000, // bound the read — day-care cases are date/status filtered, but never load the whole table unbounded
     })
     const bills = await billsOfRecords(db, ORG_ID, 'daycare', cases.map((c) => c.caseNumber))
     let rows = cases.map((c) => withBill(c, bills.get(c.caseNumber)))

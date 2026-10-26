@@ -9,6 +9,7 @@ import { purchaseApi } from '@/api/purchaseApi'
 import { showApiError } from '@/lib/apiRequest'
 import { useLiveData } from '@/lib/useLiveData'
 import VendorsMaster from './VendorsMaster'
+import BudgetsMaster from './BudgetsMaster'
 import ItemsMaster from './ItemsMaster'
 import RequestsList from './RequestsList'
 import OrdersList from './OrdersList'
@@ -50,6 +51,7 @@ const TAB_COLS = {
   4: 'sm:grid-cols-4', 5: 'sm:grid-cols-5', 6: 'sm:grid-cols-6', 7: 'sm:grid-cols-7',
   8: 'sm:grid-cols-4 xl:grid-cols-8', 9: 'sm:grid-cols-5 xl:grid-cols-9', 10: 'sm:grid-cols-5 xl:grid-cols-10',
   11: 'sm:grid-cols-6 xl:grid-cols-11', 12: 'sm:grid-cols-6 xl:grid-cols-12',
+  13: 'sm:grid-cols-7 xl:grid-cols-7',
 }
 
 export default function PurchaseModule() {
@@ -58,13 +60,15 @@ export default function PurchaseModule() {
   // How the Requests tab opens: set by the Overview (a card, a row, a search)
   // and re-keyed each time so the list starts from it. Each role opens on its
   // own work: the store on its requests, Finance on what waits for it.
+  // Doctor/Nurse: can raise requests but not buy, order or see money.
+  const isRequestOnly = !me.canBuy && me.canRaiseRequest
   const [intent, setIntent] = useState({ view: !me.seesEverything ? 'mine' : me.canBuy ? 'all' : 'to-approve', n: 0 })
   const [units, setUnits] = useState([])
   const [categories, setCategories] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
-  // Everyone lands on their own dashboard (PurchaseOverview shows each role its work).
-  const [tab, setTab] = useState('overview')
+  // Doctor/Nurse land directly on Requests (their only tab).
+  const [tab, setTab] = useState(isRequestOnly ? 'requests' : 'overview')
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -162,18 +166,19 @@ export default function PurchaseModule() {
     ? <span title={title} className={`rounded-full ${tone} px-1.5 text-[11px] font-bold text-white tabular-nums`}>{n}</span>
     : null)
   const tabs = [
-    { value: 'overview', label: 'Dashboard', show: true },
+    { value: 'overview', label: 'Dashboard', show: !isRequestOnly },
     { value: 'requests', label: 'Requests', show: true, badge: badge(toApprove) },
-    { value: 'rfqs', label: 'RFQ', show: me.canSeeRfqs },
-    { value: 'orders', label: 'Orders', show: true, badge: badge(me.seesEverything ? orderCounts.toApprove : orderCounts.toReceive, me.seesEverything ? 'bg-amber-500' : 'bg-blue-600') },
-    { value: 'stock', label: 'Stock', show: me.canSeeStock, badge: badge(dash?.stock?.belowReorder ?? 0, 'bg-red-500', 'At or under reorder level') },
-    { value: 'indents', label: 'Indents', show: me.canSeeIndents },
-    { value: 'returns', label: 'Returns', show: me.canSeeReturns },
-    { value: 'bills', label: 'Bills', show: me.canBill || me.canDecideBill, badge: badge(me.canDecideBill ? dash?.bills?.onHold?.count ?? 0 : 0) },
-    { value: 'payments', label: 'Payments', show: me.canSeePayments },
-    { value: 'reports', label: 'Reports', show: me.canSeeReports },
-    { value: 'vendors', label: 'Vendors', show: me.canSeeVendors },
-    { value: 'items', label: 'Items', show: me.canManageMasters },
+    { value: 'rfqs', label: 'RFQ', show: !isRequestOnly && me.canSeeRfqs },
+    { value: 'orders', label: 'Orders', show: !isRequestOnly, badge: badge(me.seesEverything ? orderCounts.toApprove : orderCounts.toReceive, me.seesEverything ? 'bg-amber-500' : 'bg-blue-600') },
+    { value: 'stock', label: 'Stock', show: !isRequestOnly && me.canSeeStock, badge: badge(dash?.stock?.belowReorder ?? 0, 'bg-red-500', 'At or under reorder level') },
+    { value: 'indents', label: 'Indents', show: !isRequestOnly && me.canSeeIndents },
+    { value: 'returns', label: 'Returns', show: !isRequestOnly && me.canSeeReturns },
+    { value: 'bills', label: 'Bills', show: !isRequestOnly && (me.canBill || me.canDecideBill), badge: badge(me.canDecideBill ? dash?.bills?.onHold?.count ?? 0 : 0) },
+    { value: 'payments', label: 'Payments', show: !isRequestOnly && me.canSeePayments },
+    { value: 'reports', label: 'Reports', show: !isRequestOnly && me.canSeeReports },
+    { value: 'vendors', label: 'Vendors', show: !isRequestOnly && me.canSeeVendors },
+    { value: 'items', label: 'Items', show: !isRequestOnly && me.canManageMasters },
+    { value: 'budgets', label: 'Budgets', show: !isRequestOnly && me.canManageMasters },
   ].filter((x) => x.show)
 
   return (
@@ -191,7 +196,7 @@ export default function PurchaseModule() {
           {me.canReceive && (
             <Button variant="outline" onClick={() => openOrders({ view: 'to-receive' })}><PackageCheck className="h-4 w-4 mr-2" />Receive Goods</Button>
           )}
-          {me.canBuy && (
+          {me.canRaiseRequest && (
             <Button onClick={() => openRequests({ view: 'mine', startNew: true })}><Plus className="h-4 w-4 mr-2" />New Request</Button>
           )}
         </div>
@@ -253,6 +258,12 @@ export default function PurchaseModule() {
             {me.canManageMasters && (
               <TabsContent value="items" className="mt-4">
                 <ItemsMaster units={units} categories={categories} />
+              </TabsContent>
+            )}
+
+            {me.canManageMasters && (
+              <TabsContent value="budgets" className="mt-4">
+                <BudgetsMaster />
               </TabsContent>
             )}
 

@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useRef } from 'react'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -7,7 +7,7 @@ import { Badge } from '@/components/ui/badge'
 import { TableCell, TableRow } from '@/components/ui/table'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
-import { Plus, Pencil, Loader2, Ban, RotateCcw } from 'lucide-react'
+import { Plus, Pencil, Loader2, Ban, RotateCcw, Upload, Trash2, FileText, ExternalLink, Download, CheckCircle, AlertTriangle, XCircle } from 'lucide-react'
 import { toast } from 'sonner'
 import { PaginatedTable } from '@/components/common/PaginatedTable'
 import { FilterBar, FilterSelect } from '@/components/common/FilterBar'
@@ -30,6 +30,12 @@ import { bankFromIfsc } from '@/lib/ifscBanks'
 // the GSTIN, IFSC shape); this form only helps while typing: once a GSTIN has
 // its 15 characters it shows the state and PAN it carries, so the person sees
 // what will be saved before pressing Save.
+
+const DOC_TYPE_LABEL = {
+  pan_cert: 'PAN Certificate',
+  gst_cert: 'GST Certificate',
+  other:    'Other Document',
+}
 
 const STATUS_OPTIONS = [
   { value: 'all', label: 'All vendors' },
@@ -88,6 +94,20 @@ export default function VendorsMaster({ onChanged }) {
   const [editingId, setEditingId] = useState(null)
   const [form, setForm] = useState(EMPTY)
   const [saving, setSaving] = useState(false)
+
+  // Documents tab — only loaded when editing an existing vendor
+  const [docs, setDocs] = useState([])
+  const [docsLoading, setDocsLoading] = useState(false)
+  const [uploading, setUploading] = useState(false)
+  const [docType, setDocType] = useState('pan_cert')
+  const [docLabel, setDocLabel] = useState('')
+  const fileInputRef = useRef(null)
+
+  // Bulk import dialog
+  const [importOpen, setImportOpen] = useState(false)
+  const [importing, setImporting] = useState(false)
+  const [importResult, setImportResult] = useState(null) // { summary, warnings, errors, errorFile }
+  const importFileRef = useRef(null)
   const set = (key) => (e) => setForm((f) => ({ ...f, [key]: e?.target ? e.target.value : e }))
   const setField = (key, value) => setForm((f) => ({ ...f, [key]: value }))
   // The IFSC names the bank; fill it in unless the person typed their own.
@@ -99,17 +119,94 @@ export default function VendorsMaster({ onChanged }) {
     })
   }
 
-  const startAdd = () => { setEditingId(null); setForm(EMPTY); setOpen(true) }
+  const startAdd = () => { setEditingId(null); setForm(EMPTY); setDocs([]); setOpen(true) }
   const startEdit = async (row) => {
     try {
-      const res = await purchaseApi.getVendor(row.id)
-      const v = res.data
+      const [vRes, dRes] = await Promise.all([purchaseApi.getVendor(row.id), purchaseApi.getVendorDocs(row.id)])
+      const v = vRes.data
       setForm(Object.fromEntries(Object.keys(EMPTY).map((k) => [k, v[k] == null ? '' : String(v[k])])))
+      setDocs(dRes.data ?? [])
       setEditingId(row.id)
+      setDocType('pan_cert')
+      setDocLabel('')
       setOpen(true)
     } catch (err) {
       showApiError(err, 'Could not open this vendor')
     }
+  }
+
+  const loadDocs = async (vendorId) => {
+    setDocsLoading(true)
+    try { setDocs((await purchaseApi.getVendorDocs(vendorId)).data ?? []) }
+    catch (err) { showApiError(err, 'Could not load documents') }
+    finally { setDocsLoading(false) }
+  }
+
+  const uploadDoc = async (file) => {
+    if (!editingId || !file) return
+    setUploading(true)
+    try {
+      await purchaseApi.uploadVendorDoc(editingId, docType, docLabel.trim() || null, file)
+      toast.success('Document uploaded')
+      setDocLabel('')
+      if (fileInputRef.current) fileInputRef.current.value = ''
+      await loadDocs(editingId)
+    } catch (err) {
+      showApiError(err, 'Could not upload document')
+    } finally {
+      setUploading(false)
+    }
+  }
+
+  const deleteDoc = async (doc) => {
+    if (!window.confirm(`Remove "${doc.label || doc.fileName}"?`)) return
+    try {
+      await purchaseApi.deleteVendorDoc(doc.id)
+      toast.success('Document removed')
+      setDocs((prev) => prev.filter((d) => d.id !== doc.id))
+    } catch (err) {
+      showApiError(err, 'Could not remove document')
+    }
+  }
+
+  const downloadTemplate = async () => {
+    try {
+      const blob = await purchaseApi.downloadVendorTemplate()
+      const url = URL.createObjectURL(blob instanceof Blob ? blob : new Blob([blob], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }))
+      const a = document.createElement('a')
+      a.href = url; a.download = 'vendor-import-template.xlsx'; a.click()
+      URL.revokeObjectURL(url)
+    } catch (err) { showApiError(err, 'Could not download template') }
+  }
+
+  const runImport = async (file) => {
+    if (!file) return
+    setImporting(true)
+    setImportResult(null)
+    try {
+      const res = await purchaseApi.importVendors(file)
+      setImportResult(res.data)
+      if (res.data.summary?.imported > 0) {
+        toast.success(`${res.data.summary.imported} vendor(s) imported`)
+        vendors.refresh()
+        onChanged?.()
+      }
+    } catch (err) {
+      showApiError(err, 'Import failed')
+    } finally {
+      setImporting(false)
+      if (importFileRef.current) importFileRef.current.value = ''
+    }
+  }
+
+  const downloadErrorFile = (errorFile) => {
+    const byteChars = atob(errorFile.base64)
+    const bytes = new Uint8Array(byteChars.length)
+    for (let i = 0; i < byteChars.length; i++) bytes[i] = byteChars.charCodeAt(i)
+    const url = URL.createObjectURL(new Blob([bytes], { type: errorFile.mimeType }))
+    const a = document.createElement('a')
+    a.href = url; a.download = errorFile.filename; a.click()
+    URL.revokeObjectURL(url)
   }
 
   const save = async () => {
@@ -170,7 +267,14 @@ export default function VendorsMaster({ onChanged }) {
         placeholder="Search vendor name, code, GSTIN, phone or city…"
         active={!!search || status !== 'all' || dateFilter.active}
         onClear={() => { setSearch(''); setStatus('all'); dateFilter.reset() }}
-        actions={canManageMasters && <Button onClick={startAdd}><Plus className="h-4 w-4 mr-1" />Add Vendor</Button>}
+        actions={canManageMasters && (
+          <div className="flex gap-2">
+            <Button variant="outline" onClick={() => { setImportResult(null); setImportOpen(true) }}>
+              <Upload className="h-4 w-4 mr-1" />Import vendors
+            </Button>
+            <Button onClick={startAdd}><Plus className="h-4 w-4 mr-1" />Add Vendor</Button>
+          </div>
+        )}
       >
         <FilterSelect value={status} onChange={setStatus} options={STATUS_OPTIONS} />
         {dateFilter.control}
@@ -216,6 +320,106 @@ export default function VendorsMaster({ onChanged }) {
         />
         </CardContent>
       </Card>
+
+      {/* ── Bulk Import Dialog ─────────────────────────────────── */}
+      <Dialog open={importOpen} onOpenChange={(v) => !importing && setImportOpen(v)}>
+        <DialogContent className="max-w-xl">
+          <DialogHeader>
+            <DialogTitle>Import Vendors from Excel</DialogTitle>
+            <DialogDescription>
+              Download the template, fill vendor details, and upload to create multiple vendors at once.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4">
+            {/* Step 1: Download template */}
+            <div className="rounded-md border p-3 space-y-2">
+              <p className="text-sm font-medium text-gray-700">Step 1 — Download the template</p>
+              <p className="text-xs text-gray-500">Fill in your vendors. Name is the only required column; GSTIN auto-fills state and PAN.</p>
+              <Button type="button" variant="outline" size="sm" onClick={downloadTemplate}>
+                <Download className="h-4 w-4 mr-1" />Download template (.xlsx)
+              </Button>
+            </div>
+
+            {/* Step 2: Upload filled file */}
+            <div className="rounded-md border p-3 space-y-2">
+              <p className="text-sm font-medium text-gray-700">Step 2 — Upload your filled file</p>
+              <p className="text-xs text-gray-500">Accepted: .xlsx or .csv · Max 10 MB</p>
+              <div className="flex items-center gap-2">
+                <input
+                  ref={importFileRef}
+                  type="file"
+                  accept=".xlsx,.csv"
+                  className="hidden"
+                  id="vendor-import-file"
+                  onChange={(e) => runImport(e.target.files?.[0])}
+                />
+                <Button type="button" size="sm" disabled={importing}
+                  onClick={() => importFileRef.current?.click()}>
+                  {importing ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <Upload className="h-4 w-4 mr-1" />}
+                  {importing ? 'Importing…' : 'Choose file & import'}
+                </Button>
+              </div>
+            </div>
+
+            {/* Results */}
+            {importResult && (
+              <div className="space-y-3">
+                {/* Summary tiles */}
+                <div className="grid grid-cols-3 gap-2">
+                  <div className="rounded-md bg-green-50 border border-green-200 px-3 py-2 text-center">
+                    <CheckCircle className="h-4 w-4 text-green-600 mx-auto mb-0.5" />
+                    <p className="text-lg font-bold text-green-700">{importResult.summary.imported}</p>
+                    <p className="text-xs text-green-600">Imported</p>
+                  </div>
+                  <div className="rounded-md bg-amber-50 border border-amber-200 px-3 py-2 text-center">
+                    <AlertTriangle className="h-4 w-4 text-amber-600 mx-auto mb-0.5" />
+                    <p className="text-lg font-bold text-amber-700">{importResult.summary.warnings}</p>
+                    <p className="text-xs text-amber-600">Warnings</p>
+                  </div>
+                  <div className="rounded-md bg-red-50 border border-red-200 px-3 py-2 text-center">
+                    <XCircle className="h-4 w-4 text-red-600 mx-auto mb-0.5" />
+                    <p className="text-lg font-bold text-red-700">{importResult.summary.failed}</p>
+                    <p className="text-xs text-red-600">Failed</p>
+                  </div>
+                </div>
+
+                {/* Warnings list */}
+                {importResult.warnings?.length > 0 && (
+                  <div className="rounded-md bg-amber-50 border border-amber-200 p-3 space-y-1 max-h-32 overflow-y-auto">
+                    <p className="text-xs font-semibold text-amber-700">Warnings (rows were still imported):</p>
+                    {importResult.warnings.map((w, i) => (
+                      <p key={i} className="text-xs text-amber-700">Row {w.row}: {w.reason}</p>
+                    ))}
+                  </div>
+                )}
+
+                {/* Failed rows + download */}
+                {importResult.errors?.length > 0 && (
+                  <div className="space-y-2">
+                    <div className="rounded-md bg-red-50 border border-red-200 p-3 space-y-1 max-h-32 overflow-y-auto">
+                      <p className="text-xs font-semibold text-red-700">Failed rows — fix and re-upload:</p>
+                      {importResult.errors.map((e, i) => (
+                        <p key={i} className="text-xs text-red-700">Row {e.row} ({e.name || '—'}): {e.reason}</p>
+                      ))}
+                    </div>
+                    {importResult.errorFile && (
+                      <Button type="button" variant="outline" size="sm" className="text-red-600 border-red-200"
+                        onClick={() => downloadErrorFile(importResult.errorFile)}>
+                        <Download className="h-4 w-4 mr-1" />Download error file (.xlsx)
+                      </Button>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setImportOpen(false)} disabled={importing}>Close</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={open} onOpenChange={(v) => !saving && setOpen(v)}>
         <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
@@ -287,6 +491,85 @@ export default function VendorsMaster({ onChanged }) {
                 <Input id="v-terms" value={form.paymentTermsDays} onChange={set('paymentTermsDays')} inputMode="numeric" placeholder="e.g. 30" />
               </Field>
             </Section>
+
+            {/* Documents — only available when editing an existing vendor */}
+            {editingId && (
+              <fieldset className="space-y-3">
+                <legend className="text-sm font-semibold text-gray-700 mb-2">Compliance Documents</legend>
+                <p className="text-xs text-gray-500">Upload PAN certificate, GST certificate or other compliance papers for this vendor.</p>
+
+                {/* Existing documents */}
+                {docsLoading ? (
+                  <div className="flex items-center gap-2 text-sm text-gray-500"><Loader2 className="h-4 w-4 animate-spin" />Loading documents…</div>
+                ) : docs.length === 0 ? (
+                  <p className="text-xs text-gray-400 italic">No documents uploaded yet.</p>
+                ) : (
+                  <div className="divide-y rounded-md border">
+                    {docs.map((d) => (
+                      <div key={d.id} className="flex items-center justify-between px-3 py-2 gap-2">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <FileText className="h-4 w-4 text-gray-400 shrink-0" />
+                          <div className="min-w-0">
+                            <p className="text-sm font-medium truncate">{d.label || d.fileName}</p>
+                            <p className="text-xs text-gray-500">{DOC_TYPE_LABEL[d.docType] || d.docType} · {d.fileName}</p>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-1 shrink-0">
+                          <a href={d.fileUrl} target="_blank" rel="noreferrer">
+                            <Button type="button" size="icon" variant="ghost" title="Open document" aria-label="Open document">
+                              <ExternalLink className="h-4 w-4 text-blue-600" />
+                            </Button>
+                          </a>
+                          {canManageMasters && (
+                            <Button type="button" size="icon" variant="ghost" title="Remove" aria-label="Remove document" onClick={() => deleteDoc(d)}>
+                              <Trash2 className="h-4 w-4 text-red-500" />
+                            </Button>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {/* Upload new document */}
+                {canManageMasters && (
+                  <div className="rounded-md border border-dashed p-3 space-y-2">
+                    <p className="text-xs font-medium text-gray-600">Upload a new document</p>
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                      <div className="space-y-1">
+                        <Label className="text-xs text-gray-500">Document type</Label>
+                        <Select value={docType} onValueChange={setDocType}>
+                          <SelectTrigger><SelectValue /></SelectTrigger>
+                          <SelectContent>
+                            {Object.entries(DOC_TYPE_LABEL).map(([v, l]) => <SelectItem key={v} value={v}>{l}</SelectItem>)}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="space-y-1 sm:col-span-2">
+                        <Label className="text-xs text-gray-500">Label <span className="font-normal text-gray-400">(optional, e.g. "GST cert Nov 2026")</span></Label>
+                        <Input value={docLabel} onChange={(e) => setDocLabel(e.target.value)} placeholder="Leave blank to use the file name" />
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <input
+                        ref={fileInputRef}
+                        type="file"
+                        accept=".jpg,.jpeg,.png,.pdf"
+                        className="hidden"
+                        id="vendor-doc-upload"
+                        onChange={(e) => uploadDoc(e.target.files?.[0])}
+                      />
+                      <Button type="button" variant="outline" size="sm" disabled={uploading}
+                        onClick={() => fileInputRef.current?.click()}>
+                        {uploading ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <Upload className="h-4 w-4 mr-1" />}
+                        {uploading ? 'Uploading…' : 'Browse & Upload'}
+                      </Button>
+                      <span className="text-xs text-gray-400">JPG, PNG or PDF · max 10 MB</span>
+                    </div>
+                  </div>
+                )}
+              </fieldset>
+            )}
           </div>
 
           <DialogFooter>

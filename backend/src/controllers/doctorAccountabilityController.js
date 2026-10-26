@@ -61,7 +61,11 @@ export async function handleGet(req, res, next) {
     let offset = parseInt(req.query.offset) || 0
     limit = Math.max(1, Math.min(limit, 1000))
     offset = Math.max(0, offset)
-    const pageArgs = wantsPaging ? { take: limit, skip: offset } : {}
+    // When no explicit paging is asked for, the bounded dropdowns still need the
+    // full small set (e.g. ~1,100 doctors), but the read must not be unbounded —
+    // a 2,000 safety cap keeps every current caller working while stopping a
+    // runaway load on a very large hospital.
+    const pageArgs = wantsPaging ? { take: limit, skip: offset } : { take: 2000 }
 
     if (resource === 'doctors') {
       const where = { organizationId: ORG_ID, role: 'doctor', isActive: true, ...(myDoctorId ? { id: myDoctorId } : {}) }

@@ -11,9 +11,9 @@
 // is no role and every module is open, as on every other route.
 
 export const ROLE_MODULES = {
-  doctor: ['dashboard', 'opd', 'appointments', 'queue', 'patients', 'doctorAccountability', 'ot', 'storeIndent'],
+  doctor: ['dashboard', 'opd', 'appointments', 'queue', 'patients', 'doctorAccountability', 'ot', 'storeIndent', 'purchase'],
   receptionist: ['dashboard', 'appointments', 'preTriage', 'queue', 'patients', 'billing', 'ot', 'storeIndent'],
-  nurse: ['dashboard', 'preTriage', 'patients', 'ot', 'storeIndent'],
+  nurse: ['dashboard', 'preTriage', 'patients', 'ot', 'storeIndent', 'purchase'],
   pharmacist: ['dashboard', 'pharmacy', 'storeIndent'],
   billing: ['dashboard', 'billing', 'storeIndent'],
   finance_controller: ['dashboard', 'billing', 'purchase', 'storeIndent'],

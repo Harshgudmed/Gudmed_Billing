@@ -86,7 +86,7 @@ import {
 // hand-rolled bare HTML, so it printed as unstyled browser default.
 import { gudmedDocument, infoBox, escapeHtml } from "@/lib/printTemplate";
 import { stockBadge, statusBadge } from "./pharmacyHelpers";
-import { formatMoney } from "@/lib/format";
+import { formatMoney, localYmd } from "@/lib/format";
 import DashboardTab from "./tabs/DashboardTab";
 import InventoryTab from "./tabs/InventoryTab";
 import PrescriptionsTab from "./tabs/PrescriptionsTab";
@@ -164,12 +164,16 @@ export default function PharmacyModule() {
   });
 
   const [stats, setStats] = useState(null);
+  // The search narrows only the dashboard's low-stock / expiring preview lists
+  // (done in the DB now, so a match past the first 20 is still found); the KPI
+  // counts it returns stay whole-pharmacy. Re-reads when the debounced search
+  // changes because fetchStats is a dependency of the effect below.
   const fetchStats = useCallback(async () => {
     try {
-      const res = await client.get("/pharmacy/stats");
+      const res = await client.get("/pharmacy/stats", { params: { search: debouncedDashSearch } });
       if (res.success) setStats(res.data);
     } catch { /* ignore */ }
-  }, []);
+  }, [debouncedDashSearch]);
 
   // Live over the app's WebSocket: the server announces every write in this
   // hospital (middleware/liveUpdates.js) and every list here re-reads itself —
@@ -180,7 +184,7 @@ export default function PharmacyModule() {
     drugPage.refresh(); batchPage.refresh(); poPage.refresh();
     rxPage.refresh(); pendingRxPage.refresh(); salePage.refresh();
     fetchStats();
-  }, [drugPage.refresh, batchPage.refresh, poPage.refresh, rxPage.refresh, pendingRxPage.refresh, salePage.refresh, fetchStats]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [drugPage.refresh, batchPage.refresh, poPage.refresh, rxPage.refresh, pendingRxPage.refresh, salePage.refresh, fetchStats]);
   useLiveData(["pharmacy", "consultations", "billing"], reloadAll);
 
   const [showDrugDialog, setShowDrugDialog] = useState(false);
@@ -221,7 +225,7 @@ export default function PharmacyModule() {
       if (res?.found && res.data) {
         const d = res.data;
         const batch = d.batches?.[0];
-        const toDateInput = (v) => (v ? new Date(v).toISOString().slice(0, 10) : "");
+        const toDateInput = (v) => (v ? localYmd(new Date(v)) : "");
         setDrugForm((p) => ({
           ...p,
           barcode,
@@ -434,11 +438,19 @@ export default function PharmacyModule() {
     const drugNames = items.map((i) => i.drugName || "");
     const interactions = checkDrugInteractions(drugNames);
     const allergyWarnings = [];
+    // Never let a failed allergy check look like "no allergies": if the patient
+    // record cannot be loaded (network / 500 / timeout) or its allergy data
+    // cannot be read, tell the pharmacist the check did not run instead of
+    // silently showing nothing.
+    let allergyCheckOk = false;
     try {
       const res = await client.get(`/patients?id=${rx.patientId}`);
       if (res.success && res.data) {
         let allergies = [];
-        try { allergies = typeof res.data.allergies === "string" ? JSON.parse(res.data.allergies) : res.data.allergies || []; } catch { allergies = []; }
+        try {
+          allergies = typeof res.data.allergies === "string" ? JSON.parse(res.data.allergies) : res.data.allergies || [];
+          allergyCheckOk = true;
+        } catch { allergyCheckOk = false; }
         for (const allergen of allergies) {
           const al = allergen.toLowerCase();
           for (const dn of drugNames) {
@@ -447,7 +459,12 @@ export default function PharmacyModule() {
           }
         }
       }
-    } catch { }
+    } catch {
+      allergyCheckOk = false;
+    }
+    if (!allergyCheckOk) {
+      allergyWarnings.push({ severity: "high", message: "Allergy check could not be completed — the patient's record could not be loaded. Verify the patient's allergies manually before dispensing." });
+    }
     setDispenseWarnings([...allergyWarnings, ...interactions]);
     setShowDispenseDialog(true);
   };
@@ -680,9 +697,12 @@ ${rx.notes ? `<div class="note-bar"><strong>Notes:</strong> ${escapeHtml(rx.note
   };
 
   const expiringBatches = stats?.expiringBatches ?? [];
+  const expiringCount = stats?.expiringCount ?? 0;
   const totalStockValue = stats?.stockValue ?? 0;
   const inStockCount = stats?.inStock ?? 0;
-  const lowStockCount = stats ? Math.max(0, stats.lowStock - stats.outOfStock) : 0;
+  // The server now excludes empties from lowStock (they are Out of Stock), so no
+  // more subtracting outOfStock to undo the double-count here.
+  const lowStockCount = stats?.lowStock ?? 0;
   const outStockCount = stats?.outOfStock ?? 0;
   const lowStockDrugs = stats?.lowStockDrugs ?? [];
 
@@ -753,6 +773,7 @@ ${rx.notes ? `<div class="note-bar"><strong>Notes:</strong> ${escapeHtml(rx.note
           prescriptions={rxPage.rows}
           pendingRx={pendingRx}
           expiringBatches={expiringBatches}
+          expiringCount={expiringCount}
           totalStockValue={totalStockValue}
           todaySalesTotal={todaySalesTotal}
           inStockCount={inStockCount}

@@ -22,7 +22,7 @@ import { startOfToday, ymdInZone, dayRange } from '../lib/dates.js'
 import { nextSeriesNumber } from '../lib/counters.js'
 import { listResponse } from '../lib/pagination.js'
 import { auditIpd } from '../inpatient/audit.js'
-import { canBuy, canSeeBills, isAdmin, ownsOrAdmin, othersDraftsHidden, blank, validationError, sendError, seesMoney, seesEverything, hideMoney, MONEY } from '../lib/purchaseAccess.js'
+import { canBuy, canRaiseRequest, canSeeBills, isAdmin, ownsOrAdmin, othersDraftsHidden, blank, validationError, sendError, seesMoney, seesEverything, hideMoney, MONEY } from '../lib/purchaseAccess.js'
 import { resolveLines } from '../lib/purchaseLines.js'
 import { orderFigures, HOLDING } from './purchaseOrderController.js'
 import { requestChanged } from '../lib/purchaseNotify.js'
@@ -435,7 +435,7 @@ function writeRequest(ORG_ID, id, audit, work) {
 export async function prCreate(req, res, next) {
   try {
     const ORG_ID = getOrgId(req)
-    if (!canBuy(req)) throw forbidden('Only store and purchase staff raise purchase requests')
+    if (!canRaiseRequest(req)) throw forbidden('Only store, purchase staff, doctors and nurses raise purchase requests')
     const parsed = createSchema.safeParse(req.body)
     if (!parsed.success) return validationError(res, parsed.error)
     const { departmentId, requiredBy, priority, purpose, lines } = parsed.data

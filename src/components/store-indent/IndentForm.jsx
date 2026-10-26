@@ -27,11 +27,13 @@ import LoadFailed from '@/components/purchase/LoadFailed'
 
 let nextKey = 1
 const blankLine = () => ({ key: nextKey++, itemId: '', itemName: '', item: null, unitId: '', quantity: '', note: '' })
-const NOT_IN_STOCK = 'Not in stock — the store will raise a purchase request'
+const NOT_IN_STOCK = 'Not available in store — a Purchase Request will be raised automatically'
 
 export default function IndentForm({ open, onOpenChange, onSaved }) {
   const [form, setForm] = useState({ departmentId: '', priority: 'normal', neededBy: '', purpose: '' })
   const [departments, setDepartments] = useState([])
+  const [categories, setCategories] = useState([])
+  const [categoryId, setCategoryId] = useState('')
   const [myDepartment, setMyDepartment] = useState(null)
   const [lines, setLines] = useState([blankLine()])
   const [loading, setLoading] = useState(false)
@@ -43,10 +45,10 @@ export default function IndentForm({ open, onOpenChange, onSaved }) {
   const [itemOptions, setItemOptions] = useState({})
   const [searchingLine, setSearchingLine] = useState(null)
   const found = useRef(new Map())
-  const searchItems = useCallback(async (key, q) => {
+  const searchItems = useCallback(async (key, q, catId) => {
     setSearchingLine(key)
     try {
-      const r = await indentApi.searchItems({ search: q, page: 1, limit: 30 })
+      const r = await indentApi.searchItems({ search: q, page: 1, limit: 30, ...(catId ? { categoryId: catId } : {}) })
       const rows = r?.data ?? []
       rows.forEach((it) => found.current.set(it.id, it))
       setItemOptions((o) => ({
@@ -69,10 +71,12 @@ export default function IndentForm({ open, onOpenChange, onSaved }) {
     setLoadFailed(false)
     setForm({ departmentId: '', priority: 'normal', neededBy: '', purpose: '' })
     setLines([blankLine()])
+    setCategoryId('')
     indentApi.getForm()
       .then((r) => {
         if (!alive) return
         setDepartments(r.data?.departments ?? [])
+        setCategories(r.data?.categories ?? [])
         setMyDepartment(r.data?.myDepartment ?? null)
         if (r.data?.myDepartment) setForm((f) => ({ ...f, departmentId: r.data.myDepartment.id }))
       })
@@ -117,8 +121,11 @@ export default function IndentForm({ open, onOpenChange, onSaved }) {
     <Dialog open={open} onOpenChange={(v) => !saving && onOpenChange(v)}>
       <DialogContent className="max-w-4xl max-h-[92vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>New indent to the store</DialogTitle>
-          <DialogDescription>Ask for what your department needs. The store gives what it has straight away.</DialogDescription>
+          <DialogTitle>Request Items from Store</DialogTitle>
+          <DialogDescription>
+            Fill this form to request supplies for your department. Items available in stock will be issued immediately.
+            Items not in stock will automatically trigger a Purchase Request.
+          </DialogDescription>
         </DialogHeader>
 
         {loading ? (
@@ -129,7 +136,7 @@ export default function IndentForm({ open, onOpenChange, onSaved }) {
           <div className="space-y-5">
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div className="space-y-1">
-                <Label htmlFor="ind-dept">Department *</Label>
+                <Label htmlFor="ind-dept">Requesting Department <span className="text-red-500">*</span></Label>
                 {myDepartment ? (
                   <p id="ind-dept" className="flex h-9 items-center rounded-md border bg-gray-50 px-3 text-sm">{myDepartment.name}</p>
                 ) : (
@@ -138,39 +145,60 @@ export default function IndentForm({ open, onOpenChange, onSaved }) {
                     options={departments.map((d) => ({ value: d.id, label: d.name }))}
                     value={form.departmentId}
                     onChange={(v) => setForm((f) => ({ ...f, departmentId: v }))}
-                    placeholder="Which department needs it?"
-                    emptyText="No department — an administrator adds them in Settings"
+                    placeholder="Select your department…"
+                    emptyText="No departments found — ask administrator to add them in Settings"
                   />
                 )}
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1">
-                  <Label htmlFor="ind-priority">Priority</Label>
+                  <Label htmlFor="ind-priority">Urgency Level</Label>
                   <Select value={form.priority} onValueChange={(v) => setForm((f) => ({ ...f, priority: v }))}>
                     <SelectTrigger id="ind-priority"><SelectValue /></SelectTrigger>
                     <SelectContent>{Object.entries(PRIORITY).map(([v, p]) => <SelectItem key={v} value={v}>{p.label}</SelectItem>)}</SelectContent>
                   </Select>
                 </div>
                 <div className="space-y-1">
-                  <Label htmlFor="ind-by">Needed by</Label>
+                  <Label htmlFor="ind-by">Required By (Date)</Label>
                   <Input id="ind-by" type="date" min={localYmd()} value={form.neededBy} onChange={(e) => setForm((f) => ({ ...f, neededBy: e.target.value }))} />
                 </div>
               </div>
               <div className="space-y-1 sm:col-span-2">
-                <Label htmlFor="ind-purpose">What is it for?{form.priority !== 'normal' && ' *'}</Label>
+                <Label htmlFor="ind-purpose">Purpose / Reason for Request{form.priority !== 'normal' && <span className="text-red-500"> *</span>}</Label>
                 <Textarea id="ind-purpose" rows={2} value={form.purpose} onChange={(e) => setForm((f) => ({ ...f, purpose: e.target.value }))}
-                  placeholder="e.g. Weekly restock for ICU" />
-                {needsReason && <p className="text-xs text-red-600">Say why it is {PRIORITY[form.priority].label.toLowerCase()} — the store reads that first</p>}
+                  placeholder="e.g. Monthly ICU consumables restock, OT preparation for surgery on 16-Oct" />
+                {needsReason && <p className="text-xs text-red-600">Please mention the reason — required for {PRIORITY[form.priority].label.toLowerCase()} priority requests</p>}
               </div>
             </div>
 
             <div className="space-y-2">
               <div className="flex items-center justify-between">
-                <h3 className="text-sm font-semibold text-gray-700">Items</h3>
+                <div>
+                  <h3 className="text-sm font-semibold text-gray-700">Items to Request</h3>
+                  <p className="text-xs text-gray-500 mt-0.5">Search by item name or code. Filter by category to narrow results.</p>
+                </div>
                 <Button type="button" size="sm" variant="outline" onClick={() => setLines((ls) => [...ls, blankLine()])} disabled={lines.length >= 100}>
-                  <Plus className="h-4 w-4 mr-1" />Add item
+                  <Plus className="h-4 w-4 mr-1" />Add Another Item
                 </Button>
               </div>
+              {categories.length > 0 && (
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="text-xs text-gray-500 font-medium">Filter by category:</span>
+                  <button
+                    type="button"
+                    onClick={() => { setCategoryId(''); setItemOptions({}) }}
+                    className={`text-xs px-3 py-1 rounded-full border transition-colors ${!categoryId ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-600 border-gray-300 hover:border-blue-400'}`}
+                  >All</button>
+                  {categories.map((c) => (
+                    <button
+                      key={c.id}
+                      type="button"
+                      onClick={() => { setCategoryId(c.id); setItemOptions({}) }}
+                      className={`text-xs px-3 py-1 rounded-full border transition-colors ${categoryId === c.id ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-600 border-gray-300 hover:border-blue-400'}`}
+                    >{c.name}</button>
+                  ))}
+                </div>
+              )}
               <div className="divide-y rounded-md border">
                 {lines.map((l, i) => {
                   const units = unitsOf(l.item)
@@ -180,20 +208,20 @@ export default function IndentForm({ open, onOpenChange, onSaved }) {
                         <SearchableSelect
                           className="w-full"
                           options={itemOptions[l.key] || []}
-                          onSearch={(q) => searchItems(l.key, q)}
+                          onSearch={(q) => searchItems(l.key, q, categoryId)}
                           minSearchLength={0}
                           loading={searchingLine === l.key}
                           value={l.itemId}
                           selectedLabel={l.itemName}
                           onChange={(v) => pickItem(l.key, v)}
-                          placeholder="Choose or search an item…"
-                          searchPlaceholder="Item name, code or other name"
-                          emptyText="No such item in the store's list — ask the purchase team"
+                          placeholder="Search item by name or code…"
+                          searchPlaceholder="Type item name, code or category"
+                          emptyText="Item not found — contact Purchase team to add it"
                         />
                         {l.item && (l.item.inStock
                           ? <Badge variant="outline" className="border-green-200 bg-green-50 text-green-700">In stock</Badge>
                           : <p className="text-xs font-medium text-amber-700">{NOT_IN_STOCK}</p>)}
-                        <Input className="h-8 text-xs" aria-label={`Note for line ${i + 1}`} placeholder="Note (size, brand…) — optional"
+                        <Input className="h-8 text-xs" aria-label={`Note for line ${i + 1}`} placeholder="Specifications (size, brand, colour…) — optional"
                           value={l.note} onChange={(e) => setLine(l.key, { note: e.target.value })} />
                       </div>
                       <div className="grid grid-cols-[1fr_auto_auto] gap-2 sm:col-span-6 sm:grid-cols-[9.5rem_1fr_auto]">
@@ -218,9 +246,9 @@ export default function IndentForm({ open, onOpenChange, onSaved }) {
         )}
 
         <DialogFooter className="gap-2">
-          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={saving}>Close</Button>
+          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={saving}>Cancel</Button>
           <Button onClick={save} disabled={saving || loading || loadFailed || !ready}>
-            {saving ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Send className="h-4 w-4 mr-2" />}Send to the store
+            {saving ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Send className="h-4 w-4 mr-2" />}Submit Request to Store
           </Button>
         </DialogFooter>
       </DialogContent>

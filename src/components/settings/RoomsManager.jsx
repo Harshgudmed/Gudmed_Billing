@@ -3,6 +3,7 @@ import { toast } from 'sonner'
 import { Plus, Trash2, Clock, ShieldAlert, X, Info, Search, ChevronDown, ChevronRight, Building2, Download, Upload, FileSpreadsheet } from 'lucide-react'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import client from '@/api/client'
+import { localYmd } from '@/lib/format'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -96,7 +97,7 @@ function BulkMenu({ config, onImported }) {
   }
 
   function exportData() {
-    const date = new Date().toISOString().slice(0, 10)
+    const date = localYmd()
     client.get(`${config.path}/export`, { responseType: 'blob' })
       .then((blob) => saveBlob(blob, `${config.exportPrefix}_${date}.xlsx`))
       .catch(() => toast.error('Export failed'))
@@ -627,7 +628,9 @@ export default function RoomsManager() {
 
   const activeFloor = floors.find((f) => f.id === activeFloorId)
 
-  if (loading) return <p className="text-gray-400 text-sm py-8 text-center">Loading rooms…</p>
+  // First load only — a live refresh or a floor switch keeps the current view
+  // instead of blanking the whole panel to this spinner.
+  if (loading && floors.length === 0) return <p className="text-gray-400 text-sm py-8 text-center">Loading rooms…</p>
 
   return (
     <Card>

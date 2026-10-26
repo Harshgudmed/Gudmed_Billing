@@ -1070,39 +1070,20 @@ export default function SettingsModule() {
               <CardDescription>Manage database backups and data recovery</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div className="p-4 bg-primary/10 border border-primary/20 rounded-lg">
+              {/* Honest status: backups are handled by the managed database host,
+                  not by this screen. The previous hard-coded "daily 2:00 AM / 245 MB"
+                  rows implied an in-app backup system that does not exist. */}
+              <div className="p-4 bg-amber-50 border border-amber-200 rounded-lg">
                 <div className="flex items-center gap-2 mb-2">
-                  <CheckCircle className="h-5 w-5 text-primary" />
-                  <span className="font-medium text-primary">Automatic Backups</span>
+                  <Database className="h-5 w-5 text-amber-600" />
+                  <span className="font-medium text-amber-800">Backups are managed by the database host</span>
                 </div>
-                <p className="text-sm text-primary/80">Daily backups are automatically created at 2:00 AM. Last backup: Today at 2:00 AM</p>
-              </div>
-              <div className="mt-4">
-                <h4 className="font-medium mb-2">Recent Backups</h4>
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Date</TableHead>
-                      <TableHead>Size</TableHead>
-                      <TableHead>Type</TableHead>
-                      <TableHead>Actions</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    <TableRow>
-                      <TableCell>Today, 2:00 AM</TableCell>
-                      <TableCell>245 MB</TableCell>
-                      <TableCell><Badge variant="outline">Automatic</Badge></TableCell>
-                      <TableCell><Button variant="ghost" size="sm">Download</Button></TableCell>
-                    </TableRow>
-                    <TableRow>
-                      <TableCell>Yesterday, 2:00 AM</TableCell>
-                      <TableCell>243 MB</TableCell>
-                      <TableCell><Badge variant="outline">Automatic</Badge></TableCell>
-                      <TableCell><Button variant="ghost" size="sm">Download</Button></TableCell>
-                    </TableRow>
-                  </TableBody>
-                </Table>
+                <p className="text-sm text-amber-700">
+                  This hospital's data is stored in a managed PostgreSQL database. Backup schedule,
+                  retention and restore are configured in the hosting provider's console — not from this
+                  screen. In-app backup download and restore are not available yet. Please confirm the
+                  provider's backup and recovery settings with your administrator.
+                </p>
               </div>
             </CardContent>
           </Card>

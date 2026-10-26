@@ -268,7 +268,9 @@ export default function DisplayBoardsModule() {
     return [...byFloor.values()].sort((a, b) => a.sortOrder - b.sortOrder)
   }, [screens, boardSearch])
 
-  if (loading) return <div className="p-8 text-center text-gray-500">Loading Display Boards...</div>
+  // Only on the FIRST load (no screens yet) — a live refresh keeps the boards
+  // on screen instead of flashing this spinner on every change.
+  if (loading && screens.length === 0) return <div className="p-8 text-center text-gray-500">Loading Display Boards...</div>
 
   return (
     <div className="space-y-6 p-6">

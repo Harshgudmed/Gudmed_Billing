@@ -325,6 +325,49 @@ export async function getRecords(req, res, next) {
   }
 }
 
+// GET /patients/:id/documents?consultationId=&admissionId=
+// A patient's uploaded documents, newest first. Pass a consultationId (OPD) or
+// admissionId (IPD) to see only the ones tagged to that visit — the same panel
+// drives the patient profile (no filter) and a single OPD/IPD visit.
+export async function listDocuments(req, res, next) {
+  try {
+    const organizationId = getOrgId(req)
+    const { id } = req.params
+    const { consultationId, admissionId } = req.query
+
+    const patient = await db.patient.findFirst({ where: { id, organizationId }, select: { id: true } })
+    if (!patient) return res.status(404).json({ success: false, error: 'Patient not found' })
+    // A doctor sees documents only for their own patients, as everywhere else.
+    if (doctorPatientFilter(req) && !(await doctorOwnsPatient(req.user.userId, id))) {
+      return res.status(404).json({ success: false, error: 'Patient not found' })
+    }
+
+    const where = { patientId: id, organizationId }
+    if (consultationId) where.consultationId = consultationId
+    if (admissionId) where.admissionId = admissionId
+
+    // Cap the read: a patient's document history must not load unbounded into
+    // the response/memory. 200 is far above any real per-patient or per-visit
+    // document count, and the newest are kept (orderBy desc).
+    const documents = await db.patientDocument.findMany({ where, orderBy: { uploadedAt: 'desc' }, take: 200 })
+
+    // uploadedById is a plain column (no relation), so the uploader's name is
+    // resolved in one extra lookup rather than a join.
+    const uploaderIds = [...new Set(documents.map((d) => d.uploadedById).filter(Boolean))]
+    const uploaders = uploaderIds.length
+      ? await db.user.findMany({ where: { id: { in: uploaderIds } }, select: { id: true, fullName: true } })
+      : []
+    const nameById = Object.fromEntries(uploaders.map((u) => [u.id, u.fullName]))
+
+    res.json({
+      success: true,
+      data: documents.map((d) => ({ ...d, uploadedByName: d.uploadedById ? nameById[d.uploadedById] || null : null })),
+    })
+  } catch (err) {
+    next(err)
+  }
+}
+
 export async function create(req, res, next) {
   try {
     const organizationId = getOrgId(req)

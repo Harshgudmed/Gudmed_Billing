@@ -25,6 +25,7 @@ export default function DashboardTab({
   drugs = [],
   prescriptions = [],
   expiringBatches = [],
+  expiringCount = 0,
   totalStockValue,
   todaySalesTotal,
   inStockCount,
@@ -70,17 +71,19 @@ export default function DashboardTab({
             color: "text-blue-600",
           },
           {
+            // lowStockCount excludes empties (those are Out of Stock) — the two
+            // cards no longer double-count a drug that has run to zero.
             label: "Low Stock",
-            value: stats?.lowStock ?? drugs.filter(
+            value: lowStockCount ?? drugs.filter(
               (d) =>
                 (d.quantityInStock || 0) > 0 &&
-                (d.quantityInStock || 0) < (d.reorderLevel || 10),
+                (d.quantityInStock || 0) <= (d.reorderLevel || 10),
             ).length,
             color: "text-yellow-600",
           },
           {
             label: "Out of Stock",
-            value: stats?.outOfStock ?? drugs.filter((d) => (d.quantityInStock || 0) === 0)
+            value: outStockCount ?? drugs.filter((d) => (d.quantityInStock || 0) === 0)
               .length,
             color: "text-red-600",
           },
@@ -91,8 +94,10 @@ export default function DashboardTab({
             color: "text-purple-600",
           },
           {
+            // The whole-pharmacy count, not the 20-row preview's length (which
+            // capped the card at 20 and shrank when the preview was searched).
             label: "Expiring (90d)",
-            value: expiringBatches.length,
+            value: expiringCount,
             color: "text-orange-600",
           },
           // {

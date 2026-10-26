@@ -887,9 +887,12 @@ export default function AppointmentsModule() {
     printAppointmentCard(appointment, orgInfo);
 
   // One bump re-runs every effect on this screen — the list, the week, the
-  // calendar counts and the stat cards all depend on refreshCount.
+  // calendar counts and the stat cards all depend on refreshCount. The
+  // reference-data refresh is SILENT so a status change or a live update does
+  // not blank the whole screen with the full-page spinner (that flash looked
+  // like a page reload on every button click).
   const handleRefresh = () => {
-    fetchData();
+    fetchData({ silent: true });
     setRefreshCount((count) => count + 1);
   };
 

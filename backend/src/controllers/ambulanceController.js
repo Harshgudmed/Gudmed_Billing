@@ -30,6 +30,7 @@ export async function getAll(req, res, next) {
       where,
       include: { patient: { select: patientSelect } },
       orderBy: { tripDate: 'desc' },
+      take: 1000, // bound the read — never load the whole trips table unbounded
     })
     // Each trip's money is read off its bill (lib/invoiceFulfillment.js).
     const bills = await billsOfRecords(db, ORG_ID, 'ambulance', trips.map((t) => t.tripNumber))

@@ -1,6 +1,6 @@
 import { useState, useCallback, lazy, Suspense } from 'react'
 import { toast } from 'sonner'
-import { RefreshCw, Users, Search, MonitorPlay } from 'lucide-react'
+import { RefreshCw, Users, Search, MonitorPlay, ArrowLeft } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -12,6 +12,7 @@ import { useDebounce } from '@/lib/useDebounce'
 import { useServerPagination } from '@/lib/useServerPagination'
 import { useLiveData } from '@/lib/useLiveData'
 import { useEnabledModules } from '@/lib/useEnabledModules'
+import { useAuth } from '@/lib/auth'
 import client from '@/api/client'
 // Both are behind lazy() because they are whole modules living in this module's
 // tabs, and a static import puts them in the Queue route's bundle whether or not
@@ -22,6 +23,9 @@ import client from '@/api/client'
 const AppointmentsModule = lazy(() => import('@/components/appointments/AppointmentsModule'))
 const BillingModule = lazy(() => import('@/components/billing/BillingModule'))
 const SelfRegistrationModule = lazy(() => import('@/components/registration/SelfRegistrationModule'))
+// TV Boards management (map rooms to screens) — admin only, opened from the
+// header button in place of the queue tabs (also lives in Settings).
+const DisplayBoardsModule = lazy(() => import('@/components/display-boards/DisplayBoardsModule'))
 import { QueueRow } from '@/components/queue/QueueRow'
 import { QueueEmptyState } from '@/components/queue/QueueEmptyState'
 
@@ -90,6 +94,13 @@ export default function QueueModule() {
   // Billing is not a doctor's module: the tab showed a doctor every invoice in
   // the hospital (the server now refuses that read too).
   const showBilling = useEnabledModules().canOpen('billing')
+  // TV Boards is a configuration screen (add screens, map rooms), kept to
+  // administrators — the same audience as its Settings tab.
+  const { user } = useAuth()
+  const showTvBoards = user?.role === 'admin'
+  // When the admin opens TV Boards from the header, it replaces the queue tabs
+  // in place (with a Back button) rather than navigating away.
+  const [boardsOpen, setBoardsOpen] = useState(false)
   const [updatingId, setUpdatingId] = useState(null)
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState('all')
@@ -196,11 +207,29 @@ export default function QueueModule() {
             <MonitorPlay className="h-4 w-4 mr-1" />
             Open Display Board
           </Button>
+          {/* TV Boards management (map rooms to screens), admin only — opens its
+              own full-screen window, next to the display board button. */}
+          {showTvBoards && !boardsOpen && (
+            <Button variant="outline" onClick={() => setBoardsOpen(true)}>
+              <MonitorPlay className="h-4 w-4 mr-1" />
+              TV Boards
+            </Button>
+          )}
           {/* No Refresh button: the waiting list is pushed over the hospital's
               socket (useLiveData above), so it is already up to date. */}
         </div>
       </div>
 
+      {boardsOpen ? (
+        <div className="space-y-3">
+          <Button variant="ghost" size="sm" onClick={() => setBoardsOpen(false)}>
+            <ArrowLeft className="h-4 w-4 mr-1 text-bold" />Back to Queue
+          </Button>
+          <Suspense fallback={<TabLoading name="TV Boards" />}>
+            <DisplayBoardsModule />
+          </Suspense>
+        </div>
+      ) : (
       <Tabs value={activeTab} onValueChange={setActiveTab}>
         <TabsList className="h-auto flex-wrap justify-start">
           <TabsTrigger value="queue">Queue</TabsTrigger>
@@ -309,6 +338,7 @@ export default function QueueModule() {
           </TabsContent>
         )}
       </Tabs>
+      )}
     </div>
   )
 }

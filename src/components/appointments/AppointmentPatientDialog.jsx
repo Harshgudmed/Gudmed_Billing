@@ -1,12 +1,13 @@
 import { format } from "date-fns";
 import { drName } from "@/lib/utils";
 import { formatMoney as fmtMoney } from "@/lib/format";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Loader2, Users, CalendarDays, Clock, XCircle, IndianRupee } from "lucide-react";
+import { Loader2, Users, CalendarDays, Clock, XCircle, IndianRupee, Paperclip } from "lucide-react";
+import PatientDocumentsPanel from "@/components/common/PatientDocumentsPanel";
 import { getFullName, calcAge as calculateAge, initials } from "@/lib/patient";
 
 // Trimmed copy of patients/components/PatientProfile.jsx's view dialog — same
@@ -79,9 +80,10 @@ export default function AppointmentPatientDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+      <DialogContent className="max-w-4xl w-[95vw] max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Patient Details</DialogTitle>
+          <DialogDescription className="sr-only">Patient profile, appointment history and uploaded documents.</DialogDescription>
         </DialogHeader>
         {patientLoading ? (
           <div className="flex justify-center py-12">
@@ -100,12 +102,12 @@ export default function AppointmentPatientDialog({
             </div>
 
             <Tabs value={viewTab} onValueChange={setViewTab}>
-              <TabsList className="grid w-full grid-cols-2 h-auto gap-1 p-1 bg-gray-100">
-                <TabsTrigger value="overview" className="flex items-center justify-center gap-1.5 py-2 data-[state=active]:shadow-sm data-[state=active]:text-blue-700">
+              <TabsList className="grid w-full grid-cols-3 h-auto gap-1 p-1 bg-gray-100">
+                <TabsTrigger value="overview" className="flex items-center justify-center gap-1.5 py-2 data-[state=active]:shadow-sm">
                   <Users className="h-4 w-4" />
                   <span>Patient Details</span>
                 </TabsTrigger>
-                <TabsTrigger value="appointments" className="flex items-center justify-center gap-1.5 py-2 data-[state=active]:shadow-sm data-[state=active]:text-green-700">
+                <TabsTrigger value="appointments" className="flex items-center justify-center gap-1.5 py-2 data-[state=active]:shadow-sm">
                   <CalendarDays className="h-4 w-4" />
                   <span>Appointments</span>
                   {records.appointments.length > 0 && (
@@ -113,6 +115,10 @@ export default function AppointmentPatientDialog({
                       {records.appointments.length}
                     </Badge>
                   )}
+                </TabsTrigger>
+                <TabsTrigger value="documents" className="flex items-center justify-center gap-1.5 py-2 data-[state=active]:shadow-sm">
+                  <Paperclip className="h-4 w-4" />
+                  <span>Documents</span>
                 </TabsTrigger>
               </TabsList>
 
@@ -194,6 +200,13 @@ export default function AppointmentPatientDialog({
                     </ScrollArea>
                   </div>
                 )}
+              </TabsContent>
+
+              {/* Documents — patient-level uploads (lab reports, previous OPD
+                  cards, discharge summaries, insurance papers). Not tied to a
+                  single visit; the front desk and clinicians keep them here. */}
+              <TabsContent value="documents" className="mt-4">
+                <PatientDocumentsPanel patientId={patient.id} />
               </TabsContent>
             </Tabs>
           </div>

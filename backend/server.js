@@ -87,7 +87,12 @@ app.use(express.urlencoded({ extended: true, limit: '50mb' }))
 // patient it belongs to (see routes/uploadRoutes.js). A static mount here sat
 // in front of every login check and handed a patient's scans to anyone holding
 // the link.
+// Also mounted under /api so the browser reaches it through the same proxy the
+// rest of the API uses (the dev server only forwards /api; a bare /uploads call
+// would hit Vite, and in production the absolute host is unknown). Both paths
+// serve the same guarded routes.
 app.use('/uploads', uploadRoutes)
+app.use('/api/uploads', uploadRoutes)
 
 // ── Routes ───────────────────────────────────────────────────────────────────
 app.get('/health', (_req, res) => res.json({

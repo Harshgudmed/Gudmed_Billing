@@ -196,7 +196,7 @@ router.use('/ot-clinical',           authorize('doctor', 'nurse', 'receptionist'
 // super_admin always pass). The two roles are added to Settings with the
 // approval rules; until then only an administrator gets in. When staff raise
 // purchase requests, that one screen is opened to them explicitly.
-router.use('/purchase',              authorize('purchase_officer', 'store_keeper', 'finance_controller'), purchaseRoutes)
+router.use('/purchase',              authorize('purchase_officer', 'store_keeper', 'finance_controller', 'doctor', 'nurse'), purchaseRoutes)
 // A department asking the store for goods it holds: every department that
 // uses store goods (the storeIndent module). The store issues in /purchase.
 router.use('/store-indents',         authorize(), requireModule('storeIndent'), storeIndentRoutes)
