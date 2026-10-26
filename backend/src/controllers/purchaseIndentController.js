@@ -30,7 +30,7 @@ import { z } from 'zod'
 import { db } from '../config/db.js'
 import { getOrgId, getActor, bad, notFound, conflict, forbidden } from '../lib/reqContext.js'
 import { round2 } from '../lib/money.js'
-import { startOfToday, ymdInZone } from '../lib/dates.js'
+import { startOfToday, ymdInZone, dayRange } from '../lib/dates.js'
 import { nextSeriesNumber } from '../lib/counters.js'
 import { listResponse } from '../lib/pagination.js'
 import { auditIpd } from '../inpatient/audit.js'
@@ -123,9 +123,10 @@ const readIssue = (client, ORG_ID, id) => client.storeIssue.findFirst({
 })
 
 /** Indent list filters shared by the store's list and the department's. Status is applied by the caller. */
-function indentWhere(ORG_ID, { departmentId, search }) {
+function indentWhere(ORG_ID, { departmentId, search, startDate, endDate }) {
   const where = { organizationId: ORG_ID }
   if (departmentId) where.departmentId = String(departmentId)
+  if (startDate || endDate) where.createdAt = dayRange(startDate, endDate)
   const term = String(search || '').trim()
   if (term) {
     where.OR = [
@@ -201,11 +202,12 @@ export async function indentGet(req, res, next) {
     }
 
     if (resource === 'issues') {
-      const { indentId, departmentId, status, search } = req.query
+      const { indentId, departmentId, status, search, startDate, endDate } = req.query
       const where = { organizationId: ORG_ID }
       if (indentId) where.indentId = String(indentId)
       if (departmentId) where.departmentId = String(departmentId)
       if (status && status !== 'all') where.status = String(status)
+      if (startDate || endDate) where.issuedAt = dayRange(startDate, endDate)
       const term = String(search || '').trim()
       if (term) {
         where.OR = [

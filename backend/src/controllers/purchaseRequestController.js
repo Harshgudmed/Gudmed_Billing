@@ -306,8 +306,9 @@ export async function prGet(req, res, next) {
     const actor = getActor(req)
 
     if (resource === 'requests') {
-      const { status, departmentId, search, view, priority } = req.query
+      const { status, departmentId, search, view, priority, startDate, endDate } = req.query
       const where = { organizationId: ORG_ID }
+      if (startDate || endDate) where.createdAt = dayRange(startDate, endDate)
       if (status && status !== 'all') where.status = { in: String(status).split(',') }
       if (departmentId) where.departmentId = String(departmentId)
       if (priority && priority !== 'all') where.priority = { in: String(priority).split(',').filter((p) => PRIORITIES.includes(p)) }

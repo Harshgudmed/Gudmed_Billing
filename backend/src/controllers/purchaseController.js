@@ -23,6 +23,7 @@ import { fileURLToPath } from 'url'
 import { z } from 'zod'
 import { db } from '../config/db.js'
 import { getOrgId, getActor } from '../lib/reqContext.js'
+import { dayRange } from '../lib/dates.js'
 import { ensurePurchaseDefaults } from '../lib/purchaseDefaults.js'
 import { parseGstin, isValidPan, isValidIfsc, cleanId, GST_STATES, stateCodeByName } from '../lib/gst.js'
 import { nextMasterCode, nextSeriesNumber } from '../lib/counters.js'
@@ -62,10 +63,9 @@ const optText = (max) => z.string().trim().max(max).optional().nullable().transf
 const optEnum = (values) => z.preprocess(emptyToNull, z.enum(values).nullable().optional())
 // Landlines are normal for suppliers (0522-2345678), so this is not the
 // mobile-only rule patients use: 8 to 15 digits, with the usual separators.
-const phone = z.string().trim().optional().nullable()
-  .refine((v) => blank(v) || (/^[0-9+\-()\s]+$/.test(v) && v.replace(/\D/g, '').length >= 8 && v.replace(/\D/g, '').length <= 15),
+const phone = z.string().trim().min(1, 'Phone number is required')
+  .refine((v) => /^[0-9+\-()\s]+$/.test(v) && v.replace(/\D/g, '').length >= 8 && v.replace(/\D/g, '').length <= 15,
     'Enter a phone number of 8 to 15 digits')
-  .transform(emptyToNull)
 
 const vendorFields = {
   name: z.string().trim().min(2, 'Vendor name is required').max(120),
@@ -99,7 +99,13 @@ const vendorFields = {
   defaultTdsSection: optEnum(['194C', '194J', '194I', '194H', '194Q']),
 }
 const vendorCreateSchema = z.object(vendorFields)
-const vendorUpdateSchema = z.object({ id: z.string().min(1), isActive: z.boolean().optional(), ...vendorFields }).partial({ name: true })
+const vendorUpdateSchema = z.object({ id: z.string().min(1), isActive: z.boolean().optional(), ...vendorFields }).partial({ name: true }).superRefine((data, ctx) => {
+  const onlyToggle = Object.keys(data).every((k) => ['id', 'isActive'].includes(k))
+  if (onlyToggle) return
+  if (!data.phone || String(data.phone).trim() === '') {
+    ctx.addIssue({ code: 'custom', path: ['phone'], message: 'Phone number is required' })
+  }
+})
 
 /**
  * The checks a format cannot express, and the fields that follow from others.
@@ -797,10 +803,11 @@ export async function getAll(req, res, next) {
     }
 
     if (resource === 'vendors') {
-      const { search, status } = req.query
+      const { search, status, startDate, endDate } = req.query
       const where = { organizationId: ORG_ID }
       if (status === 'active') where.isActive = true
       else if (status === 'inactive') where.isActive = false
+      if (startDate || endDate) where.createdAt = dayRange(startDate, endDate)
       const term = String(search || '').trim()
       if (term) {
         where.OR = ['name', 'code', 'gstNumber', 'phone', 'city', 'locality', 'district', 'contactPerson']
@@ -831,10 +838,11 @@ export async function getAll(req, res, next) {
 
     if (resource === 'items') {
       await ensurePurchaseDefaults(ORG_ID)
-      const { search, status, categoryId } = req.query
+      const { search, status, categoryId, startDate, endDate } = req.query
       const where = { organizationId: ORG_ID }
       if (status === 'active') where.isActive = true
       else if (status === 'inactive') where.isActive = false
+      if (startDate || endDate) where.createdAt = dayRange(startDate, endDate)
       itemSearchWhere(where, { search, categoryId })
       const body = await listResponse(db.item, { where, include: ITEM_INCLUDE, orderBy: { name: 'asc' }, req })
       // The store searches items to raise requests, without what the vendor was paid.

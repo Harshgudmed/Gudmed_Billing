@@ -6,6 +6,7 @@ import { TableCell, TableRow } from '@/components/ui/table'
 import { PaginatedTable } from '@/components/common/PaginatedTable'
 import { StatCard } from '@/components/common/StatCard'
 import { FilterBar, FilterSelect } from '@/components/common/FilterBar'
+import { useDateFilter } from '@/components/common/DateFilter'
 import { Hourglass, CheckCircle2, XCircle, Undo2, ListChecks } from 'lucide-react'
 import { useServerPagination } from '@/lib/useServerPagination'
 import { useDebounce } from '@/lib/useDebounce'
@@ -44,9 +45,16 @@ export default function ReturnsTab({ onChanged, openId: openIdLink = null }) {
   const [view, setView] = useState(me.canDecideReturn && !me.isAdmin ? 'pending' : 'all')
   const [status, setStatus] = useState('all')
   const [search, setSearch] = useState('')
+  const dateFilter = useDateFilter('all', { showClear: false })
   const debounced = useDebounce(search, 300)
   const list = useServerPagination(PURCHASE_ENDPOINT, {
-    params: { resource: 'returns', search: debounced, view: view === 'all' ? '' : view, status: view === 'all' && status !== 'all' ? status : '' },
+    params: {
+      resource: 'returns', search: debounced,
+      view: view === 'all' ? '' : view,
+      status: view === 'all' && status !== 'all' ? status : '',
+      startDate: dateFilter.range.startDate,
+      endDate: dateFilter.range.endDate,
+    },
   })
   useLiveData('purchase', list.refresh)
 
@@ -72,7 +80,7 @@ export default function ReturnsTab({ onChanged, openId: openIdLink = null }) {
     rejected: { value: s.rejected ?? 0, sublabel: 'Goods stayed in stock' },
     all: { value: s.all ?? '—', sublabel: 'Every return, every status' },
   }
-  const filtered = !!search || (view === 'all' && status !== 'all')
+  const filtered = !!search || (view === 'all' && status !== 'all') || dateFilter.active
   const seesMoney = me.seesMoney
 
   return (
@@ -91,10 +99,11 @@ export default function ReturnsTab({ onChanged, openId: openIdLink = null }) {
         onSearchChange={setSearch}
         placeholder="Search return, debit note, vendor, PO, item or batch…"
         active={filtered}
-        onClear={() => { setSearch(''); setStatus('all') }}
+        onClear={() => { setSearch(''); setStatus('all'); dateFilter.reset() }}
         actions={me.canRaiseReturn && <Button onClick={() => setFormOpen(true)} disabled={!returnMode}><Undo2 className="h-4 w-4 mr-2" />Return goods</Button>}
       >
         {view === 'all' && <FilterSelect value={status} onChange={setStatus} options={STATUS_OPTIONS} className="w-48" />}
+        {dateFilter.control}
       </FilterBar>
 
       <Card>

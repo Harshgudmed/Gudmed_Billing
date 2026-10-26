@@ -1,12 +1,12 @@
-import { useState, useMemo, useCallback } from 'react'
+import { useState, useMemo, useCallback, useEffect } from 'react'
 import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
 import { TableCell, TableRow } from '@/components/ui/table'
 import { PaginatedTable } from '@/components/common/PaginatedTable'
 import { StatCard } from '@/components/common/StatCard'
 import { FilterBar, FilterSelect } from '@/components/common/FilterBar'
+import { useDateFilter } from '@/components/common/DateFilter'
 import { Boxes, AlertTriangle, PackageX, CalendarClock, ClipboardCheck, PackageCheck } from 'lucide-react'
 import { useServerPagination } from '@/lib/useServerPagination'
 import { useDebounce } from '@/lib/useDebounce'
@@ -44,11 +44,15 @@ export default function StockList({ categories = [], receivedToday = 0, intent =
   const [search, setSearch] = useState('')
   const [category, setCategory] = useState(ALL)
   const [receiptStatus, setReceiptStatus] = useState(intent.receivedToday ? 'posted' : 'all')
-  const [receivedOn, setReceivedOn] = useState(intent.receivedToday ? localYmd() : '') // YYYY-MM-DD, '' = any day
+  const dateFilter = useDateFilter('all', { showClear: false })
   const debounced = useDebounce(search, 300)
   const [itemId, setItemId] = useState(null)
   const [receiptId, setReceiptId] = useState(intent.receiptId || null)
   const receipts = view === 'receipts'
+
+  useEffect(() => {
+    if (intent.receivedToday) dateFilter.setMode('today')
+  }, [intent.receivedToday, dateFilter.setMode])
 
   const stock = useServerPagination(PURCHASE_ENDPOINT, {
     perPage: 20,
@@ -56,7 +60,10 @@ export default function StockList({ categories = [], receivedToday = 0, intent =
   })
   const grns = useServerPagination(PURCHASE_ENDPOINT, {
     perPage: 20,
-    params: { resource: 'receipts', search: receipts ? debounced : '', status: receiptStatus, startDate: receivedOn, endDate: receivedOn },
+    params: {
+      resource: 'receipts', search: receipts ? debounced : '', status: receiptStatus,
+      startDate: dateFilter.range.startDate, endDate: dateFilter.range.endDate,
+    },
   })
   const refresh = useCallback(() => { stock.refresh(); grns.refresh() }, [stock, grns])
   useLiveData('purchase', refresh)
@@ -68,7 +75,7 @@ export default function StockList({ categories = [], receivedToday = 0, intent =
   const pick = (v) => {
     setView((cur) => (cur === v ? 'all' : v)); setSearch('')
     // The receipts tile counts today's received ones, so it opens on those.
-    if (v === 'receipts' && !receipts) { setReceivedOn(localYmd()); setReceiptStatus('posted') }
+    if (v === 'receipts' && !receipts) { dateFilter.setMode('today'); setReceiptStatus('posted') }
   }
 
   return (
@@ -84,17 +91,14 @@ export default function StockList({ categories = [], receivedToday = 0, intent =
         search={search}
         onSearchChange={setSearch}
         placeholder={receipts ? 'Search GRN, PO, vendor, challan or item…' : 'Search item name, code or HSN…'}
-        active={!!search || (receipts ? receiptStatus !== 'all' || !!receivedOn : category !== ALL || view !== 'all')}
-        onClear={() => { setSearch(''); setCategory(ALL); setReceiptStatus('all'); setReceivedOn(''); setView(receipts ? 'receipts' : 'all') }}
+        active={!!search || (receipts ? receiptStatus !== 'all' || dateFilter.active : category !== ALL || view !== 'all')}
+        onClear={() => { setSearch(''); setCategory(ALL); setReceiptStatus('all'); dateFilter.reset(); setView(receipts ? 'receipts' : 'all') }}
         actions={me.canReceive && onReceive && <Button onClick={onReceive} className="bg-green-600 hover:bg-green-700"><PackageCheck className="h-4 w-4 mr-2" />Receive goods</Button>}
       >
         {receipts ? (
           <>
             <FilterSelect value={receiptStatus} onChange={setReceiptStatus} options={RECEIPT_FILTER} className="w-44" />
-            <label className="flex items-center gap-2 text-sm text-gray-600">
-              Received on
-              <Input type="date" className="w-44" max={localYmd()} value={receivedOn} onChange={(e) => setReceivedOn(e.target.value)} />
-            </label>
+            {dateFilter.control}
           </>
         ) : <FilterSelect value={category} onChange={setCategory} options={categoryFilterOptions(flat, ALL)} className="w-64" />}
       </FilterBar>
@@ -104,7 +108,7 @@ export default function StockList({ categories = [], receivedToday = 0, intent =
           {receipts ? (
             <PaginatedTable
               pagination={grns}
-              empty={receivedOn ? 'No receipt on this day — clear the date to see every receipt'
+              empty={dateFilter.active ? 'No receipt matches this date range'
                 : search || receiptStatus !== 'all' ? 'No receipt matches this search' : 'No goods received yet — receive them from an approved order'}
               columns={[
                 { header: 'GRN' }, { header: 'Order' }, { header: 'Vendor' }, { header: 'Challan' },

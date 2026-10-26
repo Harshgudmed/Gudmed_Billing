@@ -6,6 +6,7 @@ import { TableCell, TableRow } from '@/components/ui/table'
 import { PaginatedTable } from '@/components/common/PaginatedTable'
 import { StatCard } from '@/components/common/StatCard'
 import { FilterBar, FilterSelect } from '@/components/common/FilterBar'
+import { useDateFilter } from '@/components/common/DateFilter'
 import { FilePen, Send, AlarmClock, Award, ClipboardList, Plus } from 'lucide-react'
 import { useServerPagination } from '@/lib/useServerPagination'
 import { useDebounce } from '@/lib/useDebounce'
@@ -40,9 +41,16 @@ export default function RfqTab({ onChanged, openId: openIdLink = null, onAwardDo
   const [view, setView] = useState(me.canRfq ? 'open' : 'all')
   const [status, setStatus] = useState('all')
   const [search, setSearch] = useState('')
+  const dateFilter = useDateFilter('all', { showClear: false })
   const debounced = useDebounce(search, 300)
   const rfqs = useServerPagination(PURCHASE_ENDPOINT, {
-    params: { resource: 'rfqs', search: debounced, view: view === 'all' ? '' : view, status: view === 'all' && status !== 'all' ? status : '' },
+    params: {
+      resource: 'rfqs', search: debounced,
+      view: view === 'all' ? '' : view,
+      status: view === 'all' && status !== 'all' ? status : '',
+      startDate: dateFilter.range.startDate,
+      endDate: dateFilter.range.endDate,
+    },
   })
   useLiveData('purchase', rfqs.refresh)
 
@@ -51,7 +59,7 @@ export default function RfqTab({ onChanged, openId: openIdLink = null, onAwardDo
   const [editing, setEditing] = useState(null)
   const changed = useCallback(() => { rfqs.refresh(); onChanged?.() }, [rfqs, onChanged])
   const s = rfqs.summary || {}
-  const filtered = !!search || (view === 'all' && status !== 'all')
+  const filtered = !!search || (view === 'all' && status !== 'all') || dateFilter.active
   const today = localYmd()
 
   return (
@@ -68,10 +76,11 @@ export default function RfqTab({ onChanged, openId: openIdLink = null, onAwardDo
         onSearchChange={setSearch}
         placeholder="Search RFQ no., title, item or vendor…"
         active={filtered}
-        onClear={() => { setSearch(''); setStatus('all') }}
+        onClear={() => { setSearch(''); setStatus('all'); dateFilter.reset() }}
         actions={me.canRfq && <Button onClick={() => { setEditing(null); setFormOpen(true) }}><Plus className="h-4 w-4 mr-2" />New RFQ</Button>}
       >
         {view === 'all' && <FilterSelect value={status} onChange={setStatus} options={STATUS_OPTIONS} className="w-44" />}
+        {dateFilter.control}
       </FilterBar>
 
       <Card>

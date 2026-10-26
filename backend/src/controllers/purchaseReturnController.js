@@ -401,8 +401,9 @@ export async function returnGet(req, res, next) {
     const { resource } = req.query
 
     if (resource === 'returns') {
-      const { search, status, view, orderId } = req.query
+      const { search, status, view, orderId, startDate, endDate } = req.query
       const where = { organizationId: ORG_ID }
+      if (startDate || endDate) where.createdAt = dayRange(startDate, endDate)
       if (VIEW_WHERE[view]) Object.assign(where, VIEW_WHERE[view]())
       else if (status && status !== 'all') where.status = { in: String(status).split(',') }
       if (orderId) where.orderId = String(orderId)

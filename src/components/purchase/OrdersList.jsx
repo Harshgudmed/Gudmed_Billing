@@ -6,6 +6,7 @@ import { TableCell, TableRow } from '@/components/ui/table'
 import { PaginatedTable } from '@/components/common/PaginatedTable'
 import { StatCard } from '@/components/common/StatCard'
 import { FilterBar, FilterSelect } from '@/components/common/FilterBar'
+import { useDateFilter } from '@/components/common/DateFilter'
 import { Clock, Truck, ClipboardList, PackagePlus, PackageCheck, CheckCheck } from 'lucide-react'
 import { useServerPagination } from '@/lib/useServerPagination'
 import { useDebounce } from '@/lib/useDebounce'
@@ -55,9 +56,16 @@ export default function OrdersList({ counts = {}, onChanged, intent = {}, onMake
   const [view, setView] = useState(views.some((v) => v.value === intent.view) ? intent.view : views[views.length - 1]?.value || 'all')
   const [status, setStatus] = useState(intent.status || 'all')
   const [search, setSearch] = useState(intent.search || '')
+  const dateFilter = useDateFilter('all', { showClear: false })
   const debounced = useDebounce(search, 300)
   const orders = useServerPagination(PURCHASE_ENDPOINT, {
-    params: { resource: 'orders', search: debounced, view: view === 'all' ? '' : view, status: view === 'all' && status !== 'all' ? status : '' },
+    params: {
+      resource: 'orders', search: debounced,
+      view: view === 'all' ? '' : view,
+      status: view === 'all' && status !== 'all' ? status : '',
+      startDate: dateFilter.range.startDate,
+      endDate: dateFilter.range.endDate,
+    },
   })
   useLiveData('purchase', orders.refresh)
 
@@ -92,18 +100,19 @@ export default function OrdersList({ counts = {}, onChanged, intent = {}, onMake
         search={search}
         onSearchChange={setSearch}
         placeholder="Search PO number, vendor or item…"
-        active={!!search || status !== 'all'}
-        onClear={() => { setSearch(''); setStatus('all') }}
+        active={!!search || status !== 'all' || dateFilter.active}
+        onClear={() => { setSearch(''); setStatus('all'); dateFilter.reset() }}
         actions={me.canOrder && <Button variant="outline" onClick={() => { setEditing(null); setFormOpen(true) }}>New order</Button>}
       >
         {view === 'all' && <FilterSelect value={status} onChange={setStatus} options={STATUS_OPTIONS} className="w-48" />}
+        {dateFilter.control}
       </FilterBar>
 
       <Card>
         <CardContent className="p-0">
           <PaginatedTable
             pagination={orders}
-            empty={view === 'to-approve' ? 'No order is waiting for your approval' : view === 'to-send' ? 'Nothing approved is waiting to be sent' : view === 'to-receive' ? 'Nothing is waiting to be received' : view === 'received' ? 'Nothing received yet' : search || status !== 'all' ? 'No order matches this search' : 'No purchase orders yet'}
+            empty={search || status !== 'all' || dateFilter.active ? 'No order matches these filters' : view === 'to-approve' ? 'No order is waiting for your approval' : view === 'to-send' ? 'Nothing approved is waiting to be sent' : view === 'to-receive' ? 'Nothing is waiting to be received' : view === 'received' ? 'Nothing received yet' : 'No purchase orders yet'}
             columns={[
               { header: 'Order' }, { header: 'Vendor' }, { header: 'Items', className: 'text-right' },
               ...(me.seesMoney ? [{ header: 'Total', className: 'text-right' }] : []), { header: 'Status' }, { header: 'Needed by' },

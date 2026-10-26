@@ -40,7 +40,7 @@
 import { z } from 'zod'
 import { db } from '../config/db.js'
 import { getOrgId, getActor, bad, notFound, conflict, forbidden } from '../lib/reqContext.js'
-import { startOfToday, ymdInZone, HOSPITAL_TZ } from '../lib/dates.js'
+import { startOfToday, ymdInZone, HOSPITAL_TZ, dayRange } from '../lib/dates.js'
 import { nextSeriesNumber } from '../lib/counters.js'
 import { listResponse } from '../lib/pagination.js'
 import { round2, formatRupee } from '../lib/money.js'
@@ -371,9 +371,10 @@ export async function rfqGet(req, res, next) {
     if (!canSeeRfqs(req)) throw forbidden('Requests for quotation are the purchase team\'s and Finance\'s')
 
     if (resource === 'rfqs') {
-      const { view, status, search } = req.query
+      const { view, status, search, startDate, endDate } = req.query
       const tomorrow = new Date(startOfToday().getTime() + 86400000)
       const where = { organizationId: ORG_ID, AND: [othersDraftsHidden(isAdmin(req), actor.id, 'createdById')] }
+      if (startDate || endDate) where.createdAt = dayRange(startDate, endDate)
       if (view === 'draft' || view === 'open' || view === 'awarded') where.status = view
       else if (view === 'due') { where.status = 'open'; where.dueDate = { lt: tomorrow } }
       else if (status && status !== 'all') where.status = { in: String(status).split(',') }
