@@ -161,7 +161,7 @@ export default function RequestForm({ open, onOpenChange, request, onSaved }) {
 
   // A new category empties the line — the item chosen before may not be in it.
   const pickCategory = (line, value) => {
-    const categoryId = value === ALL ? '' : value
+    const categoryId = value
     if (categoryId === line.categoryId) return
     setLine(line.key, { ...blankLine(categoryId), key: line.key })
     searchItems(line.key, '', categoryId)
@@ -323,10 +323,10 @@ export default function RequestForm({ open, onOpenChange, request, onSaved }) {
                           <td className="px-2 py-2">
                             <SearchableSelect
                               className="w-full"
-                              options={categoryOptions}
-                              value={l.categoryId || ALL}
+                              options={categoryOptions.filter((category) => category.value !== ALL)}
+                              value={l.categoryId}
                               onChange={(v) => pickCategory(l, v)}
-                              placeholder="All categories"
+                              placeholder="Choose category"
                               searchPlaceholder="Furniture, Linen, Electrical…"
                               contentClassName="w-[300px]"
                             />
@@ -336,14 +336,15 @@ export default function RequestForm({ open, onOpenChange, request, onSaved }) {
                             <SearchableSelect
                               className="w-full"
                               options={itemOptions[l.key] || []}
-                              onSearch={(q) => searchItems(l.key, q, l.categoryId)}
+                              onSearch={l.categoryId ? (q) => searchItems(l.key, q, l.categoryId) : undefined}
+                              disabled={!l.categoryId}
                               // Items show as soon as it opens; typing narrows from the first letter.
                               minSearchLength={0}
                               loading={searchingLine === l.key}
                               value={l.itemId}
                               selectedLabel={l.itemName}
                               onChange={(v) => pickItem(l.key, v)}
-                              placeholder="Choose or search an item…"
+                              placeholder={l.categoryId ? 'Choose or search an item…' : 'Choose category first'}
                               searchPlaceholder="Item name, code or other name"
                               emptyText={l.categoryId ? 'No item in this category — add it in the Items tab' : 'No item found — add it in the Items tab'}
                               contentClassName="w-[420px]"
