@@ -346,7 +346,10 @@ export async function listDocuments(req, res, next) {
     if (consultationId) where.consultationId = consultationId
     if (admissionId) where.admissionId = admissionId
 
-    const documents = await db.patientDocument.findMany({ where, orderBy: { uploadedAt: 'desc' } })
+    // Cap the read: a patient's document history must not load unbounded into
+    // the response/memory. 200 is far above any real per-patient or per-visit
+    // document count, and the newest are kept (orderBy desc).
+    const documents = await db.patientDocument.findMany({ where, orderBy: { uploadedAt: 'desc' }, take: 200 })
 
     // uploadedById is a plain column (no relation), so the uploader's name is
     // resolved in one extra lookup rather than a join.

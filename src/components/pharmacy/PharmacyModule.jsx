@@ -86,7 +86,7 @@ import {
 // hand-rolled bare HTML, so it printed as unstyled browser default.
 import { gudmedDocument, infoBox, escapeHtml } from "@/lib/printTemplate";
 import { stockBadge, statusBadge } from "./pharmacyHelpers";
-import { formatMoney } from "@/lib/format";
+import { formatMoney, localYmd } from "@/lib/format";
 import DashboardTab from "./tabs/DashboardTab";
 import InventoryTab from "./tabs/InventoryTab";
 import PrescriptionsTab from "./tabs/PrescriptionsTab";
@@ -225,7 +225,7 @@ export default function PharmacyModule() {
       if (res?.found && res.data) {
         const d = res.data;
         const batch = d.batches?.[0];
-        const toDateInput = (v) => (v ? new Date(v).toISOString().slice(0, 10) : "");
+        const toDateInput = (v) => (v ? localYmd(new Date(v)) : "");
         setDrugForm((p) => ({
           ...p,
           barcode,
@@ -438,11 +438,19 @@ export default function PharmacyModule() {
     const drugNames = items.map((i) => i.drugName || "");
     const interactions = checkDrugInteractions(drugNames);
     const allergyWarnings = [];
+    // Never let a failed allergy check look like "no allergies": if the patient
+    // record cannot be loaded (network / 500 / timeout) or its allergy data
+    // cannot be read, tell the pharmacist the check did not run instead of
+    // silently showing nothing.
+    let allergyCheckOk = false;
     try {
       const res = await client.get(`/patients?id=${rx.patientId}`);
       if (res.success && res.data) {
         let allergies = [];
-        try { allergies = typeof res.data.allergies === "string" ? JSON.parse(res.data.allergies) : res.data.allergies || []; } catch { allergies = []; }
+        try {
+          allergies = typeof res.data.allergies === "string" ? JSON.parse(res.data.allergies) : res.data.allergies || [];
+          allergyCheckOk = true;
+        } catch { allergyCheckOk = false; }
         for (const allergen of allergies) {
           const al = allergen.toLowerCase();
           for (const dn of drugNames) {
@@ -451,7 +459,12 @@ export default function PharmacyModule() {
           }
         }
       }
-    } catch { }
+    } catch {
+      allergyCheckOk = false;
+    }
+    if (!allergyCheckOk) {
+      allergyWarnings.push({ severity: "high", message: "Allergy check could not be completed — the patient's record could not be loaded. Verify the patient's allergies manually before dispensing." });
+    }
     setDispenseWarnings([...allergyWarnings, ...interactions]);
     setShowDispenseDialog(true);
   };

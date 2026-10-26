@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useOrgSettings } from '@/lib/useOrgSettings'
 import { useEnabledModules } from '@/lib/useEnabledModules'
-import { formatMoney as fmt, formatDateTime } from '@/lib/format'
+import { formatMoney as fmt, formatDateTime, localYmd } from '@/lib/format'
 import { round2 } from '@/lib/money'
 import { showApiError } from '@/lib/apiRequest'
 import { calcAge, getFullName } from '@/lib/patient'
@@ -186,7 +186,7 @@ const DEFAULT_CLINIC = {
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 // Money formatting lives in @/lib/format so every screen and receipt agrees.
-const todayStr = () => new Date().toISOString().slice(0, 10)
+const todayStr = () => localYmd()
 const newInvNo = () => 'INV-' + Date.now().toString().slice(-8)
 
 // What an invoice billed for, read off its line items. A consultation line is

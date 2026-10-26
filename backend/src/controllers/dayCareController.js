@@ -42,6 +42,7 @@ export async function getAll(req, res, next) {
       where,
       include: caseInclude,
       orderBy: { admissionDate: 'desc' },
+      take: 1000, // bound the read — day-care cases are date/status filtered, but never load the whole table unbounded
     })
     const bills = await billsOfRecords(db, ORG_ID, 'daycare', cases.map((c) => c.caseNumber))
     let rows = cases.map((c) => withBill(c, bills.get(c.caseNumber)))

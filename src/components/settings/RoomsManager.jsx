@@ -3,6 +3,7 @@ import { toast } from 'sonner'
 import { Plus, Trash2, Clock, ShieldAlert, X, Info, Search, ChevronDown, ChevronRight, Building2, Download, Upload, FileSpreadsheet } from 'lucide-react'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import client from '@/api/client'
+import { localYmd } from '@/lib/format'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -96,7 +97,7 @@ function BulkMenu({ config, onImported }) {
   }
 
   function exportData() {
-    const date = new Date().toISOString().slice(0, 10)
+    const date = localYmd()
     client.get(`${config.path}/export`, { responseType: 'blob' })
       .then((blob) => saveBlob(blob, `${config.exportPrefix}_${date}.xlsx`))
       .catch(() => toast.error('Export failed'))

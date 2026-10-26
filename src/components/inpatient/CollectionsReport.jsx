@@ -9,9 +9,9 @@ import { Label } from '@/components/ui/label'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import client from '@/api/client'
 
-import { formatMoney as inr } from '@/lib/format'
+import { formatMoney as inr, localYmd } from '@/lib/format'
 const METHODS = ['CASH', 'UPI', 'CARD', 'BANK_TRANSFER', 'CHEQUE']
-const today = () => new Date().toISOString().slice(0, 10)
+const today = () => localYmd()
 
 // Cashier daily/shift collection report — reads GET ?resource=collections.
 export default function CollectionsReport({ orgInfo = {} }) {
@@ -51,7 +51,7 @@ export default function CollectionsReport({ orgInfo = {} }) {
     w.document.write(html); w.document.close(); w.focus(); setTimeout(() => w.print(), 300)
   }
 
-  const quick = (days, label) => { const d = new Date(); d.setDate(d.getDate() - days); const s = d.toISOString().slice(0, 10); setFrom(s); setTo(today()) ; return label }
+  const quick = (days, label) => { const s = localYmd(new Date(), -days); setFrom(s); setTo(today()) ; return label }
 
   return (
     <div className="space-y-4">
