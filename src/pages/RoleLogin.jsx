@@ -39,6 +39,10 @@ const DEMO_ACCOUNTS = {
   // Made by backend/scripts/seed-purchase-demo.mjs
   purchase_officer:   { email: 'purchase@gudmed.in',    password: 'Gudmed@123' },
   store_keeper:       { email: 'store@gudmed.in',       password: 'Gudmed@123' },
+  // Made by backend/prisma/seed.js — each role's own account, not admin's.
+  billing:            { email: 'billing@gudmed.in',     password: 'Gudmed@123' },
+  nurse:              { email: 'nurse@gudmed.in',       password: 'Gudmed@123' },
+  pharmacist:         { email: 'pharmacist@gudmed.in',  password: 'Gudmed@123' },
 }
 
 // Per-role login page mounted at /:role/login. The hospital is resolved from the

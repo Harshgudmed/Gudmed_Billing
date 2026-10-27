@@ -3,6 +3,8 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { QuantityInput } from '@/components/ui/quantity-input'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Checkbox } from '@/components/ui/checkbox'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { FieldError } from '@/components/common/FieldError'
 import { Loader2, PackageCheck, CheckCheck, Eraser, AlertTriangle } from 'lucide-react'
@@ -51,7 +53,7 @@ export default function ReceiveGoodsDialog({ order, open, onOpenChange, onReceiv
 
   useEffect(() => {
     if (!open || !order) return
-    setRows(order.lines.filter((l) => dueOf(l) > 0).map((line) => ({ line, arrived: String(dueOf(line)), rejected: '', reason: '', batchNumber: '', expiryDate: '' })))
+    setRows(order.lines.filter((l) => dueOf(l) > 0).map((line) => ({ line, arrived: String(dueOf(line)), rejected: '', reason: '', quality: 'passed', returnLot: true, batchNumber: '', expiryDate: '' })))
     setHead({ challanNumber: '', challanDate: '', receivedOn: localYmd(), notes: '' })
     setTried(false)
   }, [open, order])
@@ -88,7 +90,8 @@ export default function ReceiveGoodsDialog({ order, open, onOpenChange, onReceiv
         challanNumber: head.challanNumber, challanDate: head.challanDate || null, notes: head.notes,
         lines: taking.map((x) => ({
           orderLineId: x.line.id, receivedQty: qty(x.arrived), rejectedQty: qty(x.rejected),
-          rejectReason: x.reason, batchNumber: x.batchNumber, expiryDate: x.expiryDate || null,
+          rejectReason: x.reason, qualityStatus: x.quality, returnLot: x.returnLot,
+          batchNumber: x.batchNumber, expiryDate: x.expiryDate || null,
         })),
       })
       const into = r.data.lines.filter((l) => l.stockQty > 0).length
@@ -163,6 +166,8 @@ export default function ReceiveGoodsDialog({ order, open, onOpenChange, onReceiv
                   <th className="text-right font-medium px-3 py-2">Due</th>
                   <th className="text-left font-medium px-3 py-2 w-36">Arrived</th>
                   <th className="text-left font-medium px-3 py-2 w-36">Rejected</th>
+                  <th className="text-left font-medium px-3 py-2 w-32">Quality</th>
+                  <th className="text-center font-medium px-3 py-2 w-24">Return lot</th>
                   <th className="text-left font-medium px-3 py-2 w-36">Batch no.</th>
                   <th className="text-left font-medium px-3 py-2 w-40">Expiry</th>
                 </tr>
@@ -200,12 +205,27 @@ export default function ReceiveGoodsDialog({ order, open, onOpenChange, onReceiv
                         <QuantityInput aria-label={`${l.itemName} rejected`} value={r.rejected} onChange={(v) => set(i, { rejected: v })} />
                       </td>
                       <td className="px-3 py-2 align-top">
+                        <Select value={r.quality} onValueChange={(v) => set(i, { quality: v })}>
+                          <SelectTrigger aria-label={`${l.itemName} quality`}><SelectValue /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="passed">Passed</SelectItem>
+                            <SelectItem value="hold">Hold</SelectItem>
+                            <SelectItem value="failed">Failed</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </td>
+                      <td className="px-3 py-2 align-top text-center">
+                        <Checkbox aria-label={`${l.itemName} is a return lot`} checked={r.returnLot} onCheckedChange={(v) => set(i, { returnLot: !!v })} />
+                      </td>
+                      <td className="px-3 py-2 align-top">
                         <Input aria-label={`${l.itemName} batch number`} value={r.batchNumber} maxLength={40} placeholder="Optional"
                           onChange={(e) => set(i, { batchNumber: e.target.value })} />
                       </td>
                       <td className="px-3 py-2 align-top">
-                        <Input aria-label={`${l.itemName} expiry date`} type="date" min={today} value={r.expiryDate}
-                          onChange={(e) => set(i, { expiryDate: e.target.value })} />
+                        {l.item?.expiryApplicable === false
+                          ? <span className="text-xs text-gray-400">N/A</span>
+                          : <Input aria-label={`${l.itemName} expiry date`} type="date" min={today} value={r.expiryDate}
+                              onChange={(e) => set(i, { expiryDate: e.target.value })} />}
                       </td>
                     </tr>
                   )

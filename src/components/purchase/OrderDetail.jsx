@@ -93,6 +93,7 @@ export default function OrderDetail({ id, open, onOpenChange, onEdit, onChanged,
                 <DialogTitle className="font-mono">{po.number}</DialogTitle>
                 <Badge variant="outline" className={status.cls}>{status.label}</Badge>
                 <Badge variant="outline">{GST_TYPE_LABEL[po.gstType]}</Badge>
+                {po.currency && po.currency !== 'INR' && <Badge variant="outline" className="border-blue-200 bg-blue-50 text-blue-700">{po.currency} @ ₹{po.exchangeRate}</Badge>}
               </div>
               <DialogDescription>
                 {po.vendorName} · made by {po.createdByName} on {formatDateTime(po.createdAt)}
@@ -164,6 +165,9 @@ export default function OrderDetail({ id, open, onOpenChange, onEdit, onChanged,
                   </>}
                   {po.gstType === 'inter' && <div className="flex justify-between"><dt className="text-gray-500">IGST</dt><dd className="tabular-nums">{formatMoney(po.igst)}</dd></div>}
                   <div className="flex justify-between border-t pt-2"><dt className="font-semibold">Order total</dt><dd className="text-xl font-bold tabular-nums">{formatMoney(po.total)}</dd></div>
+                  {po.currency && po.currency !== 'INR' && po.exchangeRate > 0 && (
+                    <div className="flex justify-between text-sm"><dt className="text-gray-500">= quoted in {po.currency}</dt><dd className="tabular-nums text-gray-600">{(po.total / po.exchangeRate).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</dd></div>
+                  )}
                 </dl>}
               </div>
 

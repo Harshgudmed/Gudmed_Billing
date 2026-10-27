@@ -53,6 +53,8 @@ export const ORG_SETTING_FIELDS = [
     label: 'Returns to vendors', options: ['approval', 'direct'] },
   { key: 'rfqEmailVendors',     type: 'bool', default: false,
     label: 'E-mail RFQs to vendors' },
+  { key: 'purchaseRequireBillInvoice', type: 'bool', default: false,
+    label: "Require the vendor's invoice attached before a bill can be paid" },
 
   // Spoken announcements on the waiting-hall display boards.
   //

@@ -3,6 +3,7 @@ import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { Checkbox } from '@/components/ui/checkbox'
 import { Badge } from '@/components/ui/badge'
 import { TableCell, TableRow } from '@/components/ui/table'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -51,7 +52,7 @@ const ALL = '__all'
 const EMPTY = {
   name: '', aliases: '', description: '', categoryId: '', purchaseType: 'product',
   hsnCode: '', gstRate: '', stockUnitId: '', preferredVendorId: '',
-  reorderLevel: '',
+  reorderLevel: '', expiryApplicable: true,
   conversions: [],
 }
 
@@ -92,6 +93,25 @@ export default function ItemsMaster({ units, categories, onChanged }) {
   // Read each time the form opens, so a vendor added a minute ago is offered.
   const vendors = usePickList(() => purchaseApi.getVendors({ status: 'active' }), { enabled: open })
 
+  // HSN/SAC suggestions: the person types a word (syringe, chair, printer) and
+  // picks the code, or types their own. The server holds the reference list.
+  const [hsnOptions, setHsnOptions] = useState([])
+  const [hsnSearching, setHsnSearching] = useState(false)
+  const searchHsn = async (q) => {
+    if (!q) { setHsnOptions([]); return }
+    setHsnSearching(true)
+    try {
+      const { data } = await purchaseApi.searchHsn(q)
+      setHsnOptions(data.map((h) => ({ value: h.code, label: h.code, sublabel: h.description })))
+    } catch {
+      // Suggestions are only an aid — a failed lookup shows none and the person
+      // can still type the HSN by hand, so this must never break the form.
+      setHsnOptions([])
+    } finally {
+      setHsnSearching(false)
+    }
+  }
+
   const startAdd = () => {
     setEditingId(null)
     setForm({ ...EMPTY, stockUnitId: units.find((u) => u.code === 'PCS')?.id || '' })
@@ -105,6 +125,7 @@ export default function ItemsMaster({ units, categories, onChanged }) {
         categoryId: it.categoryId, purchaseType: it.purchaseType, hsnCode: it.hsnCode || '',
         gstRate: String(it.gstRate), stockUnitId: it.stockUnitId, preferredVendorId: it.preferredVendorId || '',
         reorderLevel: it.reorderLevel == null ? '' : String(it.reorderLevel),
+        expiryApplicable: it.expiryApplicable !== false,
         conversions: it.conversions.map((c) => ({ unitId: c.unitId, factor: String(c.factor), isPurchaseDefault: c.isPurchaseDefault })),
       })
       setEditingId(row.id)
@@ -274,7 +295,21 @@ export default function ItemsMaster({ units, categories, onChanged }) {
             </Section>
 
             <Section title="Tax">
-              <Field label="HSN / SAC" id="i-hsn" hint="4, 6 or 8 digits — needed for GST filing"><Input id="i-hsn" value={form.hsnCode} onChange={set('hsnCode')} inputMode="numeric" maxLength={8} className="font-mono" /></Field>
+              <Field label="HSN / SAC" id="i-hsn" hint="Type a word (e.g. syringe, chair) to find the code, or enter your own — 4, 6 or 8 digits">
+                <SearchableSelect
+                  className="w-full font-mono"
+                  contentClassName="w-[360px]"
+                  options={hsnOptions}
+                  value={form.hsnCode}
+                  onChange={(v) => setField('hsnCode', v)}
+                  onSearch={searchHsn}
+                  loading={hsnSearching}
+                  allowCustom
+                  selectedLabel={form.hsnCode}
+                  placeholder="Choose or type HSN/SAC"
+                  searchPlaceholder="Search item or type HSN…"
+                  emptyText="No match — type your HSN and press Enter" />
+              </Field>
               <Field label="GST %" id="i-gst" hint={form.categoryId && categoryById[form.categoryId]?.defaultGstRate != null ? `Category suggests ${categoryById[form.categoryId].defaultGstRate}%` : 'Confirm the rate with your CA'}>
                 <Select value={form.gstRate} onValueChange={set('gstRate')}>
                   <SelectTrigger id="i-gst"><SelectValue placeholder="Choose GST" /></SelectTrigger>
@@ -301,6 +336,12 @@ export default function ItemsMaster({ units, categories, onChanged }) {
               </Field>
               <Field label="Reorder level" id="i-reorder" hint={notStocked ? 'Not stocked' : `Alert when stock falls below this${stockUnit ? ` (${stockUnit.name})` : ''}`}>
                 <Input id="i-reorder" value={form.reorderLevel} onChange={set('reorderLevel')} inputMode="decimal" disabled={notStocked} />
+              </Field>
+              <Field label="Expiry" id="i-expiry" hint="Turn off for durables (camera, furniture) — the receipt screen then does not ask for an expiry">
+                <label htmlFor="i-expiry" className="flex h-10 items-center gap-2 text-sm">
+                  <Checkbox id="i-expiry" checked={form.expiryApplicable} onCheckedChange={(v) => setField('expiryApplicable', !!v)} />
+                  This item has an expiry date
+                </label>
               </Field>
               <div className="md:col-span-3 space-y-2">
                 <Label>Bought in another unit?</Label>

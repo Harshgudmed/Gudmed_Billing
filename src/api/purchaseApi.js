@@ -72,6 +72,7 @@ export const purchaseApi = {
   getItems:      (params) => get('items', params),       // { search, status, categoryId, page, limit }
   getItem:       (id)     => get('item', { id }),
   getGstRates:   ()       => get('gst-rates'),           // the rates an item may carry
+  searchHsn:     (q)      => get('hsn-search', { q }),   // HSN/SAC suggestions for the item's tax code
   createItem:    (body)   => post('item', body),
   updateItem:    (id, body) => patch('item', { id, ...body }), // `conversions` replaces the list; { isActive } retires
 
@@ -132,6 +133,17 @@ export const purchaseApi = {
   cancelBill:    (id, reason) => patch('bill', { id, action: 'cancel', reason }),
   reopenBill:    (id)       => patch('bill', { id, action: 'reopen' }),
   deleteBill:    (id)       => del('bill', id),                          // drafts only
+  // Bill invoice/supporting attachments. The list arrives inside getBill (bill.documents);
+  // upload & delete go straight to /uploads/bill-documents (not /purchase) — see uploadRoutes.js
+  uploadBillDoc: (billId, docType, label, file) => {
+    const fd = new FormData()
+    fd.append('document', file)
+    fd.append('billId', billId)
+    fd.append('docType', docType)
+    if (label) fd.append('label', label)
+    return client.post('/uploads/bill-documents', fd, { headers: { 'Content-Type': 'multipart/form-data' } })
+  },
+  deleteBillDoc: (id) => client.delete(`/uploads/bill-documents/${id}`),
 
   // Who approves how much (the store gets the levels without their ₹ amounts).
   // Changing them is an administrator's.

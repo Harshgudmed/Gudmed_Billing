@@ -23,7 +23,7 @@ export const indentApi = {
   // ── The store ──────────────────────────────────────────────────────────────
   getIndent:    (id)     => store('indent', { id }), // lines with pending and what the shelf holds, its issues
   getIssue:     (id)     => store('issue', { id }),  // batch lines, the hospital (for the slip)
-  issue:        (body)   => client.post(PURCHASE_INDENT_ENDPOINT, { resource: 'issue', ...body }), // { indentId, receivedByName, notes, lines: [{ indentLineId, quantity }] }
+  issue:        (body)   => client.post(PURCHASE_INDENT_ENDPOINT, { resource: 'issue', ...body }), // { indentId, receivedByName, assignedToName?, notes, lines: [{ indentLineId, quantity }] }
   closeIndent:  (id, reason) => client.patch(PURCHASE_INDENT_ENDPOINT, { resource: 'indent', action: 'close', id, reason }),
   cancelIssue:  (id, reason) => client.patch(PURCHASE_INDENT_ENDPOINT, { resource: 'issue', action: 'cancel', id, reason }), // administrator
 }

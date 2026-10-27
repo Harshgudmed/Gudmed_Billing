@@ -6,7 +6,7 @@ import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Switch } from '@/components/ui/switch'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { Cpu, Server, Pill, MessageSquare, Volume2, QrCode, Loader2, ArrowLeft, ChevronRight, Save, ShoppingCart, Mail, Send } from 'lucide-react'
+import { Cpu, Server, Pill, MessageSquare, Volume2, QrCode, Loader2, ArrowLeft, ChevronRight, Save, Mail, Send } from 'lucide-react'
 import { toast } from 'sonner'
 import client from '@/api/client'
 import machineIntegrationApi from '@/api/machineIntegrationApi'
@@ -96,17 +96,6 @@ const CATALOG = [
     icon: QrCode,
     description: 'Print the QR for the entrance. Patients scan it and fill their own details.',
     kind: 'panel', // its own screen — see SelfRegistrationQr
-  },
-  {
-    // The purchase setup every order stands on — units of measure and item
-    // categories (with the GST a new item starts at). Only where the Purchase
-    // module is switched on; vendors and items live in Purchase → Masters.
-    key: 'purchase',
-    name: 'Purchase Setup',
-    icon: ShoppingCart,
-    description: 'Units of measure, item categories (the GST a new item starts with) and who approves how much.',
-    kind: 'panel', // its own screen — see PurchaseSettings
-    requiresModule: 'purchase',
   },
   {
     // The hospital's own mail server. Stored like the SMS gateway, in

@@ -96,6 +96,12 @@ async function main() {
   const staff = [
     { email: 'admin@gudmed.in', fullName: 'Admin User', role: 'admin' },
     { email: 'reception@gudmed.in', fullName: 'Front Desk', role: 'receptionist' },
+    // These three roles had no demo account, so their login page's "tap to fill"
+    // silently offered the Administrator's credentials (RoleLogin.jsx falls back
+    // to admin when a role has none) — signing in as the wrong role entirely.
+    { email: 'billing@gudmed.in', fullName: 'Billing Desk', role: 'billing' },
+    { email: 'nurse@gudmed.in', fullName: 'Ward Nurse', role: 'nurse' },
+    { email: 'pharmacist@gudmed.in', fullName: 'Pharmacy Desk', role: 'pharmacist' },
   ]
   for (const s of staff) {
     await db.user.upsert({

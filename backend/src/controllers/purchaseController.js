@@ -42,6 +42,7 @@ import { reportGet, REPORT_READS } from './purchaseReportController.js'
 import { loadPurchaseSettings } from '../lib/purchaseSettings.js'
 import { itemSearchWhere } from '../lib/purchaseLines.js'
 import { GST_RATES } from '../lib/purchaseOrders.js'
+import { HSN_CODES } from '../lib/hsnCodes.js'
 
 // ── Vendors ─────────────────────────────────────────────────────────────────
 
@@ -66,11 +67,22 @@ const optEnum = (values) => z.preprocess(emptyToNull, z.enum(values).nullable().
 const phone = z.string().trim().min(1, 'Phone number is required')
   .refine((v) => /^[0-9+\-()\s]+$/.test(v) && v.replace(/\D/g, '').length >= 8 && v.replace(/\D/g, '').length <= 15,
     'Enter a phone number of 8 to 15 digits')
+// The second contact's phone — the same 8-to-15-digit rule as the primary
+// phone, but optional (a vendor need not have a second contact).
+const optPhone = z.string().trim().optional().nullable()
+  .refine((v) => blank(v) || (/^[0-9+\-()\s]+$/.test(v) && v.replace(/\D/g, '').length >= 8 && v.replace(/\D/g, '').length <= 15),
+    'Enter a phone number of 8 to 15 digits')
+  .transform(emptyToNull)
 
 const vendorFields = {
   name: z.string().trim().min(2, 'Vendor name is required').max(120),
   contactPerson: optText(80),
   phone,
+  // Vendor Registration Form number — the vendor's reference on its own form.
+  vrfNumber: optText(40),
+  // A second contact person and their phone, mirroring the primary pair above.
+  contactPerson2: optText(80),
+  phone2: optPhone,
   email: z.string().trim().optional().nullable()
     .refine((v) => blank(v) || z.string().email().safeParse(v).success, 'Enter a valid email address')
     .transform((v) => { const t = emptyToNull(v); return t ? t.toLowerCase() : t }),
@@ -241,6 +253,8 @@ const itemFields = {
     z.number().refine((v) => GST_RATES.includes(v), `GST must be one of ${GST_RATES.join(', ')}%`).optional()),
   stockUnitId: z.string().min(1, 'Choose the unit it is counted in'),
   reorderLevel: finiteNum('Reorder level').refine((v) => v == null || v >= 0, 'Reorder level cannot be negative'),
+  // Durable items (a camera, furniture) carry no expiry — the receipt screen then does not ask for one.
+  expiryApplicable: z.preprocess((v) => v !== false && v !== 'false', z.boolean()).optional().default(true),
   preferredVendorId: z.string().optional().nullable().transform(emptyToNull),
   conversions: z.array(conversionSchema).max(10).optional(),
 }
@@ -803,10 +817,11 @@ export async function getAll(req, res, next) {
     }
 
     if (resource === 'vendors') {
-      const { search, status, startDate, endDate } = req.query
+      const { search, status, vendorType, startDate, endDate } = req.query
       const where = { organizationId: ORG_ID }
       if (status === 'active') where.isActive = true
       else if (status === 'inactive') where.isActive = false
+      if (['goods', 'services', 'both'].includes(vendorType)) where.vendorType = vendorType
       if (startDate || endDate) where.createdAt = dayRange(startDate, endDate)
       const term = String(search || '').trim()
       if (term) {
@@ -869,6 +884,18 @@ export async function getAll(req, res, next) {
       return res.json({ success: true, data })
     }
 
+    // Type-a-word HSN/SAC suggestions for the item form. A static reference
+    // list (common hospital purchases), so no org scoping — the hospital may
+    // still type any HSN its goods carry; this only saves recalling the number.
+    if (resource === 'hsn-search') {
+      const q = String(req.query.q || '').trim().toLowerCase()
+      const matches = q
+        ? HSN_CODES.filter((h) => h.keywords.includes(q) || h.description.toLowerCase().includes(q) || h.code.includes(q))
+        : HSN_CODES
+      const data = matches.slice(0, 15).map(({ code, description }) => ({ code, description }))
+      return res.json({ success: true, data })
+    }
+
     if (resource === 'budgets') {
       const { financialYear, budgetType, departmentId, includeInactive } = req.query
       const where = { organizationId: ORG_ID }
@@ -904,7 +931,7 @@ export async function getAll(req, res, next) {
       return res.json({ success: true, data: budget })
     }
 
-    return res.status(400).json({ success: false, error: 'Unknown resource. Use: units, categories, vendors, vendor, items, item, states, gst-rates, budgets, budget, requests, request, dashboard, approval-rules, orders, order, order-candidates' })
+    return res.status(400).json({ success: false, error: 'Unknown resource. Use: units, categories, vendors, vendor, items, item, states, gst-rates, hsn-search, budgets, budget, requests, request, dashboard, approval-rules, orders, order, order-candidates' })
   } catch (err) {
     next(err)
   }

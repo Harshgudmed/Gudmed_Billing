@@ -66,16 +66,18 @@ export function paymentAccess(me, mode) {
  */
 export function usePaymentMode(enabled = true) {
   const [mode, setMode] = useState(null)
+  const [requireInvoice, setRequireInvoice] = useState(false)
   const [error, setError] = useState(null)
   const load = useCallback(async () => {
     setError(null)
     try {
       const r = await purchasePaymentApi.getSettings()
       setMode(r?.data?.paymentMode || 'finance')
+      setRequireInvoice(r?.data?.requireBillInvoice === true)
     } catch (err) {
       setError(err?.message || 'Could not read who pays vendors')
     }
   }, [])
   useEffect(() => { if (enabled && !mode) load() }, [enabled, mode, load])
-  return { mode, error, retry: load }
+  return { mode, requireInvoice, error, retry: load }
 }

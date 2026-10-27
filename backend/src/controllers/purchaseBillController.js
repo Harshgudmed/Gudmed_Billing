@@ -137,6 +137,11 @@ const BILL_INCLUDE = {
   },
   order: { select: { id: true, number: true, status: true } },
   vendor: { select: { id: true, name: true, gstNumber: true, pan: true, msmeNumber: true } },
+  // Attached invoice / supporting files (newest first), for the bill detail screen.
+  documents: {
+    orderBy: { uploadedAt: 'desc' },
+    select: { id: true, docType: true, label: true, fileName: true, fileUrl: true, uploadedAt: true },
+  },
 }
 
 async function readFull(ORG_ID, id, client = db) {
@@ -239,7 +244,8 @@ function figures(po, vendor, rows, { tds, invoiceTotal, vendorInvoiceDate }) {
   return {
     rows: rows.map((r, i) => ({ ...r, ...preview.lines[i] })),
     header: {
-      gstType: po.gstType, ...totals, ...tds,
+      // The bill is billed in the order's currency (copied so the document shows both).
+      gstType: po.gstType, currency: po.currency ?? 'INR', exchangeRate: po.exchangeRate ?? 1, ...totals, ...tds,
       paymentTermsDays: terms.days, dueDate: dueDateFor(vendorInvoiceDate, terms.days),
       matched: false, mismatch: preview.mismatch,
     },

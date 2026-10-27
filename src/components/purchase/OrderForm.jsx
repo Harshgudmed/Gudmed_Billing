@@ -27,13 +27,28 @@ import { gstTypeFor, lineAmounts, orderTotals } from './orderMath'
 let nextKey = 1
 const blankLine = (categoryId = '') => ({ key: nextKey++, categoryId, itemId: '', itemName: '', item: null, unitId: '', unitCode: '', quantity: '', rate: '', discountPct: '', gstRate: '', requestLineId: null, requestNumber: null, note: '' })
 
+// Currencies a vendor may quote in. Rates are entered in this currency and
+// converted to INR (× the exchange rate) before saving — the order is stored in
+// INR, so GST, stock and payment are unchanged; the document shows both.
+const CURRENCIES = [
+  { code: 'INR', symbol: '₹', label: '₹ Indian Rupee' },
+  { code: 'USD', symbol: '$', label: '$ US Dollar' },
+  { code: 'EUR', symbol: '€', label: '€ Euro' },
+  { code: 'GBP', symbol: '£', label: '£ British Pound' },
+  { code: 'AED', symbol: 'AED ', label: 'AED UAE Dirham' },
+]
+const curOf = (code) => CURRENCIES.find((c) => c.code === code) || CURRENCIES[0]
+const round2 = (v) => Math.round((Number(v) || 0) * 100) / 100
+// Amount in a non-INR currency, e.g. "$1,000.00".
+const fmtCur = (v, sym) => `${sym}${(Number(v) || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+
 export default function OrderForm({ open, onOpenChange, order, onSaved }) {
   const editing = !!order
   const [vendors, setVendors] = useState([])
   const [categories, setCategories] = useState([])
   const [gstRates, setGstRates] = useState([])
   const [hospitalStateCode, setHospitalStateCode] = useState(null)
-  const [form, setForm] = useState({ vendorId: '', expectedDate: '', terms: '', notes: '' })
+  const [form, setForm] = useState({ vendorId: '', expectedDate: '', terms: '', notes: '', currency: 'INR', exchangeRate: '1' })
   const [lines, setLines] = useState([blankLine()])
   const [loading, setLoading] = useState(false)
   // The form could not be filled (a list or a draft line's item did not load):
@@ -60,17 +75,22 @@ export default function OrderForm({ open, onOpenChange, order, onSaved }) {
           const items = await Promise.all([...new Set(order.lines.map((l) => l.itemId))].map((id) => purchaseApi.getItem(id).then((x) => x.data)))
           if (!alive) return
           const byId = new Map(items.map((it) => [it.id, it]))
+          const er = order.exchangeRate || 1
+          const foreign = (order.currency || 'INR') !== 'INR'
           setForm({
             vendorId: order.vendorId, expectedDate: order.expectedDate ? String(order.expectedDate).slice(0, 10) : '',
             terms: order.terms || '', notes: order.notes || '',
+            currency: order.currency || 'INR', exchangeRate: order.exchangeRate ? String(order.exchangeRate) : '1',
           })
           setLines(order.lines.map((l) => ({
             key: nextKey++, categoryId: byId.get(l.itemId)?.categoryId || '', itemId: l.itemId, itemName: l.itemName, item: byId.get(l.itemId) || null,
-            unitId: l.unitId, unitCode: l.unitCode, quantity: String(l.quantity), rate: String(l.rate), discountPct: l.discountPct ? String(l.discountPct) : '',
+            unitId: l.unitId, unitCode: l.unitCode, quantity: String(l.quantity),
+            // Stored rates are INR; show them back in the order's currency (÷ rate).
+            rate: String(foreign ? round2(l.rate / er) : l.rate), discountPct: l.discountPct ? String(l.discountPct) : '',
             gstRate: String(l.gstRate), requestLineId: l.requestLineId, requestNumber: l.requestLine?.request?.number || null, note: l.note || '',
           })))
         } else {
-          setForm({ vendorId: '', expectedDate: '', terms: '', notes: '' })
+          setForm({ vendorId: '', expectedDate: '', terms: '', notes: '', currency: 'INR', exchangeRate: '1' })
           setLines([blankLine()])
         }
       } catch (err) {
@@ -86,6 +106,14 @@ export default function OrderForm({ open, onOpenChange, order, onSaved }) {
 
   const vendor = vendors.find((v) => v.id === form.vendorId) || (order && order.vendorId === form.vendorId ? order.vendor : null)
   const gstType = vendor ? gstTypeFor(vendor, hospitalStateCode) : 'intra'
+  // Currency the order is quoted in. Line rates are in this currency; INR =
+  // that × exchangeRate. INR orders (rate 1) behave exactly as before.
+  const cur = curOf(form.currency)
+  const foreign = form.currency !== 'INR'
+  const exRate = Number(form.exchangeRate) > 0 ? Number(form.exchangeRate) : 1
+  // Amounts in the quoted currency on screen; `inr` gives the rupee equivalent.
+  const money = (v) => (foreign ? fmtCur(v, cur.symbol) : formatMoney(v))
+  const inr = (v) => formatMoney(round2((Number(v) || 0) * exRate))
   const vendorOptions = useMemo(() => vendors.map((v) => ({ value: v.id, label: v.name, sublabel: [v.code, v.city, v.gstNumber ? 'GST registered' : 'Not GST registered'].filter(Boolean).join(' · ') })), [vendors])
 
   const setLine = (key, patch) => setLines((ls) => ls.map((l) => (l.key === key ? { ...l, ...patch } : l)))
@@ -112,8 +140,11 @@ export default function OrderForm({ open, onOpenChange, order, onSaved }) {
 
   const body = () => ({
     vendorId: form.vendorId, expectedDate: form.expectedDate || null, terms: form.terms, notes: form.notes,
+    currency: form.currency, exchangeRate: exRate,
     lines: lines.filter((l) => l.itemId).map((l) => ({
-      itemId: l.itemId, unitId: l.unitId, quantity: l.quantity, rate: l.rate === '' ? undefined : l.rate,
+      // Rates are entered in the order's currency; send INR (× exchangeRate) so the
+      // server stores, GST-taxes and pays in rupees exactly as before.
+      itemId: l.itemId, unitId: l.unitId, quantity: l.quantity, rate: l.rate === '' ? undefined : String(round2(Number(l.rate) * exRate)),
       discountPct: l.discountPct === '' ? undefined : l.discountPct, gstRate: l.gstRate === '' ? undefined : l.gstRate,
       requestLineId: l.requestLineId || undefined, note: l.note,
     })),
@@ -145,7 +176,7 @@ export default function OrderForm({ open, onOpenChange, order, onSaved }) {
     }
   }
 
-  const ready = form.vendorId && lines.some((l) => l.itemId)
+  const ready = form.vendorId && lines.some((l) => l.itemId) && (!foreign || exRate > 0)
 
   return (
     <Dialog open={open} onOpenChange={(v) => !saving && onOpenChange(v)}>
@@ -183,6 +214,27 @@ export default function OrderForm({ open, onOpenChange, order, onSaved }) {
               </div>
             </div>
 
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div className="space-y-1">
+                <Label htmlFor="po-currency">Currency</Label>
+                <Select value={form.currency} onValueChange={(v) => setForm((f) => ({ ...f, currency: v, exchangeRate: v === 'INR' ? '1' : f.exchangeRate }))}>
+                  <SelectTrigger id="po-currency"><SelectValue /></SelectTrigger>
+                  <SelectContent>{CURRENCIES.map((c) => <SelectItem key={c.code} value={c.code}>{c.label}</SelectItem>)}</SelectContent>
+                </Select>
+              </div>
+              {foreign && (
+                <div className="space-y-1">
+                  <Label htmlFor="po-exrate">Exchange rate <span className="font-normal text-gray-400">(1 {cur.code} = ₹)</span></Label>
+                  <Input id="po-exrate" inputMode="decimal" value={form.exchangeRate} placeholder="e.g. 83"
+                    className={foreign && !(exRate > 0) ? 'border-amber-400' : ''}
+                    onChange={(e) => setForm((f) => ({ ...f, exchangeRate: e.target.value.replace(/[^\d.]/g, '') }))} />
+                </div>
+              )}
+              {foreign && (
+                <p className="self-end pb-2 text-xs text-gray-500">Rates below are entered in {cur.code}; the order is stored in ₹ at this rate.</p>
+              )}
+            </div>
+
             <div className="space-y-2">
               <div className="flex items-center justify-between">
                 <h3 className="text-sm font-semibold text-gray-700">Items</h3>
@@ -197,7 +249,7 @@ export default function OrderForm({ open, onOpenChange, order, onSaved }) {
                       <th className="text-left font-medium px-2 py-2 min-w-[260px]">Item</th>
                       <th className="text-left font-medium px-2 py-2 w-28">Unit</th>
                       <th className="text-center font-medium px-2 py-2 w-36">Qty</th>
-                      <th className="text-right font-medium px-2 py-2 w-28">Rate ₹</th>
+                      <th className="text-right font-medium px-2 py-2 w-28">Rate {cur.symbol.trim() || cur.code}</th>
                       <th className="text-right font-medium px-2 py-2 w-20">Disc %</th>
                       <th className="text-right font-medium px-2 py-2 w-24">GST</th>
                       <th className="text-right font-medium px-2 py-2 w-32">Amount</th>
@@ -255,7 +307,7 @@ export default function OrderForm({ open, onOpenChange, order, onSaved }) {
                               </Select>
                             )}
                           </td>
-                          <td className="px-2 py-2 text-right font-medium tabular-nums pt-4">{l.itemId ? formatMoney(a.lineTotal) : '—'}</td>
+                          <td className="px-2 py-2 text-right font-medium tabular-nums pt-4">{l.itemId ? money(a.lineTotal) : '—'}</td>
                           <td className="px-1 py-2">
                             <Button type="button" size="icon" variant="ghost" aria-label={`Remove line ${i + 1}`} title="Remove"
                               onClick={() => setLines((ls) => (ls.length === 1 ? [blankLine()] : ls.filter((x) => x.key !== l.key)))}>
@@ -286,14 +338,16 @@ export default function OrderForm({ open, onOpenChange, order, onSaved }) {
                 </div>
               </div>
               <dl className="self-start space-y-1.5 rounded-md bg-gray-50 p-4 text-sm">
-                <div className="flex justify-between"><dt className="text-gray-500">Subtotal (after discount)</dt><dd className="tabular-nums">{formatMoney(totals.subtotal)}</dd></div>
+                {foreign && <div className="flex justify-between text-xs"><dt className="text-gray-500">Currency</dt><dd className="font-medium">{cur.code} · 1 {cur.code} = ₹{exRate}</dd></div>}
+                <div className="flex justify-between"><dt className="text-gray-500">Subtotal (after discount)</dt><dd className="tabular-nums">{money(totals.subtotal)}</dd></div>
                 {gstType === 'intra' && <>
-                  <div className="flex justify-between"><dt className="text-gray-500">CGST</dt><dd className="tabular-nums">{formatMoney(totals.cgst)}</dd></div>
-                  <div className="flex justify-between"><dt className="text-gray-500">SGST</dt><dd className="tabular-nums">{formatMoney(totals.sgst)}</dd></div>
+                  <div className="flex justify-between"><dt className="text-gray-500">CGST</dt><dd className="tabular-nums">{money(totals.cgst)}</dd></div>
+                  <div className="flex justify-between"><dt className="text-gray-500">SGST</dt><dd className="tabular-nums">{money(totals.sgst)}</dd></div>
                 </>}
-                {gstType === 'inter' && <div className="flex justify-between"><dt className="text-gray-500">IGST</dt><dd className="tabular-nums">{formatMoney(totals.igst)}</dd></div>}
+                {gstType === 'inter' && <div className="flex justify-between"><dt className="text-gray-500">IGST</dt><dd className="tabular-nums">{money(totals.igst)}</dd></div>}
                 {gstType === 'none' && <div className="flex justify-between"><dt className="text-gray-500">GST</dt><dd className="text-gray-500">none — vendor not registered</dd></div>}
-                <div className="flex justify-between border-t pt-2"><dt className="font-semibold">Order total</dt><dd className="text-xl font-bold tabular-nums">{formatMoney(totals.total)}</dd></div>
+                <div className="flex justify-between border-t pt-2"><dt className="font-semibold">Order total</dt><dd className="text-xl font-bold tabular-nums">{money(totals.total)}</dd></div>
+                {foreign && <div className="flex justify-between text-sm"><dt className="text-gray-500">= in rupees</dt><dd className="font-semibold tabular-nums text-gray-700">{inr(totals.total)}</dd></div>}
               </dl>
             </div>
           </div>

@@ -104,6 +104,118 @@ router.get('/vendor-documents/:filename', authenticate, async (req, res, next) =
   } catch (err) { next(err) }
 })
 
+// ─── Vendor-bill document upload (invoice PDF/Word + supporting) ───────────────
+// Finance / purchase roles attach the vendor's actual invoice and any supporting
+// papers to a bill. One bill can carry several (a PO may be billed across
+// invoices). Served back only to staff of the same hospital.
+
+const BILL_DOC_MIME = new Set([
+  'image/jpeg', 'image/png', 'application/pdf',
+  'application/msword', // .doc
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document', // .docx
+])
+const BILL_DOC_EXT = {
+  'image/jpeg': '.jpg', 'image/png': '.png', 'application/pdf': '.pdf',
+  'application/msword': '.doc',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document': '.docx',
+}
+
+const billDocStorage = multer.diskStorage({
+  destination: (_req, _file, cb) => {
+    const dir = path.join(UPLOAD_ROOT, 'bill-documents')
+    fs.mkdirSync(dir, { recursive: true })
+    cb(null, dir)
+  },
+  filename: (_req, file, cb) => {
+    const suffix = `${Date.now()}-${Math.round(Math.random() * 1e9)}`
+    cb(null, `billdoc-${suffix}${BILL_DOC_EXT[file.mimetype] || ''}`)
+  },
+})
+
+const uploadBillDoc = multer({
+  storage: billDocStorage,
+  limits: { fileSize: 10 * 1024 * 1024, files: 1 },
+  fileFilter: (_req, file, cb) => {
+    if (BILL_DOC_MIME.has(file.mimetype)) return cb(null, true)
+    cb(new Error('Only PDF, Word (.doc/.docx), JPG or PNG files are allowed'))
+  },
+})
+
+// POST /uploads/bill-documents — attach one invoice/supporting file to a vendor bill
+router.post('/bill-documents', authenticate, authorize('purchase_officer', 'finance_controller'), (req, res, next) => {
+  uploadBillDoc.single('document')(req, res, (err) => {
+    if (err) return res.status(400).json({ success: false, error: err.message || 'Upload failed' })
+    next()
+  })
+}, async (req, res, next) => {
+  try {
+    const orgId = getOrgId(req)
+    const { billId, docType, label } = req.body
+    if (!billId || !docType) return res.status(400).json({ success: false, error: 'billId and docType are required' })
+    if (!req.file) return res.status(400).json({ success: false, error: 'No file uploaded' })
+
+    // Confirm the bill belongs to this hospital (IDOR guard)
+    const bill = await db.vendorBill.findFirst({ where: { id: billId, organizationId: orgId }, select: { id: true } })
+    if (!bill) {
+      fs.unlinkSync(req.file.path)
+      return res.status(404).json({ success: false, error: 'Bill not found' })
+    }
+
+    const fileUrl = `/uploads/bill-documents/${req.file.filename}`
+    const doc = await db.vendorBillDocument.create({
+      data: {
+        organizationId: orgId,
+        billId,
+        docType,
+        label: label?.trim() || null,
+        fileName: req.file.originalname,
+        fileUrl,
+        uploadedById: req.user?.id || null,
+      },
+    })
+    res.json({ success: true, data: doc })
+  } catch (err) {
+    if (req.file) fs.unlink(req.file.path, () => {})
+    next(err)
+  }
+})
+
+// DELETE /uploads/bill-documents/:id — remove an attachment (its file + row)
+router.delete('/bill-documents/:id', authenticate, authorize('purchase_officer', 'finance_controller'), async (req, res, next) => {
+  try {
+    const orgId = getOrgId(req)
+    const doc = await db.vendorBillDocument.findFirst({ where: { id: req.params.id, organizationId: orgId } })
+    if (!doc) return res.status(404).json({ success: false, error: 'Document not found' })
+    await db.vendorBillDocument.delete({ where: { id: doc.id } })
+    const filePath = path.join(UPLOAD_ROOT, 'bill-documents', path.basename(doc.fileUrl))
+    if (filePath.startsWith(UPLOAD_ROOT)) fs.unlink(filePath, () => {})
+    res.json({ success: true })
+  } catch (err) { next(err) }
+})
+
+// GET /uploads/bill-documents/:filename — serve a bill document to this hospital's staff
+router.get('/bill-documents/:filename', authenticate, async (req, res, next) => {
+  try {
+    const { filename } = req.params
+    if (!/^[A-Za-z0-9._-]+$/.test(filename) || filename.includes('..')) {
+      return res.status(404).json({ success: false, error: 'File not found' })
+    }
+    const doc = await db.vendorBillDocument.findFirst({
+      where: { fileUrl: `/uploads/bill-documents/${filename}` },
+      select: { organizationId: true },
+    })
+    if (!doc || getOrgId(req) !== doc.organizationId) {
+      return res.status(404).json({ success: false, error: 'File not found' })
+    }
+    const filePath = path.join(UPLOAD_ROOT, 'bill-documents', filename)
+    if (!filePath.startsWith(UPLOAD_ROOT) || !fs.existsSync(filePath)) {
+      return res.status(404).json({ success: false, error: 'File not found' })
+    }
+    res.setHeader('Cache-Control', 'private, no-store')
+    return res.sendFile(filePath)
+  } catch (err) { next(err) }
+})
+
 // ─── Patient clinical document upload (doctor / nurse) ────────────────────────
 // A doctor or nurse attaches reports — lab, radiology, prescriptions, consent,
 // clinical photos — to a patient, optionally tagged to the OPD consultation or

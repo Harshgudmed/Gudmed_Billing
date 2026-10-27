@@ -35,6 +35,7 @@ export default function IndentDetail({ id, open, onOpenChange, onChanged, onOpen
   const [loading, setLoading] = useState(false)
   const [give, setGive] = useState({}) // indent line id → quantity typed
   const [receivedByName, setReceivedByName] = useState('')
+  const [assignedToName, setAssignedToName] = useState('')
   const [notes, setNotes] = useState('')
   const [closing, setClosing] = useState(false)
   const [reason, setReason] = useState('')
@@ -58,7 +59,7 @@ export default function IndentDetail({ id, open, onOpenChange, onChanged, onOpen
   }, [id])
   useEffect(() => {
     if (!open) return
-    setReceivedByName(''); setNotes(''); setClosing(false); setReason('')
+    setReceivedByName(''); setAssignedToName(''); setNotes(''); setClosing(false); setReason('')
     load({ fresh: true })
   }, [open, load])
 
@@ -74,13 +75,13 @@ export default function IndentDetail({ id, open, onOpenChange, onChanged, onOpen
     setBusy('issue')
     try {
       const r = await indentApi.issue({
-        indentId: indent.id, receivedByName: receivedByName.trim(), notes,
+        indentId: indent.id, receivedByName: receivedByName.trim(), assignedToName: assignedToName.trim() || null, notes,
         lines: typed.map((l) => ({ indentLineId: l.id, quantity: give[l.id] })),
       })
       toast.success(`${r.data.number} issued to ${indent.department?.name}`)
       showNotifyWarning(r)
       onChanged?.()
-      setReceivedByName(''); setNotes('')
+      setReceivedByName(''); setAssignedToName(''); setNotes('')
       await load({ fresh: true })
       onOpenIssue?.(r.data.id)
     } catch (err) {
@@ -194,6 +195,10 @@ export default function IndentDetail({ id, open, onOpenChange, onChanged, onOpen
                     <Input id="iss-by" value={receivedByName} onChange={(e) => setReceivedByName(e.target.value)} placeholder="Name of the person taking the goods" />
                   </div>
                   <div className="space-y-1">
+                    <Label htmlFor="iss-assigned">Assigned to <span className="font-normal text-gray-400">(optional — a person an asset is given to)</span></Label>
+                    <Input id="iss-assigned" value={assignedToName} onChange={(e) => setAssignedToName(e.target.value)} placeholder="e.g. Dr. Rao — leave blank for a department issue" />
+                  </div>
+                  <div className="space-y-1 sm:col-span-2">
                     <Label htmlFor="iss-notes">Note (optional)</Label>
                     <Input id="iss-notes" value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="e.g. Rest next week" />
                   </div>
@@ -229,7 +234,7 @@ export default function IndentDetail({ id, open, onOpenChange, onChanged, onOpen
                             className="flex w-full flex-wrap items-center gap-2 px-3 py-2 text-left text-sm hover:bg-gray-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue-500">
                             <span className="font-mono font-medium text-blue-700">{iss.number}</span>
                             <Badge variant="outline" className={s.cls}>{s.label}</Badge>
-                            <span className="text-gray-500">{formatDateTime(iss.issuedAt)} · {iss.lines.length} batch line{iss.lines.length === 1 ? '' : 's'} · collected by {iss.receivedByName || '—'}</span>
+                            <span className="text-gray-500">{formatDateTime(iss.issuedAt)} · {iss.lines.length} batch line{iss.lines.length === 1 ? '' : 's'} · collected by {iss.receivedByName || '—'}{iss.assignedToName && ` · assigned to ${iss.assignedToName}`}</span>
                             {money && iss.totalValue !== undefined && <span className="ml-auto tabular-nums">{formatMoney(iss.totalValue)}</span>}
                           </button>
                         </li>

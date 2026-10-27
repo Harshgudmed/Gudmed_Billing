@@ -87,7 +87,10 @@ export const ROLES = {
   },
   finance_controller: {
     label: 'Finance Controller',
-    home: 'billing',
+    // Lands on Purchase & Supply Chain — a Finance Controller's main job is
+    // vendor bills and payments (the overdue / MSME tiles live there). Patient
+    // billing and refunds are still one click away in the sidebar.
+    home: 'purchase',
     // Purchase: to approve requests above the hospital's limit, and to read.
     modules: ['dashboard', 'billing', 'purchase', 'storeIndent'],
   },
@@ -219,3 +222,4 @@ export function homePathFor(role) {
   const home = MODULES[cfg.home]?.path || ''
   return home ? `/${role}/${home}` : `/${role}`
 }
+

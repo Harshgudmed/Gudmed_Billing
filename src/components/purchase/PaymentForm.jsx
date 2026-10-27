@@ -4,6 +4,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Checkbox } from '@/components/ui/checkbox'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { FieldError } from '@/components/common/FieldError'
 import { Loader2, Wallet } from 'lucide-react'
@@ -39,7 +40,7 @@ export default function PaymentForm({ open, onOpenChange, billId, recordsPending
       const r = await purchasePaymentApi.getBillDue(billId)
       const row = r?.data?.[0] || false
       setDue(row)
-      setForm({ amount: row ? String(row.payableNow) : '', paidOn: localYmd(), mode: 'neft', reference: '', notes: '' })
+      setForm({ amount: row ? String(row.payableNow) : '', paidOn: localYmd(), mode: 'neft', reference: '', notes: '', paymentType: 'full', isRecurring: false })
     } catch (err) {
       setLoadError(err?.message || 'Could not read what is due on this bill')
     }
@@ -69,6 +70,7 @@ export default function PaymentForm({ open, onOpenChange, billId, recordsPending
       const r = await purchasePaymentApi.record({
         billId, amount: toPaise(form.amount), mode: form.mode, reference: form.reference.trim() || null,
         paidOn: form.paidOn, notes: form.notes.trim() || null,
+        paymentType: form.paymentType, isRecurring: form.isRecurring,
       })
       const p = r.data
       toast.success(p.status === 'posted'
@@ -143,11 +145,26 @@ export default function PaymentForm({ open, onOpenChange, billId, recordsPending
                       placeholder={modeInfo.ref === 'UTR number' ? 'e.g. SBIN526271234567' : modeInfo.ref ? '' : 'e.g. cash voucher no.'} />
                     <FieldError message={errors.reference} />
                   </div>
+                  <div>
+                    <Label htmlFor="pay-type">Payment type</Label>
+                    <Select value={form.paymentType} onValueChange={set('paymentType')}>
+                      <SelectTrigger id="pay-type"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="full">Full payment</SelectItem>
+                        <SelectItem value="partial">Partial payment</SelectItem>
+                        <SelectItem value="advance">Advance</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
                 </div>
                 <div>
                   <Label htmlFor="pay-notes">Note (optional)</Label>
                   <Textarea id="pay-notes" rows={2} maxLength={500} value={form.notes} onChange={(e) => set('notes')(e.target.value)} />
                 </div>
+                <label htmlFor="pay-recurring" className="flex items-center gap-2 text-sm">
+                  <Checkbox id="pay-recurring" checked={form.isRecurring} onCheckedChange={(v) => set('isRecurring')(!!v)} />
+                  Recurring payment <span className="text-gray-400">(a regular/monthly vendor invoice, not a one-time payment)</span>
+                </label>
                 {recordsPending && (
                   <p className="rounded-md bg-blue-50 px-3 py-2 text-xs text-blue-800">This payment waits for Finance to approve it; until then it does not count against the bill.</p>
                 )}

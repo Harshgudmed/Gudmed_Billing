@@ -88,6 +88,7 @@ model Organization {
   pharmacyPurchaseOrders  PharmacyPurchaseOrder[]
   vendors                 Vendor[]
   vendorDocuments         VendorDocument[]
+  vendorBillDocuments     VendorBillDocument[]
   machineIntegrations     MachineIntegration[]
   machineResultsQueue     MachineResultsQueue[]
 
@@ -1098,6 +1099,11 @@ model Vendor {
   name          String
   contactPerson String?
   phone         String?
+  // A second contact person and phone, and the vendor's own VRF (Vendor
+  // Registration Form) number. All optional — older vendors keep working.
+  contactPerson2 String?
+  phone2         String?
+  vrfNumber      String?
   email         String?
   gstNumber     String?
   address       String?
@@ -1279,6 +1285,9 @@ model Item {
   // batch and expiry tracking come with the goods-receipt screen that needs them.
 
   reorderLevel      Float?
+  // Whether this item carries an expiry date — false for durables (a camera,
+  // a phone, furniture), so the goods-receipt screen does not ask for one.
+  expiryApplicable  Boolean @default(true)
   preferredVendorId String?
   // A copy kept for speed ("last time ₹180"), refreshed when a GRN is posted.
   // The record of what was paid lives on the PO lines.
@@ -1481,6 +1490,11 @@ model PurchaseOrder {
   // intra = vendor in the hospital's state → CGST + SGST; inter → IGST;
   // none = the vendor is not GST-registered and cannot charge GST.
   gstType          String  @default("intra")
+  // The currency the vendor quotes in, and its rate to the rupee. All amounts
+  // below are still stored in INR (foreign × exchangeRate); these only record
+  // what was quoted so the document can show both. INR orders stay 1.0.
+  currency         String  @default("INR")
+  exchangeRate     Float   @default(1)
   paymentTermsDays Int? // copied from the vendor
   terms            String? // delivery and other conditions printed on the PO
   notes            String? // internal; not printed
@@ -1585,6 +1599,9 @@ model GoodsReceipt {
   notes          String?
   // Accepted goods at the order's rate, before GST. Money: not shown to the store.
   totalValue     Float     @default(0)
+  // Reconcile check: true when everything that arrived matched the order (nothing
+  // rejected and nothing held) — set when the receipt is posted, shown on the GRN.
+  reconciled     Boolean   @default(true)
 
   cancelledAt     DateTime?
   cancelledByName String?
@@ -1622,6 +1639,12 @@ model GoodsReceiptLine {
   acceptedQty  Float // passed inspection — goes into stock
   rejectedQty  Float     @default(0) // damaged, wrong, short-dated: turned back
   rejectReason String?
+  // Quality inspection outcome for this line: passed (into stock) | hold (set
+  // aside, quarantine) | failed (should be in rejectedQty). Record, not a stock state.
+  qualityStatus String  @default("passed")
+  // Whether this received lot may be sent back to the vendor (a return lot) or
+  // not (a non-return lot — e.g. a sealed consumable the vendor will not take back).
+  returnLot    Boolean   @default(true)
   batchNumber  String?
   expiryDate   DateTime?
   rate         Float     @default(0) // the order's price per unit, after discount, before GST
@@ -4236,6 +4259,11 @@ model VendorBill {
   invoiceTotal        Float? // the total printed on the vendor's invoice, when typed: checked against ours
 
   gstType        String  @default("intra")
+  // Currency the vendor billed in and its rate to the rupee (copied from the
+  // order). All amounts below are still in INR (foreign × exchangeRate); these
+  // only record what was billed so the document shows both. INR bills stay 1.0.
+  currency       String  @default("INR")
+  exchangeRate   Float   @default(1)
   subtotal       Float   @default(0)
   cgst           Float   @default(0)
   sgst           Float   @default(0)
@@ -4274,11 +4302,37 @@ model VendorBill {
   lines        VendorBillLine[]
   payments     VendorPayment[]
   returns      PurchaseReturn[]
+  documents    VendorBillDocument[]
 
   @@unique([organizationId, number])
   @@index([organizationId, status])
   @@index([orderId])
   @@index([organizationId, vendorId, vendorInvoiceKey])
+}
+
+/// A file attached to a vendor bill — the vendor's actual invoice (PDF/Word) or
+/// a supporting document (e.g. a maintenance report). One bill can carry several
+/// (one PO may be billed across several invoices). Stored in uploads/bill-documents/.
+/// Sensitive: served only to the roles that may see bills (finance / purchase).
+model VendorBillDocument {
+  id             String @id @default(cuid())
+  organizationId String
+  billId         String
+
+  // invoice | supporting | other
+  docType  String
+  label    String? // user-supplied, e.g. "Tax invoice Nov 2026"; falls back to fileName
+  fileName String  // original filename shown in the UI
+  fileUrl  String  // /uploads/bill-documents/<uuid>.<ext>
+
+  uploadedById String?
+  uploadedAt   DateTime @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  bill         VendorBill   @relation(fields: [billId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@index([billId])
 }
 
 /// One line of a vendor bill, beside what the order and the receipts say.
@@ -4400,6 +4454,9 @@ model StoreIssue {
   issuedById     String?
   issuedByName   String
   receivedByName String? // who collected the goods for the department
+  // When an item/asset is handed to a named person (a doctor, nurse…), not just
+  // the department in general — blank for an ordinary department issue.
+  assignedToName String?
   notes          String?
   // At the batches' cost, before GST. Money: not shown to the store.
   totalValue     Float    @default(0)
@@ -4473,6 +4530,12 @@ model VendorPayment {
   reference String? // UTR, cheque number…
   paidOn    DateTime
   notes     String?
+
+  // Nature of the payment, for reports: full | partial | advance. "advance" is a
+  // large payment made ahead against this approved bill (not a pre-bill PO advance).
+  paymentType String  @default("full")
+  // A regular/recurring vendor payment (e.g. a monthly service invoice) vs one-time.
+  isRecurring Boolean @default(false)
 
   createdById    String?
   createdByName  String

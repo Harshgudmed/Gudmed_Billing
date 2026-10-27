@@ -14,6 +14,7 @@ export const PURCHASE_SETTING_DEFAULTS = {
   purchasePaymentMode: 'finance',
   purchaseReturnMode: 'approval',
   rfqEmailVendors: false,
+  purchaseRequireBillInvoice: false,
 }
 
 /** The purchase settings out of an organisation row (its `settings` JSON). */
@@ -28,6 +29,8 @@ export function purchaseSettings(organization) {
     paymentMode: PAYMENT_MODES.includes(stored.purchasePaymentMode) ? stored.purchasePaymentMode : PURCHASE_SETTING_DEFAULTS.purchasePaymentMode,
     returnMode: RETURN_MODES.includes(stored.purchaseReturnMode) ? stored.purchaseReturnMode : PURCHASE_SETTING_DEFAULTS.purchaseReturnMode,
     rfqEmailVendors: stored.rfqEmailVendors === true,
+    // When on, a bill cannot be paid until the vendor's invoice file is attached.
+    requireBillInvoice: stored.purchaseRequireBillInvoice === true,
   }
 }
 

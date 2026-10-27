@@ -63,6 +63,10 @@ const receiptSchema = z.object({
     receivedQty: qty('Received'),
     rejectedQty: qty('Rejected'),
     rejectReason: optText(200),
+    // Quality inspection: passed (into stock) | hold (set aside) | failed.
+    qualityStatus: z.enum(['passed', 'hold', 'failed']).optional().default('passed'),
+    // Whether this lot may be sent back to the vendor (a return lot) or not.
+    returnLot: z.preprocess((v) => v !== false && v !== 'false', z.boolean()).optional().default(true),
     batchNumber: optText(40),
     expiryDate: optDate,
   })).min(1, 'Nothing to receive').max(300),
@@ -309,6 +313,10 @@ export async function grnCreate(req, res, next) {
       }
       if (!rows.length) throw bad('Enter how much arrived on at least one line')
 
+      // Reconcile check: this receipt reconciles when nothing was rejected and
+      // every line passed quality inspection (what arrived matched the order).
+      const reconciled = rows.every((r) => !(r.l.rejectedQty > 0) && (r.l.qualityStatus || 'passed') === 'passed')
+
       const number = await nextSeriesNumber(tx, ORG_ID, 'PURCHASE_GRN', 'GRN')
       const receipt = await tx.goodsReceipt.create({
         data: {
@@ -316,6 +324,7 @@ export async function grnCreate(req, res, next) {
           receivedAt, challanNumber: challanNumber || null, challanDate: challanDate || null,
           receivedById: actor.id, receivedByName: actor.name || 'Staff', notes: notes || null,
           totalValue: round2(rows.reduce((s, r) => s + r.stockQty * r.unitCost, 0)),
+          reconciled,
         },
       })
 
@@ -350,6 +359,7 @@ export async function grnCreate(req, res, next) {
             itemId: ol.itemId, itemCode: ol.itemCode, itemName: ol.itemName, unitId: ol.unitId, unitCode: ol.unitCode, unitFactor: ol.unitFactor,
             receivedQty: l.receivedQty, acceptedQty: accepted, rejectedQty: l.rejectedQty || 0,
             rejectReason: l.rejectedQty > 0 ? l.rejectReason : null,
+            qualityStatus: l.qualityStatus || 'passed', returnLot: l.returnLot !== false,
             batchNumber: l.batchNumber || null, expiryDate: l.expiryDate || null,
             rate: round2(unitCost * (ol.unitFactor || 1)), stockQty, batchId,
           },

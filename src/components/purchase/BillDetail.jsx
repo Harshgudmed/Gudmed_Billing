@@ -2,9 +2,11 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Label } from '@/components/ui/label'
+import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
-import { Loader2, CheckCircle2, XCircle, Pencil, Trash2, RotateCcw, Ban, AlertTriangle, PauseCircle, Wallet } from 'lucide-react'
+import { Loader2, CheckCircle2, XCircle, Pencil, Trash2, RotateCcw, Ban, AlertTriangle, PauseCircle, Wallet, FileText, ExternalLink, Upload } from 'lucide-react'
 import { toast } from 'sonner'
 import { purchaseApi } from '@/api/purchaseApi'
 import { purchasePaymentApi } from '@/api/purchasePaymentApi'
@@ -34,6 +36,10 @@ import { billLineDifferences, netRateOf, billOutcomeText, billOverdue, dueDateFo
 // The server decides each again; these only choose what to show.
 
 const day = (v) => formatDateTime(v, { withTime: false })
+
+// The kinds of file that can hang off a bill — the vendor's own invoice, any
+// paper that supports it (delivery challan, e-way bill), or anything else.
+const BILL_DOC_TYPE = { invoice: "Vendor's invoice", supporting: 'Supporting document', other: 'Other' }
 
 // Why a saved line was held. The server's flags decide ✔ or ⚠; the words come
 // from the same comparison the form made. A saved line does not keep the
@@ -65,6 +71,11 @@ export default function BillDetail({ id, open, onOpenChange, onEdit, onChanged, 
   const [payments, setPayments] = useState(null)
   const [paymentsFailed, setPaymentsFailed] = useState(false)
   const [paying, setPaying] = useState(false)
+  // Attaching the vendor's invoice / supporting files to this bill.
+  const [docType, setDocType] = useState('invoice')
+  const [docLabel, setDocLabel] = useState('')
+  const [uploading, setUploading] = useState(false)
+  const fileInputRef = useRef(null)
   const settings = usePaymentMode(open && me.canSeePayments)
   const pay = paymentAccess(me, settings.mode)
   const load = useCallback(async () => {
@@ -105,6 +116,34 @@ export default function BillDetail({ id, open, onOpenChange, onEdit, onChanged, 
     }
   }
 
+  // Attach one file, then reload the bill so its documents list refreshes.
+  const uploadDoc = async (file) => {
+    if (!bill || !file) return
+    setUploading(true)
+    try {
+      await purchaseApi.uploadBillDoc(bill.id, docType, docLabel.trim() || null, file)
+      toast.success('Document attached')
+      setDocLabel('')
+      if (fileInputRef.current) fileInputRef.current.value = ''
+      await load()
+    } catch (err) {
+      showApiError(err, 'Could not attach the document')
+    } finally {
+      setUploading(false)
+    }
+  }
+
+  const deleteDoc = async (doc) => {
+    if (!window.confirm(`Remove "${doc.label || doc.fileName}"?`)) return
+    try {
+      await purchaseApi.deleteBillDoc(doc.id)
+      toast.success('Document removed')
+      await load()
+    } catch (err) {
+      showApiError(err, 'Could not remove the document')
+    }
+  }
+
   const lines = bill?.lines ?? []
   const status = bill && (BILL_STATUS[bill.status] || BILL_STATUS.draft)
   const mine = !!bill && me.canBill && ownsOrAdmin(me, { requestedById: bill.createdById })
@@ -130,8 +169,15 @@ export default function BillDetail({ id, open, onOpenChange, onEdit, onChanged, 
   const balance = billStillDue(bill)
   // Returns worth more than was left to pay: the vendor owes the hospital.
   const vendorOwes = billOwedByVendor(bill)
-  const canPay = bill?.status === 'approved' && balance > 0 && pay.canRecord
+  // This hospital may require the vendor's invoice file attached before paying.
+  const hasInvoiceDoc = (bill?.documents ?? []).some((d) => d.docType === 'invoice')
+  const invoiceRequiredMissing = settings.requireInvoice && !hasInvoiceDoc
+  const canPay = bill?.status === 'approved' && balance > 0 && pay.canRecord && !invoiceRequiredMissing
   const needsText = asking === 'reject' || asking === 'cancel'
+  // Who may attach / remove a bill's files — the same roles the server allows
+  // (purchase officer, Finance, admin). Everyone who can open the bill sees them.
+  const canManageDocs = !!bill && (me.canBill || me.canDecideBill || me.isAdmin)
+  const docs = bill?.documents ?? []
 
   const confirmAsked = () => {
     const text = remark.trim()
@@ -156,6 +202,7 @@ export default function BillDetail({ id, open, onOpenChange, onEdit, onChanged, 
                   ? <Badge variant="outline" className="gap-1 border-green-200 bg-green-50 text-green-700"><CheckCircle2 className="h-3.5 w-3.5" />Matches</Badge>
                   : <Badge variant="outline" className="gap-1 border-amber-200 bg-amber-50 text-amber-800"><AlertTriangle className="h-3.5 w-3.5" />Mismatch</Badge>)}
                 {bill.gstType && <Badge variant="outline">{GST_TYPE_LABEL[bill.gstType] || bill.gstType}</Badge>}
+                {bill.currency && bill.currency !== 'INR' && <Badge variant="outline" className="border-blue-200 bg-blue-50 text-blue-700">{bill.currency} @ ₹{bill.exchangeRate}</Badge>}
               </div>
               <DialogDescription>
                 {bill.vendorName} · invoice <span className="font-medium text-gray-700">{bill.vendorInvoiceNumber}</span>
@@ -286,6 +333,9 @@ export default function BillDetail({ id, open, onOpenChange, onEdit, onChanged, 
                   {bill.gstType === 'inter' && <div className="flex justify-between gap-4"><dt className="text-gray-500">IGST</dt><dd className="tabular-nums">{formatMoney(bill.igst)}</dd></div>}
                   {bill.gstType === 'none' && <div className="flex justify-between gap-4"><dt className="text-gray-500">GST</dt><dd className="text-right text-gray-500">No GST — vendor not registered</dd></div>}
                   <div className="flex justify-between gap-4 border-t pt-2"><dt className="font-semibold">Bill total</dt><dd className="font-bold tabular-nums">{formatMoney(bill.total)}</dd></div>
+                  {bill.currency && bill.currency !== 'INR' && bill.exchangeRate > 0 && (
+                    <div className="flex justify-between gap-4 text-sm"><dt className="text-gray-500">= billed in {bill.currency}</dt><dd className="tabular-nums text-gray-600">{(bill.total / bill.exchangeRate).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</dd></div>
+                  )}
                   {bill.invoiceTotal != null && (
                     <div className="flex justify-between gap-4"><dt className="text-gray-500">Vendor's invoice says</dt><dd className="tabular-nums text-gray-600">{formatMoney(bill.invoiceTotal)}</dd></div>
                   )}
@@ -319,6 +369,11 @@ export default function BillDetail({ id, open, onOpenChange, onEdit, onChanged, 
               {bill.status === 'approved' && balance > 0 && settings.error && (
                 <LoadFailed onRetry={settings.retry}>Could not read who pays vendors in this hospital, so the Pay button is not shown.</LoadFailed>
               )}
+              {bill.status === 'approved' && balance > 0 && invoiceRequiredMissing && (
+                <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+                  This hospital requires the vendor's invoice to be attached before a bill can be paid. Attach it under “Invoice &amp; documents” below, then the Pay button appears.
+                </p>
+              )}
               {payments?.length > 0 && (
                 <div className="overflow-x-auto rounded-md border">
                   <table className="w-full min-w-[560px] text-sm">
@@ -339,7 +394,9 @@ export default function BillDetail({ id, open, onOpenChange, onEdit, onChanged, 
                           <tr key={p.id}>
                             <td className="px-3 py-2 font-mono">{p.number}</td>
                             <td className="px-3 py-2 whitespace-nowrap">{day(p.paidOn)}</td>
-                            <td className="px-3 py-2">{modeLabel(p.mode)}{p.reference && <span className="ml-1 font-mono text-xs text-gray-500">{p.reference}</span>}</td>
+                            <td className="px-3 py-2">{modeLabel(p.mode)}{p.reference && <span className="ml-1 font-mono text-xs text-gray-500">{p.reference}</span>}
+                              {p.paymentType && p.paymentType !== 'full' && <span className="ml-1 rounded bg-gray-100 px-1.5 py-0.5 text-[11px] capitalize text-gray-600">{p.paymentType}</span>}
+                              {p.isRecurring && <span className="ml-1 rounded bg-blue-50 px-1.5 py-0.5 text-[11px] text-blue-700">recurring</span>}</td>
                             <td className="px-3 py-2 text-right tabular-nums">{formatMoney(p.amount)}</td>
                             <td className="px-3 py-2"><Badge variant="outline" className={`whitespace-nowrap ${st.cls}`}>{st.label}</Badge></td>
                           </tr>
@@ -347,6 +404,76 @@ export default function BillDetail({ id, open, onOpenChange, onEdit, onChanged, 
                       })}
                     </tbody>
                   </table>
+                </div>
+              )}
+
+              {/* ── Invoice & supporting files attached to this bill ── */}
+              {(docs.length > 0 || canManageDocs) && (
+                <div className="space-y-2">
+                  <h3 className="text-xs font-semibold text-gray-500">Invoice &amp; documents
+                    {settings.requireInvoice && (hasInvoiceDoc
+                      ? <span className="ml-2 font-normal text-green-600">✓ invoice attached</span>
+                      : <span className="ml-2 font-normal text-amber-700">⚠ invoice pending</span>)}
+                  </h3>
+                  {docs.length === 0 ? (
+                    <p className="text-xs italic text-gray-400">No files attached yet.</p>
+                  ) : (
+                    <div className="divide-y rounded-md border">
+                      {docs.map((d) => (
+                        <div key={d.id} className="flex items-center justify-between gap-2 px-3 py-2">
+                          <div className="flex min-w-0 items-center gap-2">
+                            <FileText className="h-4 w-4 shrink-0 text-gray-400" />
+                            <div className="min-w-0">
+                              <p className="truncate text-sm font-medium">{d.label || d.fileName}</p>
+                              <p className="text-xs text-gray-500">{BILL_DOC_TYPE[d.docType] || d.docType} · {d.fileName} · {day(d.uploadedAt)}</p>
+                            </div>
+                          </div>
+                          <div className="flex shrink-0 items-center gap-1">
+                            {/* The file endpoint lives under /api (the only path the dev proxy forwards). */}
+                            <a href={`/api${d.fileUrl}`} target="_blank" rel="noreferrer">
+                              <Button type="button" size="icon" variant="ghost" title="Open file" aria-label="Open file">
+                                <ExternalLink className="h-4 w-4 text-blue-600" />
+                              </Button>
+                            </a>
+                            {canManageDocs && (
+                              <Button type="button" size="icon" variant="ghost" title="Remove" aria-label="Remove file" onClick={() => deleteDoc(d)}>
+                                <Trash2 className="h-4 w-4 text-red-500" />
+                              </Button>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {canManageDocs && (
+                    <div className="space-y-2 rounded-md border border-dashed p-3">
+                      <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+                        <div className="space-y-1">
+                          <Label className="text-xs text-gray-500">File type</Label>
+                          <Select value={docType} onValueChange={setDocType}>
+                            <SelectTrigger><SelectValue /></SelectTrigger>
+                            <SelectContent>
+                              {Object.entries(BILL_DOC_TYPE).map(([v, l]) => <SelectItem key={v} value={v}>{l}</SelectItem>)}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div className="space-y-1 sm:col-span-2">
+                          <Label className="text-xs text-gray-500">Label <span className="font-normal text-gray-400">(optional, e.g. "Invoice INV-204")</span></Label>
+                          <Input value={docLabel} onChange={(e) => setDocLabel(e.target.value)} placeholder="Leave blank to use the file name" />
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <input ref={fileInputRef} type="file" accept=".jpg,.jpeg,.png,.pdf,.doc,.docx" className="hidden" id="bill-doc-upload"
+                          onChange={(e) => uploadDoc(e.target.files?.[0])} />
+                        <Button type="button" variant="outline" size="sm" disabled={uploading} onClick={() => fileInputRef.current?.click()}>
+                          {uploading ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <Upload className="h-4 w-4 mr-1" />}
+                          {uploading ? 'Uploading…' : 'Browse & upload'}
+                        </Button>
+                        <span className="text-xs text-gray-400">PDF, Word, JPG or PNG · max 10 MB</span>
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
 

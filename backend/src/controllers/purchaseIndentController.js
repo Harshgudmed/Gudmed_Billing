@@ -88,7 +88,7 @@ const INDENT_INCLUDE = {
 const ISSUE_FOR_DEPT = {
   orderBy: { issuedAt: 'asc' },
   select: {
-    id: true, number: true, status: true, issuedAt: true, issuedByName: true, receivedByName: true,
+    id: true, number: true, status: true, issuedAt: true, issuedByName: true, receivedByName: true, assignedToName: true,
     cancelledAt: true, cancelledByName: true, cancelReason: true,
     lines: { select: { id: true, indentLineId: true, itemName: true, quantity: true, unitCode: true, batchNumber: true, expiryDate: true } },
   },
@@ -213,6 +213,7 @@ export async function indentGet(req, res, next) {
         where.OR = [
           { number: { contains: term, mode: 'insensitive' } },
           { receivedByName: { contains: term, mode: 'insensitive' } },
+          { assignedToName: { contains: term, mode: 'insensitive' } },
           { indent: { number: { contains: term, mode: 'insensitive' } } },
           { lines: { some: { itemName: { contains: term, mode: 'insensitive' } } } },
         ]
@@ -240,6 +241,8 @@ export async function indentGet(req, res, next) {
 const issueSchema = z.object({
   indentId: z.string().min(1, 'Choose the indent the goods are given against'),
   receivedByName: z.preprocess((v) => (blank(v) ? '' : String(v).trim()), z.string().min(2, 'Say who collected the goods').max(100)),
+  // Optional: the person an asset/item is handed to (blank = ordinary department issue).
+  assignedToName: optText(100),
   notes: optText(500),
   lines: z.array(z.object({
     indentLineId: z.string().min(1),
@@ -256,7 +259,7 @@ export async function indentCreate(req, res, next) {
     if (!canIssue(req)) throw forbidden('Only the store keeper or an administrator issues goods')
     const parsed = issueSchema.safeParse(req.body)
     if (!parsed.success) return validationError(res, parsed.error)
-    const { indentId, receivedByName, notes, lines } = parsed.data
+    const { indentId, receivedByName, assignedToName, notes, lines } = parsed.data
     const actor = getActor(req)
     const today = startOfToday()
 
@@ -307,7 +310,7 @@ export async function indentCreate(req, res, next) {
       const created = await tx.storeIssue.create({
         data: {
           organizationId: ORG_ID, number, indentId: indent.id, departmentId: indent.departmentId,
-          issuedById: actor.id, issuedByName: actor.name || 'Store', receivedByName, notes: notes || null,
+          issuedById: actor.id, issuedByName: actor.name || 'Store', receivedByName, assignedToName: assignedToName || null, notes: notes || null,
           totalValue: round2(plans.reduce((s, p) => s + p.takes.reduce((x, t) => x + t.qty * t.batch.unitCost, 0), 0)),
         },
       })

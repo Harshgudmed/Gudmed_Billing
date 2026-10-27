@@ -14,7 +14,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import {
   Settings, Building2, Users, Package, Link2, Database, Search,
   Save, Plus, Edit, Eye, CheckCircle, XCircle, AlertCircle, RefreshCw, Loader2, Clock, Palette,
-  MessageCircle, Bell, DoorOpen, Network, MonitorPlay, ShieldCheck, Zap, Landmark, UserCog, Undo2,
+  MessageCircle, Bell, DoorOpen, Network, MonitorPlay, ShieldCheck, Zap, Landmark, UserCog, Undo2, ShoppingCart,
 } from 'lucide-react'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -37,6 +37,7 @@ import { useDebounce } from '@/lib/useDebounce'
 import { Pagination } from '@/components/common/Pagination'
 import { FilterBar, FilterSelect } from '@/components/common/FilterBar'
 import IntegrationsHub from './IntegrationsHub'
+import PurchaseSettings from '@/components/purchase/PurchaseSettings'
 import RoomsManager from './RoomsManager'
 import DepartmentsManager from './DepartmentsManager'
 import { ChoiceCards, ToggleCard } from '@/components/common/ChoiceCards'
@@ -395,12 +396,13 @@ export default function SettingsModule() {
       </div>
 
       <Tabs value={activeTab} onValueChange={setActiveTab}>
-        <TabsList className="grid w-full grid-cols-6">
+        <TabsList className={isModuleOn('purchase', modules) ? 'grid w-full grid-cols-7' : 'grid w-full grid-cols-6'}>
           <TabsTrigger value="organization"><Building2 className="h-4 w-4 mr-2" />Organization</TabsTrigger>
           <TabsTrigger value="users"><Users className="h-4 w-4 mr-2" />Users</TabsTrigger>
           <TabsTrigger value="displayBoards"><MonitorPlay className="h-4 w-4 mr-2" />TV Boards</TabsTrigger>
           <TabsTrigger value="rooms"><DoorOpen className="h-4 w-4 mr-2" />Rooms</TabsTrigger>
           <TabsTrigger value="modules"><Package className="h-4 w-4 mr-2" />Modules</TabsTrigger>
+          {isModuleOn('purchase', modules) && <TabsTrigger value="purchase"><ShoppingCart className="h-4 w-4 mr-2" />Purchase</TabsTrigger>}
           <TabsTrigger value="integrations"><Link2 className="h-4 w-4 mr-2" />Integrations</TabsTrigger>
         </TabsList>
 
@@ -699,11 +701,23 @@ export default function SettingsModule() {
             </CardContent>
           </Card>
 
-          {isModuleOn('purchase', modules) && (
+          <div className="flex justify-end">
+            <Button onClick={saveOrganization} disabled={savingOrg}>
+              {savingOrg ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Save className="h-4 w-4 mr-2" />}
+              Save
+            </Button>
+          </div>
+        </TabsContent>
+
+        {/* Purchase Tab — every Purchase setting in one place: how the hospital pays
+            vendors, returns goods and asks for rates (saved with the organization),
+            then the setup an administrator keeps (units, categories, approval rules). */}
+        {isModuleOn('purchase', modules) && (
+          <TabsContent value="purchase" className="space-y-4">
             <Card>
               <CardHeader>
-                <CardTitle>Purchase &amp; Supply Chain</CardTitle>
-                <CardDescription>How this hospital pays vendors, returns goods and asks vendors for rates.</CardDescription>
+                <CardTitle>How this hospital runs purchasing</CardTitle>
+                <CardDescription>Who pays vendors, how returns are approved, and when the vendor's invoice is needed.</CardDescription>
               </CardHeader>
               <CardContent className="space-y-6">
                 <ChoiceCards
@@ -726,18 +740,26 @@ export default function SettingsModule() {
                   checked={orgForm.rfqEmailVendors}
                   onChange={v => setOrgForm(p => ({ ...p, rfqEmailVendors: v }))}
                 />
+                <ToggleCard
+                  title="Require the vendor's invoice before paying a bill"
+                  description="When on, a bill cannot be paid until the vendor's invoice file is attached to it (on the bill's “Invoice & documents” section). Keeps payments tied to a real invoice."
+                  checked={orgForm.purchaseRequireBillInvoice}
+                  onChange={v => setOrgForm(p => ({ ...p, purchaseRequireBillInvoice: v }))}
+                />
+                <div className="flex justify-end">
+                  <Button onClick={saveOrganization} disabled={savingOrg}>
+                    {savingOrg ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Save className="h-4 w-4 mr-2" />}
+                    Save
+                  </Button>
+                </div>
               </CardContent>
             </Card>
-          )}
 
-
-          <div className="flex justify-end">
-            <Button onClick={saveOrganization} disabled={savingOrg}>
-              {savingOrg ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Save className="h-4 w-4 mr-2" />}
-              Save 
-            </Button>
-          </div>
-        </TabsContent>
+            {/* The setup an administrator keeps — units, categories, approval rules
+                (plus the readiness checklist) — reused from the same screen Integrations opened. */}
+            <PurchaseSettings />
+          </TabsContent>
+        )}
 
         {/* Users Tab */}
         <TabsContent value="users" className="space-y-4">

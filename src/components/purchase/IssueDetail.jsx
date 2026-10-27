@@ -37,6 +37,7 @@ ${infoBox('Issued to', [
     { label: 'Against indent', value: iss.indent?.number || '—' },
     { label: 'Indent raised by', value: iss.indent?.requestedByName || '—' },
     { label: 'Collected by', value: iss.receivedByName || '—' },
+    ...(iss.assignedToName ? [{ label: 'Assigned to', value: iss.assignedToName }] : []),
   ])}
 ${infoBox('Issue', [
     { label: 'Issue number', value: iss.number },

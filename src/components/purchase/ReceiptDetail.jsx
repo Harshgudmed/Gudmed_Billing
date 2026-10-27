@@ -67,6 +67,9 @@ export default function ReceiptDetail({ id, open, onOpenChange, onChanged, onOpe
               <div className="flex flex-wrap items-center gap-2 pr-6">
                 <DialogTitle className="font-mono">{grn.number}</DialogTitle>
                 <Badge variant="outline" className={status.cls}>{status.label}</Badge>
+                {grn.status !== 'cancelled' && (grn.reconciled
+                  ? <Badge variant="outline" className="border-green-200 bg-green-50 text-green-700">Reconciled</Badge>
+                  : <Badge variant="outline" className="border-amber-200 bg-amber-50 text-amber-800">Not reconciled</Badge>)}
               </div>
               <DialogDescription>
                 {grn.vendorName} · against{' '}
@@ -92,6 +95,7 @@ export default function ReceiptDetail({ id, open, onOpenChange, onChanged, onOpe
                       <th className="text-right font-medium px-3 py-2">Arrived</th>
                       <th className="text-right font-medium px-3 py-2">Rejected</th>
                       <th className="text-right font-medium px-3 py-2">Accepted</th>
+                      <th className="text-left font-medium px-3 py-2">Quality</th>
                       <th className="text-left font-medium px-3 py-2">Batch · expiry</th>
                       {money && <th className="text-right font-medium px-3 py-2">Value</th>}
                     </tr>
@@ -108,6 +112,12 @@ export default function ReceiptDetail({ id, open, onOpenChange, onChanged, onOpe
                           {l.rejectedQty ? <><span className="tabular-nums text-red-700">{l.rejectedQty}</span><div className="text-xs text-gray-500">{l.rejectReason}</div></> : <span className="text-gray-400">—</span>}
                         </td>
                         <td className="px-3 py-2 text-right font-semibold tabular-nums">{l.acceptedQty}</td>
+                        <td className="px-3 py-2 text-sm">
+                          <span className={l.qualityStatus === 'failed' ? 'text-red-700' : l.qualityStatus === 'hold' ? 'text-amber-700' : 'text-green-700'}>
+                            {l.qualityStatus === 'hold' ? 'On hold' : l.qualityStatus === 'failed' ? 'Failed' : 'Passed'}
+                          </span>
+                          {l.returnLot === false && <div className="text-xs text-gray-500">Non-return lot</div>}
+                        </td>
                         <td className="px-3 py-2 text-sm">
                           {l.batchNumber || <span className="text-gray-400">No batch</span>}
                           {l.expiryDate && <div className="text-xs text-gray-500">Exp {formatDateTime(l.expiryDate, { withTime: false })}</div>}

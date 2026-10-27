@@ -146,7 +146,7 @@ export default function IndentsTab({ onChanged, openId: openIdLink = null, issue
                     <TableCell className="font-mono text-sm font-medium text-blue-700">{r.number}</TableCell>
                     <TableCell>{r.department?.name}</TableCell>
                     <TableCell className="font-mono text-sm">{r.indent?.number || '—'}</TableCell>
-                    <TableCell>{r.receivedByName || '—'}</TableCell>
+                    <TableCell>{r.receivedByName || '—'}{r.assignedToName && <div className="text-xs text-gray-500">→ {r.assignedToName}</div>}</TableCell>
                     <TableCell><div className="text-sm">{formatDateTime(r.issuedAt)}</div><div className="text-xs text-gray-500">by {r.issuedByName}</div></TableCell>
                     {me.seesMoney && <TableCell className="text-right tabular-nums">{r.totalValue !== undefined ? formatMoney(r.totalValue) : '—'}</TableCell>}
                     <TableCell><Badge variant="outline" className={s.cls}>{s.label}</Badge></TableCell>

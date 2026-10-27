@@ -93,6 +93,9 @@ const createSchema = z.object({
   paidOn: z.preprocess((v) => (blank(v) ? undefined : v),
     z.string({ required_error: 'Enter the date it was paid', invalid_type_error: 'Enter the date paid like 2026-10-01' })),
   notes: text(500, 'Notes').optional(),
+  // How to classify this payment, and whether it is a recurring arrangement.
+  paymentType: z.enum(['full', 'partial', 'advance']).optional().default('full'),
+  isRecurring: z.preprocess((v) => v === true || v === 'true', z.boolean()).optional().default(false),
 }).superRefine((d, ctx) => {
   // A bank payment is traced by its reference; without one the vendor's
   // "not received" cannot be answered.
@@ -421,6 +424,7 @@ export async function paymentGet(req, res, next) {
         where, req, orderBy: [{ createdAt: 'desc' }, { number: 'desc' }],
         select: {
           id: true, number: true, status: true, vendorId: true, vendorName: true, billId: true, amount: true, mode: true, reference: true,
+          paymentType: true, isRecurring: true,
           paidOn: true, createdByName: true, createdById: true, createdAt: true, decidedByName: true, decidedAt: true, decisionRemark: true,
           cancelReason: true, bill: { select: { number: true, vendorInvoiceNumber: true } },
         },
@@ -447,7 +451,7 @@ export async function paymentCreate(req, res, next) {
   try {
     const ORG_ID = getOrgId(req)
     if (!canSeePayments(req)) throw forbidden('Vendor payments are for Finance and the purchase team')
-    const { paymentMode } = await loadPurchaseSettings(db, ORG_ID)
+    const { paymentMode, requireBillInvoice } = await loadPurchaseSettings(db, ORG_ID)
     const rules = paymentRules(paymentMode)
     if (!roleIn(req, rules.recorders)) throw forbidden(WHO_RECORDS[paymentMode])
     const parsed = createSchema.safeParse(req.body)
@@ -459,6 +463,13 @@ export async function paymentCreate(req, res, next) {
     const payment = await writePayment(req, ORG_ID, 'create', async (tx) => {
       const bill = await lockBill(tx, ORG_ID, input.billId)
       assertPayable(bill)
+      // This hospital may require the vendor's invoice file on the bill before it is paid.
+      if (requireBillInvoice) {
+        const invoiceDocs = await tx.vendorBillDocument.count({ where: { organizationId: ORG_ID, billId: bill.id, docType: 'invoice' } })
+        if (invoiceDocs === 0) {
+          throw conflict(`Attach the vendor's invoice to ${bill.number} before recording a payment — this hospital requires it (Settings → Purchase).`)
+        }
+      }
       const pending = await pendingOn(tx, ORG_ID, bill.id)
       const due = stillDue(bill)
       const room = payableNow(bill, pending)
@@ -480,6 +491,7 @@ export async function paymentCreate(req, res, next) {
           organizationId: ORG_ID, number, status: rules.status,
           vendorId: bill.vendorId, vendorName: bill.vendorName, billId: bill.id,
           amount: input.amount, mode: input.mode, reference: input.reference, paidOn, notes: input.notes ?? null,
+          paymentType: input.paymentType, isRecurring: input.isRecurring,
           createdById: actor.id, createdByName: actor.name || 'Staff',
         },
       })

@@ -76,10 +76,27 @@ const headerFields = {
   expectedDate: z.preprocess((v) => (blank(v) ? null : v), z.coerce.date({ invalid_type_error: 'Enter a valid date' }).nullable().optional()),
   terms: z.string().trim().max(1000).optional().nullable(),
   notes: z.string().trim().max(500).optional().nullable(),
+  // The quoted currency and its rate to the rupee. Rates below are already in
+  // INR (the screen converts foreign × exchangeRate before sending), so these
+  // only record what was quoted. Left undefined when not sent (a save that
+  // doesn't touch currency must not silently reset it to INR) — poCreate and
+  // the save handler fall back to 'INR' / 1 themselves when creating.
+  currency: z.preprocess((v) => (v === undefined ? undefined : (blank(v) ? 'INR' : String(v).trim().toUpperCase())), z.string().max(3).optional()),
+  exchangeRate: z.preprocess((v) => (v === undefined ? undefined : (blank(v) ? 1 : Number(v))), z.number().finite().positive('The exchange rate must be more than 0').max(1e6).optional()),
   lines: z.array(lineSchema).min(1, 'Add at least one item').max(200, 'At most 200 lines on one order'),
 }
-const createSchema = z.object(headerFields)
-const saveSchema = z.object({ id: z.string().min(1), ...headerFields }).partial({ vendorId: true, lines: true })
+const createSchema = z.object(headerFields).superRefine((d, ctx) => {
+  // A foreign currency with no rate would store the order at face value in
+  // rupees — catch it here, not just on screen.
+  if (d.currency && d.currency !== 'INR' && !(d.exchangeRate > 0)) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['exchangeRate'], message: 'Enter the exchange rate to the rupee' })
+  }
+})
+const saveSchema = z.object({ id: z.string().min(1), ...headerFields }).partial({ vendorId: true, lines: true }).superRefine((d, ctx) => {
+  if (d.currency && d.currency !== 'INR' && !(d.exchangeRate > 0)) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['exchangeRate'], message: 'Enter the exchange rate to the rupee' })
+  }
+})
 
 const ORDER_INCLUDE = {
   vendor: { select: { id: true, code: true, name: true, gstNumber: true, stateCode: true, phone: true, email: true, contactPerson: true, houseNumber: true, street: true, locality: true, city: true, district: true, pincode: true, paymentTermsDays: true, msmeNumber: true } },
@@ -90,7 +107,7 @@ const ORDER_INCLUDE = {
       // whether the receiving screen may take 2.5 of it
       unit: { select: { allowsFraction: true } },
       // the unit stock is kept in, so receiving can say 5 BOX = 500 PCS
-      item: { select: { stockUnit: { select: { code: true } } } },
+      item: { select: { expiryApplicable: true, stockUnit: { select: { code: true } } } },
     },
   },
   // The goods receipts against it — what has come in.
@@ -223,14 +240,14 @@ async function readFull(ORG_ID, id, client = db) {
  * (poCreate) and awarding an RFQ (purchaseRfqController) both make orders here,
  * so an awarded RFQ's order is the same as one made by hand.
  */
-export async function insertDraftOrder(tx, req, ORG_ID, { vendor, h, gstType, rows, expectedDate, terms, notes, actor }) {
+export async function insertDraftOrder(tx, req, ORG_ID, { vendor, h, gstType, rows, expectedDate, terms, notes, actor, currency = 'INR', exchangeRate = 1 }) {
   const requestIds = await claimRequestLines(tx, ORG_ID, rows)
   const number = await nextSeriesNumber(tx, ORG_ID, 'PURCHASE_PO', 'PO')
   const created = await tx.purchaseOrder.create({
     data: {
       organizationId: ORG_ID, number, status: 'draft',
       vendorId: vendor.id, vendorName: vendor.name, expectedDate: expectedDate ?? null,
-      gstType, paymentTermsDays: vendor.paymentTermsDays,
+      gstType, currency, exchangeRate, paymentTermsDays: vendor.paymentTermsDays,
       terms: blank(terms) ? defaultTerms(h) : terms, notes: blank(notes) ? null : notes,
       ...orderTotals(rows, gstType),
       createdById: actor.id, createdByName: actor.name || 'Staff',
@@ -381,7 +398,7 @@ export async function poCreate(req, res, next) {
     if (!canOrder(req)) throw forbidden('Only the purchase officer or an administrator places orders')
     const parsed = createSchema.safeParse(req.body)
     if (!parsed.success) return validationError(res, parsed.error)
-    const { vendorId, expectedDate, terms, notes, lines } = parsed.data
+    const { vendorId, expectedDate, terms, notes, lines, currency, exchangeRate } = parsed.data
     const vendor = await checkVendor(ORG_ID, vendorId)
     if (expectedDate && expectedDate < startOfToday()) throw bad('The expected date is in the past')
     const h = await hospital(ORG_ID)
@@ -389,7 +406,7 @@ export async function poCreate(req, res, next) {
     const rows = await buildLines(ORG_ID, lines, gstType)
     const actor = getActor(req)
 
-    const full = await db.$transaction((tx) => insertDraftOrder(tx, req, ORG_ID, { vendor, h, gstType, rows, expectedDate, terms, notes, actor }))
+    const full = await db.$transaction((tx) => insertDraftOrder(tx, req, ORG_ID, { vendor, h, gstType, rows, expectedDate, terms, notes, actor, currency, exchangeRate }))
     return res.status(201).json({ success: true, data: full })
   } catch (e) {
     sendError(res, e, next)
@@ -412,7 +429,7 @@ export async function poUpdate(req, res, next) {
       if (!canOrder(req)) throw forbidden('Only the purchase officer or an administrator changes orders')
       const parsed = saveSchema.safeParse(req.body)
       if (!parsed.success) return validationError(res, parsed.error)
-      const { vendorId, expectedDate, terms, notes, lines } = parsed.data
+      const { vendorId, expectedDate, terms, notes, lines, currency, exchangeRate } = parsed.data
       if (expectedDate && expectedDate < startOfToday()) throw bad('The expected date is in the past')
       const h = await hospital(ORG_ID)
 
@@ -438,6 +455,7 @@ export async function poUpdate(req, res, next) {
           where: { id },
           data: {
             vendorId: vendor.id, vendorName: vendor.name, gstType, paymentTermsDays: vendor.paymentTermsDays,
+            ...(currency !== undefined ? { currency, exchangeRate: exchangeRate ?? 1 } : {}),
             ...(expectedDate !== undefined ? { expectedDate } : {}),
             ...(terms !== undefined ? { terms: blank(terms) ? defaultTerms(h) : terms } : {}),
             ...(notes !== undefined ? { notes: blank(notes) ? null : notes } : {}),

@@ -32,9 +32,10 @@ import { bankFromIfsc } from '@/lib/ifscBanks'
 // what will be saved before pressing Save.
 
 const DOC_TYPE_LABEL = {
-  pan_cert: 'PAN Certificate',
-  gst_cert: 'GST Certificate',
-  other:    'Other Document',
+  pan_cert:  'PAN Certificate',
+  gst_cert:  'GST Certificate',
+  agreement: 'Agreement / Contract',
+  other:     'Other Document',
 }
 
 const STATUS_OPTIONS = [
@@ -43,6 +44,8 @@ const STATUS_OPTIONS = [
   { value: 'inactive', label: 'Retired' },
 ]
 const VENDOR_TYPES = [{ value: 'goods', label: 'Goods' }, { value: 'services', label: 'Services' }, { value: 'both', label: 'Goods & services' }]
+// For the list filter: the vendor types with an "all" option in front.
+const VENDOR_TYPE_FILTER = [{ value: 'all', label: 'All types' }, ...VENDOR_TYPES]
 const TDS_SECTIONS = [
   { value: '194C', label: '194C — Contractor' },
   { value: '194J', label: '194J — Professional / technical' },
@@ -53,7 +56,7 @@ const TDS_SECTIONS = [
 const NONE = '__none'
 
 const EMPTY = {
-  name: '', contactPerson: '', phone: '', email: '', vendorType: '',
+  name: '', contactPerson: '', phone: '', vrfNumber: '', contactPerson2: '', phone2: '', email: '', vendorType: '',
   gstNumber: '', pan: '', stateCode: '', msmeNumber: '', defaultTdsSection: '',
   houseNumber: '', street: '', locality: '', city: '', district: '', pincode: '',
   bankAccountName: '', bankName: '', bankAccountNumber: '', bankIfsc: '', paymentTermsDays: '',
@@ -73,6 +76,7 @@ export default function VendorsMaster({ onChanged }) {
   const { canManageMasters } = useMe()
   const [search, setSearch] = useState('')
   const [status, setStatus] = useState('all')
+  const [vendorType, setVendorType] = useState('all')
   const dateFilter = useDateFilter('all', { showClear: false })
   const debouncedSearch = useDebounce(search, 300)
   const vendors = useServerPagination(PURCHASE_ENDPOINT, {
@@ -80,6 +84,7 @@ export default function VendorsMaster({ onChanged }) {
       resource: 'vendors',
       search: debouncedSearch,
       status: status === 'all' ? '' : status,
+      vendorType: vendorType === 'all' ? '' : vendorType,
       startDate: dateFilter.range.startDate,
       endDate: dateFilter.range.endDate,
     },
@@ -265,8 +270,8 @@ export default function VendorsMaster({ onChanged }) {
         search={search}
         onSearchChange={setSearch}
         placeholder="Search vendor name, code, GSTIN, phone or city…"
-        active={!!search || status !== 'all' || dateFilter.active}
-        onClear={() => { setSearch(''); setStatus('all'); dateFilter.reset() }}
+        active={!!search || status !== 'all' || vendorType !== 'all' || dateFilter.active}
+        onClear={() => { setSearch(''); setStatus('all'); setVendorType('all'); dateFilter.reset() }}
         actions={canManageMasters && (
           <div className="flex gap-2">
             <Button variant="outline" onClick={() => { setImportResult(null); setImportOpen(true) }}>
@@ -277,6 +282,7 @@ export default function VendorsMaster({ onChanged }) {
         )}
       >
         <FilterSelect value={status} onChange={setStatus} options={STATUS_OPTIONS} />
+        <FilterSelect value={vendorType} onChange={setVendorType} options={VENDOR_TYPE_FILTER} />
         {dateFilter.control}
       </FilterBar>
 
@@ -284,7 +290,7 @@ export default function VendorsMaster({ onChanged }) {
         <CardContent className="p-0">
         <PaginatedTable
           pagination={vendors}
-          empty={search || status !== 'all' || dateFilter.active ? 'No vendor matches these filters' : 'No vendors yet — add the first one'}
+          empty={search || status !== 'all' || vendorType !== 'all' || dateFilter.active ? 'No vendor matches these filters' : 'No vendors yet — add the first one'}
           columns={[
             { header: 'Code' }, { header: 'Vendor' }, { header: 'GSTIN' }, { header: 'State' },
             { header: 'Phone' }, { header: 'Terms' }, { header: 'Status' }, ...(canManageMasters ? [{ header: 'Actions' }] : []),
@@ -434,6 +440,9 @@ export default function VendorsMaster({ onChanged }) {
               <Field label="Contact person" id="v-contact"><Input id="v-contact" value={form.contactPerson} onChange={set('contactPerson')} /></Field>
               <Field label="Phone Number *" id="v-phone"><Input id="v-phone" value={form.phone} onChange={set('phone')} placeholder="Mobile or landline" maxLength={15} minLength={10} /></Field>
               <Field label="Email" id="v-email"><Input id="v-email" type="email" value={form.email} onChange={set('email')} /></Field>
+              <Field label="VRF number" id="v-vrf" hint="Vendor Registration Form number"><Input id="v-vrf" value={form.vrfNumber} onChange={set('vrfNumber')} maxLength={40} /></Field>
+              <Field label="Second contact" id="v-contact2"><Input id="v-contact2" value={form.contactPerson2} onChange={set('contactPerson2')} /></Field>
+              <Field label="Second contact phone" id="v-phone2"><Input id="v-phone2" value={form.phone2} onChange={set('phone2')} placeholder="Mobile or landline" maxLength={15} /></Field>
               <Field label="Supplies" id="v-type">
                 <Select value={form.vendorType || NONE} onValueChange={(v) => set('vendorType')(v === NONE ? '' : v)}>
                   <SelectTrigger id="v-type"><SelectValue /></SelectTrigger>
