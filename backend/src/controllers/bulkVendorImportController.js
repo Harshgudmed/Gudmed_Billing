@@ -154,6 +154,38 @@ export async function downloadVendorTemplate(req, res, next) {
 
     sheet.views = [{ state: 'frozen', ySplit: 1 }]
 
+    const instructions = wb.addWorksheet('Instructions')
+    instructions.columns = [
+      { header: 'Topic', key: 'topic', width: 26 },
+      { header: 'Instructions', key: 'instructions', width: 100 },
+    ]
+    instructions.addRows([
+      { topic: 'Before you begin', instructions: 'Enter vendor records on the Vendors sheet. Keep Vendors as the first worksheet; the importer reads that sheet.' },
+      { topic: 'Required field', instructions: 'Name is the only required column. Do not change or remove the column headers. The * marks a required field.' },
+      { topic: 'Optional fields', instructions: 'Leave any optional field blank when you do not have that information.' },
+      { topic: 'Vendor Type', instructions: 'Use goods, services, or both.' },
+      { topic: 'GSTIN', instructions: 'Enter a valid GSTIN. Its state code and PAN are derived from the GSTIN when present.' },
+      { topic: 'State Code', instructions: 'Use a valid 2-digit GST state code, for example 27 for Maharashtra or 07 for Delhi. This is mainly needed when GSTIN is blank.' },
+      { topic: 'Payment Terms Days', instructions: 'Enter a whole number from 0 to 365.' },
+      { topic: 'TDS Section', instructions: 'Use 194C, 194J, 194I, 194H, or 194Q.' },
+      { topic: 'Duplicate vendors', instructions: 'A duplicate GSTIN is skipped. A duplicate vendor name is imported with a warning.' },
+      { topic: 'Upload', instructions: 'Save the completed workbook as .xlsx and upload it from Import Vendors. The importer also accepts .csv files.' },
+    ])
+    const instructionHeader = instructions.getRow(1)
+    instructionHeader.eachCell((cell) => {
+      cell.font = { bold: true, color: { argb: 'FFFFFFFF' } }
+      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF2563EB' } }
+      cell.alignment = { vertical: 'middle', horizontal: 'center' }
+    })
+    instructionHeader.height = 22
+    instructions.eachRow((row, rowNumber) => {
+      if (rowNumber > 1) {
+        row.alignment = { vertical: 'top', wrapText: true }
+        row.height = 32
+      }
+    })
+    instructions.views = [{ state: 'frozen', ySplit: 1 }]
+
     const buffer = await wb.xlsx.writeBuffer()
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
     res.setHeader('Content-Disposition', 'attachment; filename="vendor-import-template.xlsx"')

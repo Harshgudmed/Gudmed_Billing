@@ -48,6 +48,7 @@ const optNum = (label) => z.preprocess((v) => (blank(v) ? undefined : Number(v))
   z.number({ invalid_type_error: `${label} must be a number` }).finite().optional())
 
 const lineSchema = z.object({
+  categoryId: z.string().min(1, 'Choose a category for every line'),
   itemId: z.string().min(1, 'Choose an item on every line'),
   unitId: z.string().optional().nullable(),
   quantity: z.preprocess((v) => (blank(v) ? undefined : Number(v)),
@@ -59,7 +60,7 @@ const lineSchema = z.object({
 
 const headerFields = {
   departmentId: z.string().min(1, 'Choose the department asking for it'),
-  requiredBy: z.preprocess((v) => (blank(v) ? null : v), z.coerce.date({ invalid_type_error: 'Enter a valid date' }).nullable().optional()),
+  requiredBy: z.preprocess((v) => (blank(v) ? undefined : v), z.coerce.date({ required_error: 'Choose when it is needed', invalid_type_error: 'Enter a valid date' })),
   priority: z.enum(PRIORITIES).optional(),
   purpose: z.string().trim().max(500).optional().nullable(),
   lines: z.array(lineSchema).max(100, 'At most 100 lines on one request'),
@@ -103,6 +104,20 @@ function orderOnLine(req, { order, quantity, receivedQty, unitCode }) {
 async function buildLines(ORG_ID, lines, { ownRates = true } = {}) {
   // Item, unit, whole numbers, no twice: the checks every purchase document makes.
   const resolved = await resolveLines(db, ORG_ID, lines, { noun: 'request' })
+  const categoryIds = [...new Set([...lines.map((line) => line.categoryId), ...resolved.map(({ item }) => item.categoryId)])]
+  const categories = await db.itemCategory.findMany({
+    where: { organizationId: ORG_ID, id: { in: categoryIds } },
+    select: { id: true, parentId: true },
+  })
+  const categoryById = new Map(categories.map((category) => [category.id, category]))
+  resolved.forEach(({ line, item }, i) => {
+    const selectedCategory = categoryById.get(line.categoryId)
+    const itemCategory = categoryById.get(item.categoryId)
+    if (!selectedCategory) throw bad(`Line ${i + 1}: choose a category from the list`)
+    if (!itemCategory || (item.categoryId !== selectedCategory.id && itemCategory.parentId !== selectedCategory.id)) {
+      throw bad(`Line ${i + 1}: ${item.name} is not in the chosen category`)
+    }
+  })
   return resolved.map(({ line: l, item, unit }, i) => {
     // The estimate starts at the last price paid, per stock unit, scaled to
     // the unit asked for (a box of 100 at ₹2 a piece is ₹200).
@@ -146,7 +161,8 @@ function submitProblem(pr) {
   // No rate is required: the person asking rarely knows the price. The price
   // is settled on the purchase order, where the money approval happens.
   if (pr.priority !== 'normal' && blank(pr.purpose)) return `Say why it is ${pr.priority} — the approver reads that first`
-  if (pr.requiredBy && pr.requiredBy < startOfToday()) return 'The required-by date is in the past'
+  if (!pr.requiredBy) return 'Choose when it is needed'
+  if (pr.requiredBy < startOfToday()) return 'The required-by date is in the past'
   return null
 }
 
