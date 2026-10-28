@@ -29,6 +29,11 @@ import { showNotifyWarning } from './requestMeta'
 const qty = (v) => Math.round((Number(v) || 0) * 1000) / 1000
 const dueOf = (l) => Math.max(0, qty(l.quantity - (l.receivedQty || 0)))
 
+const REJECT_REASONS = [
+  'Damaged in transit', 'Wrong item delivered', 'Quantity mismatch', 'Quality failed',
+  'Expired', 'Short expiry', 'Packaging damaged', 'Wrong specification',
+]
+
 function lineProblem(row, today) {
   const { line } = row
   const arrived = qty(row.arrived), rejected = qty(row.rejected)
@@ -53,7 +58,7 @@ export default function ReceiveGoodsDialog({ order, open, onOpenChange, onReceiv
 
   useEffect(() => {
     if (!open || !order) return
-    setRows(order.lines.filter((l) => dueOf(l) > 0).map((line) => ({ line, arrived: String(dueOf(line)), rejected: '', reason: '', quality: 'passed', returnLot: true, batchNumber: '', expiryDate: '' })))
+    setRows(order.lines.filter((l) => dueOf(l) > 0).map((line) => ({ line, arrived: String(dueOf(line)), rejected: '', reason: '', reasonOther: false, quality: 'passed', returnLot: true, batchNumber: '', expiryDate: '' })))
     setHead({ challanNumber: '', challanDate: '', receivedOn: localYmd(), notes: '' })
     setTried(false)
   }, [open, order])
@@ -149,10 +154,10 @@ export default function ReceiveGoodsDialog({ order, open, onOpenChange, onReceiv
               {doneLines > 0 && <span className="text-gray-400"> {doneLines} line{doneLines === 1 ? ' is' : 's are'} already fully received.</span>}
             </p>
             <div className="flex gap-2">
-              <Button type="button" variant="outline" size="sm" onClick={() => setRows((rs) => rs.map((r) => ({ ...r, arrived: String(dueOf(r.line)), rejected: '', reason: '' })))}>
+              <Button type="button" variant="outline" size="sm" onClick={() => setRows((rs) => rs.map((r) => ({ ...r, arrived: String(dueOf(r.line)), rejected: '', reason: '', reasonOther: false })))}>
                 <CheckCheck className="h-4 w-4 mr-1" />Everything arrived
               </Button>
-              <Button type="button" variant="outline" size="sm" onClick={() => setRows((rs) => rs.map((r) => ({ ...r, arrived: '', rejected: '', reason: '' })))}>
+              <Button type="button" variant="outline" size="sm" onClick={() => setRows((rs) => rs.map((r) => ({ ...r, arrived: '', rejected: '', reason: '', reasonOther: false })))}>
                 <Eraser className="h-4 w-4 mr-1" />Clear all
               </Button>
             </div>
@@ -188,10 +193,22 @@ export default function ReceiveGoodsDialog({ order, open, onOpenChange, onReceiv
                           {l.unitFactor !== 1 && stockUnit && <> · 1 {l.unitCode} = {l.unitFactor} {stockUnit}</>}
                         </div>
                         {qty(r.rejected) > 0 && (
-                          <div className="mt-2 max-w-xs">
-                            <Input aria-label={`Why ${l.itemName} was rejected`} value={r.reason} maxLength={200} autoFocus={!r.reason}
-                              placeholder="Why rejected? e.g. Damaged, short expiry" onChange={(e) => set(i, { reason: e.target.value })}
-                              className={tried && r.reason.trim().length < 3 ? 'border-red-400' : ''} />
+                          <div className="mt-2 max-w-xs space-y-1.5">
+                            <Select value={r.reasonOther ? 'other' : (REJECT_REASONS.includes(r.reason) ? r.reason : '')}
+                              onValueChange={(v) => v === 'other' ? set(i, { reasonOther: true, reason: '' }) : set(i, { reasonOther: false, reason: v })}>
+                              <SelectTrigger aria-label={`Why ${l.itemName} was rejected`} className={tried && r.reason.trim().length < 3 ? 'border-red-400' : ''}>
+                                <SelectValue placeholder="Why rejected?" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {REJECT_REASONS.map((reason) => <SelectItem key={reason} value={reason}>{reason}</SelectItem>)}
+                                <SelectItem value="other">Other — specify</SelectItem>
+                              </SelectContent>
+                            </Select>
+                            {r.reasonOther && (
+                              <Input aria-label={`Specify why ${l.itemName} was rejected`} value={r.reason} maxLength={200} autoFocus
+                                placeholder="Say why it was rejected" onChange={(e) => set(i, { reason: e.target.value })}
+                                className={tried && r.reason.trim().length < 3 ? 'border-red-400' : ''} />
+                            )}
                           </div>
                         )}
                         {showProblem && <FieldError message={problem} />}
