@@ -39,7 +39,7 @@ import { auditIpd } from '../inpatient/audit.js'
 import { canSeePayments, isAdmin, blank, validationError, sendError } from '../lib/purchaseAccess.js'
 import { loadPurchaseSettings } from '../lib/purchaseSettings.js'
 import { notify, notifyRoles } from '../lib/notify.js'
-import { hospital } from './purchaseOrderController.js'
+import { hospital, lockOrder } from './purchaseOrderController.js'
 import {
   PAY_MODES, REFERENCE_NAME, BUCKETS, BUCKET_KEYS, MSME_MAX_DAYS, MSME_WARN_DAYS, DEFAULT_TERMS_DAYS,
   paymentRules, stillDue, payableNow,
@@ -81,8 +81,10 @@ const text = (max, label) => z.preprocess((v) => (blank(v) ? null : String(v).tr
   z.string().max(max, `${label} can be at most ${max} characters`).nullable())
 
 const createSchema = z.object({
-  billId: z.preprocess((v) => (blank(v) ? undefined : String(v)),
-    z.string({ required_error: 'Choose the bill this payment is for' })),
+  // Against a bill (the usual case) OR an order directly — an advance paid
+  // before any goods arrive or any bill exists. Exactly one of the two.
+  billId: z.preprocess((v) => (blank(v) ? undefined : String(v)), z.string().optional()),
+  orderId: z.preprocess((v) => (blank(v) ? undefined : String(v)), z.string().optional()),
   amount: z.preprocess((v) => (blank(v) ? undefined : Number(v)),
     z.number({ required_error: 'Enter the amount paid', invalid_type_error: 'The amount must be a number' })
       .finite('The amount must be a number').max(1e10, 'The amount is too large')
@@ -102,6 +104,11 @@ const createSchema = z.object({
   if (d.mode !== 'cash' && !d.reference) {
     ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['reference'], message: `Enter the ${REFERENCE_NAME[d.mode]} — every payment except cash needs one` })
   }
+  if (!d.billId && !d.orderId) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['billId'], message: 'Choose the bill, or the order, this payment is for' })
+  } else if (d.billId && d.orderId) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['billId'], message: 'A payment is against a bill or an order, not both' })
+  }
 })
 
 /** The day it was paid: a real calendar date, not after today (the hospital's calendar). */
@@ -119,6 +126,8 @@ const BILL_FIELDS = {
 }
 const PAYMENT_INCLUDE = {
   bill: { select: { ...BILL_FIELDS, order: { select: { id: true, number: true } } } },
+  // Set only for an advance (billId null, orderId set) — the order it was paid against.
+  order: { select: { id: true, number: true, total: true } },
   vendor: {
     select: {
       id: true, name: true, code: true, gstNumber: true, pan: true, msmeNumber: true, phone: true,
@@ -160,7 +169,7 @@ const pendingOn = async (tx, ORG_ID, billId) => round2((await tx.vendorPayment.a
 }))._sum.amount)
 
 /** amountPaid = the bill's posted payments, summed again — never added to, so it cannot drift. */
-async function syncPaid(tx, ORG_ID, billId) {
+export async function syncPaid(tx, ORG_ID, billId) {
   const sum = await tx.vendorPayment.aggregate({ where: { organizationId: ORG_ID, billId, status: 'posted' }, _sum: { amount: true } })
   await tx.vendorBill.update({ where: { id: billId }, data: { amountPaid: round2(sum._sum.amount) } })
 }
@@ -169,6 +178,23 @@ function assertPayable(bill) {
   if (bill.status !== 'approved') {
     throw conflict(`${bill.number} is ${bill.status.replace('_', ' ')} — only an approved bill is paid`)
   }
+}
+
+// An advance may be paid once the vendor has agreed to the order; not on a
+// draft/rejected/cancelled one, and not once it is closed (nothing more to pay for).
+const ADVANCE_ORDER_STATUSES = ['approved', 'sent', 'partly_received', 'received']
+
+/**
+ * What this order's advances (paid before any bill exists) already hold —
+ * posted and pending together, so two advances at once cannot overpay the
+ * order, the same rule a bill's payments follow.
+ */
+async function advanceHeldOn(tx, ORG_ID, orderId) {
+  const sum = await tx.vendorPayment.aggregate({
+    where: { organizationId: ORG_ID, orderId, billId: null, status: { in: ['posted', 'pending_approval'] } },
+    _sum: { amount: true },
+  })
+  return round2(sum._sum.amount || 0)
 }
 
 /**
@@ -201,7 +227,7 @@ const paidHow = (p) => `${MODE_WORDS[p.mode] || p.mode}${p.reference ? ` ${p.ref
 async function paymentChanged(ORG_ID, action, p, actor, words) {
   try {
     const who = { except: actor.id }
-    const what = `${p.vendorName}, ${formatRupee(p.amount)} by ${paidHow(p)} on bill ${p.bill?.number || ''}`
+    const what = `${p.vendorName}, ${formatRupee(p.amount)} by ${paidHow(p)}${p.bill ? ` on bill ${p.bill.number}` : p.order ? ` as an advance on order ${p.order.number}` : ''}`
     if (action === 'create' && p.status === 'pending_approval') {
       const ask = {
         type: 'purchase.payment.to_approve', title: `Payment ${p.number} needs your approval`,
@@ -394,6 +420,35 @@ async function paymentsSummary(ORG_ID) {
   return { posted: of('posted'), pending: of('pending_approval'), rejected: of('rejected'), cancelled: of('cancelled') }
 }
 
+/**
+ * Advances across the hospital, before any bill exists — proof of "how much
+ * has gone out as advances, and how much of those orders is still left to
+ * pay": `paid`/`pending` (how many orders, how much), and `remaining` — on
+ * exactly those orders, the order value not yet advanced (what the eventual
+ * bill will still need to collect).
+ */
+async function advancesSummary(ORG_ID) {
+  const rows = await db.vendorPayment.groupBy({
+    by: ['orderId', 'status'],
+    where: { organizationId: ORG_ID, orderId: { not: null }, billId: null, status: { in: ['posted', 'pending_approval'] } },
+    _sum: { amount: true },
+  })
+  const byStatus = (s) => rows.filter((r) => r.status === s)
+  const paidRows = byStatus('posted'), pendingRows = byStatus('pending_approval')
+
+  const orderIds = [...new Set(rows.map((r) => r.orderId))]
+  const orders = orderIds.length ? await db.purchaseOrder.findMany({ where: { id: { in: orderIds } }, select: { id: true, total: true } }) : []
+  const paidByOrder = new Map(paidRows.map((r) => [r.orderId, r._sum.amount || 0]))
+  const pendingByOrder = new Map(pendingRows.map((r) => [r.orderId, r._sum.amount || 0]))
+  const remaining = round2(orders.reduce((s, o) => s + Math.max(0, o.total - (paidByOrder.get(o.id) || 0) - (pendingByOrder.get(o.id) || 0)), 0))
+
+  return {
+    paid: pair(paidRows.length, paidRows.reduce((s, r) => s + (r._sum.amount || 0), 0)),
+    pending: pair(pendingRows.length, pendingRows.reduce((s, r) => s + (r._sum.amount || 0), 0)),
+    remaining,
+  }
+}
+
 export async function paymentGet(req, res, next) {
   try {
     const ORG_ID = getOrgId(req)
@@ -403,12 +458,16 @@ export async function paymentGet(req, res, next) {
     if (resource === 'payables') return res.json(await payables(req, ORG_ID))
 
     if (resource === 'payments') {
-      const { search, status, mode, vendorId, billId, from, to } = req.query
+      const { search, status, mode, vendorId, billId, orderId, kind, from, to } = req.query
       const where = { organizationId: ORG_ID }
       if (status && status !== 'all') where.status = { in: String(status).split(',') }
       if (mode && mode !== 'all') where.mode = String(mode)
       if (vendorId) where.vendorId = String(vendorId)
+      // kind=advance: every advance (paid before any bill) — orderId is only
+      // ever set on an advance, whether or not it has since attached to a bill.
+      if (kind === 'advance') where.orderId = { not: null }
       if (billId) where.billId = String(billId)
+      if (orderId) where.orderId = String(orderId)
       if (from || to) where.paidOn = dayRange(from ? String(from) : undefined, to ? String(to) : undefined)
       const term = String(search || '').trim()
       if (term) {
@@ -418,18 +477,22 @@ export async function paymentGet(req, res, next) {
           { reference: { contains: term, mode: 'insensitive' } },
           { bill: { number: { contains: term, mode: 'insensitive' } } },
           { bill: { vendorInvoiceNumber: { contains: term, mode: 'insensitive' } } },
+          { order: { number: { contains: term, mode: 'insensitive' } } },
         ]
       }
       const body = await listResponse(db.vendorPayment, {
         where, req, orderBy: [{ createdAt: 'desc' }, { number: 'desc' }],
         select: {
-          id: true, number: true, status: true, vendorId: true, vendorName: true, billId: true, amount: true, mode: true, reference: true,
+          id: true, number: true, status: true, vendorId: true, vendorName: true, billId: true, orderId: true, amount: true, mode: true, reference: true,
           paymentType: true, isRecurring: true,
           paidOn: true, createdByName: true, createdById: true, createdAt: true, decidedByName: true, decidedAt: true, decisionRemark: true,
-          cancelReason: true, bill: { select: { number: true, vendorInvoiceNumber: true } },
+          cancelReason: true, bill: { select: { number: true, vendorInvoiceNumber: true } }, order: { select: { number: true } },
         },
       })
-      body.summary = await paymentsSummary(ORG_ID)
+      // advances: a proof figure — how much has gone out as advances (before
+      // any bill), and how much of those same orders is still left to pay.
+      const [summary, advances] = await Promise.all([paymentsSummary(ORG_ID), advancesSummary(ORG_ID)])
+      body.summary = { ...summary, advances }
       return res.json(body)
     }
 
@@ -461,6 +524,33 @@ export async function paymentCreate(req, res, next) {
     const actor = getActor(req)
 
     const payment = await writePayment(req, ORG_ID, 'create', async (tx) => {
+      // Advance: paid against the order itself, before any bill exists.
+      if (input.orderId) {
+        const po = await lockOrder(tx, ORG_ID, input.orderId)
+        if (!ADVANCE_ORDER_STATUSES.includes(po.status)) {
+          throw conflict(`${po.number} is ${po.status.replace('_', ' ')} — an advance is paid once the order is approved, not before or after`)
+        }
+        const held = await advanceHeldOn(tx, ORG_ID, po.id)
+        const room = round2(po.total - held)
+        if (room <= 0) throw conflict(`${po.number}'s full value (${formatRupee(po.total)}) is already paid or waiting as an advance — nothing more can be recorded`)
+        if (input.amount > room) {
+          throw conflict(`Only ${formatRupee(room)} is left to advance on ${po.number} (its total is ${formatRupee(po.total)}${held > 0 ? `, ${formatRupee(held)} already recorded` : ''}) — ${formatRupee(input.amount)} would be more than the order is worth`)
+        }
+        const number = await nextSeriesNumber(tx, ORG_ID, 'VENDOR_PAYMENT', 'VPAY')
+        const created = await tx.vendorPayment.create({
+          data: {
+            organizationId: ORG_ID, number, status: rules.status,
+            vendorId: po.vendorId, vendorName: po.vendorName, orderId: po.id,
+            amount: input.amount, mode: input.mode, reference: input.reference, paidOn, notes: input.notes ?? null,
+            paymentType: 'advance', isRecurring: input.isRecurring,
+            createdById: actor.id, createdByName: actor.name || 'Staff',
+          },
+        })
+        // No bill exists yet — nothing to re-sum. Once a bill is entered on
+        // this order, billCreate relinks this payment and re-sums the bill.
+        return { id: created.id }
+      }
+
       const bill = await lockBill(tx, ORG_ID, input.billId)
       assertPayable(bill)
       // This hospital may require the vendor's invoice file on the bill before it is paid.
@@ -548,16 +638,19 @@ export async function paymentUpdate(req, res, next) {
     }
 
     const payment = await writePayment(req, ORG_ID, action, async (tx) => {
-      const head = await tx.vendorPayment.findFirst({ where: { id, organizationId: ORG_ID }, select: { billId: true } })
+      const head = await tx.vendorPayment.findFirst({ where: { id, organizationId: ORG_ID }, select: { billId: true, orderId: true } })
       if (!head) throw notFound('Payment not found')
-      const bill = await lockBill(tx, ORG_ID, head.billId)
-      // Re-read under the bill's lock: another decision may have just committed.
+      // Lock the bill, or the order for an advance — either way, row-locked
+      // before reading, so two decisions on the same document take turns.
+      const bill = head.billId ? await lockBill(tx, ORG_ID, head.billId) : null
+      if (head.orderId) await lockOrder(tx, ORG_ID, head.orderId)
+      // Re-read under the lock: another decision may have just committed.
       const before = await tx.vendorPayment.findFirst({ where: { id, organizationId: ORG_ID } })
 
       if (action === 'cancel') {
         if (before.status !== 'posted') throw conflict(`${before.number} is ${statusWords(before.status)} — only a posted payment is cancelled`)
         await tx.vendorPayment.update({ where: { id }, data: { status: 'cancelled', cancelledAt: new Date(), cancelReason: words.slice(0, 300) } })
-        await syncPaid(tx, ORG_ID, bill.id)
+        if (bill) await syncPaid(tx, ORG_ID, bill.id)
         return { id, before }
       }
 
@@ -567,7 +660,7 @@ export async function paymentUpdate(req, res, next) {
       if (!isAdmin(req) && before.createdById && before.createdById === actor.id) {
         throw forbidden('You recorded this payment — someone else in Finance must approve or reject it')
       }
-      if (action === 'approve') {
+      if (action === 'approve' && bill) {
         assertPayable(bill)
         // Against what is due now: a debit note or another payment may have
         // come since it was recorded.
@@ -576,6 +669,9 @@ export async function paymentUpdate(req, res, next) {
           throw conflict(`Only ${formatRupee(due)} is still due on ${bill.number} — less than this payment of ${formatRupee(before.amount)}, because a debit note or another payment came after it was recorded. Reject it and record the right amount.`)
         }
       }
+      // An advance's room was already reserved when it was recorded (held by
+      // its own pending_approval status) — nothing on the order can have
+      // reduced it since, so approving it needs no re-check.
       await tx.vendorPayment.update({
         where: { id },
         data: {
@@ -583,7 +679,7 @@ export async function paymentUpdate(req, res, next) {
           decidedAt: new Date(), decidedById: actor.id, decidedByName: actor.name || 'Finance', decisionRemark: words.slice(0, 500) || null,
         },
       })
-      if (action === 'approve') await syncPaid(tx, ORG_ID, bill.id)
+      if (action === 'approve' && bill) await syncPaid(tx, ORG_ID, bill.id)
       return { id, before }
     })
 

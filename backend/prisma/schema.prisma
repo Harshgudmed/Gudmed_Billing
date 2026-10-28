@@ -1523,6 +1523,8 @@ model PurchaseOrder {
   bills        VendorBill[]
   returns      PurchaseReturn[]
   rfqs         Rfq[]
+  // Advance payments made directly against this order, before any bill exists.
+  advances     VendorPayment[]
 
   @@unique([organizationId, number])
   @@index([organizationId, status])
@@ -4523,7 +4525,13 @@ model VendorPayment {
 
   vendorId   String
   vendorName String
-  billId     String
+  // A payment is against ONE of these: an approved bill (the usual case), or
+  // an order directly — an advance paid before any goods arrive or any bill
+  // exists. When a bill is later entered on that same order, its unattached
+  // advances are relinked here (billId set) so the bill's amountPaid picks
+  // them up automatically — see purchaseBillController.js billCreate.
+  billId  String?
+  orderId String?
 
   amount    Float
   mode      String // neft | rtgs | imps | upi | cheque | dd | cash
@@ -4531,8 +4539,9 @@ model VendorPayment {
   paidOn    DateTime
   notes     String?
 
-  // Nature of the payment, for reports: full | partial | advance. "advance" is a
-  // large payment made ahead against this approved bill (not a pre-bill PO advance).
+  // Nature of the payment, for reports: full | partial | advance. An advance
+  // paid directly against an order (orderId set, billId null) always carries
+  // this as 'advance'.
   paymentType String  @default("full")
   // A regular/recurring vendor payment (e.g. a monthly service invoice) vs one-time.
   isRecurring Boolean @default(false)
@@ -4553,13 +4562,15 @@ model VendorPayment {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  vendor       Vendor       @relation(fields: [vendorId], references: [id], onDelete: Restrict)
-  bill         VendorBill   @relation(fields: [billId], references: [id], onDelete: Restrict)
+  organization Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  vendor       Vendor        @relation(fields: [vendorId], references: [id], onDelete: Restrict)
+  bill         VendorBill?   @relation(fields: [billId], references: [id], onDelete: Restrict)
+  order        PurchaseOrder? @relation(fields: [orderId], references: [id], onDelete: Restrict)
 
   @@unique([organizationId, number])
   @@index([organizationId, status])
   @@index([billId])
+  @@index([orderId])
   @@index([vendorId])
 }
 

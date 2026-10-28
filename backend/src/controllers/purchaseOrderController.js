@@ -229,7 +229,15 @@ async function readFull(ORG_ID, id, client = db) {
   await withReturnsOnBills(client, ORG_ID, po.lines)
   for (const l of po.lines) l.billable = billableOf(l)
   const steps = await stepsOf(client, ORG_ID, DOC, id)
-  return { ...po, steps, currentStep: currentStep(steps), hospital: await hospital(ORG_ID, client) }
+  // Advances paid directly against this order, before any bill exists —
+  // posted (actually paid) and pending (recorded, waiting for approval) apart,
+  // so the screen can show both without adding them together.
+  const advances = await client.vendorPayment.groupBy({
+    by: ['status'], where: { organizationId: ORG_ID, orderId: id, billId: null, status: { in: ['posted', 'pending_approval'] } }, _sum: { amount: true },
+  })
+  const advancePaid = round2(advances.find((a) => a.status === 'posted')?._sum.amount || 0)
+  const advancePending = round2(advances.find((a) => a.status === 'pending_approval')?._sum.amount || 0)
+  return { ...po, steps, currentStep: currentStep(steps), advancePaid, advancePending, hospital: await hospital(ORG_ID, client) }
 }
 
 /**
@@ -524,6 +532,8 @@ export async function poUpdate(req, res, next) {
         if (po.lines.some((l) => l.receivedQty > 0)) throw conflict('Goods have been received against this order — it can no longer be cancelled')
         const bill = await tx.vendorBill.findFirst({ where: { organizationId: ORG_ID, orderId: id, status: { not: 'cancelled' } }, select: { number: true } })
         if (bill) throw conflict(`Vendor bill ${bill.number} is entered on this order — cancel or delete it first`)
+        const advance = await tx.vendorPayment.findFirst({ where: { organizationId: ORG_ID, orderId: id, billId: null, status: { in: ['posted', 'pending_approval'] } }, select: { number: true } })
+        if (advance) throw conflict(`Advance payment ${advance.number} is recorded against this order — cancel or reject it first`)
         if (!canOrder(req) || !ownsOrAdmin(req, po.createdById)) throw forbidden(`Only ${po.createdByName} or an administrator can cancel this order`)
         if (po.status !== 'draft' && reason.length < 3) throw bad(po.status === 'sent' ? 'Say why it is cancelled — and tell the vendor' : 'Say why it is cancelled')
         await cancelSteps(tx, ORG_ID, DOC, id)

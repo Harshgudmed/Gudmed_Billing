@@ -73,6 +73,7 @@ export default function PaymentsTab({ intent = {}, onChanged }) {
   const [vendor, setVendor] = useState(null) // { id, name } — from the By vendor list
   const [status, setStatus] = useState('all')
   const [mode, setMode] = useState('all')
+  const [kind, setKind] = useState('') // '' | 'advance' — the Advances tile
   const [search, setSearch] = useState('')
   const debounced = useDebounce(search, 300)
 
@@ -86,7 +87,7 @@ export default function PaymentsTab({ intent = {}, onChanged }) {
     params: { resource: 'payables', by: 'vendor', bucket, search: section === 'vendors' ? debounced : '' },
   })
   const payments = useServerPagination(PURCHASE_ENDPOINT, {
-    params: { resource: 'payments', status, mode, vendorId: vendor?.id || '', search: section === 'payments' ? debounced : '' },
+    params: { resource: 'payments', status, mode, kind, vendorId: vendor?.id || '', search: section === 'payments' ? debounced : '' },
   })
   const refresh = useCallback(() => { payables.refresh(); byVendor.refresh(); payments.refresh() }, [payables, byVendor, payments])
   useLiveData('purchase', refresh)
@@ -96,12 +97,13 @@ export default function PaymentsTab({ intent = {}, onChanged }) {
   const [openBill, setOpenBill] = useState(null)
   const changed = useCallback(() => { refresh(); onChanged?.() }, [refresh, onChanged])
 
-  const clearFilters = () => { setView('all'); setBucket(''); setVendor(null); setStatus('all'); setMode('all'); setSearch('') }
+  const clearFilters = () => { setView('all'); setBucket(''); setVendor(null); setStatus('all'); setMode('all'); setKind(''); setSearch('') }
   const openTile = (next) => { clearFilters(); next() }
   const s = payables.summary || {}
+  const advances = payments.summary?.advances
   const tile = (t) => (t?.count ? formatMoney(t.amount) : null)
 
-  const filtered = !!search || bucket || vendor || (section === 'bills' && view !== 'all') || (section === 'payments' && (status !== 'all' || mode !== 'all'))
+  const filtered = !!search || bucket || vendor || (section === 'bills' && view !== 'all') || (section === 'payments' && (status !== 'all' || mode !== 'all' || kind))
 
   return (
     <div className="min-w-0 space-y-4">
@@ -115,6 +117,24 @@ export default function PaymentsTab({ intent = {}, onChanged }) {
         <StatCard tone="yellow" icon={Hourglass} label="Waiting for approval" sublabel={tile(s.pendingApproval) || 'Payments not yet approved'}
           value={s.pendingApproval?.count ?? 0} selected={section === 'payments' && status === 'pending_approval'} onClick={() => openTile(() => { setSection('payments'); setStatus('pending_approval') })} />
       </div>
+
+      {/* Advances — paid before any bill exists. Proof of how much has gone
+          out as advances, and how much of those same orders is still left to
+          pay (what the eventual bill will still need to collect). */}
+      {!!(advances?.paid?.count || advances?.pending?.count) && (
+        <div role="group" aria-label="Advances, before any bill" className="grid grid-cols-2 gap-4 lg:grid-cols-3">
+          <StatCard tone="blue" icon={Wallet} label="Advances paid" sublabel={tile(advances.paid) || 'Paid against an order, before any bill'}
+            value={advances.paid?.count ?? 0} selected={section === 'payments' && kind === 'advance'}
+            onClick={() => openTile(() => { setSection('payments'); setKind('advance') })} />
+          {!!advances.pending?.count && (
+            <StatCard tone="yellow" icon={Hourglass} label="Advances waiting for approval" sublabel={tile(advances.pending)}
+              value={advances.pending?.count ?? 0} selected={section === 'payments' && kind === 'advance' && status === 'pending_approval'}
+              onClick={() => openTile(() => { setSection('payments'); setKind('advance'); setStatus('pending_approval') })} />
+          )}
+          <StatCard tone="purple" icon={CalendarClock} label="Still to be paid on those orders" sublabel="Not yet advanced — due when billed"
+            value={formatMoney(advances.remaining)} />
+        </div>
+      )}
 
       {settings.error ? (
         <LoadFailed onRetry={settings.retry}>Could not read who pays vendors in this hospital, so no payment can be recorded or approved from here.</LoadFailed>
@@ -264,7 +284,9 @@ export default function PaymentsTab({ intent = {}, onChanged }) {
                     </TableCell>
                     <TableCell>
                       <div className="font-medium">{p.vendorName}</div>
-                      <div className="text-xs text-gray-500">{p.bill?.number} · inv {p.bill?.vendorInvoiceNumber}</div>
+                      <div className="text-xs text-gray-500">
+                        {p.bill ? <>{p.bill.number} · inv {p.bill.vendorInvoiceNumber}</> : p.order ? <>{p.order.number} · advance</> : null}
+                      </div>
                     </TableCell>
                     <TableCell className="text-sm">
                       <div>{modeLabel(p.mode)}</div>

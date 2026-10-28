@@ -46,6 +46,7 @@ import { roundQty } from '../lib/purchaseReceipts.js'
 import { invoiceKey, netRateOf, billableOf, billedAfter, lineProblem, matchBill, billTotals, paymentTermsFor, dueDateFor, submitOutcome } from '../lib/vendorBills.js'
 import { TDS_SECTION_CODES, MAX_TDS_RATE, tdsDefault, tdsSectionsFor, resolveTds } from '../lib/tds.js'
 import { lockOrder, hospital } from './purchaseOrderController.js'
+import { syncPaid } from './purchasePaymentController.js'
 import { billChanged } from '../lib/purchaseNotify.js'
 import { withReturnsOnBills } from './purchaseReturnController.js'
 
@@ -529,6 +530,15 @@ export async function billCreate(req, res, next) {
         },
         include: { lines: { orderBy: { sortOrder: 'asc' } } },
       })
+      // Any advance paid on this order before the bill existed now attaches to
+      // it — the same rows, just no longer "unattached" — so the bill's
+      // amountPaid (syncPaid, the usual bill-payment re-sum) picks them up
+      // without this bill's own payment math needing to know advances exist.
+      const relinked = await tx.vendorPayment.updateMany({
+        where: { organizationId: ORG_ID, orderId: po.id, billId: null, status: { in: ['posted', 'pending_approval'] } },
+        data: { billId: bill.id },
+      })
+      if (relinked.count) await syncPaid(tx, ORG_ID, bill.id)
       if (input.submit) await submitBill(tx, ORG_ID, bill, po, vendor)
       // Read back before the commit — see writeBill.
       const created = await readFull(ORG_ID, bill.id, tx)
@@ -679,6 +689,12 @@ export async function billRemove(req, res, next) {
       before = bill
       if (bill.status !== 'draft') throw conflict(`${bill.number} is ${statusWords(bill.status)} — only a draft can be deleted`)
       if (!ownsOrAdmin(req, bill.createdById)) throw forbidden(`Only ${bill.createdByName} or an administrator can delete this draft`)
+      // A draft can carry a relinked advance (billCreate attaches any of the
+      // order's unattached advances as soon as the bill exists, before it is
+      // ever submitted). Deleting the draft must not strand that money on a
+      // bill that is about to vanish — unlink it, so it is an order-advance
+      // again, ready for whichever bill is entered next.
+      await tx.vendorPayment.updateMany({ where: { organizationId: ORG_ID, billId: id }, data: { billId: null } })
       await tx.vendorBill.delete({ where: { id } })
       await auditIpd(req, ORG_ID, { action: 'delete', entityType: 'purchase.bill', entityId: id, before }, tx)
     }, TX)

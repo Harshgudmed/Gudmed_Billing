@@ -4,7 +4,7 @@ import { Badge } from '@/components/ui/badge'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
-import { Loader2, CheckCircle2, XCircle, Pencil, Send, Trash2, RotateCcw, Ban, Printer, Truck, PackageCheck, PackageX, Receipt } from 'lucide-react'
+import { Loader2, CheckCircle2, XCircle, Pencil, Send, Trash2, RotateCcw, Ban, Printer, Truck, PackageCheck, PackageX, Receipt, Wallet } from 'lucide-react'
 import { toast } from 'sonner'
 import { purchaseApi } from '@/api/purchaseApi'
 import { showApiError } from '@/lib/apiRequest'
@@ -12,6 +12,12 @@ import { formatMoney, formatDateTime } from '@/lib/format'
 import { ORDER_STATUS, RECEIPT_STATUS, GST_TYPE_LABEL, useMe, canDecide, ownsOrAdmin, showNotifyWarning } from './requestMeta'
 import ApprovalTrail from './ApprovalTrail'
 import { printOrder } from './orderPrint'
+import { paymentAccess, usePaymentMode } from './paymentAccess'
+import AdvancePaymentForm from './AdvancePaymentForm'
+
+// An advance may be recorded once the vendor has agreed to the order — the
+// same window it can still be received against or billed in.
+const ADVANCE_ELIGIBLE = ['approved', 'sent', 'partly_received', 'received']
 
 // One purchase order: the vendor, every line with its price and GST, the
 // totals as the vendor charges them, and the approval trail. The buttons are
@@ -29,6 +35,9 @@ export default function OrderDetail({ id, open, onOpenChange, onEdit, onChanged,
   const [busy, setBusy] = useState(null)
   const [asking, setAsking] = useState(null) // 'approve' | 'reject' | 'cancel' | 'close'
   const [remark, setRemark] = useState('')
+  const [advancing, setAdvancing] = useState(false)
+  const settings = usePaymentMode(open && me.canSeePayments)
+  const pay = paymentAccess(me, settings.mode)
 
   // Held in a ref: the list passes an inline arrow, and a new one on each of
   // its live refreshes must not re-open this dialog (that wiped a remark
@@ -71,6 +80,9 @@ export default function OrderDetail({ id, open, onOpenChange, onEdit, onChanged,
   // Goods in that the vendor's bill has not covered yet.
   // The server's own rule for what is still billable (returns included).
   const toBill = po?.lines.some((l) => (l.billable ?? (l.receivedQty || 0) - (l.billedQty || 0)) > 1e-9)
+  // What is left of the order's value that has not already gone out as an advance.
+  const advanceRoom = po ? Math.max(0, Math.round((po.total - (po.advancePaid || 0) - (po.advancePending || 0)) * 100) / 100) : 0
+  const canAdvance = po && money && pay.canRecord && ADVANCE_ELIGIBLE.includes(po.status) && advanceRoom > 0
   const missingRates = po?.status === 'draft' && money && po.lines.some((l) => !l.rate)
 
   const confirmAsked = () => {
@@ -167,6 +179,12 @@ export default function OrderDetail({ id, open, onOpenChange, onEdit, onChanged,
                   <div className="flex justify-between border-t pt-2"><dt className="font-semibold">Order total</dt><dd className="text-xl font-bold tabular-nums">{formatMoney(po.total)}</dd></div>
                   {po.currency && po.currency !== 'INR' && po.exchangeRate > 0 && (
                     <div className="flex justify-between text-sm"><dt className="text-gray-500">= quoted in {po.currency}</dt><dd className="tabular-nums text-gray-600">{(po.total / po.exchangeRate).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</dd></div>
+                  )}
+                  {po.advancePaid > 0 && (
+                    <div className="flex justify-between text-sm"><dt className="text-gray-500">Advance paid</dt><dd className="tabular-nums text-green-700">− {formatMoney(po.advancePaid)}</dd></div>
+                  )}
+                  {po.advancePending > 0 && (
+                    <div className="flex justify-between text-sm"><dt className="text-amber-700">Advance waiting for approval</dt><dd className="tabular-nums text-amber-700">{formatMoney(po.advancePending)}</dd></div>
                   )}
                 </dl>}
               </div>
@@ -267,12 +285,19 @@ export default function OrderDetail({ id, open, onOpenChange, onEdit, onChanged,
                 {RECEIVING.includes(po.status) && me.canReceive && onReceive && (
                   <Button className="bg-green-600 hover:bg-green-700" disabled={!!busy} onClick={() => onReceive(po)}><PackageCheck className="h-4 w-4 mr-1" />Receive goods</Button>
                 )}
+                {canAdvance && (
+                  <Button variant="outline" disabled={!!busy} onClick={() => setAdvancing(true)}><Wallet className="h-4 w-4 mr-1" />Record advance</Button>
+                )}
                 <Button variant="outline" onClick={() => onOpenChange(false)} disabled={!!busy}>Close</Button>
               </DialogFooter>
             )}
           </>
         )}
       </DialogContent>
+      {canAdvance && (
+        <AdvancePaymentForm open={advancing} onOpenChange={setAdvancing} order={po} advanceRoom={advanceRoom}
+          recordsPending={pay.recordsPending} onSaved={() => { load(); onChanged?.() }} />
+      )}
     </Dialog>
   )
 }

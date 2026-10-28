@@ -31,7 +31,29 @@ function printVoucher(p) {
   const address = [v.houseNumber, v.street, v.locality, v.city, v.district, v.pincode].filter(Boolean).join(', ')
   const refName = PAY_MODES.find((m) => m.value === p.mode)?.ref || 'Reference'
   const state = p.status === 'posted' ? '' : `<div class="note-bar"><b>${escapeHtml((PAYMENT_STATUS[p.status]?.label || p.status).toUpperCase())}</b>${
-    p.status === 'cancelled' ? ` — ${escapeHtml(p.cancelReason || '')}` : p.status === 'rejected' ? ` — ${escapeHtml(p.decisionRemark || '')}` : ' — not yet counted against the bill'}</div>`
+    p.status === 'cancelled' ? ` — ${escapeHtml(p.cancelReason || '')}` : p.status === 'rejected' ? ` — ${escapeHtml(p.decisionRemark || '')}` : p.bill ? ' — not yet counted against the bill' : ' — not yet counted against the order'}</div>`
+  // An advance (p.bill null, p.order set) has no invoice yet — printed against
+  // the order instead, so it is still on paper to track until the bill comes.
+  const table = p.bill ? `
+<table>
+  <thead><tr><th>Bill</th><th>Vendor invoice</th><th>PO</th><th style="text-align:right">Payable</th><th style="text-align:right">This payment</th></tr></thead>
+  <tbody><tr>
+    <td>${escapeHtml(p.bill.number || '')}</td>
+    <td>${escapeHtml(p.bill.vendorInvoiceNumber || '')}${p.bill.vendorInvoiceDate ? ` · ${day(p.bill.vendorInvoiceDate)}` : ''}</td>
+    <td>${escapeHtml(p.bill.order?.number || '—')}</td>
+    <td style="text-align:right">${formatMoney(p.bill.payable)}</td>
+    <td style="text-align:right"><b>${formatMoney(p.amount)}</b></td>
+  </tr></tbody>
+  <tfoot><tr><td colspan="4" style="text-align:right">Still due on the bill after posted payments${p.bill.debitNoteTotal > 0 ? ' and debit notes' : ''}</td><td style="text-align:right">${formatMoney(p.bill.stillDue)}</td></tr></tfoot>
+</table>` : `
+<table>
+  <thead><tr><th>Order</th><th style="text-align:right">Order value</th><th style="text-align:right">This advance</th></tr></thead>
+  <tbody><tr>
+    <td>${escapeHtml(p.order?.number || '—')} <i>(advance — no bill yet)</i></td>
+    <td style="text-align:right">${formatMoney(p.order?.total)}</td>
+    <td style="text-align:right"><b>${formatMoney(p.amount)}</b></td>
+  </tr></tbody>
+</table>`
   const body = `
 ${infoBox('Paid to', [
     { label: 'Vendor', value: v.name || p.vendorName },
@@ -46,17 +68,7 @@ ${infoBox('Payment', [
     { label: refName, value: p.reference || '—' },
   ])}
 ${state}
-<table>
-  <thead><tr><th>Bill</th><th>Vendor invoice</th><th>PO</th><th style="text-align:right">Payable</th><th style="text-align:right">This payment</th></tr></thead>
-  <tbody><tr>
-    <td>${escapeHtml(p.bill?.number || '')}</td>
-    <td>${escapeHtml(p.bill?.vendorInvoiceNumber || '')}${p.bill?.vendorInvoiceDate ? ` · ${day(p.bill.vendorInvoiceDate)}` : ''}</td>
-    <td>${escapeHtml(p.bill?.order?.number || '—')}</td>
-    <td style="text-align:right">${formatMoney(p.bill?.payable)}</td>
-    <td style="text-align:right"><b>${formatMoney(p.amount)}</b></td>
-  </tr></tbody>
-  <tfoot><tr><td colspan="4" style="text-align:right">Still due on the bill after posted payments${p.bill?.debitNoteTotal > 0 ? ' and debit notes' : ''}</td><td style="text-align:right">${formatMoney(p.bill?.stillDue)}</td></tr></tfoot>
-</table>
+${table}
 <div class="note-bar"><b>Amount in words:</b> ${escapeHtml(`${amountInWords(Number(p.amount) || 0)} Rupee(s) Only`)}</div>
 ${p.notes ? `<div class="note-bar"><b>Note:</b> ${escapeHtml(p.notes)}</div>` : ''}
 <div style="display:flex;justify-content:space-between;gap:16px;margin-top:40px;font-size:9.5pt;text-align:center">
@@ -97,9 +109,9 @@ export default function PaymentDetail({ id, open, onOpenChange, access, onChange
     try {
       const call = key === 'approve' ? purchasePaymentApi.approve : key === 'reject' ? purchasePaymentApi.reject : purchasePaymentApi.cancel
       const r = await call(p.id, text)
-      toast.success(key === 'approve' ? `${p.number} approved — ${formatMoney(p.amount)} counted against ${p.bill?.number}`
+      toast.success(key === 'approve' ? `${p.number} approved — ${formatMoney(p.amount)} counted against ${p.bill ? p.bill.number : `order ${p.order?.number} as an advance`}`
         : key === 'reject' ? `${p.number} rejected — ${p.createdByName} has been told why`
-          : `${p.number} cancelled — the bill shows it unpaid again`)
+          : `${p.number} cancelled — ${p.bill ? 'the bill shows it unpaid again' : 'the order shows it unadvanced again'}`)
       showNotifyWarning(r)
       setAsking(null)
       setRemark('')
@@ -131,7 +143,11 @@ export default function PaymentDetail({ id, open, onOpenChange, access, onChange
                 <Badge variant="outline" className={status.cls}>{status.label}</Badge>
               </div>
               <DialogDescription>
-                {p.vendorName} · bill <span className="font-mono">{p.bill?.number}</span> (invoice {p.bill?.vendorInvoiceNumber}) · recorded by {p.createdByName} on {formatDateTime(p.createdAt)}
+                {p.vendorName} · {p.bill
+                  ? <>bill <span className="font-mono">{p.bill.number}</span> (invoice {p.bill.vendorInvoiceNumber})</>
+                  : p.order
+                    ? <>advance on order <span className="font-mono">{p.order.number}</span> — no bill yet</>
+                    : null} · recorded by {p.createdByName} on {formatDateTime(p.createdAt)}
               </DialogDescription>
             </DialogHeader>
 
@@ -140,7 +156,7 @@ export default function PaymentDetail({ id, open, onOpenChange, access, onChange
                 <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-amber-900">
                   {decide ? 'Approve it once the money has left the bank; reject it if the amount or reference is wrong.'
                     : recordedIt ? 'You recorded this payment, so someone else in Finance approves it.'
-                      : 'Waiting for Finance to approve it. Until then it does not count against the bill.'}
+                      : `Waiting for Finance to approve it. Until then it does not count against the ${p.bill ? 'bill' : 'order'}.`}
                 </p>
               )}
               {p.status === 'rejected' && (
@@ -167,10 +183,21 @@ export default function PaymentDetail({ id, open, onOpenChange, access, onChange
                   {p.notes && <div><dt className="text-gray-500">Note</dt><dd>{p.notes}</dd></div>}
                 </dl>
                 <dl className="space-y-1.5 self-start rounded-md bg-gray-50 p-3">
-                  <div className="flex justify-between gap-4"><dt className="text-gray-500">Bill payable</dt><dd className="tabular-nums">{formatMoney(p.bill?.payable)}</dd></div>
-                  {p.bill?.debitNoteTotal > 0 && <div className="flex justify-between gap-4"><dt className="text-gray-500">Debit notes</dt><dd className="tabular-nums">− {formatMoney(p.bill.debitNoteTotal)}</dd></div>}
-                  <div className="flex justify-between gap-4"><dt className="text-gray-500">Paid (posted)</dt><dd className="tabular-nums">− {formatMoney(p.bill?.amountPaid)}</dd></div>
-                  <div className="flex justify-between gap-4 border-t pt-1.5"><dt className="font-semibold">Still due</dt><dd className="font-bold tabular-nums">{formatMoney(p.bill?.stillDue)}</dd></div>
+                  {p.bill ? (
+                    <>
+                      <div className="flex justify-between gap-4"><dt className="text-gray-500">Bill payable</dt><dd className="tabular-nums">{formatMoney(p.bill.payable)}</dd></div>
+                      {p.bill.debitNoteTotal > 0 && <div className="flex justify-between gap-4"><dt className="text-gray-500">Debit notes</dt><dd className="tabular-nums">− {formatMoney(p.bill.debitNoteTotal)}</dd></div>}
+                      <div className="flex justify-between gap-4"><dt className="text-gray-500">Paid (posted)</dt><dd className="tabular-nums">− {formatMoney(p.bill.amountPaid)}</dd></div>
+                      <div className="flex justify-between gap-4 border-t pt-1.5"><dt className="font-semibold">Still due</dt><dd className="font-bold tabular-nums">{formatMoney(p.bill.stillDue)}</dd></div>
+                    </>
+                  ) : p.order ? (
+                    <>
+                      <div className="flex justify-between gap-4"><dt className="text-gray-500">Order</dt><dd className="font-mono">{p.order.number}</dd></div>
+                      <div className="flex justify-between gap-4"><dt className="text-gray-500">Order value</dt><dd className="tabular-nums">{formatMoney(p.order.total)}</dd></div>
+                      <div className="flex justify-between gap-4 border-t pt-1.5"><dt className="font-semibold">This advance</dt><dd className="font-bold tabular-nums">{formatMoney(p.amount)}</dd></div>
+                      <p className="pt-1 text-xs text-gray-500">No bill yet — this will count against the bill once one is entered on the order.</p>
+                    </>
+                  ) : null}
                 </dl>
               </div>
 
