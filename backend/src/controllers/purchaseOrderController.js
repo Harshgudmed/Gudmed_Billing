@@ -496,10 +496,13 @@ export async function poUpdate(req, res, next) {
             data: { status: 'approved', actedById: actor.id, actedByName: actor.name, actedAt: now },
           })
         }
+        // Fully approved on submit (no levels, or an admin self-approving) goes
+        // straight to sent — approving an order IS telling the vendor; there is
+        // no separate "mark as sent" step to chase afterwards.
         await tx.purchaseOrder.update({
           where: { id },
           data: (!levels || adminSelf)
-            ? { status: 'approved', submittedAt: now, decidedAt: now }
+            ? { status: 'sent', submittedAt: now, decidedAt: now, sentAt: now }
             : { status: 'submitted', submittedAt: now, decidedAt: null },
         })
       })
@@ -513,7 +516,9 @@ export async function poUpdate(req, res, next) {
         const result = await decide(tx, ORG_ID, DOC, id, { actor, requestedById: po.createdById, approve: action === 'approve', remark })
         if (result.error) throw forbidden(result.error.replace('a request you raised', 'an order you made'))
         auditAction = `${action} level ${result.step.level}`
-        if (result.outcome !== 'next') await tx.purchaseOrder.update({ where: { id }, data: { status: result.outcome, decidedAt: new Date() } })
+        // Same as submit: the last approval also sends it — one decision, done.
+        if (result.outcome === 'approved') await tx.purchaseOrder.update({ where: { id }, data: { status: 'sent', decidedAt: new Date(), sentAt: new Date() } })
+        else if (result.outcome !== 'next') await tx.purchaseOrder.update({ where: { id }, data: { status: result.outcome, decidedAt: new Date() } })
       })
     } else if (action === 'send') {
       if (!canOrder(req)) throw forbidden('Only the purchase officer or an administrator sends orders to vendors')

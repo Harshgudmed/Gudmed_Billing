@@ -7,10 +7,11 @@
 //   request sent / a level approved → the people who approve the next level
 //   request approved                → its requester, and the purchase officers (ready to order)
 //   request rejected                → its requester, with the reason
-//   order sent / a level approved   → the next level's approvers
-//   order approved                  → whoever made it (send it to the vendor)
+//   order submitted / a level approved → the next level's approvers
 //   order rejected                  → whoever made it, with the reason
-//   order sent to the vendor        → the store (goods are coming)
+//   order fully approved            → sent to the vendor in the same step; whoever
+//                                      made it is told it is sent, and the store
+//                                      is told goods are coming
 //   order cancelled or closed       → the store (stop waiting)
 //   goods received                  → whoever made the order, and whoever asked for the items
 //   a receipt cancelled             → whoever received it, and whoever made the order
@@ -87,25 +88,30 @@ export const orderChanged = safe(async function orderChanged(orgId, action, po, 
       message: `${po.vendorName}, ${formatRupee(po.total)}${levelOf(po)}. Made by ${po.createdByName}.`, ...link('order', po.id),
     }, who)
   }
-  if (po.status === 'approved' && action === 'approve') {
-    return notify(orgId, [po.createdById], {
-      type: 'purchase.order.approved', title: `Order ${po.number} is approved`,
-      message: `Print it and send it to ${po.vendorName}, then mark it sent.`, ...link('order', po.id),
-    }, who)
-  }
   if (po.status === 'rejected' && action === 'reject') {
     return notify(orgId, [po.createdById], {
       type: 'purchase.order.rejected', title: `Order ${po.number} was rejected`,
       message: `${actor.name || 'The approver'}: ${remark || 'no reason given'}.`, priority: 'high', ...link('order', po.id),
     }, who)
   }
-  if (po.status === 'sent' && action === 'send') {
+  // Approving (or an admin's own submit) sends it in the same step — there is
+  // no separate "mark as sent" action to wait for, so the store is told goods
+  // are coming the moment it happens, whichever action got it there.
+  if (po.status === 'sent' && ['submit', 'approve', 'send'].includes(action)) {
+    let n = 0
+    if (action !== 'send') {
+      n += await notify(orgId, [po.createdById], {
+        type: 'purchase.order.approved', title: `Order ${po.number} is approved and sent`,
+        message: `${po.vendorName}, ${formatRupee(po.total)}. Approving it sent it straight to the vendor.`, ...link('order', po.id),
+      }, who)
+    }
     const by = po.expectedDate ? ` by ${new Date(po.expectedDate).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })}` : ''
-    return notifyRoles(orgId, STORE, {
+    n += await notifyRoles(orgId, STORE, {
       type: 'purchase.order.sent', title: `Goods coming from ${po.vendorName}`,
       message: `${po.number}: ${po.lines.length} item${po.lines.length === 1 ? '' : 's'} expected${by}. Receive them against this order.`,
       ...link('order', po.id),
     }, who)
+    return n
   }
   // The store was told goods are coming; tell it they are not.
   if ((po.status === 'cancelled' && ['approved', 'sent'].includes(wasStatus)) || po.status === 'closed') {

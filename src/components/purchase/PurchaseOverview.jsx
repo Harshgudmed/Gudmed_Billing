@@ -30,7 +30,10 @@ const WORKFLOW = [
   { status: 'approved', label: 'Approved' },
   { status: 'ordered', label: 'Ordered' },
 ]
-const NEXT_STAGES = ['Paid']
+// Tailwind finds class names by scanning the source, so a column count picked
+// at run time (`lg:grid-cols-${n}`) never ships — the real classes are spelled
+// out here, one per tile count a role can have.
+const TILE_COLS = { 4: 'lg:grid-cols-4', 5: 'lg:grid-cols-5', 6: 'lg:grid-cols-6' }
 
 // The bar on the left of an attention row, as on the lab's attention list.
 const PRIORITY_BAR = { emergency: 'bg-red-500', urgent: 'bg-orange-500', normal: 'bg-yellow-400' }
@@ -56,25 +59,23 @@ export default function PurchaseOverview({ data, onOpen, onOrders, onStock, onBi
   const list = approver ? attention : myOpen
   const approved30 = approvedLast30Days.reduce((s, d) => s + d.amount, 0)
   const topSpend = approvedLast30Days[0]?.amount || 0
-  // Of the requests that got a decision, how many went through.
-  const decided = (pipeline.approved || 0) + (pipeline.rejected || 0)
-  const approvalRate = decided ? Math.round(((pipeline.approved || 0) / decided) * 100) : null
 
-  // Each role sees its own day — six tiles and its quick actions:
+  // Each role sees its own day and its quick actions. Approving an order sends
+  // it to the vendor in the same step (no separate "mark as sent"), so there is
+  // no "orders to send" tile — once approved, it is already on its way:
   //   store      what to receive, what came today, what runs low or expires, its requests
-  //   buyer      what to approve, to order, to send, what is due in, what to bill, open orders
+  //   buyer      what to approve, to order, what is due in, what to bill, open orders
   //   finance    approvals with their money, bills on hold and to pay, open orders
   //   admin      the approvals, ordering and bills together
   const bills = data.bills || { onHold: { count: 0, amount: 0 }, approved: { count: 0, amount: 0 }, toBill: 0 }
   const money = (n, amount) => (n ? formatMoney(amount) : null)
   const T = {
-    reqMine:  { key: 'req-mine', tone: 'yellow', icon: Clock, label: 'Requests Waiting for Me', value: cards.toApprove.count, sublabel: money(cards.toApprove.count, cards.toApprove.amount), go: () => onOpen({ view: 'to-approve' }) },
-    poMine:   { key: 'po-mine', tone: 'orange', icon: FileCheck2, label: 'Orders Waiting for Me', value: orders.ordersToApprove.count, sublabel: money(orders.ordersToApprove.count, orders.ordersToApprove.amount), go: () => onOrders({ view: 'to-approve' }) },
-    ready:    { key: 'ready', tone: 'blue', icon: PackagePlus, label: 'Ready to Order', value: orders.requestsReadyToOrder, sublabel: 'Approved requests', go: () => onOrders({ view: 'all', make: true }) },
-    send:     { key: 'send', tone: 'green', icon: Truck, label: 'Orders to Send', value: orders.ordersToSend, sublabel: 'Approved, not yet with the vendor', go: () => onOrders({ view: 'to-send' }) },
+    reqMine:  { key: 'req-mine', tone: 'yellow', icon: Clock, label: 'Staff Requests to Approve', value: cards.toApprove.count, sublabel: money(cards.toApprove.count, cards.toApprove.amount), go: () => onOpen({ view: 'to-approve' }) },
+    poMine:   { key: 'po-mine', tone: 'orange', icon: FileCheck2, label: 'Vendor Orders to Approve', value: orders.ordersToApprove.count, sublabel: money(orders.ordersToApprove.count, orders.ordersToApprove.amount), go: () => onOrders({ view: 'to-approve' }) },
+    ready:    { key: 'ready', tone: 'blue', icon: PackagePlus, label: 'Approved Requests to Order', value: orders.requestsReadyToOrder, sublabel: 'Approved; no vendor order yet', go: () => onOrders({ view: 'all', make: true }) },
     dueIn:    { key: 'due-in', tone: 'blue', icon: PackageCheck, label: 'Awaiting Delivery', value: stock.toReceive, sublabel: 'Ordered, not all in yet', go: () => onOrders({ view: 'all', status: OPEN_ORDERS }) },
-    toBill:   { key: 'to-bill', tone: 'blue', icon: Receipt, label: 'To Bill', value: bills.toBill, sublabel: 'Goods in, vendor bill not entered', go: () => onBills({ view: 'to-bill' }) },
-    onHold:   { key: 'on-hold', tone: 'red', icon: AlertTriangle, label: 'Bills On Hold', value: bills.onHold.count, sublabel: money(bills.onHold.count, bills.onHold.amount) || 'Mismatch with order or receipt', go: () => onBills({ view: 'on-hold' }) },
+    toBill:   { key: 'to-bill', tone: 'blue', icon: Receipt, label: 'Orders to Bill', value: bills.toBill, sublabel: 'Goods in, vendor bill not entered', go: () => onBills({ view: 'to-bill' }) },
+    onHold:   { key: 'on-hold', tone: 'red', icon: AlertTriangle, label: 'Bills to Resolve', value: bills.onHold.count, sublabel: money(bills.onHold.count, bills.onHold.amount) || 'Mismatch with order or receipt', go: () => onBills({ view: 'on-hold' }) },
     toPay:    { key: 'to-pay', tone: 'green', icon: Wallet, label: 'Bills to Pay', value: bills.approved.count, sublabel: money(bills.approved.count, bills.approved.amount), go: () => onBills({ view: 'approved' }) },
     open:     { key: 'open', tone: 'purple', icon: ShoppingCart, label: 'Open Orders', value: orders.openOrders.count, sublabel: money(orders.openOrders.count, orders.openOrders.amount), go: () => onOrders({ view: 'all', status: OPEN_ORDERS }) },
     urgent:   { key: 'urgent', tone: 'red', icon: AlertTriangle, label: 'Urgent & Emergency', value: cards.urgentOpen, go: () => onOpen({ view: 'all', status: 'submitted', priority: 'urgent,emergency' }) },
@@ -99,8 +100,8 @@ export default function PurchaseOverview({ data, onOpen, onOrders, onStock, onBi
     : { count: orders.receivedOrders, title: 'Orders with goods received, in part or in full', go: () => onOrders({ view: 'all', status: GOODS_IN_ORDERS }) }
   const tiles = store ? [T.myWaiting, T.myRejected, T.receive, T.today, T.low, T.expiring]
     : finance ? [T.reqMine, T.poMine, T.onHold, T.toPay, T.open, T.worth]
-      : buyer ? [T.reqMine, T.ready, T.send, T.dueIn, T.toBill, T.open]
-        : [T.reqMine, T.poMine, T.ready, T.send, T.onHold, T.open]
+      : buyer ? [T.reqMine, T.ready, T.dueIn, T.toBill, T.open]
+        : [T.reqMine, T.poMine, T.ready, T.onHold, T.toBill]
 
   // Quick actions for this role, most used first.
   const A = {
@@ -125,7 +126,7 @@ export default function PurchaseOverview({ data, onOpen, onOrders, onStock, onBi
 
   return (
     <div className="space-y-6">
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
+      <div className={`grid grid-cols-2 md:grid-cols-3 ${TILE_COLS[tiles.length] || TILE_COLS[6]} gap-4`}>
         {tiles.map(({ key, go, ...t }) => <StatCard key={key} {...t} onClick={go} />)}
       </div>
 
@@ -191,69 +192,41 @@ export default function PurchaseOverview({ data, onOpen, onOrders, onStock, onBi
         </Card>
       </div>
 
-      <Card>
-        <CardHeader className="pb-3">
-          <div className="flex items-center justify-between gap-4">
-            <div>
-              <CardTitle>{store ? 'My Requests — Where They Stand' : <>Procure to Pay &mdash; Workflow</>}</CardTitle>
-              <CardDescription>{store ? 'The requests you raised, stage by stage — Ordered means all its items are on purchase orders.' : 'Where every request stands — Ordered means all its items are on purchase orders. Click a stage to see its requests.'}</CardDescription>
-            </div>
-            {approvalRate != null && !store && (
-              <div className="text-right shrink-0">
-                <p className="text-2xl font-bold text-green-600">{approvalRate}%</p>
-                <p className="text-xs text-gray-500">Approval Rate</p>
-              </div>
-            )}
-          </div>
-        </CardHeader>
-        <CardContent>
-          <div className="flex flex-wrap items-center gap-2">
-            {WORKFLOW.map((w, i) => (
-              <div key={w.status} className="flex items-center gap-2">
-                {i > 0 && <ArrowRight className="h-4 w-4 text-gray-300 shrink-0" />}
-                <button type="button" onClick={() => onOpen({ view: store ? 'mine' : 'all', status: w.status })} title={w.status === 'ordered' ? 'Requests whose items are all on purchase orders' : undefined}
-                  className={`min-w-[120px] rounded-lg border px-4 py-2 text-left transition-shadow hover:shadow-md ${STATUS[w.status].cls}`}>
-                  <div className="text-2xl font-bold tabular-nums">{pipeline[w.status] || 0}</div>
-                  {/* others' drafts are private: everyone but an administrator counts only their own */}
-                  <div className="text-xs font-medium">{w.status === 'draft' && !me.isAdmin ? 'My drafts' : w.label}</div>
-                </button>
-              </div>
-            ))}
-            <div className="flex items-center gap-2">
-              <ArrowRight className="h-4 w-4 text-gray-300 shrink-0" />
-              <button type="button" onClick={received.go} title={received.title}
-                className="min-w-[120px] rounded-lg border border-purple-200 bg-purple-50 px-4 py-2 text-left text-purple-700 transition-shadow hover:shadow-md">
-                <div className="text-2xl font-bold tabular-nums">{received.count ?? 0}</div>
-                <div className="text-xs font-medium">Received (orders)</div>
-              </button>
-            </div>
-            {(me.canBill || me.canDecideBill) && (
+      {store && (
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle>My Requests — Where They Stand</CardTitle>
+            <CardDescription>The requests you raised, stage by stage — Ordered means all its items are on purchase orders.</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="flex flex-wrap items-center gap-2">
+              {WORKFLOW.map((w, i) => (
+                <div key={w.status} className="flex items-center gap-2">
+                  {i > 0 && <ArrowRight className="h-4 w-4 text-gray-300 shrink-0" />}
+                  <button type="button" onClick={() => onOpen({ view: 'mine', status: w.status })}
+                    className={`min-w-[120px] rounded-lg border px-4 py-2 text-left transition-shadow hover:shadow-md ${STATUS[w.status].cls}`}>
+                    <div className="text-2xl font-bold tabular-nums">{pipeline[w.status] || 0}</div>
+                    <div className="text-xs font-medium">{w.status === 'draft' ? 'My drafts' : w.label}</div>
+                  </button>
+                </div>
+              ))}
               <div className="flex items-center gap-2">
                 <ArrowRight className="h-4 w-4 text-gray-300 shrink-0" />
-                <button type="button" onClick={() => onBills({ view: 'approved' })} title="Vendor bills approved for payment"
-                  className="min-w-[120px] rounded-lg border border-green-200 bg-green-50 px-4 py-2 text-left text-green-700 transition-shadow hover:shadow-md">
-                  <div className="text-2xl font-bold tabular-nums">{bills.approved.count}</div>
-                  <div className="text-xs font-medium">Billed</div>
+                <button type="button" onClick={received.go} title={received.title}
+                  className="min-w-[120px] rounded-lg border border-purple-200 bg-purple-50 px-4 py-2 text-left text-purple-700 transition-shadow hover:shadow-md">
+                  <div className="text-2xl font-bold tabular-nums">{received.count ?? 0}</div>
+                  <div className="text-xs font-medium">Received (orders)</div>
                 </button>
               </div>
-            )}
-            {NEXT_STAGES.map((label) => (
-              <div key={label} className="flex items-center gap-2" title="Comes with the next stages of the Purchase module">
-                <ArrowRight className="h-4 w-4 text-gray-200 shrink-0" />
-                <div className="min-w-[100px] rounded-lg border border-dashed px-4 py-2 text-gray-400">
-                  <div className="text-sm font-medium">{label}</div>
-                  <div className="text-[11px]">Coming next</div>
-                </div>
-              </div>
-            ))}
-          </div>
-          {(pipeline.rejected || pipeline.cancelled) ? (
-            <p className="mt-3 text-xs text-gray-500">
-              Also {pipeline.rejected || 0} rejected and {pipeline.cancelled || 0} cancelled &mdash; not moving further.
-            </p>
-          ) : null}
-        </CardContent>
-      </Card>
+            </div>
+            {(pipeline.rejected || pipeline.cancelled) ? (
+              <p className="mt-3 text-xs text-gray-500">
+                Also {pipeline.rejected || 0} rejected and {pipeline.cancelled || 0} cancelled &mdash; not moving further.
+              </p>
+            ) : null}
+          </CardContent>
+        </Card>
+      )}
 
       <div className={`grid gap-6 ${me.seesMoney ? 'md:grid-cols-2' : ''}`}>
         {me.seesMoney && <Card>
