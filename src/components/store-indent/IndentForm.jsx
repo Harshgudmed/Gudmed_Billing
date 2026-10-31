@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -14,7 +14,7 @@ import { indentApi } from '@/api/purchaseIndentApi'
 import { showApiError } from '@/lib/apiRequest'
 import { localYmd } from '@/lib/format'
 import { PRIORITY, PURPOSE_SUGGESTIONS, showNotifyWarning } from '@/components/purchase/requestMeta'
-import { unitsOf } from '@/components/purchase/itemPicking'
+import { unitsOf, useItemSearch } from '@/components/purchase/itemPicking'
 import LoadFailed from '@/components/purchase/LoadFailed'
 
 // A department asks the store for goods: which items, how many, by when, and
@@ -39,28 +39,14 @@ export default function IndentForm({ open, onOpenChange, onSaved }) {
   const [attempt, setAttempt] = useState(0)
   const [saving, setSaving] = useState(false)
 
-  // Item search, one result list per line; `found` turns a picked id back into the item.
-  const [itemOptions, setItemOptions] = useState({})
-  const [searchingLine, setSearchingLine] = useState(null)
-  const found = useRef(new Map())
-  const searchItems = useCallback(async (key, q, catId) => {
-    setSearchingLine(key)
-    try {
-      const r = await indentApi.searchItems({ search: q, page: 1, limit: 30, ...(catId ? { categoryId: catId } : {}) })
-      const rows = r?.data ?? []
-      rows.forEach((it) => found.current.set(it.id, it))
-      setItemOptions((o) => ({
-        ...o,
-        [key]: rows.map((it) => ({
-          value: it.id, label: it.name,
-          sublabel: `${it.code} · ${it.category?.name || ''} · ${it.inStock ? 'Stock available' : 'Out of stock'}`,
-        })),
-      }))
-    } catch (err) {
-      // Say so and keep the list as it was: an empty one reads as "no such item".
-      showApiError(err, 'Could not search the store\'s items')
-    } finally { setSearchingLine((s) => (s === key ? null : s)) }
-  }, [])
+  // Item search, one result list per line — the shared per-line search (same
+  // caching and error handling as the purchase forms), pointed at the store's
+  // own stock-only lookup (no prices) instead of the item master.
+  const fetchIndentItems = useCallback((params) => indentApi.searchItems(params).then((r) => r?.data ?? []), [])
+  const formatIndentOption = useCallback((it) => `${it.code} · ${it.category?.name || ''} · ${it.inStock ? 'Stock available' : 'Out of stock'}`, [])
+  const { itemOptions, searchingLine, searchItems, found } = useItemSearch([], {
+    fetchItems: fetchIndentItems, formatOption: formatIndentOption, errorMessage: "Could not search the store's items",
+  })
 
   useEffect(() => {
     if (!open) return

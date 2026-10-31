@@ -221,13 +221,16 @@ async function undoReturn(tx, ORG_ID, ret, po, actor, reason) {
     if (after === null) throw conflict(`${ret.number}: ${po.number} shows less returned than this return sent — the order and its returns do not agree, so it cannot be undone. Nothing was changed.`)
     next.set(orderLineId, after)
   }
+  // Same lock order as postReturn — batches, then the bill — so a concurrent
+  // post and undo on the same order never wait on each other's rows in the
+  // opposite order (that is what causes a Postgres deadlock, 40P01).
+  const batches = await lockBatches(tx, ORG_ID, ret.lines)
   if (ret.billId) {
     const bill = await lockBillRow(tx, ORG_ID, ret.billId)
     const dn = bill && debitNoteAfter(bill.debitNoteTotal, ret.total, -1)
     if (dn == null) throw conflict(`${bill?.number || 'Its bill'} carries ${formatRupee(bill?.debitNoteTotal || 0)} of debit notes, less than this return's ${formatRupee(ret.total)} — the bill and its returns do not agree, so it cannot be undone. Nothing was changed.`)
     await tx.vendorBill.update({ where: { id: bill.id }, data: { debitNoteTotal: dn } })
   }
-  const batches = await lockBatches(tx, ORG_ID, ret.lines)
   for (const line of ret.lines) {
     const batch = line.batchId && batches.get(line.batchId)
     if (!batch || batch.itemId !== line.itemId) {

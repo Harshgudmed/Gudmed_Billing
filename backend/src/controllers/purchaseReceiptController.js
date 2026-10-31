@@ -328,11 +328,20 @@ export async function grnCreate(req, res, next) {
         },
       })
 
-      await lockItems(tx, rows.filter((r) => r.stockQty > 0).map((r) => r.ol.itemId))
+      const stockedItemIds = [...new Set(rows.filter((r) => r.stockQty > 0).map((r) => r.ol.itemId))]
+      await lockItems(tx, stockedItemIds)
+      // One balance per item, kept running in memory as batches are added below —
+      // not a fresh onHand() query per line, which would be up to one query per
+      // line (near the schema's 300-line cap) while the order's row lock is held.
+      const balances = new Map(stockedItemIds.length
+        ? (await tx.stockBatch.groupBy({ by: ['itemId'], where: { organizationId: ORG_ID, itemId: { in: stockedItemIds } }, _sum: { quantity: true } }))
+            .map((r) => [r.itemId, r._sum.quantity || 0])
+        : [])
       for (const { ol, l, accepted, stockQty, unitCost } of rows) {
         let batchId = null
         if (stockQty > 0) {
-          const before = await onHand(tx, ORG_ID, ol.itemId)
+          const before = balances.get(ol.itemId) || 0
+          balances.set(ol.itemId, roundQty(before + stockQty))
           const batch = await tx.stockBatch.create({
             data: {
               organizationId: ORG_ID, itemId: ol.itemId, batchNumber: l.batchNumber || null, expiryDate: l.expiryDate || null,

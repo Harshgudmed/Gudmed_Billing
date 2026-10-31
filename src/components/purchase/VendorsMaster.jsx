@@ -214,12 +214,12 @@ export default function VendorsMaster({ onChanged }) {
     URL.revokeObjectURL(url)
   }
 
-  const save = async () => {
-    const digits = String(form.phone || '').replace(/\D/g, '')
-    const phoneValid = digits.length >= 8 && digits.length <= 15
-    const requiredOk = !!form.name.trim() && !!form.phone.trim() && phoneValid
+  const phoneDigits = String(form.phone || '').replace(/\D/g, '')
+  const phoneValid = phoneDigits.length >= 8 && phoneDigits.length <= 15
+  const requiredFieldsComplete = !!form.name.trim() && !!form.phone.trim() && phoneValid
 
-    if (!requiredOk) {
+  const save = async () => {
+    if (!requiredFieldsComplete) {
       toast.error('Phone number is required and must be 8 to 15 digits.')
       return
     }
@@ -258,9 +258,6 @@ export default function VendorsMaster({ onChanged }) {
   }
 
   const gst = readGstin(form.gstNumber, statesByCode)
-  const phoneDigits = String(form.phone || '').replace(/\D/g, '')
-  const phoneValid = phoneDigits.length >= 8 && phoneDigits.length <= 15
-  const requiredFieldsComplete = !!form.name.trim() && !!form.phone.trim() && phoneValid
 
   return (
     // The HMS list layout, as on Pharmacy's tabs: the filter row with the Add

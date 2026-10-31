@@ -533,13 +533,13 @@ export async function poUpdate(req, res, next) {
       after = await writeOrder(ORG_ID, id, audit, async (tx) => {
         const po = await lockOrder(tx, ORG_ID, id)
         before = po
+        if (!canOrder(req) || !ownsOrAdmin(req, po.createdById)) throw forbidden(`Only ${po.createdByName} or an administrator can cancel this order`)
         if (!['draft', 'submitted', 'approved', 'sent', 'rejected'].includes(po.status)) throw conflict(`A ${po.status.replace('_', ' ')} order cannot be cancelled`)
         if (po.lines.some((l) => l.receivedQty > 0)) throw conflict('Goods have been received against this order — it can no longer be cancelled')
         const bill = await tx.vendorBill.findFirst({ where: { organizationId: ORG_ID, orderId: id, status: { not: 'cancelled' } }, select: { number: true } })
         if (bill) throw conflict(`Vendor bill ${bill.number} is entered on this order — cancel or delete it first`)
         const advance = await tx.vendorPayment.findFirst({ where: { organizationId: ORG_ID, orderId: id, billId: null, status: { in: ['posted', 'pending_approval'] } }, select: { number: true } })
         if (advance) throw conflict(`Advance payment ${advance.number} is recorded against this order — cancel or reject it first`)
-        if (!canOrder(req) || !ownsOrAdmin(req, po.createdById)) throw forbidden(`Only ${po.createdByName} or an administrator can cancel this order`)
         if (po.status !== 'draft' && reason.length < 3) throw bad(po.status === 'sent' ? 'Say why it is cancelled — and tell the vendor' : 'Say why it is cancelled')
         await cancelSteps(tx, ORG_ID, DOC, id)
         await tx.purchaseOrder.update({ where: { id }, data: { status: 'cancelled', cancelledAt: new Date(), cancelReason: reason || null } })

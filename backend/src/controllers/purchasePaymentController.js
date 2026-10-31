@@ -437,7 +437,7 @@ async function advancesSummary(ORG_ID) {
   const paidRows = byStatus('posted'), pendingRows = byStatus('pending_approval')
 
   const orderIds = [...new Set(rows.map((r) => r.orderId))]
-  const orders = orderIds.length ? await db.purchaseOrder.findMany({ where: { id: { in: orderIds } }, select: { id: true, total: true } }) : []
+  const orders = orderIds.length ? await db.purchaseOrder.findMany({ where: { id: { in: orderIds }, organizationId: ORG_ID }, select: { id: true, total: true } }) : []
   const paidByOrder = new Map(paidRows.map((r) => [r.orderId, r._sum.amount || 0]))
   const pendingByOrder = new Map(pendingRows.map((r) => [r.orderId, r._sum.amount || 0]))
   const remaining = round2(orders.reduce((s, o) => s + Math.max(0, o.total - (paidByOrder.get(o.id) || 0) - (pendingByOrder.get(o.id) || 0)), 0))
@@ -594,7 +594,7 @@ export async function paymentCreate(req, res, next) {
     let payoutWarning = null
     if (razorpayXEnabled() && PAYOUT_MODES.has(input.mode) && payment.status === 'posted') {
       try {
-        const vendor = await db.vendor.findUnique({ where: { id: payment.vendorId } })
+        const vendor = await db.vendor.findFirst({ where: { id: payment.vendorId, organizationId: ORG_ID } })
         const contactId    = await ensureContact(vendor)
         const fundAcctId   = await ensureFundAccount(contactId, vendor)
         const payout       = await createPayout({ fundAccountId: fundAcctId, amount: payment.amount, referenceId: payment.number, narration: `Gudmed ${payment.number}` })

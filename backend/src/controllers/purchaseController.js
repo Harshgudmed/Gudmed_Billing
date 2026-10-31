@@ -647,7 +647,7 @@ export async function update(req, res, next) {
         if (children) return res.status(409).json({ success: false, error: `Retire the ${children} categor${children === 1 ? 'y' : 'ies'} inside this group first` })
       }
       if (data.isActive === true && before.parentId) {
-        const parent = await db.itemCategory.findFirst({ where: { id: before.parentId }, select: { isActive: true, name: true } })
+        const parent = await db.itemCategory.findFirst({ where: { id: before.parentId, organizationId: ORG_ID }, select: { isActive: true, name: true } })
         if (!parent?.isActive) return res.status(409).json({ success: false, error: `Restore the group "${parent?.name}" first` })
       }
       const category = await db.$transaction(async (tx) => {

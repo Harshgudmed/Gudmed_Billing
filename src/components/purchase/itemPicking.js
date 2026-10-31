@@ -24,12 +24,21 @@ export function unitsOf(item) {
 /** The last price paid, scaled to a unit (a box of 100 at ₹2 a piece is ₹200), or ''. */
 export const suggestedRate = (item, factor) => (item?.lastPurchasePrice != null ? String(round2(item.lastPurchasePrice * factor)) : '')
 
+// Default lookup: the purchase item master, with its last price. A caller with
+// a different source of items (the store indent's own stock-only search) passes
+// its own `fetchItems`/`formatOption` — stable references (module-level, not
+// defined inline per render) so callers that don't override them keep the same
+// memoized `searchItems` they always had.
+const defaultFetchItems = (params) => purchaseApi.getItems(params).then((r) => r?.data ?? [])
+const defaultFormatOption = (it) =>
+  `${it.code} · ${it.category?.name || ''} · ${it.stockUnit?.code}${it.lastPurchasePrice != null ? ` · last ${formatMoney(it.lastPurchasePrice)}` : ''}`
+
 /**
  * Per-line item search. `categories` is the tree from resource=categories.
  * searchItems(lineKey, query, categoryId) fills itemOptions[lineKey]; `found`
  * keeps every item seen, so a picked id can be turned back into the item.
  */
-export function useItemSearch(categories) {
+export function useItemSearch(categories, { fetchItems = defaultFetchItems, formatOption = defaultFormatOption, errorMessage = 'Could not search the items' } = {}) {
   const [itemOptions, setItemOptions] = useState({}) // line key → options
   const [searchingLine, setSearchingLine] = useState(null)
   const found = useRef(new Map())
@@ -39,21 +48,17 @@ export function useItemSearch(categories) {
     if (!q && firstPages.current.has(categoryId)) { show(firstPages.current.get(categoryId)); return }
     setSearchingLine(key)
     try {
-      const r = await purchaseApi.getItems({ search: q, status: 'active', categoryId: categoryId || undefined, page: 1, limit: 30 })
-      const rows = r?.data ?? []
+      const rows = await fetchItems({ search: q, status: 'active', categoryId: categoryId || undefined, page: 1, limit: 30 })
       rows.forEach((it) => found.current.set(it.id, it))
-      const options = rows.map((it) => ({
-        value: it.id, label: it.name,
-        sublabel: `${it.code} · ${it.category?.name || ''} · ${it.stockUnit?.code}${it.lastPurchasePrice != null ? ` · last ${formatMoney(it.lastPurchasePrice)}` : ''}`,
-      }))
+      const options = rows.map((it) => ({ value: it.id, label: it.name, sublabel: formatOption(it) }))
       if (!q) firstPages.current.set(categoryId, options)
       show(options)
     } catch (err) {
       // Say so, and leave the list as it was: an empty one read as "no such
       // item" and sent people to create a duplicate.
-      showApiError(err, 'Could not search the items')
+      showApiError(err, errorMessage)
     } finally { setSearchingLine((s) => (s === key ? null : s)) }
-  }, [])
+  }, [fetchItems, formatOption, errorMessage])
   const categoryOptions = useMemo(() => [
     { value: ALL, label: 'All categories', sublabel: 'Every item' },
     ...categoryPickerOptions(flattenCategories(categories), { showGst: false }),
