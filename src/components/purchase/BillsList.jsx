@@ -25,8 +25,9 @@ import BillDetail from './BillDetail'
 // then the table.
 //   To Bill           — orders with goods in and no bill yet; a click starts
 //                       a bill (the purchase officer's tile only)
-//   On Hold           — bills that differ from the order, waiting for Finance
-//   Approved — To Pay — passed for payment, not paid yet
+//   Bills on Hold     — bills that differ from the order, waiting for Finance
+//   Approved Bills    — bills Finance or the matching process approved; the
+//                       table shows whether each one is still due, partly paid or paid
 //   All Bills         — everything, with a status filter
 // A row opens the bill; approving, rejecting and cancelling happen there, and
 // only for Finance. Finance sees nothing for making a bill.
@@ -34,8 +35,8 @@ import BillDetail from './BillDetail'
 // The same colour and icon as the dashboard's tile for each, so a bill on hold
 // looks the same wherever it is counted.
 const VIEWS = [
-  { value: 'on-hold', label: 'On Hold — Mismatch', tone: 'red', icon: AlertTriangle },
-  { value: 'approved', label: 'Approved — To Pay', tone: 'green', icon: Wallet },
+  { value: 'on-hold', label: 'Bills on Hold', tone: 'red', icon: AlertTriangle },
+  { value: 'approved', label: 'Approved Bills', tone: 'green', icon: Wallet },
   { value: 'all', label: 'All Bills', tone: 'purple', icon: ReceiptText },
 ]
 // Written out in full so Tailwind finds them (an interpolated class never ships).
@@ -79,7 +80,7 @@ export default function BillsList({ intent = {}, onChanged, onOpenOrder }) {
   const s = bills.summary || {}
   const allCount = s.all ?? (view === 'all' && status === 'all' && !debounced ? bills.total : null)
   const values = {
-    'on-hold': { value: s.onHold?.count ?? 0, sublabel: s.onHold?.amount ? formatMoney(s.onHold.amount) : 'Waiting for Finance' },
+    'on-hold': { value: s.onHold?.count ?? 0, sublabel: s.financeReviewerConfigured ? 'Finance review required' : 'Administrator review required' },
     approved: { value: s.approved?.count ?? 0, sublabel: s.approved?.amount ? formatMoney(s.approved.amount) : 'Passed for payment' },
     // Drafts are the purchase officer's unfinished work; Finance never acts on them.
     all: { value: allCount ?? '—', sublabel: me.canBill && s.drafts ? `${s.drafts} draft${s.drafts === 1 ? '' : 's'} not submitted` : 'Every vendor, every status' },
@@ -92,7 +93,7 @@ export default function BillsList({ intent = {}, onChanged, onOpenOrder }) {
       <div role="group" aria-label="Which bills" className={`grid gap-4 ${COLS[tiles]}`}>
         {/* Not a filter: orders waiting for a bill are picked in the bill form. */}
         {me.canBill && (
-          <StatCard tone="blue" icon={Receipt} label="To Bill" sublabel="Goods in, no bill yet"
+          <StatCard tone="blue" icon={Receipt} label="Invoice Pending" sublabel="Goods received; supplier invoice not entered"
             value={s.toBill ?? 0} onClick={() => openForm()} />
         )}
         {VIEWS.map((v) => (
@@ -107,7 +108,7 @@ export default function BillsList({ intent = {}, onChanged, onOpenOrder }) {
         placeholder="Search bill no., vendor, invoice no. or PO…"
         active={filtered}
         onClear={() => { setSearch(''); setStatus('all'); dateFilter.reset() }}
-        actions={me.canBill && <Button onClick={() => openForm()}><FilePlus2 className="h-4 w-4 mr-2" />Enter vendor bill</Button>}
+        actions={me.canBill && <Button onClick={() => openForm()}><FilePlus2 className="h-4 w-4 mr-2" />Enter Invoice</Button>}
       >
         {view === 'all' && <FilterSelect value={status} onChange={setStatus} options={STATUS_OPTIONS} className="w-48" />}
         {dateFilter.control}

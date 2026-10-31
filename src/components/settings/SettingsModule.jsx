@@ -65,7 +65,7 @@ const PAYMENT_MODE_CHOICES = [
     description: 'Finance records each payment against an approved vendor bill. It counts as paid at once.',
     steps: ['Finance records payment', 'Bill is paid'] },
   { value: 'officer_finance', Icon: Users, title: 'Purchase Officer records, Finance approves',
-    description: 'The purchase officer enters the payment; it counts as paid only after Finance approves. Two people check every payment.',
+    description: 'The purchase officer enters each payment; Finance approves it before it counts as paid. An administrator can act as an emergency override, including on a payment they entered.',
     steps: ['Purchase Officer records', 'Finance approves', 'Bill is paid'] },
   { value: 'admin', Icon: UserCog, title: 'Administrator only',
     description: 'Only an administrator records vendor payments — for a small hospital where one person handles the money.',

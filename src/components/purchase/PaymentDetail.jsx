@@ -29,6 +29,8 @@ const day = (v) => formatDateTime(v, { withTime: false })
 function printVoucher(p) {
   const v = p.vendor || {}
   const address = [v.houseNumber, v.street, v.locality, v.city, v.district, v.pincode].filter(Boolean).join(', ')
+  const account = String(v.bankAccountNumber || '')
+  const maskedAccount = account ? `••••${account.slice(-4)}` : ''
   const refName = PAY_MODES.find((m) => m.value === p.mode)?.ref || 'Reference'
   const state = p.status === 'posted' ? '' : `<div class="note-bar"><b>${escapeHtml((PAYMENT_STATUS[p.status]?.label || p.status).toUpperCase())}</b>${
     p.status === 'cancelled' ? ` — ${escapeHtml(p.cancelReason || '')}` : p.status === 'rejected' ? ` — ${escapeHtml(p.decisionRemark || '')}` : p.bill ? ' — not yet counted against the bill' : ' — not yet counted against the order'}</div>`
@@ -58,7 +60,7 @@ function printVoucher(p) {
 ${infoBox('Paid to', [
     { label: 'Vendor', value: v.name || p.vendorName },
     { label: 'GSTIN / PAN', value: [v.gstNumber, v.pan].filter(Boolean).join(' / ') || '—' },
-    { label: 'Bank', value: [v.bankName, v.bankAccountNumber, v.bankIfsc].filter(Boolean).join(' · ') || '—' },
+    { label: 'Bank details', value: [v.bankName, maskedAccount, v.bankIfsc].filter(Boolean).join(' · ') || '—' },
     { label: 'Address', value: address || '—' },
   ])}
 ${infoBox('Payment', [
@@ -71,16 +73,16 @@ ${state}
 ${table}
 <div class="note-bar"><b>Amount in words:</b> ${escapeHtml(`${amountInWords(Number(p.amount) || 0)} Rupee(s) Only`)}</div>
 ${p.notes ? `<div class="note-bar"><b>Note:</b> ${escapeHtml(p.notes)}</div>` : ''}
-<div style="display:flex;justify-content:space-between;gap:16px;margin-top:40px;font-size:9.5pt;text-align:center">
-  <div>${escapeHtml(p.createdByName || '')}<br>______________________<br>Prepared by</div>
-  <div>${escapeHtml(p.decidedByName || '')}<br>______________________<br>Approved by</div>
-  <div><br>______________________<br>Receiver's signature</div>
+<div class="signature-grid">
+  <div class="signature-cell">${escapeHtml(p.createdByName || '')}<br>Prepared by</div>
+  <div class="signature-cell">${escapeHtml(p.decidedByName || '')}<br>Approved by</div>
+  <div class="signature-cell">Receiver's signature</div>
 </div>`
   printViaIframe(gudmedDocument({
     orgInfo: { name: p.hospital?.name, address: p.hospital?.address, city: p.hospital?.city },
-    title: p.number, banner: 'PAYMENT VOUCHER', subtitle: 'Accounts — vendor payment',
+    title: p.number, banner: 'PAYMENT VOUCHER', subtitle: 'Finance — vendor payment',
     headerRight: `${escapeHtml(p.number)}<br>${day(p.paidOn)}`,
-    body,
+    body, variant: 'purchase',
   }))
 }
 

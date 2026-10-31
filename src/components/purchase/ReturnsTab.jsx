@@ -30,7 +30,7 @@ import ReturnDetail, { RETURN_STATUS, REASON_LABEL } from './ReturnDetail'
 // the server; the store sees quantities only — the server sends it no money.
 
 const VIEWS = [
-  { value: 'pending', label: 'Waiting for Approval', tone: 'yellow', icon: Hourglass },
+  { value: 'pending', label: 'Pending Approval', tone: 'yellow', icon: Hourglass },
   { value: 'posted-month', label: 'Posted This Month', tone: 'green', icon: CheckCircle2 },
   { value: 'rejected', label: 'Rejected', tone: 'red', icon: XCircle },
   { value: 'all', label: 'All Returns', tone: 'purple', icon: ListChecks },

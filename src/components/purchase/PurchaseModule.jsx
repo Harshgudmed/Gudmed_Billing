@@ -175,7 +175,8 @@ export default function PurchaseModule() {
     { value: 'returns', label: 'Returns', show: !isRequestOnly && me.canSeeReturns },
     { value: 'bills', label: 'Bills', show: !isRequestOnly && (me.canBill || me.canDecideBill), badge: badge(me.canDecideBill ? dash?.bills?.onHold?.count ?? 0 : 0) },
     { value: 'payments', label: 'Payments', show: !isRequestOnly && me.canSeePayments },
-    { value: 'reports', label: 'Reports', show: !isRequestOnly && me.canSeeReports },
+    // Keep the unfinished report placeholder out of day-to-day navigation.
+    { value: 'reports', label: 'Reports', show: false },
     { value: 'vendors', label: 'Vendors', show: !isRequestOnly && me.canSeeVendors },
     { value: 'items', label: 'Items', show: !isRequestOnly && me.canManageMasters },
     { value: 'budgets', label: 'Budgets', show: !isRequestOnly && me.canManageMasters },
@@ -209,9 +210,11 @@ export default function PurchaseModule() {
       )}
 
       <Tabs value={tab} onValueChange={setTab}>
-        <TabsList className={`grid w-full h-auto ${tabs.length <= 4 ? 'grid-cols-2' : 'grid-cols-3'} ${TAB_COLS[tabs.length]}`}>
-          {tabs.map((x) => <TabsTrigger key={x.value} value={x.value} className="gap-2">{x.label}{x.badge}</TabsTrigger>)}
-        </TabsList>
+        {!isRequestOnly && (
+          <TabsList className={`grid w-full h-auto ${tabs.length <= 4 ? 'grid-cols-2' : 'grid-cols-3'} ${TAB_COLS[tabs.length]}`}>
+            {tabs.map((x) => <TabsTrigger key={x.value} value={x.value} className="gap-2">{x.label}{x.badge}</TabsTrigger>)}
+          </TabsList>
+        )}
 
         {loading ? (
           <div className="flex items-center justify-center py-16 text-gray-500"><Loader2 className="h-8 w-8 animate-spin text-[#2E4168]" /></div>

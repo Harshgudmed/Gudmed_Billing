@@ -49,7 +49,7 @@ import { HSN_CODES } from '../lib/hsnCodes.js'
 // Bank details are shown in full only to the people who pay vendors; everyone
 // else who can open Purchase (a store keeper receiving goods) sees the last four
 // digits. The list always masks: it is scanned, not used to make a payment.
-const BANK_ROLES = new Set(['admin', 'super_admin', 'purchase_officer'])
+const BANK_ROLES = new Set(['admin', 'super_admin', 'purchase_officer', 'finance_controller'])
 const mask = (acct) => (acct ? `••••${String(acct).slice(-4)}` : acct)
 const withBank = (vendor, full) => (full ? vendor : { ...vendor, bankAccountNumber: mask(vendor.bankAccountNumber) })
 const canSeeBank = (req) => !req.user || BANK_ROLES.has(getActor(req).role)
@@ -765,17 +765,18 @@ export async function getAll(req, res, next) {
     try {
       const ORG_ID = getOrgId(req)
       await ensurePurchaseDefaults(ORG_ID)
-      const [activeUnits, liveGroups, vendors, items, prRuleCount] = await Promise.all([
+      const [activeUnits, liveGroups, vendors, items, prRuleCount, poRuleCount] = await Promise.all([
         db.unit.count({ where: { organizationId: ORG_ID, isActive: true } }),
         db.itemCategory.count({ where: { organizationId: ORG_ID, parentId: null, isActive: true } }),
         db.vendor.count({ where: { organizationId: ORG_ID, isActive: true } }),
         db.item.count({ where: { organizationId: ORG_ID, isActive: true } }),
         // rulesSet = at least one PR approval rule exists (mirrors isDefault: rows===0 in prGet)
         db.approvalRule.count({ where: { organizationId: ORG_ID, documentType: 'PR' } }),
+        db.approvalRule.count({ where: { organizationId: ORG_ID, documentType: 'PO' } }),
       ])
       return res.json({
         success: true,
-        data: { activeUnits, liveGroups, vendors, items, rulesSet: prRuleCount > 0 },
+        data: { activeUnits, liveGroups, vendors, items, rulesSet: prRuleCount > 0 && poRuleCount > 0 },
       })
     } catch (err) {
       return next(err)
@@ -812,7 +813,7 @@ export async function getAll(req, res, next) {
     }
 
     // The vendor list is for those who order and those who pay, not the store.
-    if ((resource === 'vendors' || resource === 'vendor') && !canSeeVendors(req)) {
+    if (['vendors', 'vendor', 'vendor-documents'].includes(resource) && !canSeeVendors(req)) {
       return res.status(403).json({ success: false, error: 'Vendors are kept by the purchase team' })
     }
 

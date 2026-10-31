@@ -6,6 +6,7 @@ import multer from 'multer'
 import { db } from '../config/db.js'
 import { authenticate, authorize } from '../middleware/auth.js'
 import { getOrgId } from '../lib/reqContext.js'
+import { canManageMasters, canSeeBills, canSeeVendors, requirePurchaseOn } from '../lib/purchaseAccess.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const UPLOAD_ROOT = path.join(__dirname, '..', '..', 'uploads')
@@ -41,7 +42,8 @@ const uploadVendorDoc = multer({
 })
 
 // POST /uploads/vendor-documents  — upload one document for a vendor
-router.post('/vendor-documents', authenticate, (req, res, next) => {
+router.post('/vendor-documents', authenticate, requirePurchaseOn, (req, res, next) => {
+  if (!canManageMasters(req)) return res.status(403).json({ success: false, error: 'Only the purchase officer or an administrator can upload vendor documents' })
   uploadVendorDoc.single('document')(req, res, (err) => {
     if (err) return res.status(400).json({ success: false, error: err.message || 'Upload failed' })
     next()
@@ -82,8 +84,9 @@ router.post('/vendor-documents', authenticate, (req, res, next) => {
 
 // GET /uploads/vendor-documents/:filename  — serve a vendor document
 // Only this hospital's staff can fetch it; 404 for wrong org or missing file.
-router.get('/vendor-documents/:filename', authenticate, async (req, res, next) => {
+router.get('/vendor-documents/:filename', authenticate, requirePurchaseOn, async (req, res, next) => {
   try {
+    if (!canSeeVendors(req)) return res.status(403).json({ success: false, error: 'Vendor documents are for the purchase team and Finance' })
     const { filename } = req.params
     if (!/^[A-Za-z0-9._-]+$/.test(filename) || filename.includes('..')) {
       return res.status(404).json({ success: false, error: 'File not found' })
@@ -142,7 +145,8 @@ const uploadBillDoc = multer({
 })
 
 // POST /uploads/bill-documents — attach one invoice/supporting file to a vendor bill
-router.post('/bill-documents', authenticate, authorize('purchase_officer', 'finance_controller'), (req, res, next) => {
+router.post('/bill-documents', authenticate, requirePurchaseOn, (req, res, next) => {
+  if (!canSeeBills(req)) return res.status(403).json({ success: false, error: 'Vendor bill documents are for the purchase team and Finance' })
   uploadBillDoc.single('document')(req, res, (err) => {
     if (err) return res.status(400).json({ success: false, error: err.message || 'Upload failed' })
     next()
@@ -181,8 +185,9 @@ router.post('/bill-documents', authenticate, authorize('purchase_officer', 'fina
 })
 
 // DELETE /uploads/bill-documents/:id — remove an attachment (its file + row)
-router.delete('/bill-documents/:id', authenticate, authorize('purchase_officer', 'finance_controller'), async (req, res, next) => {
+router.delete('/bill-documents/:id', authenticate, requirePurchaseOn, async (req, res, next) => {
   try {
+    if (!canSeeBills(req)) return res.status(403).json({ success: false, error: 'Vendor bill documents are for the purchase team and Finance' })
     const orgId = getOrgId(req)
     const doc = await db.vendorBillDocument.findFirst({ where: { id: req.params.id, organizationId: orgId } })
     if (!doc) return res.status(404).json({ success: false, error: 'Document not found' })
@@ -194,8 +199,9 @@ router.delete('/bill-documents/:id', authenticate, authorize('purchase_officer',
 })
 
 // GET /uploads/bill-documents/:filename — serve a bill document to this hospital's staff
-router.get('/bill-documents/:filename', authenticate, async (req, res, next) => {
+router.get('/bill-documents/:filename', authenticate, requirePurchaseOn, async (req, res, next) => {
   try {
+    if (!canSeeBills(req)) return res.status(403).json({ success: false, error: 'Vendor bill documents are for the purchase team and Finance' })
     const { filename } = req.params
     if (!/^[A-Za-z0-9._-]+$/.test(filename) || filename.includes('..')) {
       return res.status(404).json({ success: false, error: 'File not found' })

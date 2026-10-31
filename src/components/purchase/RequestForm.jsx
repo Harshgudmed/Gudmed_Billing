@@ -13,7 +13,7 @@ import client from '@/api/client'
 import { purchaseApi } from '@/api/purchaseApi'
 import { showApiError } from '@/lib/apiRequest'
 import { formatMoney, localYmd } from '@/lib/format'
-import { PRIORITY, APPROVER_LABEL, useMe, showNotifyWarning } from './requestMeta'
+import { PRIORITY, APPROVER_LABEL, PURPOSE_SUGGESTIONS, useMe, showNotifyWarning } from './requestMeta'
 import LoadFailed from './LoadFailed'
 import { ALL, unitsOf, suggestedRate, useItemSearch } from './itemPicking'
 
@@ -33,7 +33,6 @@ import { ALL, unitsOf, suggestedRate, useItemSearch } from './itemPicking'
 // pressing Send.
 
 const round2 = (n) => Math.round((Number(n) || 0) * 100) / 100
-const PURPOSE_SUGGESTIONS = ['Monthly restock', 'Low stock', 'New requirement', 'Increased usage', 'Replacement', 'Damaged or expired stock']
 let nextKey = 1
 const blankLine = (categoryId = '') => ({ key: nextKey++, categoryId, itemId: '', itemName: '', item: null, unitId: '', quantity: '', estimatedRate: '', rateTyped: false, note: '' })
 const blank = (v) => v == null || String(v).trim() === ''

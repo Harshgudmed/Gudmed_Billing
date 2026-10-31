@@ -102,3 +102,10 @@ backend/scripts/*
 !backend/scripts/queue-race.mjs
 !backend/scripts/seed-medicine-reference.mjs
 !backend/scripts/storage-report.mjs
+
+# Scratch review notes and one-off audit output — not part of the product
+GUDMED_TRACKER.md
+GUDMED_VERIFIED_BUGS.md
+RevenueGuard_System_Design.pdf
+output/
+tmp/

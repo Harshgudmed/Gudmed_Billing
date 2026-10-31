@@ -33,7 +33,7 @@ const WORKFLOW = [
 // Tailwind finds class names by scanning the source, so a column count picked
 // at run time (`lg:grid-cols-${n}`) never ships — the real classes are spelled
 // out here, one per tile count a role can have.
-const TILE_COLS = { 4: 'lg:grid-cols-4', 5: 'lg:grid-cols-5', 6: 'lg:grid-cols-6' }
+const TILE_COLS = { 3: 'lg:grid-cols-3', 4: 'lg:grid-cols-4', 5: 'lg:grid-cols-5', 6: 'lg:grid-cols-6' }
 
 // The bar on the left of an attention row, as on the lab's attention list.
 const PRIORITY_BAR = { emergency: 'bg-red-500', urgent: 'bg-orange-500', normal: 'bg-yellow-400' }
@@ -71,12 +71,12 @@ export default function PurchaseOverview({ data, onOpen, onOrders, onStock, onBi
   const money = (n, amount) => (n ? formatMoney(amount) : null)
   const T = {
     reqMine:  { key: 'req-mine', tone: 'yellow', icon: Clock, label: 'Staff Requests to Approve', value: cards.toApprove.count, sublabel: money(cards.toApprove.count, cards.toApprove.amount), go: () => onOpen({ view: 'to-approve' }) },
-    poMine:   { key: 'po-mine', tone: 'orange', icon: FileCheck2, label: 'Vendor Orders to Approve', value: orders.ordersToApprove.count, sublabel: money(orders.ordersToApprove.count, orders.ordersToApprove.amount), go: () => onOrders({ view: 'to-approve' }) },
-    ready:    { key: 'ready', tone: 'blue', icon: PackagePlus, label: 'Approved Requests to Order', value: orders.requestsReadyToOrder, sublabel: 'Approved; no vendor order yet', go: () => onOrders({ view: 'all', make: true }) },
+    poMine:   { key: 'po-mine', tone: 'orange', icon: FileCheck2, label: 'Purchase Orders — Pending Approval', value: orders.ordersToApprove.count, sublabel: 'Administrator approval required', go: () => onOrders({ view: 'to-approve' }) },
+    ready:    { key: 'ready', tone: 'blue', icon: PackagePlus, label: 'Requests Ready for Ordering', value: orders.requestsReadyToOrder, sublabel: 'Create a purchase order', go: () => onOrders({ view: 'all', make: true }) },
     dueIn:    { key: 'due-in', tone: 'blue', icon: PackageCheck, label: 'Awaiting Delivery', value: stock.toReceive, sublabel: 'Ordered, not all in yet', go: () => onOrders({ view: 'all', status: OPEN_ORDERS }) },
-    toBill:   { key: 'to-bill', tone: 'blue', icon: Receipt, label: 'Orders to Bill', value: bills.toBill, sublabel: 'Goods in, vendor bill not entered', go: () => onBills({ view: 'to-bill' }) },
-    onHold:   { key: 'on-hold', tone: 'red', icon: AlertTriangle, label: 'Bills to Resolve', value: bills.onHold.count, sublabel: money(bills.onHold.count, bills.onHold.amount) || 'Mismatch with order or receipt', go: () => onBills({ view: 'on-hold' }) },
-    toPay:    { key: 'to-pay', tone: 'green', icon: Wallet, label: 'Bills to Pay', value: bills.approved.count, sublabel: money(bills.approved.count, bills.approved.amount), go: () => onBills({ view: 'approved' }) },
+    toBill:   { key: 'to-bill', tone: 'blue', icon: Receipt, label: 'Invoice Pending', value: bills.toBill, sublabel: 'Goods received; supplier invoice not entered', go: () => onBills({ view: 'to-bill' }) },
+    onHold:   { key: 'on-hold', tone: 'red', icon: AlertTriangle, label: 'Bills on Hold', value: bills.onHold.count, sublabel: `${bills.financeReviewerConfigured ? 'Finance' : 'Administrator'} review${bills.onHold.count ? ` · ${formatMoney(bills.onHold.amount)}` : ''}`, go: () => onBills({ view: 'on-hold' }) },
+    toPay:    { key: 'to-pay', tone: 'green', icon: Wallet, label: 'Approved Bills', value: bills.approved.count, sublabel: money(bills.approved.count, bills.approved.amount), go: () => onBills({ view: 'approved' }) },
     open:     { key: 'open', tone: 'purple', icon: ShoppingCart, label: 'Open Orders', value: orders.openOrders.count, sublabel: money(orders.openOrders.count, orders.openOrders.amount), go: () => onOrders({ view: 'all', status: OPEN_ORDERS }) },
     urgent:   { key: 'urgent', tone: 'red', icon: AlertTriangle, label: 'Urgent & Emergency', value: cards.urgentOpen, go: () => onOpen({ view: 'all', status: 'submitted', priority: 'urgent,emergency' }) },
     // the store's own
@@ -101,7 +101,7 @@ export default function PurchaseOverview({ data, onOpen, onOrders, onStock, onBi
   const tiles = store ? [T.myWaiting, T.myRejected, T.receive, T.today, T.low, T.expiring]
     : finance ? [T.reqMine, T.poMine, T.onHold, T.toPay, T.open, T.worth]
       : buyer ? [T.reqMine, T.ready, T.dueIn, T.toBill, T.open]
-        : [T.reqMine, T.poMine, T.ready, T.onHold, T.toBill]
+        : [T.reqMine, T.ready, T.poMine, T.toBill, T.onHold, T.toPay]
 
   // Quick actions for this role, most used first.
   const A = {
@@ -110,11 +110,11 @@ export default function PurchaseOverview({ data, onOpen, onOrders, onStock, onBi
     receive:  { key: 'receive', icon: PackageCheck, label: 'Receive Goods', go: () => onOrders({ view: 'to-receive' }) },
     stock:    { key: 'stock', icon: Boxes, label: 'Stock', go: () => onStock({}) },
     make:     { key: 'make', icon: PackagePlus, label: 'Make Orders', go: () => onOrders({ view: 'all', make: true }) },
-    bill:     { key: 'bill', icon: Receipt, label: 'Enter Vendor Bill', go: () => onBills({ make: true }) },
+    bill:     { key: 'bill', icon: Receipt, label: 'Enter Invoice', go: () => onBills({ make: true }) },
     apr:      { key: 'apr', icon: ShieldCheck, label: 'Approve Requests', go: () => onOpen({ view: 'to-approve' }) },
     apo:      { key: 'apo', icon: FileCheck2, label: 'Approve Orders', go: () => onOrders({ view: 'to-approve' }) },
-    hold:     { key: 'hold', icon: AlertTriangle, label: 'Bills On Hold', go: () => onBills({ view: 'on-hold' }) },
-    toPay:    { key: 'to-pay', icon: Wallet, label: 'Bills to Pay', go: () => onBills({ view: 'approved' }) },
+    hold:     { key: 'hold', icon: AlertTriangle, label: 'Review Invoice Exceptions', go: () => onBills({ view: 'on-hold' }) },
+    toPay:    { key: 'to-pay', icon: Wallet, label: 'Approved Bills', go: () => onBills({ view: 'approved' }) },
     vendors:  { key: 'vendors', icon: Truck, label: 'Vendors', go: () => onMaster('vendors') },
     items:    { key: 'items', icon: Package, label: 'Items', go: () => onMaster('items') },
   }

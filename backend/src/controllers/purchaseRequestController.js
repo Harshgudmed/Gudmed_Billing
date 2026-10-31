@@ -496,7 +496,7 @@ export async function prUpdate(req, res, next) {
     const audit = (tx, committed) => auditIpd(req, ORG_ID, { action: auditAction, entityType: 'purchase.request', entityId: id, before, after: committed }, tx)
 
     if (action === 'save') {
-      if (!canBuy(req)) throw forbidden('Only store and purchase staff change purchase requests')
+      if (!canRaiseRequest(req)) throw forbidden('Only staff allowed to raise purchase requests can change them')
       const parsed = saveSchema.safeParse(req.body)
       if (!parsed.success) return validationError(res, parsed.error)
       const { departmentId, requiredBy, priority, purpose, lines } = parsed.data
@@ -525,7 +525,7 @@ export async function prUpdate(req, res, next) {
         })
       })
     } else if (action === 'submit') {
-      if (!canBuy(req)) throw forbidden('Only store and purchase staff send purchase requests')
+      if (!canRaiseRequest(req)) throw forbidden('Only staff allowed to raise purchase requests can send them for approval')
       after = await writeRequest(ORG_ID, id, audit, async (tx) => {
         const pr = await lockRequest(tx, ORG_ID, id)
         before = pr

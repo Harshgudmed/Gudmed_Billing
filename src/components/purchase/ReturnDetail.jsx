@@ -76,7 +76,7 @@ ${infoBox(money ? 'Debit note' : 'Return', [
     { label: money ? 'Against bill' : 'Goods receipt', value: money ? (ret.bill ? `${ret.bill.number} (inv ${ret.bill.vendorInvoiceNumber})` : 'Not billed yet') : (ret.receipt?.number || '—') },
   ])}
 ${ret.status === 'cancelled' ? `<div class="note-bar"><b>CANCELLED</b>: ${escapeHtml(ret.cancelReason || '')}</div>` : ''}
-${ret.status === 'pending_approval' ? '<div class="note-bar"><b>NOT YET APPROVED</b> — the goods have not left stock.</div>' : ''}
+${ret.status === 'pending_approval' ? '<div class="note-bar"><b>Pending approval</b> — goods have not left stock.</div>' : ''}
 <div class="note-bar"><b>Reason:</b> ${escapeHtml(REASON_LABEL[ret.reason] || ret.reason)}${ret.notes ? ` — ${escapeHtml(ret.notes)}` : ''}</div>
 <table>
   <thead><tr><th>#</th><th>Item</th><th>Batch</th><th>Expiry</th><th style="text-align:right">Qty</th>${money ? '<th style="text-align:right">Rate</th><th style="text-align:right">GST</th><th style="text-align:right">Amount</th>' : ''}</tr></thead>
@@ -84,17 +84,17 @@ ${ret.status === 'pending_approval' ? '<div class="note-bar"><b>NOT YET APPROVED
   ${foot}
 </table>
 ${money ? `<div class="note-bar"><b>Amount in words:</b> ${escapeHtml(`${amountInWords(Number(ret.total) || 0)} Rupee(s) Only`)}</div>` : ''}
-<div style="display:flex;justify-content:space-between;gap:16px;margin-top:40px;font-size:9.5pt;text-align:center">
-  <div>______________________<br>Sent by (store)</div>
-  <div>______________________<br>Received by (vendor)</div>
-  <div>______________________<br>Authorised signatory</div>
+<div class="signature-grid">
+  <div class="signature-cell">Sent by (store)</div>
+  <div class="signature-cell">Received by (vendor)</div>
+  <div class="signature-cell">Authorised signatory</div>
 </div>`
 
   printViaIframe(gudmedDocument({
     orgInfo: { name: ret.hospital?.name, address: ret.hospital?.address, city: ret.hospital?.city },
-    title: docNo, banner: money ? 'DEBIT NOTE' : 'GOODS RETURN NOTE', subtitle: 'Purchase Department',
+    title: docNo, banner: money ? 'DEBIT NOTE' : 'GOODS RETURN NOTE', subtitle: money ? 'Finance — supplier return' : 'Stores — supplier return',
     headerRight: `${escapeHtml(docNo)}<br>${day(ret.postedAt || ret.createdAt)}`,
-    body,
+    body, variant: 'purchase',
   }))
 }
 

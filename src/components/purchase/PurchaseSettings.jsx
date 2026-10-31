@@ -73,7 +73,7 @@ export default function PurchaseSettings() {
   const steps = [
     { label: 'Units of measure', Icon: Ruler, note: `${activeUnits} active`, done: activeUnits > 0, opens: 'units' },
     { label: 'Item categories', Icon: FolderTree, note: `${liveGroups} group${liveGroups !== 1 ? 's' : ''}`, done: liveGroups > 0, opens: 'categories' },
-    { label: 'Approval rules', Icon: ShieldCheck, note: rulesSet ? 'Set' : 'Not set — an administrator approves every request', done: rulesSet, opens: 'approvals' },
+    { label: 'Request & order approval rules', Icon: ShieldCheck, note: rulesSet ? 'Both are set' : 'One or both are not set — Administrator approval is the default', done: rulesSet, opens: 'approvals' },
     { label: 'Vendors', Icon: Truck, note: vendors ? `${vendors} active · added in Purchase → Masters` : 'None yet — add them in Purchase → Masters', done: vendors > 0 },
     { label: 'Items', Icon: Package, note: items ? `${items} active · added in Purchase → Masters` : 'None yet — add them in Purchase → Masters', done: items > 0 },
   ]

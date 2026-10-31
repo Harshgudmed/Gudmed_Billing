@@ -25,10 +25,9 @@ import RfqDetail, { RFQ_STATUS } from './RfqDetail'
 // The purchase officer makes and awards; Finance reads.
 
 const VIEWS = [
-  { value: 'draft', label: 'Drafts', hint: 'Not sent yet', tone: 'yellow', icon: FilePen },
-  { value: 'open', label: 'Out with vendors', hint: 'Sent — quotes coming in', tone: 'blue', icon: Send },
-  { value: 'due', label: 'Quotes due', hint: 'Due today or earlier — compare and award', tone: 'orange', icon: AlarmClock },
-  { value: 'awarded', label: 'Awarded', hint: 'Purchase order made', tone: 'green', icon: Award },
+  { value: 'draft', label: 'Drafts', hint: 'Not sent to vendors', tone: 'yellow', icon: FilePen },
+  { value: 'open', label: 'Sent to Vendors', hint: 'Waiting for vendor quotes', tone: 'blue', icon: Send },
+  { value: 'awarded', label: 'Awarded', hint: 'Purchase order created', tone: 'green', icon: Award },
   { value: 'all', label: 'All RFQs', hint: 'Every status', tone: 'purple', icon: ClipboardList },
 ]
 const STATUS_OPTIONS = [{ value: 'all', label: 'All statuses' }, ...Object.entries(RFQ_STATUS).map(([value, s]) => ({ value, label: s.label }))]
@@ -64,8 +63,28 @@ export default function RfqTab({ onChanged, openId: openIdLink = null, onAwardDo
 
   return (
     <div className="min-w-0 space-y-4">
-      <div role="group" aria-label="Which RFQs" className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-5">
-        {VIEWS.map((v) => (
+      <div role="group" aria-label="Which RFQs" className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
+        {VIEWS.map((v) => v.value === 'open' ? (
+          <Card key={v.value} className={`h-full border-blue-200 bg-blue-50 ${['open', 'due'].includes(view) ? 'ring-2 ring-blue-500' : ''}`}>
+            <CardContent className="p-4">
+              <button type="button" aria-pressed={view === 'open'} onClick={() => { setView('open'); setStatus('all') }} className="block w-full rounded text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="min-w-0">
+                    <p className="text-2xl font-bold tabular-nums text-blue-700">{s.open ?? '—'}</p>
+                    <p className="text-xs text-blue-600">{v.label}</p>
+                    <p className="text-[11px] tabular-nums text-blue-600 opacity-80">{v.hint}</p>
+                  </div>
+                  <Send className="h-8 w-8 shrink-0 text-blue-500" />
+                </div>
+              </button>
+              {Number(s.due) > 0 && (
+                <button type="button" aria-pressed={view === 'due'} onClick={() => { setView('due'); setStatus('all') }} className={`mt-2 rounded-md px-2 py-1 text-xs font-medium text-orange-700 hover:bg-orange-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500 ${view === 'due' ? 'bg-orange-100' : ''}`}>
+                  <AlarmClock className="mr-1 inline h-3.5 w-3.5" />{s.due} due · Review
+                </button>
+              )}
+            </CardContent>
+          </Card>
+        ) : (
           <StatCard key={v.value} tone={v.tone} icon={v.icon} label={v.label} sublabel={v.hint}
             value={s[v.value] ?? '—'} selected={view === v.value} onClick={() => { setView(v.value); setStatus('all') }} />
         ))}
@@ -91,7 +110,7 @@ export default function RfqTab({ onChanged, openId: openIdLink = null, onAwardDo
             empty={filtered ? 'No RFQ matches this search'
               : view === 'draft' ? 'No draft RFQs'
               : view === 'open' ? 'No RFQ is out with vendors'
-              : view === 'due' ? 'No quotes are due — nothing waits to be compared'
+              : view === 'due' ? 'No RFQs are due for review or vendor follow-up'
               : view === 'awarded' ? 'No RFQ has been awarded yet'
               : me.canRfq ? 'No RFQs yet — ask vendors for rates with New RFQ' : 'No RFQs yet'}
             columns={[

@@ -46,9 +46,9 @@ export async function requirePurchaseOn(req, res, next) {
 
 // Who raises requests and orders and keeps the masters. A Finance Controller
 // reaches Purchase to approve and to read, but does not buy.
-// Doctors and nurses may raise a purchase request (they need something from
-// the store); they cannot order, receive, bill or pay — and they see only
-// their own requests with no money fields.
+// Doctors and nurses may create, edit and submit their own purchase requests
+// (they need something from the store); they cannot order, receive, bill or pay
+// — and they see only their own requests with no money fields.
 export const REQUEST_CREATOR_ROLES = new Set(['admin', 'super_admin', 'purchase_officer', 'store_keeper', 'doctor', 'nurse'])
 export const canRaiseRequest = (req) => !req.user || REQUEST_CREATOR_ROLES.has(getActor(req).role)
 

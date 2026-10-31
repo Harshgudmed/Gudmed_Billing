@@ -54,7 +54,30 @@ tr:nth-child(even) td{background:#f9f9f9}
 tfoot td{font-weight:bold;border-top:2px solid ${PRINT_NAVY};background:#fff!important}
 .footer{margin-top:12px;border-top:1px solid #ccc;padding-top:5px;font-size:8pt;color:#888;text-align:center}
 .print-btn{display:block;margin:16px auto 0;background:${PRINT_NAVY};color:#fff;border:none;padding:9px 28px;font-size:13px;font-weight:600;border-radius:6px;cursor:pointer}
-@media print{.print-btn{display:none}body{padding:0}.page{padding:8mm}}
+@page{size:A4 portrait;margin:10mm}
+.page.purchase{color:#172033;line-height:1.4}
+.page.purchase *{-webkit-print-color-adjust:exact;print-color-adjust:exact}
+.page.purchase .hosp-header{gap:12mm;border-bottom:2px solid ${PRINT_NAVY};margin-bottom:12px;break-inside:avoid}
+.page.purchase .hosp-contact{max-width:36%;color:#475569;line-height:1.5;overflow-wrap:anywhere}
+.page.purchase .report-banner{background:transparent;color:${PRINT_NAVY};padding:5px 0 7px;border-bottom:1px solid #cbd5e1;letter-spacing:1.5px}
+.page.purchase .info-box{border:1px solid #cbd5e1;break-inside:avoid}
+.page.purchase .info-box-hdr{background:#edf2f7;color:${PRINT_NAVY};padding:5px 9px;border-bottom:1px solid #cbd5e1;letter-spacing:.35px}
+.page.purchase .info-grid{grid-template-columns:repeat(4,minmax(0,1fr))}
+.page.purchase .info-cell{min-height:14mm;padding:6px 9px;border-color:#e2e8f0;overflow-wrap:anywhere}
+.page.purchase .info-label{color:#64748b;letter-spacing:.2px}
+.page.purchase .info-value{font-size:9.5pt;margin-top:2px;overflow-wrap:anywhere}
+.page.purchase .note-bar{padding:7px 10px;background:#f3f6fa;border:1px solid #dbe3ed;border-left:3px solid ${PRINT_NAVY};margin-bottom:9px;font-size:9.5pt;white-space:pre-wrap;overflow-wrap:anywhere}
+.page.purchase:not(.purchase-custom) table{border:1px solid #cbd5e1;font-size:9pt;table-layout:auto}
+.page.purchase:not(.purchase-custom) thead{display:table-header-group}
+.page.purchase:not(.purchase-custom) thead th{background:#edf2f7;color:${PRINT_NAVY};padding:7px 6px;border:1px solid #cbd5e1;font-size:8pt;line-height:1.25;vertical-align:bottom}
+.page.purchase:not(.purchase-custom) td{padding:7px 6px;border:1px solid #e2e8f0;vertical-align:top;overflow-wrap:anywhere}
+.page.purchase:not(.purchase-custom) tbody tr:nth-child(even) td{background:#fafbfd}
+.page.purchase:not(.purchase-custom) tr{break-inside:avoid}
+.page.purchase:not(.purchase-custom) tfoot td{border-top:2px solid ${PRINT_NAVY};background:#f3f6fa!important}
+.page.purchase .signature-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12mm;margin-top:18mm;break-inside:avoid;text-align:center;font-size:9pt}
+.page.purchase .signature-cell{min-height:20mm;padding-top:10mm;border-top:1px solid #64748b}
+.page.purchase .footer{margin-top:10mm;border-color:#cbd5e1;color:#64748b;break-inside:avoid}
+@media print{.print-btn{display:none}body{padding:0}.page{padding:8mm}.page.purchase{width:auto;max-width:none;margin:0;padding:0}.page.purchase .info-box,.page.purchase .note-bar,.page.purchase .signature-grid{break-inside:avoid}.page.purchase .hosp-contact{max-width:38%}}
 `
 
 /**
@@ -68,12 +91,12 @@ tfoot td{font-weight:bold;border-top:2px solid ${PRINT_NAVY};background:#fff!imp
  * @param body        the document's own HTML (already escaped by the caller)
  * @param showPrintButton  on-screen "Print / Save as PDF" button (hidden when printing)
  */
-export function gudmedDocument({ orgInfo = {}, title, banner, subtitle = '', headerRight = '', body = '', showPrintButton = false }) {
+export function gudmedDocument({ orgInfo = {}, title, banner, subtitle = '', headerRight = '', body = '', showPrintButton = false, variant = '' }) {
   const printedAt = format(new Date(), 'dd MMM yyyy HH:mm')
   const addr = [orgInfo.address, orgInfo.city].filter(Boolean).join(', ')
   const hospital = orgInfo.name || 'Hospital'
   return `<!DOCTYPE html><html><head><title>${escapeHtml(title)}</title><style>${CSS}</style></head><body>
-<div class="page">
+<div class="page${variant ? ` ${escapeHtml(variant)}` : ''}">
   <div class="hosp-header">
     <div>
       <div class="hosp-name">${escapeHtml(hospital)}</div>

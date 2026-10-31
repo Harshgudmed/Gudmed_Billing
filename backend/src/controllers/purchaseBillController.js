@@ -367,20 +367,21 @@ const unbilledValueOf = (l) => lineAmounts({ quantity: billableOf(l), rate: l.ra
 // list leaves out — another person's, which cannot be opened.
 async function billSummary(ORG_ID, draftsShown = {}) {
   const sum = (status) => db.vendorBill.aggregate({ where: { organizationId: ORG_ID, status }, _count: { _all: true }, _sum: { payable: true } })
-  const [onHold, approved, drafts, toBill, all] = await Promise.all([
+  const [onHold, approved, drafts, toBill, all, financeReviewers] = await Promise.all([
     sum('on_hold'), sum('approved'),
     db.vendorBill.count({ where: { organizationId: ORG_ID, status: 'draft', AND: [draftsShown] } }),
     candidateOrderIds(ORG_ID),
     db.vendorBill.count({ where: { organizationId: ORG_ID, AND: [draftsShown] } }),
+    db.user.count({ where: { organizationId: ORG_ID, role: 'finance_controller', isActive: true } }),
   ])
   const pair = (a) => ({ count: a._count._all, amount: round2(a._sum.payable) })
-  return { onHold: pair(onHold), approved: pair(approved), drafts, toBill: toBill.length, all }
+  return { onHold: pair(onHold), approved: pair(approved), drafts, toBill: toBill.length, all, financeReviewerConfigured: financeReviewers > 0 }
 }
 
 /** The Purchase dashboard's bill figures: on hold and approved (what is to be paid), and orders still to bill. */
 export async function billFigures(ORG_ID) {
-  const { onHold, approved, toBill } = await billSummary(ORG_ID)
-  return { onHold, approved, toBill }
+  const { onHold, approved, toBill, financeReviewerConfigured } = await billSummary(ORG_ID)
+  return { onHold, approved, toBill, financeReviewerConfigured }
 }
 
 async function candidates(req, res, ORG_ID) {

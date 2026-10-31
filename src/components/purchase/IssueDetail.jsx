@@ -52,15 +52,15 @@ ${iss.status === 'cancelled' ? `<div class="note-bar"><b>CANCELLED</b> by ${esca
   ${money ? `<tfoot><tr><td colspan="5" style="text-align:right">Cost of goods issued (before GST)</td><td style="text-align:right">${formatMoney(iss.totalValue)}</td></tr></tfoot>` : ''}
 </table>
 ${iss.notes ? `<div class="note-bar"><b>Note:</b> ${escapeHtml(iss.notes)}</div>` : ''}
-<div style="display:flex;justify-content:space-between;gap:16px;margin-top:40px;font-size:9.5pt;text-align:center">
-  <div>______________________<br>Issued by (store)</div>
-  <div>______________________<br>Received by (${escapeHtml(iss.department?.name || 'department')})</div>
+  <div class="signature-grid" style="grid-template-columns:repeat(2,minmax(0,1fr))">
+    <div class="signature-cell">Issued by (store)</div>
+    <div class="signature-cell">Received by (${escapeHtml(iss.department?.name || 'department')})</div>
 </div>`
   printViaIframe(gudmedDocument({
     orgInfo: { name: iss.hospital?.name, address: iss.hospital?.address, city: iss.hospital?.city },
     title: iss.number, banner: 'STORE ISSUE SLIP', subtitle: 'Stores',
     headerRight: `${escapeHtml(iss.number)}<br>${formatDateTime(iss.issuedAt, { withTime: false })}`,
-    body,
+    body, variant: 'purchase',
   }))
 }
 

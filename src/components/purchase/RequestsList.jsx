@@ -20,17 +20,17 @@ import RfqForm from './RfqForm'
 // Purchase requests — the start of every purchase. Three views of one list,
 // chosen with tiles that show how many each holds (the Queue's status tiles
 // work the same way: click to filter, a blue ring on the one that is on):
-//   Waiting for My Approval — my role's level is the current one
-//   All Requests            — every request in the hospital
-//   My Requests             — the ones I raised
+//   Awaiting My Approval — my role's level is the current one
+//   All Requests         — every request in the hospital
+//   Requests I Raised    — the ones I raised
 // A view that can never hold anything for this person is not offered: a store
 // keeper approves nothing, a Finance Controller raises nothing.
 // A row opens the request; everything done to it happens there.
 
 const VIEWS = [
-  { value: 'to-approve', label: 'Waiting for My Approval', hint: 'Your turn to decide', tone: 'yellow', icon: Clock, count: 'toApprove', who: 'approver' },
-  { value: 'all', label: 'All Requests', hint: 'Every department, every status', tone: 'purple', icon: ClipboardList, count: 'total', who: 'overseer' },
-  { value: 'mine', label: 'My Requests', hint: 'Raised by you', tone: 'blue', icon: UserRound, count: 'mine', who: 'buyer' },
+  { value: 'to-approve', label: 'Awaiting My Approval', hint: 'Your decision is needed', tone: 'yellow', icon: Clock, count: 'toApprove', who: 'approver' },
+  { value: 'all', label: 'All Requests', hint: 'Across all departments and statuses', tone: 'purple', icon: ClipboardList, count: 'total', who: 'overseer' },
+  { value: 'mine', label: 'Requests I Raised', hint: 'Created by you', tone: 'blue', icon: UserRound, count: 'mine', who: 'buyer' },
 ]
 // The store sees only its own requests, so its tiles split them by where they
 // stand instead — and each one filters the list by that status.

@@ -47,6 +47,7 @@ export function SearchableSelect({
   emptyText = 'No results found',
   className,
   contentClassName,
+  id,
   disabled,
   onSearch,
   loading = false,
@@ -94,6 +95,7 @@ export function SearchableSelect({
       <PopoverTrigger asChild>
         <Button
           type="button"
+          id={id}
           variant="outline"
           role="combobox"
           aria-expanded={open}

@@ -49,7 +49,12 @@ export default function IndentDetail({ id, open, onOpenChange, onChanged, onOpen
     try {
       const data = (await indentApi.getIndent(id)).data
       setIndent(data)
-      if (fresh) setGive(Object.fromEntries(data.lines.map((l) => [l.id, giveDefault(l)])))
+      if (fresh) {
+        setGive(Object.fromEntries(data.lines.map((l) => [l.id, giveDefault(l)])))
+        // Usually the person who raised the indent collects it. Prefill that
+        // name to save typing, but let the store record a different collector.
+        setReceivedByName(data.requestedByName || '')
+      }
     } catch (err) {
       showApiError(err, 'Could not open the indent')
       close.current(false)
@@ -177,7 +182,7 @@ export default function IndentDetail({ id, open, onOpenChange, onChanged, onOpen
                                   {over && <p className="mt-1 text-xs text-red-600">At most {qtyText(max, l.unitCode)}</p>}
                                 </>
                               ) : l.pending > 0 ? (
-                                <p className="text-xs text-amber-700">Nothing to give — raise a purchase request</p>
+                                <p className="text-xs text-amber-700">No available stock — create a purchase request.</p>
                               ) : null}
                             </td>
                           )}
@@ -191,8 +196,9 @@ export default function IndentDetail({ id, open, onOpenChange, onChanged, onOpen
               {canWork && !closing && (
                 <div className="grid grid-cols-1 gap-3 rounded-md bg-gray-50 p-3 sm:grid-cols-2">
                   <div className="space-y-1">
-                    <Label htmlFor="iss-by">Collected by *</Label>
-                    <Input id="iss-by" value={receivedByName} onChange={(e) => setReceivedByName(e.target.value)} placeholder="Name of the person taking the goods" />
+                    <Label htmlFor="iss-by">Collected by (requester prefilled) *</Label>
+                    <Input id="iss-by" autoComplete="name" value={receivedByName} onChange={(e) => setReceivedByName(e.target.value)} placeholder="Name of the person taking the goods" />
+                    <p className="text-xs text-gray-500">Change this if someone else collects the goods.</p>
                   </div>
                   <div className="space-y-1">
                     <Label htmlFor="iss-assigned">Assigned to <span className="font-normal text-gray-400">(optional — a person an asset is given to)</span></Label>

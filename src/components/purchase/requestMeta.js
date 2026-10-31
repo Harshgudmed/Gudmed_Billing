@@ -24,6 +24,9 @@ export const STATUS = {
   cancelled: { label: 'Cancelled',        cls: 'border-gray-200 bg-white text-gray-500' },
 }
 
+// Suggested purpose text shared by purchase requests and department indents.
+export const PURPOSE_SUGGESTIONS = ['Monthly restock', 'Low stock', 'New requirement', 'Increased usage', 'Replacement', 'Damaged or expired stock']
+
 // A purchase order's statuses, in the HMS status colours.
 export const ORDER_STATUS = {
   draft:           { label: 'Draft',             cls: 'border-gray-200 bg-gray-50 text-gray-700' },

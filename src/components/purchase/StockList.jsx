@@ -32,7 +32,7 @@ const VIEWS = [
   { value: 'low', label: 'Low Stock', hint: 'At or under reorder level', tone: 'yellow', icon: AlertTriangle, count: 'low' },
   { value: 'out', label: 'Out of Stock', hint: 'Nothing left', tone: 'red', icon: PackageX, count: 'out' },
   { value: 'expiring', label: 'Expiring Soon', hint: 'Within 60 days', tone: 'orange', icon: CalendarClock, count: 'expiring' },
-  { value: 'receipts', label: 'Goods Receipts', hint: 'Received today', tone: 'purple', icon: ClipboardCheck, count: 'receivedToday' },
+  { value: 'receipts', label: 'Deliveries Recorded Today', hint: 'Goods receipts', tone: 'purple', icon: ClipboardCheck, count: 'receivedToday' },
 ]
 const RECEIPT_FILTER = [{ value: 'all', label: 'All receipts' }, { value: 'posted', label: 'Received' }, { value: 'cancelled', label: 'Cancelled' }]
 

@@ -29,11 +29,11 @@ import ReceiptDetail from './ReceiptDetail'
 // store sees no money.
 
 const VIEWS = [
-  { value: 'to-approve', label: 'Waiting for My Approval', hint: 'Your turn to decide', tone: 'yellow', icon: Clock, count: 'toApprove', who: 'approver' },
-  { value: 'to-send', label: 'Approved — To Send', hint: 'Print and give to the vendor', tone: 'green', icon: Truck, count: 'toSend', who: 'orderer' },
-  { value: 'to-receive', label: 'To Receive', hint: 'Ordered, not all in yet', tone: 'blue', icon: PackageCheck, count: 'toReceive', who: 'receiver' },
+  { value: 'to-approve', label: 'Purchase Orders Awaiting Approval', hint: 'Your approval is required', tone: 'yellow', icon: Clock, count: 'toApprove', who: 'approver' },
+  { value: 'to-send', label: 'Approved Orders Awaiting Dispatch', hint: 'Confirm after you send the PO to the vendor', tone: 'green', icon: Truck, count: 'toSend', who: 'orderer' },
+  { value: 'to-receive', label: 'Goods Receipt Pending', hint: 'Approved or sent orders; goods not fully received', tone: 'blue', icon: PackageCheck, count: 'toReceive', who: 'receiver' },
   { value: 'received', label: 'Received', hint: 'Delivered in full, or closed', tone: 'green', icon: CheckCheck, count: 'received', who: 'store' },
-  { value: 'all', label: 'All Orders', hint: 'Every vendor, every status', tone: 'purple', icon: ClipboardList, count: 'all', who: 'overseer' },
+  { value: 'all', label: 'All Purchase Orders', hint: 'Every vendor and status', tone: 'purple', icon: ClipboardList, count: 'all', who: 'overseer' },
 ]
 const COLS = { 1: 'sm:grid-cols-1', 2: 'sm:grid-cols-2', 3: 'sm:grid-cols-3', 4: 'sm:grid-cols-2 lg:grid-cols-4' }
 const STATUS_OPTIONS = [
@@ -52,7 +52,9 @@ export default function OrdersList({ counts = {}, onChanged, intent = {}, onMake
   const approver = me.isAdmin || !!APPROVER_LABEL[me.role]
   // The store's history of deliveries; everyone else finds them under All Orders.
   const allowed = { approver, orderer: me.canOrder, receiver: me.canReceive, overseer: me.seesEverything, store: !me.seesEverything && me.canReceive }
-  const views = VIEWS.filter((v) => !v.who || allowed[v.who])
+  // Normal approval releases the order directly. Keep this view only for any
+  // older/legacy approved orders that still need the buyer to record dispatch.
+  const views = VIEWS.filter((v) => (!v.who || allowed[v.who]) && (v.value !== 'to-send' || counts.toSend > 0))
   const [view, setView] = useState(views.some((v) => v.value === intent.view) ? intent.view : views[views.length - 1]?.value || 'all')
   const [status, setStatus] = useState(intent.status || 'all')
   const [search, setSearch] = useState(intent.search || '')
