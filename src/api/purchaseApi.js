@@ -36,8 +36,9 @@ export const purchaseApi = {
 
   // Vendors. The list masks bank account numbers; getVendor returns them in
   // full to admin / purchase officer (what the edit form needs).
-  getVendors:          (params)     => get('vendors', params),     // { search, status, page, limit }
+  getVendors:          (params)     => get('vendors', params),     // { search, status, vendorType, category, page, limit }
   getVendor:           (id)         => get('vendor', { id }),
+  getVendorCategories: ()           => get('vendor-categories'),  // distinct categories already in use, for the filter + form suggestions
   getStates:           ()           => get('states'),              // GST state codes, for the state picker
   createVendor:        (body)       => post('vendor', body),
   updateVendor:        (id, body)   => patch('vendor', { id, ...body }), // also { isActive } to retire / restore
@@ -95,7 +96,8 @@ export const purchaseApi = {
   // { status, vendorId, search, view: 'to-approve' | 'to-send' | 'mine' }).
   getOrder:           (id)       => get('order', { id }),            // lines (+ the request each came from), vendor, steps, hospital
   getOrderCandidates: (params)   => get('order-candidates', params), // approved request lines not on an order yet ({ requestId })
-  createOrder:        (body)     => post('order', body),             // a draft: { vendorId, expectedDate, terms, notes, lines }
+  // a draft: { vendorId, expectedDate, terms, notes, deliverElsewhere, deliveryAddress, lines }
+  createOrder:        (body)     => post('order', body),
   saveOrder:          (id, body) => patch('order', { id, action: 'save', ...body }),
   submitOrder:        (id)       => patch('order', { id, action: 'submit' }),
   approveOrder:       (id, remark) => patch('order', { id, action: 'approve', remark }),
@@ -112,11 +114,23 @@ export const purchaseApi = {
   // categoryId, status: low | out | in_stock | expiring } → rows + summary).
   // Rates and values are left out for the store.
   getReceipt:    (id)     => get('receipt', { id }),
-  // { orderId, receivedAt, challanNumber, challanDate, notes,
+  // { orderId, receivedAt, challanNumber, challanDate, invoiceNumber, invoiceDate,
+  //   ewayBillNumber, notes,
   //   lines: [{ orderLineId, receivedQty, rejectedQty, rejectReason, batchNumber, expiryDate }] }
   createReceipt: (body)   => post('receipt', body),
   cancelReceipt: (id, reason) => patch('receipt', { id, action: 'cancel', reason }), // administrator; takes the goods back out of stock
   getStockItem:  (id)     => get('stock-item', { id }),   // its batches and its last 100 movements
+  // GRN invoice/challan attachments. The list arrives inside getReceipt (receipt.documents);
+  // upload & delete go straight to /uploads/receipt-documents — see uploadRoutes.js
+  uploadReceiptDoc: (receiptId, docType, label, file) => {
+    const fd = new FormData()
+    fd.append('document', file)
+    fd.append('receiptId', receiptId)
+    fd.append('docType', docType)
+    if (label) fd.append('label', label)
+    return client.post('/uploads/receipt-documents', fd, { headers: { 'Content-Type': 'multipart/form-data' } })
+  },
+  deleteReceiptDoc: (id) => client.delete(`/uploads/receipt-documents/${id}`),
 
   // ── Vendor bills (3-way match: order rate × goods received × vendor's invoice) ─
   // The list is paged with useServerPagination: resource 'bills' ({ search, status,
@@ -144,6 +158,18 @@ export const purchaseApi = {
     return client.post('/uploads/bill-documents', fd, { headers: { 'Content-Type': 'multipart/form-data' } })
   },
   deleteBillDoc: (id) => client.delete(`/uploads/bill-documents/${id}`),
+
+  // ── Rate contracts (negotiated vendor+item rate, good for a date range) ───────
+  // The list is paged with useServerPagination (resource 'rate-contracts',
+  // { search, vendorId, itemId, status: active|expired|all }).
+  getRateContracts: (params) => get('rate-contracts', params),
+  getRateContract:  (id)     => get('rate-contract', { id }),
+  // The active one for an item (+ vendor, if already picked), or null — OrderForm
+  // calls this as a line's item/vendor settle, to offer the contracted rate.
+  getActiveRateContract: (itemId, vendorId) => get('rate-contract-for', { itemId, vendorId }),
+  // { vendorId, itemId, rate, gstRate?, validFrom, validTo, notes? }
+  createRateContract: (body)     => post('rate-contract', body),
+  updateRateContract: (id, body) => patch('rate-contract', { id, ...body }), // also { isActive:false } to end it early
 
   // Who approves how much (the store gets the levels without their ₹ amounts).
   // Changing them is an administrator's.

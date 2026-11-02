@@ -52,9 +52,9 @@ const reportSchema = z.object({
   dicomStudyUid: z.string().optional(),
   templateUsed: z.string().optional(),
   images: z.any().optional(),
-  reportedById: z.string().optional(),
-  verifiedById: z.string().optional(),
-  verifiedAt: z.string().datetime().optional(),
+  // reportedById/verifiedById/verifiedAt are NOT client fields — a report is
+  // created as a draft (nothing is verified yet) and who wrote/signed it comes
+  // from the session, never the body. See signerId() below.
 })
 
 const orderUpdateSchema = z.object({
@@ -81,7 +81,8 @@ const reportUpdateSchema = z.object({
   comparedWithPrevious: z.boolean().optional(),
   comparisonNotes: z.string().optional(),
   status: z.string().optional(),
-  verifiedById: z.string().optional(),
+  // verifiedAt is a client timestamp ("now"); verifiedById is NOT accepted —
+  // it is always the logged-in actor, resolved in the handler.
   verifiedAt: z.string().datetime().optional(),
 }).passthrough()
 
@@ -104,6 +105,20 @@ const examUpdateSchema = z.object({
 
 // Shared patient snapshot fields — single source of truth (see utils/patientSnapshot).
 const patientSelect = PATIENT_SNAPSHOT_SELECT
+
+/**
+ * Who writes or signs a report — the acting user, but only once they are
+ * proved to be THIS hospital's user. Mirrors laboratoryController.js's
+ * signerId(): never resolveRequestedById, which falls back to the org's
+ * oldest active user and would print a real radiologist's name under a
+ * report they never saw. An unattributable report must stay blank instead.
+ */
+async function signerId(client, organizationId, req) {
+  const id = getActor(req).id
+  if (!id) return null
+  const user = await client.user.findFirst({ where: { id, organizationId }, select: { id: true } })
+  return user?.id ?? null
+}
 
 // ── GET /api/radiology ─────────────────────────────────────────────────────────
 
@@ -333,8 +348,20 @@ export const create = async (req, res, next) => {
       if (!(await isOwned('patient', patientId, ORGANIZATION_ID))) {
         return res.status(404).json({ success: false, error: 'Patient not found' })
       }
-      if (!(await isOwned('radiologyExam', examId, ORGANIZATION_ID))) {
+      // isOwned only checks the org, not isActive — the exam picker (getAll
+      // resource=exams) already filters isActive:true, but a retired exam's id
+      // kept in a stale cache (or a direct call) must not still be orderable.
+      const exam = await db.radiologyExam.findFirst({
+        where: { id: examId, organizationId: ORGANIZATION_ID },
+        select: { id: true, isActive: true },
+      })
+      if (!exam || exam.isActive === false) {
         return res.status(404).json({ success: false, error: 'Exam not found' })
+      }
+      // consultationId is optional but, like patientId/examId, caller-supplied —
+      // without this check an order could link to another hospital's consultation.
+      if (consultationId && !(await isOwned('consultation', consultationId, ORGANIZATION_ID))) {
+        return res.status(404).json({ success: false, error: 'Consultation not found' })
       }
 
       // Atomic per-org counter inside the insert's transaction — `RAD${Date.now()}`
@@ -379,7 +406,6 @@ export const create = async (req, res, next) => {
         hasCriticalFindings, criticalFindings, criticalNotifiedTo,
         comparedWithPrevious, comparisonNotes,
         dicomStudyUid, templateUsed, images,
-        reportedById, verifiedById, verifiedAt,
       } = parsed.data
 
       // Tenant guard: only report against an order that belongs to this org.
@@ -408,9 +434,8 @@ export const create = async (req, res, next) => {
           ...(dicomStudyUid !== undefined ? { dicomStudyUid } : {}),
           ...(templateUsed !== undefined ? { templateUsed } : {}),
           ...(images !== undefined ? { images } : {}),
-          ...(reportedById !== undefined ? { reportedById } : {}),
-          ...(verifiedById !== undefined ? { verifiedById } : {}),
-          ...(verifiedAt !== undefined ? { verifiedAt: new Date(verifiedAt) } : {}),
+          // Who wrote it — the logged-in user, never the request body.
+          reportedById: await signerId(db, ORGANIZATION_ID, req),
         },
       })
 
@@ -488,6 +513,17 @@ export const update = async (req, res, next) => {
       const include = { patient: { select: patientSelect }, exam: true, report: true }
       const data = await db.$transaction(async (tx) => {
         if (fields.status === 'cancelled') {
+          // orderCancelCheck above ran against `db`, before this transaction —
+          // a payment landing in that gap would otherwise still cancel the scan
+          // while `amountPaid: { lte: 0 }` below matched zero rows, leaving a
+          // cancelled scan with a stranded, still-live paid bill. Re-check the
+          // bill's live state here, inside the transaction, right before writing.
+          if (cancelBill) {
+            const live = await tx.invoice.findFirst({ where: { id: cancelBill.id, organizationId: ORGANIZATION_ID }, select: { amountPaid: true } })
+            if (live && live.amountPaid > 0.005) {
+              throw Object.assign(new Error(`This scan is paid on ${cancelBill.invoiceNumber}. Cancel it in Billing with "Cancel & refund" so the patient gets the money back.`), { status: 409 })
+            }
+          }
           // Only while still pending as the write lands: a scan started in the
           // same instant wins over a cancel read a moment earlier.
           const { count } = await tx.radiologyOrder.updateMany({
@@ -501,6 +537,17 @@ export const update = async (req, res, next) => {
               data: { status: 'cancelled', paymentStatus: 'cancelled', cancelledAt: new Date(), cancellationReason: `Scan cancelled: ${String(fields.cancellationReason).trim()}` },
             })
           }
+          return tx.radiologyOrder.findFirst({ where: { id, organizationId: ORGANIZATION_ID }, include })
+        }
+        if (fields.scheduledDate !== undefined) {
+          // Same compare-and-set as cancel: a scan started in the same instant
+          // the reschedule lands must win, not be silently overwritten by a
+          // date change read against a now-stale "still pending" snapshot.
+          const { count } = await tx.radiologyOrder.updateMany({
+            where: { id, organizationId: ORGANIZATION_ID, status: 'pending' },
+            data: fields,
+          })
+          if (count === 0) throw Object.assign(new Error('This scan has already been started, so its date can no longer be changed.'), { status: 409 })
           return tx.radiologyOrder.findFirst({ where: { id, organizationId: ORGANIZATION_ID }, include })
         }
         return tx.radiologyOrder.update({ where: { id }, data: fields, include })
@@ -527,7 +574,11 @@ export const update = async (req, res, next) => {
       // update({ data }) — one shared list decides what a client may never move.
       stripIdentity(fields, 'radiologyReport')
 
-      if (fields.verifiedAt) fields.verifiedAt = new Date(fields.verifiedAt)
+      // Whoever signs it off is the logged-in user, not whatever the body claims.
+      if (fields.verifiedAt) {
+        fields.verifiedAt = new Date(fields.verifiedAt)
+        fields.verifiedById = await signerId(db, ORGANIZATION_ID, req)
+      }
 
       // Tenant guard via the parent order's org (RadiologyReport.organizationId is
       // nullable). Blocks cross-tenant tampering with radiology report content.

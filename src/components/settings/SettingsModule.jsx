@@ -746,6 +746,14 @@ export default function SettingsModule() {
                   checked={orgForm.purchaseRequireBillInvoice}
                   onChange={v => setOrgForm(p => ({ ...p, purchaseRequireBillInvoice: v }))}
                 />
+                <div className="space-y-1">
+                  <Label htmlFor="purchase-terms">Default Terms &amp; Conditions for purchase orders</Label>
+                  <Textarea id="purchase-terms" rows={4}
+                    placeholder="Leave blank to use the built-in default (deliver to the hospital's stores, inspect on receipt, etc.)"
+                    value={orgForm.purchaseDefaultTerms}
+                    onChange={e => setOrgForm(p => ({ ...p, purchaseDefaultTerms: e.target.value }))} />
+                  <p className="text-xs text-gray-500">Every new order starts with this printed on it — changed per order if needed.</p>
+                </div>
                 <div className="flex justify-end">
                   <Button onClick={saveOrganization} disabled={savingOrg}>
                     {savingOrg ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Save className="h-4 w-4 mr-2" />}

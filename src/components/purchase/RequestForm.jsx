@@ -90,7 +90,7 @@ const FieldError = ({ children }) => (children ? <p className="text-xs text-red-
 export default function RequestForm({ open, onOpenChange, request, onSaved }) {
   const editing = !!request
   // The store raises requests without prices (the server sends it none).
-  const money = useMe().seesMoney
+  const { seesMoney: money, fixedDepartmentId } = useMe()
   const [departments, setDepartments] = useState([])
   const [rules, setRules] = useState([])
   const [approverNames, setApproverNames] = useState({}) // role → names of the people who hold it
@@ -142,7 +142,7 @@ export default function RequestForm({ open, onOpenChange, request, onSaved }) {
             unitId: l.unitId, quantity: String(l.quantity), estimatedRate: String(l.estimatedRate), rateTyped: true, note: l.note || '',
           })) : [blankLine()])
         } else {
-          setForm({ departmentId: '', requiredBy: '', priority: 'normal', purpose: '' })
+          setForm({ departmentId: fixedDepartmentId || '', requiredBy: '', priority: 'normal', purpose: '' })
           setLines([blankLine()])
         }
       } catch (err) {
@@ -154,7 +154,7 @@ export default function RequestForm({ open, onOpenChange, request, onSaved }) {
       }
     })()
     return () => { alive = false }
-  }, [open, request, money, attempt])
+  }, [open, request, money, attempt, fixedDepartmentId])
 
   const setLine = (key, patch) => setLines((ls) => ls.map((l) => (l.key === key ? { ...l, ...patch } : l)))
 
@@ -252,14 +252,20 @@ export default function RequestForm({ open, onOpenChange, request, onSaved }) {
             <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
               <div className="space-y-1 md:col-span-2">
                 <Label>Department <span className="text-red-500">*</span></Label>
-                <SearchableSelect
-                  className="w-full"
-                  options={departments.map((d) => ({ value: d.id, label: d.name }))}
-                  value={form.departmentId}
-                  onChange={(v) => setForm((f) => ({ ...f, departmentId: v }))}
-                  placeholder="Which department needs it?"
-                  emptyText="No department — add one in Settings"
-                />
+                {fixedDepartmentId ? (
+                  // A doctor/nurse requests for their own department only — no
+                  // picker to get wrong.
+                  <Input disabled value={departments.find((d) => d.id === form.departmentId)?.name || '—'} />
+                ) : (
+                  <SearchableSelect
+                    className="w-full"
+                    options={departments.map((d) => ({ value: d.id, label: d.name }))}
+                    value={form.departmentId}
+                    onChange={(v) => setForm((f) => ({ ...f, departmentId: v }))}
+                    placeholder="Which department needs it?"
+                    emptyText="No department — add one in Settings"
+                  />
+                )}
                 <FieldError>{errors.fields.departmentId}</FieldError>
               </div>
               <div className="space-y-1">

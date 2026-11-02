@@ -88,6 +88,7 @@ export async function login(req, res, next) {
         email: user.email,
         role: user.role,
         organizationId: orgId,
+        departmentId: user.departmentId || null,
       },
     })
   } catch (err) {
@@ -205,6 +206,7 @@ export async function me(req, res, next) {
         email: user.email,
         role: user.role,
         organizationId: req.user.organizationId,
+        departmentId: user.departmentId || null,
       },
     })
   } catch (err) {

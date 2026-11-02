@@ -154,29 +154,31 @@ model Organization {
   budgets             Budget[]
 
   // Purchase & Supply Chain — documents
-  purchaseRequests     PurchaseRequest[]
-  purchaseRequestLines PurchaseRequestLine[]
-  approvalRules        ApprovalRule[]
-  approvalSteps        ApprovalStep[]
-  purchaseOrders       PurchaseOrder[]
-  purchaseOrderLines   PurchaseOrderLine[]
-  goodsReceipts        GoodsReceipt[]
-  goodsReceiptLines    GoodsReceiptLine[]
-  stockBatches         StockBatch[]
-  stockMovements       StockMovement[]
-  vendorBills          VendorBill[]
-  vendorBillLines      VendorBillLine[]
-  storeIndents         StoreIndent[]
-  storeIndentLines     StoreIndentLine[]
-  storeIssues          StoreIssue[]
-  storeIssueLines      StoreIssueLine[]
-  vendorPayments       VendorPayment[]
-  purchaseReturns      PurchaseReturn[]
-  purchaseReturnLines  PurchaseReturnLine[]
-  rfqs                 Rfq[]
-  rfqLines             RfqLine[]
-  rfqVendors           RfqVendor[]
-  rfqQuotes            RfqQuote[]
+  purchaseRequests      PurchaseRequest[]
+  purchaseRequestLines  PurchaseRequestLine[]
+  approvalRules         ApprovalRule[]
+  approvalSteps         ApprovalStep[]
+  purchaseOrders        PurchaseOrder[]
+  purchaseOrderLines    PurchaseOrderLine[]
+  goodsReceipts         GoodsReceipt[]
+  goodsReceiptLines     GoodsReceiptLine[]
+  goodsReceiptDocuments GoodsReceiptDocument[]
+  rateContracts         RateContract[]
+  stockBatches          StockBatch[]
+  stockMovements        StockMovement[]
+  vendorBills           VendorBill[]
+  vendorBillLines       VendorBillLine[]
+  storeIndents          StoreIndent[]
+  storeIndentLines      StoreIndentLine[]
+  storeIssues           StoreIssue[]
+  storeIssueLines       StoreIssueLine[]
+  vendorPayments        VendorPayment[]
+  purchaseReturns       PurchaseReturn[]
+  purchaseReturnLines   PurchaseReturnLine[]
+  rfqs                  Rfq[]
+  rfqLines              RfqLine[]
+  rfqVendors            RfqVendor[]
+  rfqQuotes             RfqQuote[]
 }
 
 /// User (Staff)
@@ -497,7 +499,7 @@ model PreRegistration {
 
 /// Patient Document (KYC & Records)
 model PatientDocument {
-  id             String @id @default(cuid())
+  id             String  @id @default(cuid())
   organizationId String
   patientId      String
   // Optional link to the visit the document was uploaded from, so the same file
@@ -517,9 +519,8 @@ model PatientDocument {
   uploadedAt   DateTime @default(now())
 
   // Verification fields
-  verificationStatus String   @default("PENDING") // PENDING, VERIFIED, REJECTED
+  verificationStatus String  @default("PENDING") // PENDING, VERIFIED, REJECTED
   rejectionReason    String?
-
 
   // Relations
   organization Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
@@ -655,10 +656,10 @@ model Consultation {
   createdById String?
 
   // Relations
-  organization    Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  patient         Patient          @relation(fields: [patientId], references: [id], onDelete: Cascade)
-  appointment     Appointment?     @relation(fields: [appointmentId], references: [id])
-  doctor          User             @relation("DoctorConsultations", fields: [doctorId], references: [id])
+  organization    Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  patient         Patient           @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  appointment     Appointment?      @relation(fields: [appointmentId], references: [id])
+  doctor          User              @relation("DoctorConsultations", fields: [doctorId], references: [id])
   prescriptions   Prescription[]
   labOrders       LabOrder[]
   radiologyOrders RadiologyOrder[]
@@ -1096,45 +1097,50 @@ model Vendor {
   id             String @id @default(cuid())
   organizationId String
 
-  name          String
-  contactPerson String?
-  phone         String?
+  name           String
+  contactPerson  String?
+  phone          String?
   // A second contact person and phone, and the vendor's own VRF (Vendor
   // Registration Form) number. All optional — older vendors keep working.
   contactPerson2 String?
   phone2         String?
   vrfNumber      String?
-  email         String?
-  gstNumber     String?
-  address       String?
+  // What the vendor supplies, hospital's own wording (e.g. "Furniture",
+  // "Pharma", "Medical Equipment") — so the vendor list can be filtered the
+  // way the item catalogue is. Free text, not a managed master list: a
+  // hospital names its own vendor categories without a separate screen.
+  category       String?
+  email          String?
+  gstNumber      String?
+  address        String?
 
   // Purchase & Supply Chain. All optional, so vendors made before these
   // existed keep working unchanged.
-  code              String? // VEN-0012 — short, quotable on the phone
-  pan               String? // needed for TDS; without it TDS is deducted at 20%
-  stateCode         String? // first two digits of the GSTIN; decides CGST+SGST vs IGST
+  code                  String? // VEN-0012 — short, quotable on the phone
+  pan                   String? // needed for TDS; without it TDS is deducted at 20%
+  stateCode             String? // first two digits of the GSTIN; decides CGST+SGST vs IGST
   // The address in the same parts as a patient's (the shared AddressFields).
   // `address` above is the older one-line address; the migration that added
   // these copied it into `street`.
-  houseNumber       String? // House / Flat / Building No.
-  street            String? // Street / Block
-  locality          String? // Locality / Area
-  city              String?
-  district          String?
-  pincode           String?
+  houseNumber           String? // House / Flat / Building No.
+  street                String? // Street / Block
+  locality              String? // Locality / Area
+  city                  String?
+  district              String?
+  pincode               String?
   // Bank details for paying the vendor. Sensitive: shown masked, in full to
   // finance roles only.
-  bankAccountName   String?
-  bankName          String? // State Bank of India — the form fills it from the IFSC's first four letters
-  bankAccountNumber String?
-  bankIfsc          String?
+  bankAccountName       String?
+  bankName              String? // State Bank of India — the form fills it from the IFSC's first four letters
+  bankAccountNumber     String?
+  bankIfsc              String?
   // Razorpay contact/fund-account IDs cached so they are not re-created on every payment.
   razorpayContactId     String?
   razorpayFundAccountId String?
-  paymentTermsDays  Int? // 30 → a bill is due 30 days after its date
-  vendorType        String? // goods | services | both
-  msmeNumber        String? // an MSME must be paid within 45 days by law
-  defaultTdsSection String? // 194C contractor, 194J professional — prefilled on bills
+  paymentTermsDays      Int? // 30 → a bill is due 30 days after its date
+  vendorType            String? // goods | services | both
+  msmeNumber            String? // an MSME must be paid within 45 days by law
+  defaultTdsSection     String? // 194C contractor, 194J professional — prefilled on bills
 
   isActive  Boolean  @default(true)
   createdAt DateTime @default(now())
@@ -1150,6 +1156,9 @@ model Vendor {
   payments       VendorPayment[]
   returns        PurchaseReturn[]
   rfqs           RfqVendor[]
+  rateContracts  RateContract[]
+
+  documents VendorDocument[]
 
   // Unique within a hospital. NULL codes (older vendors) never collide:
   // Postgres treats each NULL as different.
@@ -1159,8 +1168,6 @@ model Vendor {
   // approved against each. Vendors without a GSTIN (NULL) never collide.
   @@unique([organizationId, gstNumber])
   @@index([organizationId])
-
-  documents VendorDocument[]
 }
 
 /// A document attached to a vendor — PAN certificate, GST certificate, or any
@@ -1175,14 +1182,14 @@ model VendorDocument {
   docType  String
   // user-supplied label, e.g. "GST cert Nov 2026"; falls back to fileName on display
   label    String?
-  fileName String  // original filename shown in the UI
-  fileUrl  String  // /uploads/vendor-documents/<uuid>.<ext>
+  fileName String // original filename shown in the UI
+  fileUrl  String // /uploads/vendor-documents/<uuid>.<ext>
 
   uploadedById String?
   uploadedAt   DateTime @default(now())
 
   organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  vendor       Vendor        @relation(fields: [vendorId], references: [id], onDelete: Cascade)
+  vendor       Vendor       @relation(fields: [vendorId], references: [id], onDelete: Cascade)
 
   @@index([organizationId])
   @@index([vendorId])
@@ -1213,14 +1220,15 @@ model Unit {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  organization Organization          @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  stockItems   Item[]
-  conversions  ItemUnitConversion[]
-  requestLines PurchaseRequestLine[]
-  orderLines   PurchaseOrderLine[]
-  receiptLines GoodsReceiptLine[]
-  indentLines  StoreIndentLine[]
-  rfqLines     RfqLine[]
+  organization  Organization          @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  stockItems    Item[]
+  conversions   ItemUnitConversion[]
+  requestLines  PurchaseRequestLine[]
+  orderLines    PurchaseOrderLine[]
+  receiptLines  GoodsReceiptLine[]
+  indentLines   StoreIndentLine[]
+  rfqLines      RfqLine[]
+  rateContracts RateContract[]
 
   @@unique([organizationId, code])
   @@index([organizationId])
@@ -1287,7 +1295,7 @@ model Item {
   reorderLevel      Float?
   // Whether this item carries an expiry date — false for durables (a camera,
   // a phone, furniture), so the goods-receipt screen does not ask for one.
-  expiryApplicable  Boolean @default(true)
+  expiryApplicable  Boolean   @default(true)
   preferredVendorId String?
   // A copy kept for speed ("last time ₹180"), refreshed when a GRN is posted.
   // The record of what was paid lives on the PO lines.
@@ -1318,6 +1326,7 @@ model Item {
   issueLines      StoreIssueLine[]
   returnLines     PurchaseReturnLine[]
   rfqLines        RfqLine[]
+  rateContracts   RateContract[]
 
   @@unique([organizationId, code])
   @@index([organizationId])
@@ -1363,25 +1372,25 @@ model Budget {
   id             String @id @default(cuid())
   organizationId String
 
-  code         String  // BUD-2026-27-000001
-  name         String  // "ICU Annual Budget 2026-27"
+  code          String // BUD-2026-27-000001
+  name          String // "ICU Annual Budget 2026-27"
   // capex (capital — new machine, building) | opex (operational — consumables) | project (named initiative)
-  budgetType   String
-  departmentId String? // for capex/opex scoped to one department; null = hospital-wide
-  projectName  String? // only for budgetType = project, e.g. "New Wing Construction"
+  budgetType    String
+  departmentId  String? // for capex/opex scoped to one department; null = hospital-wide
+  projectName   String? // only for budgetType = project, e.g. "New Wing Construction"
   financialYear String // "2026-27" — the Indian financial year this covers
 
-  allocatedAmount Float   // total budget sanctioned
+  allocatedAmount Float // total budget sanctioned
   approvedDate    DateTime? // when the budget was formally approved
-  approvedById    String?   // who approved (free text or user id)
+  approvedById    String? // who approved (free text or user id)
   notes           String?
 
   isActive  Boolean  @default(true)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  organization Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  department   Department?     @relation(fields: [departmentId], references: [id])
+  organization Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  department   Department?       @relation(fields: [departmentId], references: [id])
   requests     PurchaseRequest[]
 
   @@unique([organizationId, code])
@@ -1498,6 +1507,11 @@ model PurchaseOrder {
   paymentTermsDays Int? // copied from the vendor
   terms            String? // delivery and other conditions printed on the PO
   notes            String? // internal; not printed
+  // Where the vendor should actually send the goods — not always the store's
+  // own warehouse (a direct-to-ward delivery, a site address for a new wing).
+  // false = this hospital's own default warehouse address; true = the text below.
+  deliverElsewhere Boolean @default(false)
+  deliveryAddress  String? // printed on the PO only when deliverElsewhere is true
 
   subtotal Float @default(0) // after discounts, before GST
   cgst     Float @default(0)
@@ -1577,6 +1591,47 @@ model PurchaseOrderLine {
   @@index([requestLineId])
 }
 
+/// A negotiated rate held with a vendor for an item, good for a date range.
+/// While one is active, ordering that item from that vendor does not need a
+/// fresh RFQ — OrderForm offers the contracted rate as soon as the item and
+/// vendor are both picked (sir: "Rate Contract auto-trigger").
+model RateContract {
+  id             String @id @default(cuid())
+  organizationId String
+
+  number String // RC-2026-27-000001
+
+  vendorId   String
+  vendorName String
+  itemId     String
+  itemCode   String
+  itemName   String
+  unitId     String
+  unitCode   String
+
+  rate      Float // per unit, before GST — the contracted price
+  gstRate   Float? // if the contract also fixes the GST rate; else the item's own
+  validFrom DateTime
+  validTo   DateTime
+  notes     String?
+
+  isActive      Boolean @default(true) // an administrator can end a contract early
+  createdById   String?
+  createdByName String
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  vendor       Vendor       @relation(fields: [vendorId], references: [id], onDelete: Restrict)
+  item         Item         @relation(fields: [itemId], references: [id], onDelete: Restrict)
+  unit         Unit         @relation(fields: [unitId], references: [id], onDelete: Restrict)
+
+  @@unique([organizationId, number])
+  @@index([organizationId, itemId, vendorId])
+  @@index([organizationId, isActive])
+}
+
 /// Goods received against a purchase order (GRN): what came, what was
 /// accepted into stock, what was turned back and why, with batch and expiry.
 /// Posting it puts the accepted goods in stock and moves the order on to
@@ -1594,8 +1649,17 @@ model GoodsReceipt {
   vendorName String
 
   receivedAt     DateTime  @default(now())
-  challanNumber  String? // the vendor's delivery challan or invoice number
+  challanNumber  String? // the vendor's delivery challan
   challanDate    DateTime?
+  // The vendor's invoice, recorded with the GRN itself (sir: "invoice accepted
+  // together with the GRN") — a record only, no rate/GST, so the store may fill
+  // it. The Purchase Officer's bill is still a separate step; it starts
+  // prefilled from here. The file itself is a GoodsReceiptDocument (docType
+  // 'invoice'), alongside the delivery/logistics challan scans.
+  invoiceNumber  String?
+  invoiceDate    DateTime?
+  // The e-way bill covering this shipment (GST e-way bill portal reference).
+  ewayBillNumber String?
   receivedById   String?
   receivedByName String
   notes          String?
@@ -1612,15 +1676,40 @@ model GoodsReceipt {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  organization Organization       @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  order        PurchaseOrder      @relation(fields: [orderId], references: [id], onDelete: Restrict)
-  vendor       Vendor             @relation(fields: [vendorId], references: [id], onDelete: Restrict)
+  organization Organization           @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  order        PurchaseOrder          @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  vendor       Vendor                 @relation(fields: [vendorId], references: [id], onDelete: Restrict)
   lines        GoodsReceiptLine[]
   returns      PurchaseReturn[]
+  documents    GoodsReceiptDocument[]
 
   @@unique([organizationId, number])
   @@index([organizationId, status])
   @@index([orderId])
+}
+
+/// A scan attached to a GRN: the vendor's invoice, the delivery challan, the
+/// transporter's own (logistics) challan. Mirrors VendorBillDocument exactly —
+/// same upload/serve pattern, a different parent.
+model GoodsReceiptDocument {
+  id             String @id @default(cuid())
+  organizationId String
+  receiptId      String
+
+  // invoice | delivery_challan | logistics_challan | other
+  docType  String
+  label    String? // user-supplied, e.g. "Transporter challan"; falls back to fileName
+  fileName String // original filename shown in the UI
+  fileUrl  String // /uploads/receipt-documents/<uuid>.<ext>
+
+  uploadedById String?
+  uploadedAt   DateTime @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  receipt      GoodsReceipt @relation(fields: [receiptId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@index([receiptId])
 }
 
 /// One item on a goods receipt.
@@ -1637,21 +1726,21 @@ model GoodsReceiptLine {
   unitCode   String
   unitFactor Float  @default(1) // stock units in one of `unitId`
 
-  receivedQty  Float // what arrived, in the order's unit
-  acceptedQty  Float // passed inspection — goes into stock
-  rejectedQty  Float     @default(0) // damaged, wrong, short-dated: turned back
-  rejectReason String?
+  receivedQty   Float // what arrived, in the order's unit
+  acceptedQty   Float // passed inspection — goes into stock
+  rejectedQty   Float     @default(0) // damaged, wrong, short-dated: turned back
+  rejectReason  String?
   // Quality inspection outcome for this line: passed (into stock) | hold (set
   // aside, quarantine) | failed (should be in rejectedQty). Record, not a stock state.
-  qualityStatus String  @default("passed")
+  qualityStatus String    @default("passed")
   // Whether this received lot may be sent back to the vendor (a return lot) or
   // not (a non-return lot — e.g. a sealed consumable the vendor will not take back).
-  returnLot    Boolean   @default(true)
-  batchNumber  String?
-  expiryDate   DateTime?
-  rate         Float     @default(0) // the order's price per unit, after discount, before GST
-  stockQty     Float     @default(0) // accepted × unitFactor: what stock went up by
-  batchId      String? // the stock batch this receipt made
+  returnLot     Boolean   @default(true)
+  batchNumber   String?
+  expiryDate    DateTime?
+  rate          Float     @default(0) // the order's price per unit, after discount, before GST
+  stockQty      Float     @default(0) // accepted × unitFactor: what stock went up by
+  batchId       String? // the stock batch this receipt made
 
   organization Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   receipt      GoodsReceipt      @relation(fields: [receiptId], references: [id], onDelete: Cascade)
@@ -4298,9 +4387,9 @@ model VendorBill {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  organization Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  vendor       Vendor           @relation(fields: [vendorId], references: [id], onDelete: Restrict)
-  order        PurchaseOrder    @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  organization Organization         @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  vendor       Vendor               @relation(fields: [vendorId], references: [id], onDelete: Restrict)
+  order        PurchaseOrder        @relation(fields: [orderId], references: [id], onDelete: Restrict)
   lines        VendorBillLine[]
   payments     VendorPayment[]
   returns      PurchaseReturn[]
@@ -4324,8 +4413,8 @@ model VendorBillDocument {
   // invoice | supporting | other
   docType  String
   label    String? // user-supplied, e.g. "Tax invoice Nov 2026"; falls back to fileName
-  fileName String  // original filename shown in the UI
-  fileUrl  String  // /uploads/bill-documents/<uuid>.<ext>
+  fileName String // original filename shown in the UI
+  fileUrl  String // /uploads/bill-documents/<uuid>.<ext>
 
   uploadedById String?
   uploadedAt   DateTime @default(now())
@@ -4530,8 +4619,8 @@ model VendorPayment {
   // exists. When a bill is later entered on that same order, its unattached
   // advances are relinked here (billId set) so the bill's amountPaid picks
   // them up automatically — see purchaseBillController.js billCreate.
-  billId  String?
-  orderId String?
+  billId     String?
+  orderId    String?
 
   amount    Float
   mode      String // neft | rtgs | imps | upi | cheque | dd | cash
@@ -4562,9 +4651,9 @@ model VendorPayment {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  organization Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  vendor       Vendor        @relation(fields: [vendorId], references: [id], onDelete: Restrict)
-  bill         VendorBill?   @relation(fields: [billId], references: [id], onDelete: Restrict)
+  organization Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  vendor       Vendor         @relation(fields: [vendorId], references: [id], onDelete: Restrict)
+  bill         VendorBill?    @relation(fields: [billId], references: [id], onDelete: Restrict)
   order        PurchaseOrder? @relation(fields: [orderId], references: [id], onDelete: Restrict)
 
   @@unique([organizationId, number])

@@ -620,6 +620,10 @@ ${rx.notes ? `<div class="note-bar"><strong>Notes:</strong> ${escapeHtml(rx.note
       toast.error("Add supplier and items");
       return;
     }
+    if (poItems.some((i) => !i.drugId)) {
+      toast.error("Pick a medicine from the list for every line — Receive needs it to add the stock");
+      return;
+    }
     setSavingPo(true);
     try {
       const res = await client.post("/pharmacy/purchase-orders", { ...poForm, items: poItems });
@@ -1264,18 +1268,28 @@ ${rx.notes ? `<div class="note-bar"><strong>Notes:</strong> ${escapeHtml(rx.note
                           </Button>
                         </div>
 
-                        {/* Drug Identity */}
+                        {/* Drug Identity — picked from the master list, never free text: a
+                            name typed by hand here had no drugId, so Receive (which needs
+                            drugId to add the batch/stock) rejected every line on this PO. */}
                         <div className="grid grid-cols-3 gap-2">
                           <div className="col-span-3">
-                            <Label className="text-[10px] font-medium text-gray-500">Medicine Name *</Label>
-                            <Input
-                              className="mt-0.5 h-8 text-sm"
-                              placeholder="e.g., Paracetamol 500mg Tablet"
-                              value={item.drugName}
-                              onChange={(e) =>
-                                setPoItems((p) => p.map((x, i) => i === idx ? { ...x, drugName: e.target.value } : x))
+                            <Label className="text-[10px] font-medium text-gray-500">Medicine *</Label>
+                            <PosDrugCombo
+                              inStockOnly={false}
+                              selectedName={item.drugName}
+                              placeholder="Search drug to order..."
+                              onSelect={(d) =>
+                                setPoItems((p) => p.map((x, i) => i === idx ? {
+                                  ...x,
+                                  drugId: d.id, drugName: d.drugName,
+                                  saltName: d.genericName || '', companyName: d.brandName || '',
+                                  category: d.drugCategory || '', form: d.dosageForm || '', strength: d.strength || '',
+                                } : x))
                               }
                             />
+                            {!item.drugName && (
+                              <p className="text-[11px] text-gray-400 mt-0.5">Not in the list? Add it to Drug Inventory first, then order it here.</p>
+                            )}
                           </div>
                           <div>
                             <Label className="text-[10px] font-medium text-gray-500">Salt / Generic</Label>

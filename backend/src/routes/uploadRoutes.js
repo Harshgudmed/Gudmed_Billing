@@ -6,7 +6,7 @@ import multer from 'multer'
 import { db } from '../config/db.js'
 import { authenticate, authorize } from '../middleware/auth.js'
 import { getOrgId } from '../lib/reqContext.js'
-import { canManageMasters, canSeeBills, canSeeVendors, requirePurchaseOn } from '../lib/purchaseAccess.js'
+import { canManageMasters, canSeeBills, canSeeVendors, canReceive, requirePurchaseOn } from '../lib/purchaseAccess.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const UPLOAD_ROOT = path.join(__dirname, '..', '..', 'uploads')
@@ -214,6 +214,113 @@ router.get('/bill-documents/:filename', authenticate, requirePurchaseOn, async (
       return res.status(404).json({ success: false, error: 'File not found' })
     }
     const filePath = path.join(UPLOAD_ROOT, 'bill-documents', filename)
+    if (!filePath.startsWith(UPLOAD_ROOT) || !fs.existsSync(filePath)) {
+      return res.status(404).json({ success: false, error: 'File not found' })
+    }
+    res.setHeader('Cache-Control', 'private, no-store')
+    return res.sendFile(filePath)
+  } catch (err) { next(err) }
+})
+
+// ─── Goods-receipt document upload (invoice / delivery challan / logistics challan) ─
+// Store and purchase staff — whoever may receive goods — attach the vendor's
+// invoice and the challan scans to a GRN. Several files can go up, each its
+// own GoodsReceiptDocument. Served back only to this hospital's staff.
+
+const RECEIPT_DOC_MIME = BILL_DOC_MIME
+const RECEIPT_DOC_EXT = BILL_DOC_EXT
+
+const receiptDocStorage = multer.diskStorage({
+  destination: (_req, _file, cb) => {
+    const dir = path.join(UPLOAD_ROOT, 'receipt-documents')
+    fs.mkdirSync(dir, { recursive: true })
+    cb(null, dir)
+  },
+  filename: (_req, file, cb) => {
+    const suffix = `${Date.now()}-${Math.round(Math.random() * 1e9)}`
+    cb(null, `receiptdoc-${suffix}${RECEIPT_DOC_EXT[file.mimetype] || ''}`)
+  },
+})
+
+const uploadReceiptDoc = multer({
+  storage: receiptDocStorage,
+  limits: { fileSize: 10 * 1024 * 1024, files: 1 },
+  fileFilter: (_req, file, cb) => {
+    if (RECEIPT_DOC_MIME.has(file.mimetype)) return cb(null, true)
+    cb(new Error('Only PDF, Word (.doc/.docx), JPG or PNG files are allowed'))
+  },
+})
+
+// POST /uploads/receipt-documents — attach one invoice/challan file to a GRN
+router.post('/receipt-documents', authenticate, requirePurchaseOn, (req, res, next) => {
+  if (!canReceive(req)) return res.status(403).json({ success: false, error: 'Only store and purchase staff attach documents to a goods receipt' })
+  uploadReceiptDoc.single('document')(req, res, (err) => {
+    if (err) return res.status(400).json({ success: false, error: err.message || 'Upload failed' })
+    next()
+  })
+}, async (req, res, next) => {
+  try {
+    const orgId = getOrgId(req)
+    const { receiptId, docType, label } = req.body
+    if (!receiptId || !docType) return res.status(400).json({ success: false, error: 'receiptId and docType are required' })
+    if (!req.file) return res.status(400).json({ success: false, error: 'No file uploaded' })
+
+    // Confirm the receipt belongs to this hospital (IDOR guard)
+    const receipt = await db.goodsReceipt.findFirst({ where: { id: receiptId, organizationId: orgId }, select: { id: true } })
+    if (!receipt) {
+      fs.unlinkSync(req.file.path)
+      return res.status(404).json({ success: false, error: 'Goods receipt not found' })
+    }
+
+    const fileUrl = `/uploads/receipt-documents/${req.file.filename}`
+    const doc = await db.goodsReceiptDocument.create({
+      data: {
+        organizationId: orgId,
+        receiptId,
+        docType,
+        label: label?.trim() || null,
+        fileName: req.file.originalname,
+        fileUrl,
+        uploadedById: req.user?.id || null,
+      },
+    })
+    res.json({ success: true, data: doc })
+  } catch (err) {
+    if (req.file) fs.unlink(req.file.path, () => {})
+    next(err)
+  }
+})
+
+// DELETE /uploads/receipt-documents/:id — remove an attachment (its file + row)
+router.delete('/receipt-documents/:id', authenticate, requirePurchaseOn, async (req, res, next) => {
+  try {
+    if (!canReceive(req)) return res.status(403).json({ success: false, error: 'Only store and purchase staff remove goods-receipt documents' })
+    const orgId = getOrgId(req)
+    const doc = await db.goodsReceiptDocument.findFirst({ where: { id: req.params.id, organizationId: orgId } })
+    if (!doc) return res.status(404).json({ success: false, error: 'Document not found' })
+    await db.goodsReceiptDocument.delete({ where: { id: doc.id } })
+    const filePath = path.join(UPLOAD_ROOT, 'receipt-documents', path.basename(doc.fileUrl))
+    if (filePath.startsWith(UPLOAD_ROOT)) fs.unlink(filePath, () => {})
+    res.json({ success: true })
+  } catch (err) { next(err) }
+})
+
+// GET /uploads/receipt-documents/:filename — serve a GRN document to this hospital's staff
+router.get('/receipt-documents/:filename', authenticate, requirePurchaseOn, async (req, res, next) => {
+  try {
+    if (!canReceive(req) && !canSeeBills(req)) return res.status(403).json({ success: false, error: 'Goods-receipt documents are for store and purchase staff' })
+    const { filename } = req.params
+    if (!/^[A-Za-z0-9._-]+$/.test(filename) || filename.includes('..')) {
+      return res.status(404).json({ success: false, error: 'File not found' })
+    }
+    const doc = await db.goodsReceiptDocument.findFirst({
+      where: { fileUrl: `/uploads/receipt-documents/${filename}` },
+      select: { organizationId: true },
+    })
+    if (!doc || getOrgId(req) !== doc.organizationId) {
+      return res.status(404).json({ success: false, error: 'File not found' })
+    }
+    const filePath = path.join(UPLOAD_ROOT, 'receipt-documents', filename)
     if (!filePath.startsWith(UPLOAD_ROOT) || !fs.existsSync(filePath)) {
       return res.status(404).json({ success: false, error: 'File not found' })
     }

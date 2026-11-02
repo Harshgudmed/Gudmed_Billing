@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useRef } from 'react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -7,7 +7,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Checkbox } from '@/components/ui/checkbox'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { FieldError } from '@/components/common/FieldError'
-import { Loader2, PackageCheck, CheckCheck, Eraser, AlertTriangle } from 'lucide-react'
+import { Loader2, PackageCheck, CheckCheck, Eraser, AlertTriangle, Upload, FileText, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { purchaseApi } from '@/api/purchaseApi'
 import { showApiError } from '@/lib/apiRequest'
@@ -49,17 +49,32 @@ function lineProblem(row, today) {
   return null
 }
 
+// What may ride along with a GRN — the vendor's invoice, the delivery challan,
+// the transporter's own (logistics) challan — each its own upload, so a
+// receipt with two scans does not need them squeezed into one file.
+const DOC_TYPES = [
+  { value: 'invoice', label: 'Vendor invoice' },
+  { value: 'delivery_challan', label: 'Delivery challan' },
+  { value: 'logistics_challan', label: 'Logistics / transporter challan' },
+]
+
 export default function ReceiveGoodsDialog({ order, open, onOpenChange, onReceived }) {
   const today = localYmd()
   const [rows, setRows] = useState([])
-  const [head, setHead] = useState({ challanNumber: '', challanDate: '', receivedOn: today, notes: '' })
+  const [head, setHead] = useState({ challanNumber: '', challanDate: '', receivedOn: today, notes: '', invoiceNumber: '', invoiceDate: '', ewayBillNumber: '' })
   const [saving, setSaving] = useState(false)
   const [tried, setTried] = useState(false)
+  // Picked here, uploaded only once the GRN itself exists (it needs the new
+  // receipt's id) — one extra request right after the save, not blocking it.
+  const [pendingDocs, setPendingDocs] = useState([]) // [{ docType, file }]
+  const fileInputRef = useRef(null)
+  const [pendingDocType, setPendingDocType] = useState('invoice')
 
   useEffect(() => {
     if (!open || !order) return
     setRows(order.lines.filter((l) => dueOf(l) > 0).map((line) => ({ line, arrived: String(dueOf(line)), rejected: '', reason: '', reasonOther: false, quality: 'passed', returnLot: true, batchNumber: '', expiryDate: '' })))
-    setHead({ challanNumber: '', challanDate: '', receivedOn: localYmd(), notes: '' })
+    setHead({ challanNumber: '', challanDate: '', receivedOn: localYmd(), notes: '', invoiceNumber: '', invoiceDate: '', ewayBillNumber: '' })
+    setPendingDocs([])
     setTried(false)
   }, [open, order])
 
@@ -93,6 +108,7 @@ export default function ReceiveGoodsDialog({ order, open, onOpenChange, onReceiv
         // Today keeps the actual time of arrival; an earlier day is that day.
         receivedAt: head.receivedOn === today ? null : head.receivedOn,
         challanNumber: head.challanNumber, challanDate: head.challanDate || null, notes: head.notes,
+        invoiceNumber: head.invoiceNumber, invoiceDate: head.invoiceDate || null, ewayBillNumber: head.ewayBillNumber,
         lines: taking.map((x) => ({
           orderLineId: x.line.id, receivedQty: qty(x.arrived), rejectedQty: qty(x.rejected),
           rejectReason: x.reason, qualityStatus: x.quality, returnLot: x.returnLot,
@@ -100,7 +116,15 @@ export default function ReceiveGoodsDialog({ order, open, onOpenChange, onReceiv
         })),
       })
       const into = r.data.lines.filter((l) => l.stockQty > 0).length
+      // Uploaded now, against the receipt we just got an id for — one by one,
+      // after the save: a failed upload must not lose the goods receipt itself.
+      let uploadFailed = 0
+      for (const { docType, file } of pendingDocs) {
+        try { await purchaseApi.uploadReceiptDoc(r.data.id, docType, null, file) }
+        catch { uploadFailed += 1 }
+      }
       toast.success(`${r.data.number} saved — ${into} item${into === 1 ? '' : 's'} added to stock`)
+      if (uploadFailed) toast.warning(`${uploadFailed} document${uploadFailed === 1 ? '' : 's'} could not be attached — add it from the receipt afterwards`)
       showNotifyWarning(r)
       onReceived?.(r.data)
       onOpenChange(false)
@@ -125,7 +149,7 @@ export default function ReceiveGoodsDialog({ order, open, onOpenChange, onReceiv
         <div className="space-y-4">
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
             <div>
-              <Label htmlFor="grn-challan">Challan / invoice no.</Label>
+              <Label htmlFor="grn-challan">Challan no.</Label>
               <Input id="grn-challan" value={head.challanNumber} maxLength={60} placeholder="As printed on the vendor's slip"
                 onChange={(e) => setHead((h) => ({ ...h, challanNumber: e.target.value }))} />
             </div>
@@ -147,6 +171,67 @@ export default function ReceiveGoodsDialog({ order, open, onOpenChange, onReceiv
               <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />{w}
             </p>
           ))}
+
+          {/* The vendor's invoice, recorded with the GRN itself — a record only
+              (no rate/GST), so the store may fill it. The Purchase Officer's
+              bill is still a separate step. */}
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3 rounded-md border p-3">
+            <div>
+              <Label htmlFor="grn-invno">Invoice no. <span className="text-gray-400 font-normal">(optional)</span></Label>
+              <Input id="grn-invno" value={head.invoiceNumber} maxLength={60} placeholder="As printed on the vendor's invoice"
+                onChange={(e) => setHead((h) => ({ ...h, invoiceNumber: e.target.value }))} />
+            </div>
+            <div>
+              <Label htmlFor="grn-invdate">Invoice date</Label>
+              <Input id="grn-invdate" type="date" max={today} value={head.invoiceDate}
+                onChange={(e) => setHead((h) => ({ ...h, invoiceDate: e.target.value }))} />
+            </div>
+            <div>
+              <Label htmlFor="grn-eway">E-way bill no. <span className="text-gray-400 font-normal">(optional)</span></Label>
+              <Input id="grn-eway" value={head.ewayBillNumber} maxLength={30} placeholder="GST e-way bill reference"
+                onChange={(e) => setHead((h) => ({ ...h, ewayBillNumber: e.target.value }))} />
+            </div>
+            <div className="sm:col-span-3 space-y-2">
+              <Label>Attach a scan <span className="text-gray-400 font-normal">(optional — JPG, PNG, PDF or Word, max 10 MB)</span></Label>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".jpg,.jpeg,.png,.pdf,.doc,.docx"
+                className="hidden"
+                id="grn-doc-upload"
+                onChange={(e) => {
+                  const file = e.target.files?.[0]
+                  if (file) setPendingDocs((ds) => [...ds, { docType: pendingDocType, file }])
+                  if (fileInputRef.current) fileInputRef.current.value = ''
+                }}
+              />
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                {DOC_TYPES.map((t) => {
+                  const attached = pendingDocs.filter((d) => d.docType === t.value)
+                  return (
+                    <div key={t.value} className="flex flex-col items-center gap-2 rounded-lg border border-dashed border-gray-300 p-3 text-center">
+                      <div className="flex h-10 w-10 items-center justify-center rounded-full bg-gray-100">
+                        <FileText className="h-5 w-5 text-gray-400" />
+                      </div>
+                      <p className="text-sm font-medium leading-tight text-blue-700">{t.label}</p>
+                      <Button type="button" size="sm" variant="outline" onClick={() => { setPendingDocType(t.value); fileInputRef.current?.click() }}>
+                        <Upload className="h-4 w-4 mr-1.5" />Upload Document
+                      </Button>
+                      {attached.map((d, i) => (
+                        <div key={i} className="flex w-full items-center justify-between gap-1 rounded bg-gray-50 px-1.5 py-1 text-xs">
+                          <span className="truncate">{d.file.name}</span>
+                          <button type="button" className="shrink-0 text-red-500" title="Remove"
+                            onClick={() => setPendingDocs((ds) => ds.filter((x) => x !== d))}>
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          </div>
 
           <div className="flex flex-wrap items-center justify-between gap-2">
             <p className="text-sm text-gray-600">

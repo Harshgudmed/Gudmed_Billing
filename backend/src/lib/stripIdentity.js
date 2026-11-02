@@ -38,7 +38,10 @@ const IDENTITY = {
   // update schema is .passthrough(), so without these a caller could sign a
   // result off in a pathologist's name they picked themselves.
   labResult:       ['orderId', 'testId', 'enteredById', 'verifiedById'],
-  radiologyReport: ['orderId'],
+  // enteredById/verifiedById → reportedById/verifiedById here: signatures on a
+  // signed clinical document, resolved from the session (radiologyController.js
+  // signerId()), never accepted from the request body.
+  radiologyReport: ['orderId', 'reportedById', 'verifiedById'],
 
   // Catalogue rows own nothing beyond ALWAYS.
   labTest:         [],

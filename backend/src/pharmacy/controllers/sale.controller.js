@@ -95,7 +95,7 @@ export async function create(req, res, next) {
       const drugsById = new Map()
       for (const item of parsed.items) {
         const drug = await tx.pharmacyDrug.findFirst({
-          where: { id: item.drugId, organizationId: ORGANIZATION_ID },
+          where: { id: item.drugId, organizationId: ORGANIZATION_ID, isActive: true },
           select: { id: true, drugName: true, quantityInStock: true, gstRate: true, sellingPrice: true, mrp: true },
         })
         if (!drug) {
@@ -149,7 +149,7 @@ export async function create(req, res, next) {
       const enrichedItems = []
       for (const item of items) {
         const drug = drugsById.get(item.drugId)
-        const { consumed } = await consumeFromBatches(tx, { drugId: item.drugId, quantity: item.quantity })
+        const { consumed } = await consumeFromBatches(tx, { organizationId: ORGANIZATION_ID, drugId: item.drugId, quantity: item.quantity })
         enrichedItems.push({
           ...item,
           gstRate: drug.gstRate || 0,
@@ -328,6 +328,7 @@ export async function cancel(req, res, next) {
 
     res.json({ success: true, data })
   } catch (err) {
-    handleServiceError(err, res, next)
+    if (handleServiceError(res, err)) return
+    next(err)
   }
 }

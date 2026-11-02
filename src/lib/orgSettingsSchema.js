@@ -55,6 +55,11 @@ export const ORG_SETTING_FIELDS = [
     label: 'E-mail RFQs to vendors' },
   { key: 'purchaseRequireBillInvoice', type: 'bool', default: false,
     label: "Require the vendor's invoice attached before a bill can be paid" },
+  // A reusable Terms & Conditions block every new order starts from — one
+  // place to keep it, instead of retyped (or copy-pasted) on each order.
+  // Blank = the built-in default (backend/src/controllers/purchaseOrderController.js).
+  { key: 'purchaseDefaultTerms', type: 'text', default: '',
+    label: 'Default Terms & Conditions for purchase orders' },
 
   // Spoken announcements on the waiting-hall display boards.
   //

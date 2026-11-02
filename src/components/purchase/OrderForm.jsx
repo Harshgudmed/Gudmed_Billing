@@ -8,7 +8,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { SearchableSelect } from '@/components/ui/searchable-select'
 import { QuantityInput } from '@/components/ui/quantity-input'
-import { Plus, Trash2, Loader2, Send, Info } from 'lucide-react'
+import { Checkbox } from '@/components/ui/checkbox'
+import { Plus, Trash2, Loader2, Send, Info, Tag } from 'lucide-react'
 import { toast } from 'sonner'
 import { purchaseApi } from '@/api/purchaseApi'
 import { showApiError } from '@/lib/apiRequest'
@@ -48,8 +49,12 @@ export default function OrderForm({ open, onOpenChange, order, onSaved }) {
   const [categories, setCategories] = useState([])
   const [gstRates, setGstRates] = useState([])
   const [hospitalStateCode, setHospitalStateCode] = useState(null)
-  const [form, setForm] = useState({ vendorId: '', expectedDate: '', terms: '', notes: '', currency: 'INR', exchangeRate: '1' })
+  const [form, setForm] = useState({ vendorId: '', expectedDate: '', terms: '', notes: '', currency: 'INR', exchangeRate: '1', deliverElsewhere: false, deliveryAddress: '' })
   const [lines, setLines] = useState([blankLine()])
+  // Active rate contracts for this vendor, by item — looked up as items are
+  // picked, so the line can offer the contracted rate (sir: "Rate Contract
+  // auto-trigger"). Reset whenever the vendor changes: a contract is per vendor.
+  const [rateContracts, setRateContracts] = useState({})
   const [loading, setLoading] = useState(false)
   // The form could not be filled (a list or a draft line's item did not load):
   // it says so with a retry, and cannot be saved over the draft half-loaded.
@@ -81,6 +86,7 @@ export default function OrderForm({ open, onOpenChange, order, onSaved }) {
             vendorId: order.vendorId, expectedDate: order.expectedDate ? String(order.expectedDate).slice(0, 10) : '',
             terms: order.terms || '', notes: order.notes || '',
             currency: order.currency || 'INR', exchangeRate: order.exchangeRate ? String(order.exchangeRate) : '1',
+            deliverElsewhere: !!order.deliverElsewhere, deliveryAddress: order.deliveryAddress || '',
           })
           setLines(order.lines.map((l) => ({
             key: nextKey++, categoryId: byId.get(l.itemId)?.categoryId || '', itemId: l.itemId, itemName: l.itemName, item: byId.get(l.itemId) || null,
@@ -90,9 +96,10 @@ export default function OrderForm({ open, onOpenChange, order, onSaved }) {
             gstRate: String(l.gstRate), requestLineId: l.requestLineId, requestNumber: l.requestLine?.request?.number || null, note: l.note || '',
           })))
         } else {
-          setForm({ vendorId: '', expectedDate: '', terms: '', notes: '', currency: 'INR', exchangeRate: '1' })
+          setForm({ vendorId: '', expectedDate: '', terms: '', notes: '', currency: 'INR', exchangeRate: '1', deliverElsewhere: false, deliveryAddress: '' })
           setLines([blankLine()])
         }
+        setRateContracts({})
       } catch (err) {
         if (!alive) return
         setLoadFailed(true)
@@ -116,7 +123,23 @@ export default function OrderForm({ open, onOpenChange, order, onSaved }) {
   const inr = (v) => formatMoney(round2((Number(v) || 0) * exRate))
   const vendorOptions = useMemo(() => vendors.map((v) => ({ value: v.id, label: v.name, sublabel: [v.code, v.city, v.gstNumber ? 'GST registered' : 'Not GST registered'].filter(Boolean).join(' · ') })), [vendors])
 
+  // Rate-contract lookup: as soon as a line has both an item and this order's
+  // vendor, ask whether a contract covers it. Re-runs when either changes;
+  // never re-fetches an item already looked up for this vendor.
+  const itemIdsOnLines = lines.map((l) => l.itemId).filter(Boolean).join(',')
+  useEffect(() => {
+    if (!form.vendorId) return
+    const ids = itemIdsOnLines ? itemIdsOnLines.split(',') : []
+    const missing = ids.filter((id) => !(id in rateContracts))
+    if (!missing.length) return
+    let alive = true
+    Promise.all(missing.map((id) => purchaseApi.getActiveRateContract(id, form.vendorId).then((r) => [id, r?.data || null]).catch(() => [id, null])))
+      .then((pairs) => { if (alive) setRateContracts((rc) => ({ ...rc, ...Object.fromEntries(pairs) })) })
+    return () => { alive = false }
+  }, [form.vendorId, itemIdsOnLines, rateContracts])
+
   const setLine = (key, patch) => setLines((ls) => ls.map((l) => (l.key === key ? { ...l, ...patch } : l)))
+  const applyContractRate = (line, rc) => setLine(line.key, { rate: String(rc.rate), gstRate: rc.gstRate != null ? String(rc.gstRate) : line.gstRate })
   const pickCategory = (line, value) => {
     const categoryId = value === ALL ? '' : value
     if (categoryId === line.categoryId) return
@@ -141,6 +164,7 @@ export default function OrderForm({ open, onOpenChange, order, onSaved }) {
   const body = () => ({
     vendorId: form.vendorId, expectedDate: form.expectedDate || null, terms: form.terms, notes: form.notes,
     currency: form.currency, exchangeRate: exRate,
+    deliverElsewhere: form.deliverElsewhere, deliveryAddress: form.deliverElsewhere ? form.deliveryAddress : '',
     lines: lines.filter((l) => l.itemId).map((l) => ({
       // Rates are entered in the order's currency; send INR (× exchangeRate) so the
       // server stores, GST-taxes and pays in rupees exactly as before.
@@ -176,7 +200,7 @@ export default function OrderForm({ open, onOpenChange, order, onSaved }) {
     }
   }
 
-  const ready = form.vendorId && lines.some((l) => l.itemId) && (!foreign || exRate > 0)
+  const ready = form.vendorId && lines.some((l) => l.itemId) && (!foreign || exRate > 0) && (!form.deliverElsewhere || form.deliveryAddress.trim())
 
   return (
     <Dialog open={open} onOpenChange={(v) => !saving && onOpenChange(v)}>
@@ -198,7 +222,7 @@ export default function OrderForm({ open, onOpenChange, order, onSaved }) {
               <div className="space-y-1 md:col-span-2">
                 <Label>Vendor *</Label>
                 <SearchableSelect className="w-full" options={vendorOptions} value={form.vendorId}
-                  selectedLabel={order?.vendorName} onChange={(v) => setForm((f) => ({ ...f, vendorId: v }))}
+                  selectedLabel={order?.vendorName} onChange={(v) => { setForm((f) => ({ ...f, vendorId: v })); setRateContracts({}) }}
                   placeholder="Who will supply it?" emptyText="No vendor — add one in the Vendors tab" />
                 {vendor && (
                   <p className="flex flex-wrap items-center gap-2 text-xs text-gray-500">
@@ -277,6 +301,15 @@ export default function OrderForm({ open, onOpenChange, order, onSaved }) {
                                   emptyText="No item found — add it in the Items tab" contentClassName="w-[420px]" />
                               </div>
                             )}
+                            {l.itemId && rateContracts[l.itemId] && (
+                              <div className="mt-1 flex items-center gap-1.5 rounded-md bg-blue-50 px-2 py-1 text-xs text-blue-800">
+                                <Tag className="h-3 w-3 shrink-0" />
+                                <span>Rate contract {rateContracts[l.itemId].number}: {formatMoney(rateContracts[l.itemId].rate)}, valid till {new Date(rateContracts[l.itemId].validTo).toLocaleDateString('en-IN')}</span>
+                                {String(l.rate) !== String(rateContracts[l.itemId].rate) && (
+                                  <Button type="button" size="sm" variant="link" className="h-auto p-0 text-blue-700 underline" onClick={() => applyContractRate(l, rateContracts[l.itemId])}>Use this rate</Button>
+                                )}
+                              </div>
+                            )}
                           </td>
                           <td className="px-2 py-2">
                             <Select value={l.unitId} onValueChange={(v) => pickUnit(l, v)} disabled={!l.item}>
@@ -335,6 +368,20 @@ export default function OrderForm({ open, onOpenChange, order, onSaved }) {
                 <div className="space-y-1">
                   <Label htmlFor="po-notes">Internal note <span className="font-normal text-gray-400">(not printed)</span></Label>
                   <Input id="po-notes" value={form.notes} onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))} />
+                </div>
+                <div className="space-y-2 rounded-md border p-3">
+                  <label className="flex items-center gap-2 text-sm">
+                    <Checkbox checked={form.deliverElsewhere} onCheckedChange={(v) => setForm((f) => ({ ...f, deliverElsewhere: !!v }))} />
+                    Deliver somewhere other than the hospital's own warehouse
+                  </label>
+                  {form.deliverElsewhere && (
+                    <div className="space-y-1">
+                      <Label htmlFor="po-deliveryaddress">Delivery address</Label>
+                      <Textarea id="po-deliveryaddress" rows={2} value={form.deliveryAddress} maxLength={300}
+                        placeholder="e.g. Site office, New Wing construction, Plot 12, …"
+                        onChange={(e) => setForm((f) => ({ ...f, deliveryAddress: e.target.value }))} />
+                    </div>
+                  )}
                 </div>
               </div>
               <dl className="self-start space-y-1.5 rounded-md bg-gray-50 p-4 text-sm">

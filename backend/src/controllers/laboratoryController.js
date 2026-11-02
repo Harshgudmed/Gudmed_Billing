@@ -470,6 +470,17 @@ export const update = async (req, res, next) => {
         // technician collecting the sample in the same instant must win, not be
         // silently overwritten by a cancel read a moment earlier.
         if (updates.status === 'cancelled') {
+          // orderCancelCheck above ran against `db`, before this transaction —
+          // a payment landing in that gap would otherwise still cancel the order
+          // while `amountPaid: { lte: 0 }` below matched zero rows, leaving a
+          // cancelled order with a stranded, still-live paid bill. Re-check the
+          // bill's live state here, inside the transaction, right before writing.
+          if (cancelBill) {
+            const live = await tx.invoice.findFirst({ where: { id: cancelBill.id, organizationId: ORGANIZATION_ID }, select: { amountPaid: true } })
+            if (live && live.amountPaid > 0.005) {
+              throw Object.assign(new Error(`This order is paid on ${cancelBill.invoiceNumber}. Cancel it in Billing with "Cancel & refund" so the patient gets the money back.`), { status: 409 })
+            }
+          }
           const { count } = await tx.labOrder.updateMany({
             where: { id, organizationId: ORGANIZATION_ID, status: 'pending' },
             data: { status: 'cancelled', rejectionReason: String(updates.rejectionReason).trim() },

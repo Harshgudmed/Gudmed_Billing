@@ -57,6 +57,12 @@ const receiptSchema = z.object({
   receivedAt: optDate,
   challanNumber: optText(60),
   challanDate: optDate,
+  // The vendor's invoice, recorded with the GRN itself (sir: "invoice
+  // accepted together with the GRN") — a record only, no rate/GST; the
+  // Purchase Officer's bill is a separate step and starts prefilled from this.
+  invoiceNumber: optText(60),
+  invoiceDate: optDate,
+  ewayBillNumber: optText(30),
   notes: optText(500),
   lines: z.array(z.object({
     orderLineId: z.string().min(1),
@@ -93,6 +99,7 @@ async function lockItems(tx, itemIds) {
 const RECEIPT_INCLUDE = {
   lines: { orderBy: { itemName: 'asc' } },
   order: { select: { id: true, number: true, status: true } },
+  documents: { orderBy: { uploadedAt: 'desc' }, select: { id: true, docType: true, label: true, fileName: true, fileUrl: true, uploadedAt: true } },
 }
 
 // ── Reads ────────────────────────────────────────────────────────────────────
@@ -266,7 +273,7 @@ export async function grnCreate(req, res, next) {
     if (!canReceive(req)) throw forbidden('Only store and purchase staff receive goods')
     const parsed = receiptSchema.safeParse(req.body)
     if (!parsed.success) return validationError(res, parsed.error)
-    const { orderId, challanNumber, challanDate, notes, lines } = parsed.data
+    const { orderId, challanNumber, challanDate, invoiceNumber, invoiceDate, ewayBillNumber, notes, lines } = parsed.data
     const now = new Date()
     const receivedAt = parsed.data.receivedAt || now
     if (receivedAt > new Date(now.getTime() + SOON_MINUTES)) throw bad('The received date cannot be in the future')
@@ -322,6 +329,7 @@ export async function grnCreate(req, res, next) {
         data: {
           organizationId: ORG_ID, number, orderId: po.id, vendorId: po.vendorId, vendorName: po.vendorName,
           receivedAt, challanNumber: challanNumber || null, challanDate: challanDate || null,
+          invoiceNumber: invoiceNumber || null, invoiceDate: invoiceDate || null, ewayBillNumber: ewayBillNumber || null,
           receivedById: actor.id, receivedByName: actor.name || 'Staff', notes: notes || null,
           totalValue: round2(rows.reduce((s, r) => s + r.stockQty * r.unitCost, 0)),
           reconciled,

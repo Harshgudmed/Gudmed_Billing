@@ -983,6 +983,15 @@ export async function create(req, res) {
       let payment
       try {
         payment = await db.$transaction(async (tx) => {
+        // Lock the invoice row FIRST, same as the refund path below: recalcInvoice
+        // reads every Payment row and overwrites amountPaid/balanceDue with a fresh
+        // sum, not an increment — so two payments landing in the same instant could
+        // otherwise each compute from a snapshot that misses the other's row, and
+        // whichever commits last would overwrite the invoice cache with a total that
+        // silently drops the first payment (both Payment rows still exist; only the
+        // cached total goes briefly stale). Locking first makes the second wait and
+        // then read the balance the first one left, so its recompute is always complete.
+        await tx.$executeRaw`SELECT 1 FROM "Invoice" WHERE "id" = ${invoiceId} AND "organizationId" = ${ORGANIZATION_ID} FOR UPDATE`
         const invoice = await tx.invoice.findFirst({
           where: { id: invoiceId, organizationId: ORGANIZATION_ID },
           select: { id: true, isArchived: true, status: true, patientId: true },

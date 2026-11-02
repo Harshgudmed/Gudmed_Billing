@@ -11,6 +11,7 @@ import { Plus, Pencil, Loader2, Ban, RotateCcw, Upload, Trash2, FileText, Extern
 import { toast } from 'sonner'
 import { PaginatedTable } from '@/components/common/PaginatedTable'
 import { FilterBar, FilterSelect } from '@/components/common/FilterBar'
+import { SearchableSelect } from '@/components/ui/searchable-select'
 import { useDateFilter } from '@/components/common/DateFilter'
 import { useServerPagination } from '@/lib/useServerPagination'
 import { useDebounce } from '@/lib/useDebounce'
@@ -56,7 +57,7 @@ const TDS_SECTIONS = [
 const NONE = '__none'
 
 const EMPTY = {
-  name: '', contactPerson: '', phone: '', vrfNumber: '', contactPerson2: '', phone2: '', email: '', vendorType: '',
+  name: '', contactPerson: '', phone: '', vrfNumber: '', contactPerson2: '', phone2: '', email: '', vendorType: '', category: '',
   gstNumber: '', pan: '', stateCode: '', msmeNumber: '', defaultTdsSection: '',
   houseNumber: '', street: '', locality: '', city: '', district: '', pincode: '',
   bankAccountName: '', bankName: '', bankAccountNumber: '', bankIfsc: '', paymentTermsDays: '',
@@ -77,6 +78,7 @@ export default function VendorsMaster({ onChanged }) {
   const [search, setSearch] = useState('')
   const [status, setStatus] = useState('all')
   const [vendorType, setVendorType] = useState('all')
+  const [category, setCategory] = useState('')
   const dateFilter = useDateFilter('all', { showClear: false })
   const debouncedSearch = useDebounce(search, 300)
   const vendors = useServerPagination(PURCHASE_ENDPOINT, {
@@ -85,12 +87,16 @@ export default function VendorsMaster({ onChanged }) {
       search: debouncedSearch,
       status: status === 'all' ? '' : status,
       vendorType: vendorType === 'all' ? '' : vendorType,
+      category,
       startDate: dateFilter.range.startDate,
       endDate: dateFilter.range.endDate,
     },
   })
   // A vendor added on another screen appears here on its own.
   useLiveData('purchase', vendors.refresh)
+  // Categories already in use — the filter's options and the form's suggestions.
+  const categories = usePickList(purchaseApi.getVendorCategories)
+  const categoryOptions = useMemo(() => categories.list.map((c) => ({ value: c, label: c })), [categories.list])
 
   const states = usePickList(purchaseApi.getStates)
   const statesByCode = useMemo(() => Object.fromEntries(states.list.map((s) => [s.code, s.name])), [states.list])
@@ -267,8 +273,8 @@ export default function VendorsMaster({ onChanged }) {
         search={search}
         onSearchChange={setSearch}
         placeholder="Search vendor name, code, GSTIN, phone or city…"
-        active={!!search || status !== 'all' || vendorType !== 'all' || dateFilter.active}
-        onClear={() => { setSearch(''); setStatus('all'); setVendorType('all'); dateFilter.reset() }}
+        active={!!search || status !== 'all' || vendorType !== 'all' || !!category || dateFilter.active}
+        onClear={() => { setSearch(''); setStatus('all'); setVendorType('all'); setCategory(''); dateFilter.reset() }}
         actions={canManageMasters && (
           <div className="flex gap-2">
             <Button variant="outline" onClick={() => { setImportResult(null); setImportOpen(true) }}>
@@ -280,6 +286,14 @@ export default function VendorsMaster({ onChanged }) {
       >
         <FilterSelect value={status} onChange={setStatus} options={STATUS_OPTIONS} />
         <FilterSelect value={vendorType} onChange={setVendorType} options={VENDOR_TYPE_FILTER} />
+        <SearchableSelect
+          className="w-44"
+          options={categoryOptions}
+          value={category}
+          onChange={setCategory}
+          placeholder="All categories"
+          emptyText="No category set on any vendor yet"
+        />
         {dateFilter.control}
       </FilterBar>
 
@@ -301,7 +315,7 @@ export default function VendorsMaster({ onChanged }) {
                   {/* An MSME must be paid within 45 days by law — worth seeing at a glance. */}
                   {v.msmeNumber && <Badge variant="outline" className="border-blue-200 bg-blue-50 text-blue-700 text-[10px] px-1.5 py-0" title={v.msmeNumber}>MSME</Badge>}
                 </div>
-                {(v.contactPerson || v.city) && <div className="text-xs text-gray-500">{[v.contactPerson, v.city].filter(Boolean).join(' · ')}</div>}
+                {(v.contactPerson || v.city || v.category) && <div className="text-xs text-gray-500">{[v.contactPerson, v.city, v.category].filter(Boolean).join(' · ')}</div>}
               </TableCell>
               <TableCell className="font-mono text-xs">{v.gstNumber || <span className="text-gray-400 font-sans">Unregistered</span>}</TableCell>
               <TableCell className="text-sm">{statesByCode[v.stateCode] || '—'}</TableCell>
@@ -448,6 +462,17 @@ export default function VendorsMaster({ onChanged }) {
                     {VENDOR_TYPES.map((t) => <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>)}
                   </SelectContent>
                 </Select>
+              </Field>
+              <Field label="Category" id="v-category" hint="e.g. Furniture, Pharma, Medical Equipment — type a new one or pick an existing one">
+                <SearchableSelect
+                  options={categoryOptions}
+                  value={form.category}
+                  onChange={(v) => setField('category', v)}
+                  allowCustom
+                  placeholder="Not set"
+                  searchPlaceholder="Type to search or add…"
+                  emptyText="Type to add a new category"
+                />
               </Field>
             </Section>
 

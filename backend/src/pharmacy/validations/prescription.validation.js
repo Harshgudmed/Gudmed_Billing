@@ -8,11 +8,12 @@ export const createPrescriptionSchema = z.object({
   notes: z.string().optional(),
 })
 
-// Whitelisted update fields — patientId, doctorId, organizationId, createdAt, updatedAt NOT included
+// Whitelisted update fields — patientId, doctorId, organizationId, createdAt, updatedAt NOT included.
+// dispensedById / dispensedAt are deliberately NOT here: only POST /dispense sets
+// them, from the authenticated caller — accepting them on this plain PATCH let
+// any pharmacy-role request attribute a dispense to someone else.
 export const updatePrescriptionSchema = z.object({
   status: z.string().optional(),
-  dispensedById: z.string().optional(),
-  dispensedAt: z.string().optional(),
   notes: z.string().optional(),
   items: z.array(z.any()).optional(),
   isRefill: z.boolean().optional(),

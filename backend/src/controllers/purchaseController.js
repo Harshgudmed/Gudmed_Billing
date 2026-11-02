@@ -39,6 +39,7 @@ import { paymentGet, paymentCreate, paymentUpdate, paymentRemove, PAYMENT_READS,
 import { returnGet, returnCreate, returnUpdate, returnRemove, RETURN_READS, RETURN_WRITES } from './purchaseReturnController.js'
 import { rfqGet, rfqCreate, rfqUpdate, rfqRemove, RFQ_READS, RFQ_WRITES } from './purchaseRfqController.js'
 import { reportGet, REPORT_READS } from './purchaseReportController.js'
+import { rcGet, rcCreate, rcUpdate, RATE_CONTRACT_READS, RATE_CONTRACT_WRITES } from './purchaseRateContractController.js'
 import { loadPurchaseSettings } from '../lib/purchaseSettings.js'
 import { itemSearchWhere } from '../lib/purchaseLines.js'
 import { GST_RATES } from '../lib/purchaseOrders.js'
@@ -107,6 +108,9 @@ const vendorFields = {
   paymentTermsDays: z.preprocess((v) => (v === undefined ? undefined : blank(v) ? null : Number(v)),
     z.number({ invalid_type_error: 'Payment terms must be a number of days' }).int().min(0).max(365).nullable().optional()),
   vendorType: optEnum(['goods', 'services', 'both']),
+  // What the vendor supplies, the hospital's own wording — a free-text filter
+  // category, not a fixed list (see Vendor.category in schema.prisma).
+  category: optText(60),
   msmeNumber: optText(30),
   defaultTdsSection: optEnum(['194C', '194J', '194I', '194H', '194Q']),
 }
@@ -349,6 +353,7 @@ export async function create(req, res, next) {
   if (PAYMENT_WRITES.has(req.body?.resource)) return paymentCreate(req, res, next)
   if (RETURN_WRITES.has(req.body?.resource)) return returnCreate(req, res, next)
   if (RFQ_WRITES.has(req.body?.resource)) return rfqCreate(req, res, next)
+  if (RATE_CONTRACT_WRITES.has(req.body?.resource)) return rcCreate(req, res, next)
   try {
     const ORG_ID = getOrgId(req)
     const { resource } = req.body
@@ -563,6 +568,7 @@ export async function update(req, res, next) {
   if (PAYMENT_WRITES.has(req.body?.resource)) return paymentUpdate(req, res, next)
   if (RETURN_WRITES.has(req.body?.resource)) return returnUpdate(req, res, next)
   if (RFQ_WRITES.has(req.body?.resource)) return rfqUpdate(req, res, next)
+  if (RATE_CONTRACT_WRITES.has(req.body?.resource)) return rcUpdate(req, res, next)
   try {
     const ORG_ID = getOrgId(req)
     const { resource } = req.body
@@ -752,6 +758,7 @@ export async function getAll(req, res, next) {
   if (RETURN_READS.has(req.query?.resource)) return returnGet(req, res, next)
   if (RFQ_READS.has(req.query?.resource)) return rfqGet(req, res, next)
   if (REPORT_READS.has(req.query?.resource)) return reportGet(req, res, next)
+  if (RATE_CONTRACT_READS.has(req.query?.resource)) return rcGet(req, res, next)
   // How this hospital runs payments, returns and RFQs (Settings → Purchase):
   // the screens show the right buttons from it; the server decides with it.
   if (req.query?.resource === 'purchase-settings') {
@@ -813,16 +820,17 @@ export async function getAll(req, res, next) {
     }
 
     // The vendor list is for those who order and those who pay, not the store.
-    if (['vendors', 'vendor', 'vendor-documents'].includes(resource) && !canSeeVendors(req)) {
+    if (['vendors', 'vendor', 'vendor-documents', 'vendor-categories'].includes(resource) && !canSeeVendors(req)) {
       return res.status(403).json({ success: false, error: 'Vendors are kept by the purchase team' })
     }
 
     if (resource === 'vendors') {
-      const { search, status, vendorType, startDate, endDate } = req.query
+      const { search, status, vendorType, category, startDate, endDate } = req.query
       const where = { organizationId: ORG_ID }
       if (status === 'active') where.isActive = true
       else if (status === 'inactive') where.isActive = false
       if (['goods', 'services', 'both'].includes(vendorType)) where.vendorType = vendorType
+      if (String(category || '').trim()) where.category = String(category).trim()
       if (startDate || endDate) where.createdAt = dayRange(startDate, endDate)
       const term = String(search || '').trim()
       if (term) {
@@ -832,6 +840,17 @@ export async function getAll(req, res, next) {
       const body = await listResponse(db.vendor, { where, orderBy: { name: 'asc' }, req })
       body.data = body.data.map((v) => withBank(v, false))
       return res.json(body)
+    }
+
+    // Distinct categories already used by this hospital's vendors — the filter's
+    // options and the add/edit form's suggestions (SearchableSelect allowCustom:
+    // a hospital types its own, nothing to set up in Settings first).
+    if (resource === 'vendor-categories') {
+      const rows = await db.vendor.findMany({
+        where: { organizationId: ORG_ID, category: { not: null } },
+        select: { category: true }, distinct: ['category'], orderBy: { category: 'asc' },
+      })
+      return res.json({ success: true, data: rows.map((r) => r.category).filter(Boolean) })
     }
 
     if (resource === 'vendor') {
@@ -932,7 +951,7 @@ export async function getAll(req, res, next) {
       return res.json({ success: true, data: budget })
     }
 
-    return res.status(400).json({ success: false, error: 'Unknown resource. Use: units, categories, vendors, vendor, items, item, states, gst-rates, hsn-search, budgets, budget, requests, request, dashboard, approval-rules, orders, order, order-candidates' })
+    return res.status(400).json({ success: false, error: 'Unknown resource. Use: units, categories, vendors, vendor, vendor-categories, items, item, states, gst-rates, hsn-search, budgets, budget, requests, request, dashboard, approval-rules, orders, order, order-candidates' })
   } catch (err) {
     next(err)
   }

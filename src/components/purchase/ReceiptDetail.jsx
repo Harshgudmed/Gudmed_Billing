@@ -4,7 +4,7 @@ import { Badge } from '@/components/ui/badge'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
-import { Loader2, Ban, Printer } from 'lucide-react'
+import { Loader2, Ban, Printer, FileText, ExternalLink } from 'lucide-react'
 import { toast } from 'sonner'
 import { purchaseApi } from '@/api/purchaseApi'
 import { showApiError } from '@/lib/apiRequest'
@@ -16,6 +16,13 @@ import { printReceipt } from './orderPrint'
 // into stock and what was turned back. An administrator can cancel it — the
 // goods come back out of stock and are due on the order again — as long as
 // none of them has left the store.
+
+const DOC_TYPE_LABEL = {
+  invoice: 'Vendor invoice',
+  delivery_challan: 'Delivery challan',
+  logistics_challan: 'Logistics / transporter challan',
+  other: 'Other document',
+}
 
 export default function ReceiptDetail({ id, open, onOpenChange, onChanged, onOpenOrder }) {
   const me = useMe()
@@ -78,10 +85,32 @@ export default function ReceiptDetail({ id, open, onOpenChange, onChanged, onOpe
                   : <span className="font-mono">{grn.order?.number}</span>}
                 {' '}· received {formatDateTime(grn.receivedAt)} by {grn.receivedByName}
                 {grn.challanNumber && <> · challan {grn.challanNumber}{grn.challanDate && ` of ${formatDateTime(grn.challanDate, { withTime: false })}`}</>}
+                {grn.invoiceNumber && <> · invoice {grn.invoiceNumber}{grn.invoiceDate && ` of ${formatDateTime(grn.invoiceDate, { withTime: false })}`}</>}
+                {grn.ewayBillNumber && <> · e-way bill {grn.ewayBillNumber}</>}
               </DialogDescription>
             </DialogHeader>
 
             <div className="space-y-4">
+              {grn.documents?.length > 0 && (
+                <div className="rounded-md border divide-y">
+                  {grn.documents.map((d) => (
+                    <div key={d.id} className="flex items-center justify-between px-3 py-2 gap-2">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <FileText className="h-4 w-4 text-gray-400 shrink-0" />
+                        <div className="min-w-0">
+                          <p className="text-sm font-medium truncate">{d.label || d.fileName}</p>
+                          <p className="text-xs text-gray-500">{DOC_TYPE_LABEL[d.docType] || d.docType} · {d.fileName}</p>
+                        </div>
+                      </div>
+                      <a href={d.fileUrl} target="_blank" rel="noreferrer">
+                        <Button type="button" size="icon" variant="ghost" title="Open document" aria-label="Open document">
+                          <ExternalLink className="h-4 w-4 text-blue-600" />
+                        </Button>
+                      </a>
+                    </div>
+                  ))}
+                </div>
+              )}
               {grn.status === 'cancelled' && (
                 <p className="rounded-md bg-gray-50 px-3 py-2 text-sm">
                   <span className="text-gray-500">Cancelled by {grn.cancelledByName} on {formatDateTime(grn.cancelledAt)}: </span>{grn.cancelReason}

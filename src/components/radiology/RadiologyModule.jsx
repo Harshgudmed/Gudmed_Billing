@@ -35,6 +35,7 @@ import PatientLookup from '@/components/common/PatientLookup'
 // to this module paid for it on page load.
 const BulkImportDialog = lazy(() => import('@/components/common/BulkImportDialog'))
 import client from '@/api/client'
+import { showApiError } from '@/lib/apiRequest'
 import { getFullName, calcAge } from "@/lib/patient";
 // Names, complaints and clinical notes are typed by people and printed into a
 // window that shares this app's origin — any HTML in them would run there, so
@@ -433,7 +434,11 @@ export default function RadiologyModule() {
               amountPaid: orderForm.amountPaid,
               paymentMethod: orderForm.paymentMethod,
             })
-          } catch { /* non-fatal — order is created regardless of billing */ }
+          } catch (err) {
+            // The order IS created — say so, and say billing needs a manual
+            // follow-up, instead of staying silent after the success toast above.
+            showApiError(err, `Order ${res.data.orderNumber || ''} is saved, but the bill was not created — raise it from Billing`)
+          }
         }
       }
     } catch (e) { toast.error(e.message || 'Failed to create order') }
@@ -671,7 +676,7 @@ ${report.hasCriticalFindings ? `<div class="critical-banner"><div style="font-we
 </div>
 ${order.clinicalIndication ? `<div class="section"><div class="section-header">Clinical Indication</div><div class="section-body">${escapeHtml(order.clinicalIndication)}</div></div>` : ''}
 ${report.technique ? `<div class="section"><div class="section-header">Technique</div><div class="section-body">${escapeHtml(report.technique)}</div></div>` : ''}
-${report.comparedWithPrevious ? `<div class="section"><div class="section-header">Comparison</div><div class="section-body">Compared with previous study. ${report.comparisonNotes || ''}</div></div>` : ''}
+${report.comparedWithPrevious ? `<div class="section"><div class="section-header">Comparison</div><div class="section-body">Compared with previous study. ${escapeHtml(report.comparisonNotes || '')}</div></div>` : ''}
 <div class="section"><div class="section-header">Findings</div><div class="section-body">${escapeHtml(report.findings || '—')}</div></div>
 <div class="impression-box">
   <div style="font-weight:bold;font-size:11pt;color:#1e3a5f;text-transform:uppercase;margin-bottom:6px">Impression</div>
@@ -727,7 +732,7 @@ body{font-family:'Times New Roman',Times,serif;font-size:11pt;padding:30px}
 </style></head><body>
 <div class="hosp-header">
   <div><div class="hosp-name">${orgInfo.name}</div><div style="font-size:9pt;color:#555">Radiology &amp; Imaging Department</div></div>
-  <div style="font-size:8.5pt;color:#555;text-align:right">Order #: <strong>${escapeHtml(order.orderNumber)}</strong><br/>Accession: ${reportAccession || '—'}<br/>Date: ${orderDate}<br/>Print: ${printDate}</div>
+  <div style="font-size:8.5pt;color:#555;text-align:right">Order #: <strong>${escapeHtml(order.orderNumber)}</strong><br/>Accession: ${escapeHtml(reportAccession || '—')}<br/>Date: ${orderDate}<br/>Print: ${printDate}</div>
 </div>
 <div class="banner">RADIOLOGY REPORT</div>
 <div class="info-box">
@@ -736,13 +741,13 @@ body{font-family:'Times New Roman',Times,serif;font-size:11pt;padding:30px}
     <div class="info-cell"><div class="info-label">Patient Name</div><div class="info-value"><strong>${escapeHtml(patientName)}</strong></div></div>
     <div class="info-cell"><div class="info-label">UHID</div><div class="info-value">${escapeHtml(order.patient?.mrn || '—')}</div></div>
     <div class="info-cell"><div class="info-label">Exam</div><div class="info-value">${order.exam?.examName || '—'}</div></div>
-    <div class="info-cell"><div class="info-label">Radiologist</div><div class="info-value">${reportRadiologist || '—'}</div></div>
+    <div class="info-cell"><div class="info-label">Radiologist</div><div class="info-value">${escapeHtml(reportRadiologist || '—')}</div></div>
   </div>
 </div>
 ${order.clinicalIndication ? `<div class="section"><div class="section-header">Clinical Indication</div><div class="section-body">${escapeHtml(order.clinicalIndication)}</div></div>` : ''}
 <div class="section">
   <div class="section-header">Findings</div>
-  <div class="section-body">${reportNotes || ''}</div>
+  <div class="section-body">${escapeHtml(reportNotes || '')}</div>
   ${!reportNotes ? '<div class="blank-line"></div><div class="blank-line"></div><div class="blank-line"></div>' : ''}
 </div>
 <div class="impression-box">
@@ -750,7 +755,7 @@ ${order.clinicalIndication ? `<div class="section"><div class="section-header">C
   ${!reportNotes ? '<div class="blank-line"></div><div class="blank-line"></div>' : ''}
 </div>
 <div class="sig-section">
-  <div><div class="sig-line"></div><div class="sig-label"><strong>Radiologist:</strong> ${reportRadiologist || '—'}<br/>Date &amp; Time: ___________________________</div></div>
+  <div><div class="sig-line"></div><div class="sig-label"><strong>Radiologist:</strong> ${escapeHtml(reportRadiologist || '—')}<br/>Date &amp; Time: ___________________________</div></div>
   <div><div class="sig-line"></div><div class="sig-label"><strong>Verified By:</strong> ___________________________<br/>Date &amp; Time: ___________________________</div></div>
 </div>
 <div class="footer">${orgInfo.name} — Radiology &amp; Imaging &nbsp;|&nbsp; Confidential — for requesting physician only &nbsp;|&nbsp; Printed: ${printDate}</div>
@@ -767,7 +772,11 @@ ${order.clinicalIndication ? `<div class="section"><div class="section-header">C
   const filteredExams = exams
 
   const reportedCount = orders.filter(o => o.status === 'reported').length
-  const criticalFindingsCount = stats.criticalFindings || reports.filter(r => r.hasCriticalFindings).length || orders.filter(o => o.report?.hasCriticalFindings || o.hasCriticalFindings).length
+  // The server-wide count (stats.criticalFindings) is the authoritative figure
+  // and always a number (state defaults it to 0) — a `||` fallback onto the
+  // currently-loaded reports/orders page used to kick in on a legitimate 0 and
+  // show a stale, page-local count instead.
+  const criticalFindingsCount = stats.criticalFindings
 
   // ── Render ────────────────────────────────────────────────────────────────
 
@@ -1160,7 +1169,7 @@ ${order.clinicalIndication ? `<div class="section"><div class="section-header">C
                   <TableCell>
                     <div className="flex gap-1">
                       <Button size="sm" variant="ghost" onClick={() => { setViewOrder(o); setShowViewOrder(true) }}><Eye className="h-4 w-4" /></Button>
-                      {o.status === 'completed' && !reports.find(r => r.orderId === o.id) && (
+                      {o.status === 'completed' && !o.report && (
                         <Button size="sm" variant="outline" className="text-xs" onClick={() => { setSelectedOrder(o); setReportForm(emptyReport); setShowReportDialog(true) }}>
                           <FileText className="h-3.5 w-3.5 mr-1" />Report
                         </Button>

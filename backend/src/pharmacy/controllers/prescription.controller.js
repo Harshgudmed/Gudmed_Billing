@@ -4,7 +4,8 @@ import { isOwned } from '../../lib/tenant.js'
 import { nextSeriesNumber } from '../../lib/counters.js'
 import { createPrescriptionSchema, updatePrescriptionSchema } from '../validations/prescription.validation.js'
 import { getPagination, paginationMeta, handleServiceError, makeError } from '../utils.js'
-import { recordStockChange, consumeFromBatches, findShortages, insufficientStockError } from '../stockService.js'
+import { recordStockChange, consumeFromBatches, findShortages, insufficientStockError, sellableByDrug } from '../stockService.js'
+import { round2 } from '../../lib/money.js'
 import { PATIENT_NAME_SELECT } from '../../lib/patientName.js'
 import { patientSearchWhere } from '../../lib/patientSearch.js'
 import { invoiceOfPrescription } from '../../lib/invoiceFulfillment.js'
@@ -148,23 +149,32 @@ export async function dispense(req, res, next) {
 
       // Re-read available quantities + pricing (source of truth for the bill —
       // dispense has no price in its request body, unlike a Direct Sale).
+      // isActive, like every other drug lookup a sale draws from (sale.controller.js,
+      // drug.controller.js list/lookupByBarcode) — a withdrawn medicine must not
+      // still go out through an old prescription referencing its id.
       const drugs = await tx.pharmacyDrug.findMany({
-        where: { id: { in: stockItems.map((i) => i.drugId) }, organizationId: ORGANIZATION_ID },
+        where: { id: { in: stockItems.map((i) => i.drugId) }, organizationId: ORGANIZATION_ID, isActive: true },
         select: { id: true, drugName: true, quantityInStock: true, sellingPrice: true, gstRate: true },
       })
       const drugById = new Map(drugs.map((d) => [d.id, d]))
+      // The IN-DATE figure, not raw quantityInStock: allowPartial must clamp to
+      // what consumeFromBatches can actually hand out. Capping at the raw column
+      // let a request for more than the in-date stock through this clamp, then
+      // consumeFromBatches threw EXPIRED_STOCK and rolled back the whole dispense
+      // — allowPartial's entire point (give what's available) never ran.
+      const sellableById = await sellableByDrug(tx, { organizationId: ORGANIZATION_ID, drugIds: stockItems.map((i) => i.drugId) })
 
       let partial = false
       const saleItems = []
       for (const it of stockItems) {
         const drug = drugById.get(it.drugId)
-        const available = drug?.quantityInStock ?? 0
+        const available = sellableById.get(it.drugId)?.sellable ?? 0
         const qty = allowPartial ? Math.min(it.quantity, available) : it.quantity
         if (qty < it.quantity) partial = true
         if (qty <= 0) continue
         // Consume batches BEFORE recording the sale item so batch/expiry actually
         // dispensed can be snapshotted onto the receipt (see sale.controller.js).
-        const { consumed } = await consumeFromBatches(tx, { drugId: it.drugId, quantity: qty })
+        const { consumed } = await consumeFromBatches(tx, { organizationId: ORGANIZATION_ID, drugId: it.drugId, quantity: qty })
         await recordStockChange(tx, {
           organizationId: ORGANIZATION_ID,
           drugId: it.drugId,
@@ -175,13 +185,13 @@ export async function dispense(req, res, next) {
           createdById,
         })
 
-        const unitPrice = drug?.sellingPrice ?? 0
+        const unitPrice = round2(drug?.sellingPrice ?? 0)
         saleItems.push({
           drugId: it.drugId,
           drugName: drug?.drugName ?? it.drugName ?? 'Unknown',
           quantity: qty,
           unitPrice,
-          total: unitPrice * qty,
+          total: round2(unitPrice * qty),
           gstRate: drug?.gstRate || 0,
           batchNumber: consumed.map((c) => c.batchNumber).join('/') || '',
           expiryDate: consumed[0]?.expiryDate || null,
@@ -206,7 +216,7 @@ export async function dispense(req, res, next) {
       const billedOn = invoiceOfPrescription(rx.notes)
       let sale = null
       if (saleItems.length > 0 && !billedOn) {
-        const totalAmount = saleItems.reduce((sum, i) => sum + i.total, 0)
+        const totalAmount = round2(saleItems.reduce((sum, i) => sum + i.total, 0))
         sale = await tx.pharmacySale.create({
           data: {
             organizationId: ORGANIZATION_ID,
@@ -307,7 +317,6 @@ export async function update(req, res, next) {
       return res.json({ success: true, data, message: 'Prescription cancelled' })
     }
 
-    if (updateData.dispensedAt) updateData.dispensedAt = new Date(updateData.dispensedAt)
     if (updateData.items && Array.isArray(updateData.items)) {
       updateData.items = JSON.stringify(updateData.items)
     }

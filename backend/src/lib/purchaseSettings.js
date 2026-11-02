@@ -15,6 +15,7 @@ export const PURCHASE_SETTING_DEFAULTS = {
   purchaseReturnMode: 'approval',
   rfqEmailVendors: false,
   purchaseRequireBillInvoice: false,
+  purchaseDefaultTerms: '',
 }
 
 /** The purchase settings out of an organisation row (its `settings` JSON). */
@@ -31,6 +32,10 @@ export function purchaseSettings(organization) {
     rfqEmailVendors: stored.rfqEmailVendors === true,
     // When on, a bill cannot be paid until the vendor's invoice file is attached.
     requireBillInvoice: stored.purchaseRequireBillInvoice === true,
+    // A reusable Terms & Conditions block (sir: "adjustable, change for size") —
+    // the order form starts from this instead of the hardcoded default.
+    // Blank means "use the built-in default" (purchaseOrderController.js defaultTerms).
+    defaultTerms: typeof stored.purchaseDefaultTerms === 'string' ? stored.purchaseDefaultTerms : '',
   }
 }
 

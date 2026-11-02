@@ -4,7 +4,6 @@ import { Badge } from '@/components/ui/badge'
 import { Label } from '@/components/ui/label'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Loader2, CheckCircle2, XCircle, Pencil, Trash2, RotateCcw, Ban, AlertTriangle, PauseCircle, Wallet, FileText, ExternalLink, Upload } from 'lucide-react'
 import { toast } from 'sonner'
@@ -448,30 +447,28 @@ export default function BillDetail({ id, open, onOpenChange, onEdit, onChanged, 
 
                   {canManageDocs && (
                     <div className="space-y-2 rounded-md border border-dashed p-3">
-                      <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
-                        <div className="space-y-1">
-                          <Label className="text-xs text-gray-500">File type</Label>
-                          <Select value={docType} onValueChange={setDocType}>
-                            <SelectTrigger><SelectValue /></SelectTrigger>
-                            <SelectContent>
-                              {Object.entries(BILL_DOC_TYPE).map(([v, l]) => <SelectItem key={v} value={v}>{l}</SelectItem>)}
-                            </SelectContent>
-                          </Select>
-                        </div>
-                        <div className="space-y-1 sm:col-span-2">
-                          <Label className="text-xs text-gray-500">Label <span className="font-normal text-gray-400">(optional, e.g. "Invoice INV-204")</span></Label>
-                          <Input value={docLabel} onChange={(e) => setDocLabel(e.target.value)} placeholder="Leave blank to use the file name" />
-                        </div>
+                      <div className="space-y-1">
+                        <Label className="text-xs text-gray-500">Label <span className="font-normal text-gray-400">(optional, e.g. "Invoice INV-204") — applies to the next file you attach</span></Label>
+                        <Input value={docLabel} onChange={(e) => setDocLabel(e.target.value)} placeholder="Leave blank to use the file name" />
                       </div>
-                      <div className="flex items-center gap-2">
-                        <input ref={fileInputRef} type="file" accept=".jpg,.jpeg,.png,.pdf,.doc,.docx" className="hidden" id="bill-doc-upload"
-                          onChange={(e) => uploadDoc(e.target.files?.[0])} />
-                        <Button type="button" variant="outline" size="sm" disabled={uploading} onClick={() => fileInputRef.current?.click()}>
-                          {uploading ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <Upload className="h-4 w-4 mr-1" />}
-                          {uploading ? 'Uploading…' : 'Browse & upload'}
-                        </Button>
-                        <span className="text-xs text-gray-400">PDF, Word, JPG or PNG · max 10 MB</span>
+                      <input ref={fileInputRef} type="file" accept=".jpg,.jpeg,.png,.pdf,.doc,.docx" className="hidden" id="bill-doc-upload"
+                        onChange={(e) => uploadDoc(e.target.files?.[0])} />
+                      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                        {Object.entries(BILL_DOC_TYPE).map(([v, l]) => (
+                          <div key={v} className="flex flex-col items-center gap-2 rounded-lg border border-dashed border-gray-300 p-3 text-center">
+                            <div className="flex h-10 w-10 items-center justify-center rounded-full bg-gray-100">
+                              <FileText className="h-5 w-5 text-gray-400" />
+                            </div>
+                            <p className="text-sm font-medium leading-tight text-blue-700">{l}</p>
+                            <Button type="button" size="sm" variant="outline" disabled={uploading}
+                              onClick={() => { setDocType(v); fileInputRef.current?.click() }}>
+                              {uploading && docType === v ? <Loader2 className="h-4 w-4 mr-1.5 animate-spin" /> : <Upload className="h-4 w-4 mr-1.5" />}
+                              Upload Document
+                            </Button>
+                          </div>
+                        ))}
                       </div>
+                      <span className="text-xs text-gray-400">PDF, Word, JPG or PNG · max 10 MB</span>
                     </div>
                   )}
                 </div>

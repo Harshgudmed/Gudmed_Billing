@@ -126,14 +126,21 @@ const REPORT_READERS = new Set(['admin', 'super_admin', 'purchase_officer', 'fin
  *   canRfq / canSeeRfqs   requests for quotation
  *   canSeeReports   purchase reports (the store's without money)
  */
+// Doctor/nurse raise requests for their own department only — the department
+// their User record is assigned to, never a pick from every department in the
+// hospital. (A doctor could otherwise send a request in, say, Radiology's
+// name by mistake; the dropdown offered every one of them with no default.)
+const SINGLE_DEPARTMENT_ROLES = new Set(['doctor', 'nurse'])
+
 export function useMe() {
   const { user } = useAuth()
-  if (!user) return { id: null, role: null, isAdmin: true, canBuy: true, canRaiseRequest: true, canOrder: true, canReceive: true, seesMoney: true, canBill: true, canDecideBill: true, canManageMasters: true, canSeeVendors: true, seesEverything: true, canSeeStock: true, canIssue: true, canSeeIndents: true, canSeePayments: true, canRaiseReturn: true, canDecideReturn: true, canSeeReturns: true, canRfq: true, canSeeRfqs: true, canSeeReports: true }
+  if (!user) return { id: null, role: null, isAdmin: true, canBuy: true, canRaiseRequest: true, canOrder: true, canReceive: true, seesMoney: true, canBill: true, canDecideBill: true, canManageMasters: true, canSeeVendors: true, seesEverything: true, canSeeStock: true, canIssue: true, canSeeIndents: true, canSeePayments: true, canRaiseReturn: true, canDecideReturn: true, canSeeReturns: true, canRfq: true, canSeeRfqs: true, canSeeReports: true, fixedDepartmentId: null }
   const id = user.id || user.userId || null
   const canBuy = BUYERS.has(user.role)
   const canRaiseRequest = REQUEST_CREATORS.has(user.role)
+  const fixedDepartmentId = SINGLE_DEPARTMENT_ROLES.has(user.role) ? (user.departmentId || null) : null
   return {
-    id, role: user.role, isAdmin: ADMINS.has(user.role), canBuy, canRaiseRequest,
+    id, role: user.role, isAdmin: ADMINS.has(user.role), canBuy, canRaiseRequest, fixedDepartmentId,
     canOrder: ORDERERS.has(user.role), canReceive: RECEIVERS.has(user.role), seesMoney: !NO_MONEY.has(user.role),
     canManageMasters: ORDERERS.has(user.role), canSeeVendors: VENDOR_READERS.has(user.role), seesEverything: OVERSEERS.has(user.role),
     canSeeStock: STOCK_READERS.has(user.role),

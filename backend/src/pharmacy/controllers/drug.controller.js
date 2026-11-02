@@ -152,8 +152,28 @@ export async function create(req, res, next) {
     // A blank barcode is stored as null (not "") so barcode-less drugs don't clash.
     if (!parsed.barcode?.trim()) parsed.barcode = null
     if (parsed.barcode) await assertBarcodeFree(ORGANIZATION_ID, parsed.barcode, null)
-    const data = await db.pharmacyDrug.create({
-      data: { ...parsed, organizationId: ORGANIZATION_ID, isActive: true },
+    // Opening stock typed in without a batch (no expiry to track) is still a real
+    // stock movement — it must leave a StockLedger row like every other one, or
+    // Drug Inventory and the ledger disagree about this drug from the moment it
+    // exists. Create at zero, then move it in through the one place that writes
+    // the ledger (stockService.js), inside the drug's own transaction.
+    const { quantityInStock, ...rest } = parsed
+    const data = await db.$transaction(async (tx) => {
+      const drug = await tx.pharmacyDrug.create({
+        data: { ...rest, organizationId: ORGANIZATION_ID, isActive: true },
+      })
+      if (quantityInStock > 0) {
+        await recordStockChange(tx, {
+          organizationId: ORGANIZATION_ID,
+          drugId: drug.id,
+          changeType: 'opening_stock',
+          quantityDelta: quantityInStock,
+          note: 'Opening stock on creation',
+          createdById: req.user?.userId ?? null,
+        })
+        return tx.pharmacyDrug.findUnique({ where: { id: drug.id } })
+      }
+      return drug
     })
     res.status(201).json({ success: true, data, message: 'Drug created successfully' })
   } catch (err) {
@@ -210,7 +230,7 @@ export async function adjustStock(req, res, next) {
       }
       // A write-off: expired stock is exactly what this must be able to remove,
       // soonest expiry (so expired first) as before.
-      await consumeFromBatches(tx, { drugId: drug.id, quantity, includeExpired: true })
+      await consumeFromBatches(tx, { organizationId: ORGANIZATION_ID, drugId: drug.id, quantity, includeExpired: true })
       const quantityInStock = await recordStockChange(tx, {
         organizationId: ORGANIZATION_ID,
         drugId: drug.id,

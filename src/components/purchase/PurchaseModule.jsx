@@ -25,6 +25,7 @@ const IndentsTab = lazy(() => import('./IndentsTab'))
 const ReturnsTab = lazy(() => import('./ReturnsTab'))
 const PaymentsTab = lazy(() => import('./PaymentsTab'))
 const ReportsTab = lazy(() => import('./ReportsTab'))
+const RateContractsTab = lazy(() => import('./RateContractsTab'))
 const tabLoading = <div className="flex justify-center py-12"><Loader2 className="h-6 w-6 animate-spin text-[#2E4168]" /></div>
 
 // Purchase & Supply Chain — module shell.
@@ -180,6 +181,7 @@ export default function PurchaseModule() {
     { value: 'vendors', label: 'Vendors', show: !isRequestOnly && me.canSeeVendors },
     { value: 'items', label: 'Items', show: !isRequestOnly && me.canManageMasters },
     { value: 'budgets', label: 'Budgets', show: !isRequestOnly && me.canManageMasters },
+    { value: 'rate-contracts', label: 'Rate Contracts', show: !isRequestOnly && me.canManageMasters },
   ].filter((x) => x.show)
 
   return (
@@ -268,6 +270,10 @@ export default function PurchaseModule() {
               <TabsContent value="budgets" className="mt-4">
                 <BudgetsMaster />
               </TabsContent>
+            )}
+
+            {me.canManageMasters && (
+              <TabsContent value="rate-contracts" className="mt-4"><Suspense fallback={tabLoading}><RateContractsTab /></Suspense></TabsContent>
             )}
 
             {me.canSeeRfqs && (

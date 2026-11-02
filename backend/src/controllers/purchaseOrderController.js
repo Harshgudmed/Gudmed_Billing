@@ -43,6 +43,7 @@ import { gstTypeFor, lineAmounts, orderTotals, GST_RATES } from '../lib/purchase
 import { currentStep, decide, openSteps, cancelSteps, stepsOf, awaitingFor } from '../lib/approvals.js'
 import { orderChanged } from '../lib/purchaseNotify.js'
 import { billableOf } from '../lib/vendorBills.js'
+import { purchaseSettings } from '../lib/purchaseSettings.js'
 // Its own functions call back into this file's lockOrder / hospital; the
 // cycle is safe because both sides only call each other at run time.
 import { withReturnsOnBills } from './purchaseReturnController.js'
@@ -76,6 +77,11 @@ const headerFields = {
   expectedDate: z.preprocess((v) => (blank(v) ? null : v), z.coerce.date({ invalid_type_error: 'Enter a valid date' }).nullable().optional()),
   terms: z.string().trim().max(1000).optional().nullable(),
   notes: z.string().trim().max(500).optional().nullable(),
+  // Where the vendor should ship it, when that is not this hospital's own
+  // warehouse (a direct-to-site delivery). deliveryAddress is only meaningful
+  // when deliverElsewhere is true; the printed PO leaves it out otherwise.
+  deliverElsewhere: z.boolean().optional(),
+  deliveryAddress: z.string().trim().max(300).optional().nullable(),
   // The quoted currency and its rate to the rupee. Rates below are already in
   // INR (the screen converts foreign × exchangeRate before sending), so these
   // only record what was quoted. Left undefined when not sent (a save that
@@ -85,17 +91,26 @@ const headerFields = {
   exchangeRate: z.preprocess((v) => (v === undefined ? undefined : (blank(v) ? 1 : Number(v))), z.number().finite().positive('The exchange rate must be more than 0').max(1e6).optional()),
   lines: z.array(lineSchema).min(1, 'Add at least one item').max(200, 'At most 200 lines on one order'),
 }
+const checkDelivery = (d, ctx) => {
+  if (d.deliverElsewhere && blank(d.deliveryAddress)) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['deliveryAddress'], message: 'Enter the delivery address, or leave it set to the warehouse' })
+  }
+}
 const createSchema = z.object(headerFields).superRefine((d, ctx) => {
   // A foreign currency with no rate would store the order at face value in
   // rupees — catch it here, not just on screen.
   if (d.currency && d.currency !== 'INR' && !(d.exchangeRate > 0)) {
     ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['exchangeRate'], message: 'Enter the exchange rate to the rupee' })
   }
+  checkDelivery(d, ctx)
 })
 const saveSchema = z.object({ id: z.string().min(1), ...headerFields }).partial({ vendorId: true, lines: true }).superRefine((d, ctx) => {
   if (d.currency && d.currency !== 'INR' && !(d.exchangeRate > 0)) {
     ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['exchangeRate'], message: 'Enter the exchange rate to the rupee' })
   }
+  // deliverElsewhere/deliveryAddress is a partial update here — checked in the
+  // handler against the order's EFFECTIVE (merged) values, not just what this
+  // one save sent.
 })
 
 const ORDER_INCLUDE = {
@@ -117,15 +132,22 @@ const ORDER_INCLUDE = {
 /** The hospital's GST state and name/address, for GST and the printed PO. */
 /** The hospital as a printed document names it, with its GST state. `client` is a transaction when read inside one. */
 export async function hospital(ORG_ID, client = db) {
-  const org = await client.organization.findUnique({ where: { id: ORG_ID }, select: { name: true, address: true, city: true, region: true } })
+  const org = await client.organization.findUnique({ where: { id: ORG_ID }, select: { name: true, address: true, city: true, region: true, settings: true } })
   return { ...org, stateCode: stateCodeByName(org?.region) }
 }
 
-const defaultTerms = (h) => [
-  `Deliver to ${h?.name || 'the hospital'} stores${h?.address ? `, ${h.address}` : ''}.`,
-  'Quote this PO number on the invoice and the delivery challan.',
-  'Goods are accepted after inspection on receipt; short or damaged supply will be returned.',
-].join('\n')
+// The hospital's own Terms & Conditions block (Settings → Purchase), when it
+// has set one — otherwise the built-in default. One reusable template, not
+// retyped on every order.
+const defaultTerms = (h) => {
+  const custom = purchaseSettings(h).defaultTerms
+  if (!blank(custom)) return custom
+  return [
+    `Deliver to ${h?.name || 'the hospital'} stores${h?.address ? `, ${h.address}` : ''}.`,
+    'Quote this PO number on the invoice and the delivery challan.',
+    'Goods are accepted after inspection on receipt; short or damaged supply will be returned.',
+  ].join('\n')
+}
 
 export async function checkVendor(ORG_ID, vendorId, { allowRetired = false } = {}) {
   const v = await db.vendor.findFirst({ where: { id: vendorId, organizationId: ORG_ID } })
@@ -248,7 +270,7 @@ async function readFull(ORG_ID, id, client = db) {
  * (poCreate) and awarding an RFQ (purchaseRfqController) both make orders here,
  * so an awarded RFQ's order is the same as one made by hand.
  */
-export async function insertDraftOrder(tx, req, ORG_ID, { vendor, h, gstType, rows, expectedDate, terms, notes, actor, currency = 'INR', exchangeRate = 1 }) {
+export async function insertDraftOrder(tx, req, ORG_ID, { vendor, h, gstType, rows, expectedDate, terms, notes, actor, currency = 'INR', exchangeRate = 1, deliverElsewhere = false, deliveryAddress = null }) {
   const requestIds = await claimRequestLines(tx, ORG_ID, rows)
   const number = await nextSeriesNumber(tx, ORG_ID, 'PURCHASE_PO', 'PO')
   const created = await tx.purchaseOrder.create({
@@ -257,6 +279,7 @@ export async function insertDraftOrder(tx, req, ORG_ID, { vendor, h, gstType, ro
       vendorId: vendor.id, vendorName: vendor.name, expectedDate: expectedDate ?? null,
       gstType, currency, exchangeRate, paymentTermsDays: vendor.paymentTermsDays,
       terms: blank(terms) ? defaultTerms(h) : terms, notes: blank(notes) ? null : notes,
+      deliverElsewhere, deliveryAddress: deliverElsewhere && !blank(deliveryAddress) ? deliveryAddress : null,
       ...orderTotals(rows, gstType),
       createdById: actor.id, createdByName: actor.name || 'Staff',
       lines: { create: rows },
@@ -406,7 +429,7 @@ export async function poCreate(req, res, next) {
     if (!canOrder(req)) throw forbidden('Only the purchase officer or an administrator places orders')
     const parsed = createSchema.safeParse(req.body)
     if (!parsed.success) return validationError(res, parsed.error)
-    const { vendorId, expectedDate, terms, notes, lines, currency, exchangeRate } = parsed.data
+    const { vendorId, expectedDate, terms, notes, lines, currency, exchangeRate, deliverElsewhere, deliveryAddress } = parsed.data
     const vendor = await checkVendor(ORG_ID, vendorId)
     if (expectedDate && expectedDate < startOfToday()) throw bad('The expected date is in the past')
     const h = await hospital(ORG_ID)
@@ -414,7 +437,7 @@ export async function poCreate(req, res, next) {
     const rows = await buildLines(ORG_ID, lines, gstType)
     const actor = getActor(req)
 
-    const full = await db.$transaction((tx) => insertDraftOrder(tx, req, ORG_ID, { vendor, h, gstType, rows, expectedDate, terms, notes, actor, currency, exchangeRate }))
+    const full = await db.$transaction((tx) => insertDraftOrder(tx, req, ORG_ID, { vendor, h, gstType, rows, expectedDate, terms, notes, actor, currency, exchangeRate, deliverElsewhere, deliveryAddress }))
     return res.status(201).json({ success: true, data: full })
   } catch (e) {
     sendError(res, e, next)
@@ -437,7 +460,7 @@ export async function poUpdate(req, res, next) {
       if (!canOrder(req)) throw forbidden('Only the purchase officer or an administrator changes orders')
       const parsed = saveSchema.safeParse(req.body)
       if (!parsed.success) return validationError(res, parsed.error)
-      const { vendorId, expectedDate, terms, notes, lines, currency, exchangeRate } = parsed.data
+      const { vendorId, expectedDate, terms, notes, lines, currency, exchangeRate, deliverElsewhere, deliveryAddress } = parsed.data
       if (expectedDate && expectedDate < startOfToday()) throw bad('The expected date is in the past')
       const h = await hospital(ORG_ID)
 
@@ -445,6 +468,12 @@ export async function poUpdate(req, res, next) {
         const po = await lockOrder(tx, ORG_ID, id)
         before = po
         if (po.status !== 'draft') throw conflict(`This order is ${po.status} — only a draft can be changed`)
+        // Checked against the order's EFFECTIVE state (this save's fields, or
+        // what it already holds) — a save that only edits deliveryAddress must
+        // not leave a blank address while deliverElsewhere stays true from before.
+        const effElsewhere = deliverElsewhere !== undefined ? deliverElsewhere : po.deliverElsewhere
+        const effAddress = deliveryAddress !== undefined ? deliveryAddress : po.deliveryAddress
+        if (effElsewhere && blank(effAddress)) throw bad('Enter the delivery address, or leave it set to the warehouse')
         if (!ownsOrAdmin(req, po.createdById)) throw forbidden(`Only ${po.createdByName} or an administrator can change this draft`)
         const vendor = vendorId ? await checkVendor(ORG_ID, vendorId) : await checkVendor(ORG_ID, po.vendorId, { allowRetired: true })
         const gstType = gstTypeFor(vendor, h.stateCode)
@@ -467,6 +496,8 @@ export async function poUpdate(req, res, next) {
             ...(expectedDate !== undefined ? { expectedDate } : {}),
             ...(terms !== undefined ? { terms: blank(terms) ? defaultTerms(h) : terms } : {}),
             ...(notes !== undefined ? { notes: blank(notes) ? null : notes } : {}),
+            ...(deliverElsewhere !== undefined ? { deliverElsewhere } : {}),
+            ...(deliveryAddress !== undefined ? { deliveryAddress: blank(deliveryAddress) ? null : deliveryAddress } : {}),
             ...orderTotals(rows, gstType),
           },
         })

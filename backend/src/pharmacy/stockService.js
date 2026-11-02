@@ -48,11 +48,14 @@ export async function recordStockChange(
     }
     drug = await tx.pharmacyDrug.findUnique({ where: { id: drugId }, select: { quantityInStock: true } })
   } else {
-    drug = await tx.pharmacyDrug.update({
-      where: { id: drugId },
+    const { count } = await tx.pharmacyDrug.updateMany({
+      where: { id: drugId, ...(organizationId ? { organizationId } : {}) },
       data: { quantityInStock: { increment: quantityDelta } },
-      select: { quantityInStock: true },
     })
+    if (count === 0) {
+      throw makeError('Drug not found', 404, 'DRUG_NOT_FOUND')
+    }
+    drug = await tx.pharmacyDrug.findUnique({ where: { id: drugId }, select: { quantityInStock: true } })
   }
 
   await tx.stockLedger.create({
@@ -90,12 +93,12 @@ export async function recordStockChange(
 // refusal that says how much is expired, not a quiet fall-back onto it.
 // `includeExpired` is for taking stock OUT of the shelf without selling it
 // (Adjust Stock → Remove, a write-off), which must be able to reach them.
-export async function consumeFromBatches(tx, { drugId, quantity, includeExpired = false }) {
+export async function consumeFromBatches(tx, { organizationId = null, drugId, quantity, includeExpired = false }) {
   let remaining = quantity
   const consumed = []
   const today = startOfToday()
   const all = await tx.pharmacyBatch.findMany({
-    where: { drugId, status: 'active', quantityRemaining: { gt: 0 } },
+    where: { drugId, ...(organizationId ? { organizationId } : {}), status: 'active', quantityRemaining: { gt: 0 } },
     orderBy: { expiryDate: 'asc' },
   })
   const isExpired = (b) => b.expiryDate && b.expiryDate < today
@@ -104,7 +107,7 @@ export async function consumeFromBatches(tx, { drugId, quantity, includeExpired 
   if (!includeExpired) {
     const expiredQty = all.filter(isExpired).reduce((s, b) => s + b.quantityRemaining, 0)
     if (expiredQty > 0) {
-      const drug = await tx.pharmacyDrug.findUnique({ where: { id: drugId }, select: { drugName: true, quantityInStock: true } })
+      const drug = await tx.pharmacyDrug.findFirst({ where: { id: drugId, ...(organizationId ? { organizationId } : {}) }, select: { drugName: true, quantityInStock: true } })
       const sellable = Math.max(0, (drug?.quantityInStock ?? 0) - expiredQty)
       if (quantity > sellable) {
         throw makeError(
@@ -145,6 +148,32 @@ export async function consumeFromBatches(tx, { drugId, quantity, includeExpired 
 }
 
 /**
+ * In-date stock per drug: quantityInStock minus whatever sits in expired
+ * batches. Shared by findShortages and dispense's allowPartial — expired stock
+ * still counts in quantityInStock until it is written off (Adjust Stock), so
+ * anything that promises or hands out medicine must check THIS, not the raw
+ * column, or it offers/consumes units consumeFromBatches will refuse.
+ */
+export async function sellableByDrug(tx, { organizationId, drugIds }) {
+  if (!drugIds.length) return new Map()
+  const drugs = await tx.pharmacyDrug.findMany({
+    where: { id: { in: drugIds }, organizationId },
+    select: { id: true, drugName: true, quantityInStock: true },
+  })
+  const expired = await tx.pharmacyBatch.groupBy({
+    by: ['drugId'],
+    where: { drugId: { in: drugIds }, status: 'active', quantityRemaining: { gt: 0 }, expiryDate: { lt: startOfToday() } },
+    _sum: { quantityRemaining: true },
+  })
+  const expiredById = new Map(expired.map((e) => [e.drugId, e._sum.quantityRemaining || 0]))
+  return new Map(drugs.map((d) => [d.id, {
+    drugName: d.drugName,
+    quantityInStock: d.quantityInStock,
+    sellable: Math.max(0, d.quantityInStock - (expiredById.get(d.id) || 0)),
+  }]))
+}
+
+/**
  * Validate a list of {drugId, quantity, drugName?} against current stock.
  * Returns an array of shortage objects (empty when everything is available).
  */
@@ -152,31 +181,15 @@ export async function findShortages(tx, { organizationId, items }) {
   const stockItems = items.filter((i) => i.drugId && Number(i.quantity) > 0)
   if (!stockItems.length) return []
 
-  const drugs = await tx.pharmacyDrug.findMany({
-    where: { id: { in: stockItems.map((i) => i.drugId) }, organizationId },
-    select: { id: true, drugName: true, quantityInStock: true },
-  })
-  const byId = new Map(drugs.map((d) => [d.id, d]))
-
-  // Only IN-DATE stock can be promised: Billing takes the money here and the
-  // medicine is handed over later at dispense, which refuses expired batches
-  // (consumeFromBatches). Counting them here charged for a medicine the
-  // pharmacy then could not give.
-  const expired = await tx.pharmacyBatch.groupBy({
-    by: ['drugId'],
-    where: { drugId: { in: drugs.map((d) => d.id) }, status: 'active', quantityRemaining: { gt: 0 }, expiryDate: { lt: startOfToday() } },
-    _sum: { quantityRemaining: true },
-  })
-  const expiredById = new Map(expired.map((e) => [e.drugId, e._sum.quantityRemaining || 0]))
+  const byId = await sellableByDrug(tx, { organizationId, drugIds: stockItems.map((i) => i.drugId) })
 
   const shortages = []
   for (const it of stockItems) {
     const d = byId.get(it.drugId)
-    const available = d ? Math.max(0, d.quantityInStock - (expiredById.get(d.id) || 0)) : 0
     if (!d) {
       shortages.push({ drugId: it.drugId, drugName: it.drugName || 'Unknown', requested: it.quantity, available: 0, shortage: it.quantity })
-    } else if (available < it.quantity) {
-      shortages.push({ drugId: d.id, drugName: d.drugName, requested: it.quantity, available, shortage: it.quantity - available })
+    } else if (d.sellable < it.quantity) {
+      shortages.push({ drugId: it.drugId, drugName: d.drugName, requested: it.quantity, available: d.sellable, shortage: it.quantity - d.sellable })
     }
   }
   return shortages

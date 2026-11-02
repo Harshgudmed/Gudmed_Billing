@@ -106,6 +106,13 @@ export async function update(req, res, next) {
     })
     if (!existing) throw makeError('Purchase order not found', 404, 'PURCHASE_ORDER_NOT_FOUND')
 
+    // A received PO already moved real stock onto the shelf (batches + StockLedger
+    // rows) — cancelling it here would relabel that as void with no reversal and
+    // the medicine would stay in inventory under a "cancelled" order.
+    if (existing.status === 'received' && parsed.status && parsed.status !== 'received') {
+      throw makeError('This purchase order was already received — its stock is on the shelf and cannot be undone here', 409, 'ALREADY_RECEIVED')
+    }
+
     const updateData = { ...parsed }
     if (updateData.expectedDeliveryDate) {
       updateData.expectedDeliveryDate = new Date(updateData.expectedDeliveryDate)
@@ -149,6 +156,17 @@ export async function receive(req, res, next) {
       })
       if (claimed === 0) {
         throw makeError('Purchase order already received', 409, 'PURCHASE_ORDER_ALREADY_RECEIVED')
+      }
+
+      // A line received with no batch number / expiry used to be skipped with no
+      // error — the PO still went to 'received' and that medicine's stock simply
+      // never arrived, with no way to re-receive it (claimed === 0 above refuses a
+      // second try). quantityReceived === 0 is a real partial receipt (not this
+      // delivery) and stays silent; a positive quantity with no batch is a form
+      // left half-filled, so refuse the whole request and roll back the claim.
+      const incomplete = parsed.items.find((item) => item.quantityReceived > 0 && !(item.batchNumber && item.expiryDate))
+      if (incomplete) {
+        throw makeError(`Batch number and expiry date are required to receive "${incomplete.drugName || incomplete.drugId}"`, 400, 'BATCH_INFO_REQUIRED')
       }
 
       for (const item of parsed.items) {
