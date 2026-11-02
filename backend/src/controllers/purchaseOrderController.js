@@ -468,13 +468,13 @@ export async function poUpdate(req, res, next) {
         const po = await lockOrder(tx, ORG_ID, id)
         before = po
         if (po.status !== 'draft') throw conflict(`This order is ${po.status} — only a draft can be changed`)
+        if (!ownsOrAdmin(req, po.createdById)) throw forbidden(`Only ${po.createdByName} or an administrator can change this draft`)
         // Checked against the order's EFFECTIVE state (this save's fields, or
         // what it already holds) — a save that only edits deliveryAddress must
         // not leave a blank address while deliverElsewhere stays true from before.
         const effElsewhere = deliverElsewhere !== undefined ? deliverElsewhere : po.deliverElsewhere
         const effAddress = deliveryAddress !== undefined ? deliveryAddress : po.deliveryAddress
         if (effElsewhere && blank(effAddress)) throw bad('Enter the delivery address, or leave it set to the warehouse')
-        if (!ownsOrAdmin(req, po.createdById)) throw forbidden(`Only ${po.createdByName} or an administrator can change this draft`)
         const vendor = vendorId ? await checkVendor(ORG_ID, vendorId) : await checkVendor(ORG_ID, po.vendorId, { allowRetired: true })
         const gstType = gstTypeFor(vendor, h.stateCode)
         // A new vendor changes the GST on every line, so the lines are rebuilt

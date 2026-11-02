@@ -102,7 +102,8 @@ export default function ReceiptDetail({ id, open, onOpenChange, onChanged, onOpe
                           <p className="text-xs text-gray-500">{DOC_TYPE_LABEL[d.docType] || d.docType} · {d.fileName}</p>
                         </div>
                       </div>
-                      <a href={d.fileUrl} target="_blank" rel="noreferrer">
+                      {/* The file endpoint lives under /api (the only path the dev proxy forwards). */}
+                      <a href={`/api${d.fileUrl}`} target="_blank" rel="noreferrer">
                         <Button type="button" size="icon" variant="ghost" title="Open document" aria-label="Open document">
                           <ExternalLink className="h-4 w-4 text-blue-600" />
                         </Button>

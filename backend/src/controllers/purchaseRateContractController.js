@@ -14,7 +14,7 @@
 // (canSeeVendors) — the store never sees a rate.
 import { z } from 'zod'
 import { db } from '../config/db.js'
-import { getOrgId, getActor, bad, notFound } from '../lib/reqContext.js'
+import { getOrgId, getActor, bad } from '../lib/reqContext.js'
 import { nextSeriesNumber } from '../lib/counters.js'
 import { listResponse } from '../lib/pagination.js'
 import { canManageMasters, canSeeVendors, blank, validationError, sendError } from '../lib/purchaseAccess.js'

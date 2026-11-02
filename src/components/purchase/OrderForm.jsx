@@ -139,7 +139,12 @@ export default function OrderForm({ open, onOpenChange, order, onSaved }) {
   }, [form.vendorId, itemIdsOnLines, rateContracts])
 
   const setLine = (key, patch) => setLines((ls) => ls.map((l) => (l.key === key ? { ...l, ...patch } : l)))
-  const applyContractRate = (line, rc) => setLine(line.key, { rate: String(rc.rate), gstRate: rc.gstRate != null ? String(rc.gstRate) : line.gstRate })
+  // The contract's rate is always in ₹ (it has no currency of its own); a
+  // foreign-currency order enters its line rates in that currency, so the
+  // figure has to come back the same way the order's own rupee rates do
+  // (OrderForm's `inr`/stored-rate conversion below) or a ₹175 contract would
+  // be typed into a "$" box as 175.
+  const applyContractRate = (line, rc) => setLine(line.key, { rate: String(foreign ? round2(rc.rate / exRate) : rc.rate), gstRate: rc.gstRate != null ? String(rc.gstRate) : line.gstRate })
   const pickCategory = (line, value) => {
     const categoryId = value === ALL ? '' : value
     if (categoryId === line.categoryId) return
