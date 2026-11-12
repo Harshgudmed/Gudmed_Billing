@@ -14,7 +14,7 @@ import { getFullName, calculateAge, initials } from '../utils/patientUtils';
 import { useLiveData } from '@/lib/useLiveData';
 import { useEnabledModules } from '@/lib/useEnabledModules';
 import { toast } from 'sonner';
-import client from '@/api/client';
+import client, { BASE_URL } from '@/api/client';
 
 // The strip was a 6-column grid, so every tab got the same 115px whatever its
 // label — and "Lab / Pathology" plus its icon and count needs ~160px at any font
@@ -537,12 +537,12 @@ body{font-family:Arial,Helvetica,sans-serif;font-size:10.5pt;color:#000;backgrou
                         <div key={doc.id} className="relative group rounded-lg border bg-white p-3 hover:shadow-md transition-shadow">
                           <div className="aspect-[4/3] rounded bg-gray-100 mb-2 overflow-hidden flex items-center justify-center relative">
                             {doc.fileType.startsWith('image/') ? (
-                              <img src={`http://localhost:5000${doc.fileUrl}`} alt={doc.title} className="w-full h-full object-cover" />
+                              <img src={`${BASE_URL}${doc.fileUrl}`} alt={doc.title} className="w-full h-full object-cover" />
                             ) : (
                               <FileText className="h-10 w-10 text-gray-400" />
                             )}
                             <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex flex-col items-center justify-center transition-opacity gap-2">
-                              <a href={`http://localhost:5000${doc.fileUrl}`} target="_blank" rel="noreferrer" className="bg-white text-blue-600 rounded-full p-2 hover:scale-110 transition-transform shadow-lg">
+                              <a href={`${BASE_URL}${doc.fileUrl}`} target="_blank" rel="noreferrer" className="bg-white text-blue-600 rounded-full p-2 hover:scale-110 transition-transform shadow-lg">
                                 <Eye className="h-4 w-4" />
                               </a>
                             </div>

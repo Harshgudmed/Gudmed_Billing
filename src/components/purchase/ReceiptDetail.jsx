@@ -7,6 +7,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Loader2, Ban, Printer, FileText, ExternalLink } from 'lucide-react'
 import { toast } from 'sonner'
 import { purchaseApi } from '@/api/purchaseApi'
+import { BASE_URL } from '@/api/client'
 import { showApiError } from '@/lib/apiRequest'
 import { formatMoney, formatDateTime } from '@/lib/format'
 import { RECEIPT_STATUS, useMe, showNotifyWarning } from './requestMeta'
@@ -102,8 +103,9 @@ export default function ReceiptDetail({ id, open, onOpenChange, onChanged, onOpe
                           <p className="text-xs text-gray-500">{DOC_TYPE_LABEL[d.docType] || d.docType} · {d.fileName}</p>
                         </div>
                       </div>
-                      {/* The file endpoint lives under /api (the only path the dev proxy forwards). */}
-                      <a href={`/api${d.fileUrl}`} target="_blank" rel="noreferrer">
+                      {/* BASE_URL, not a hardcoded '/api' — in prod the frontend and
+                          backend are on different origins (see api/client.js). */}
+                      <a href={`${BASE_URL}${d.fileUrl}`} target="_blank" rel="noreferrer">
                         <Button type="button" size="icon" variant="ghost" title="Open document" aria-label="Open document">
                           <ExternalLink className="h-4 w-4 text-blue-600" />
                         </Button>

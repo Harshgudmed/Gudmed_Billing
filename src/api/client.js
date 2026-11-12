@@ -5,7 +5,13 @@ import axios from 'axios'
 //   In .env.production → VITE_API_URL=https://gudmed-api.onrender.com/api
 //   In .env.development → VITE_API_URL=http://localhost:5000/api  (or use proxy)
 // ─────────────────────────────────────────────────────────────────────────────
-const BASE_URL = import.meta.env.VITE_API_URL || '/api'
+// Exported so any <img>/<a>/<iframe> pointed straight at an uploaded file
+// (not going through axios) builds the same URL requests do — a relative
+// '/api' is only correct in dev, where Vite's proxy forwards it; in prod the
+// frontend and backend are on different origins (VITE_API_URL), so a
+// hardcoded '/api' resolves against the frontend's own host, 404s there, and
+// the frontend's SPA fallback quietly serves index.html instead of the file.
+export const BASE_URL = import.meta.env.VITE_API_URL || '/api'
 
 const client = axios.create({
   baseURL: BASE_URL,

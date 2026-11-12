@@ -19,6 +19,7 @@ import { useLiveData } from '@/lib/useLiveData'
 import { showApiError } from '@/lib/apiRequest'
 import { useMe } from './requestMeta'
 import { purchaseApi, PURCHASE_ENDPOINT } from '@/api/purchaseApi'
+import { BASE_URL } from '@/api/client'
 import { usePickList } from './usePickList'
 import LoadFailed from './LoadFailed'
 import AddressFields from '@/components/common/AddressFields'
@@ -546,7 +547,9 @@ export default function VendorsMaster({ onChanged }) {
                           </div>
                         </div>
                         <div className="flex items-center gap-1 shrink-0">
-                          <a href={d.fileUrl} target="_blank" rel="noreferrer">
+                          {/* BASE_URL, not the raw stored path — in prod the frontend and
+                              backend are on different origins (see api/client.js). */}
+                          <a href={`${BASE_URL}${d.fileUrl}`} target="_blank" rel="noreferrer">
                             <Button type="button" size="icon" variant="ghost" title="Open document" aria-label="Open document">
                               <ExternalLink className="h-4 w-4 text-blue-600" />
                             </Button>

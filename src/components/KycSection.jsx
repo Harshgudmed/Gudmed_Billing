@@ -4,7 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { toast } from 'sonner'
-import client from '@/api/client'
+import client, { BASE_URL } from '@/api/client'
 import { PATIENT_DOC_TYPE_LABEL } from '@/lib/patientDocumentTypes'
 
 // The identity proofs + previous-record types a patient fills in from their
@@ -77,11 +77,11 @@ export default function KycSection({ documents = [], onUploadSuccess, primaryCol
     return acc
   }, {})
 
-  // The file route lives under /api (the only path the Vite dev proxy
-  // forwards, and the same-origin path in production) — a bare `/uploads/...`
-  // URL skips the proxy, reaches the backend's own origin directly, and the
-  // auth cookie doesn't cross with it, which 404s as "file not found".
-  const getMediaUrl = (url) => (url ? `/api${url}` : '')
+  // BASE_URL, not a hardcoded '/api': in dev that's what Vite's proxy
+  // forwards, but in prod the frontend and backend are on different origins
+  // (VITE_API_URL), so a bare '/api/...' resolves against the frontend's own
+  // host and its SPA fallback quietly serves index.html instead of the file.
+  const getMediaUrl = (url) => (url ? `${BASE_URL}${url}` : '')
 
   return (
     <Card className="col-span-full mb-6">

@@ -6,7 +6,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '
 import { Textarea } from '@/components/ui/textarea'
 import { FileText, Upload, Trash2, Eye, Printer, Download, Loader2, AlertCircle, FolderOpen, ZoomIn, ZoomOut, RotateCcw, ChevronDown, CheckCircle2, XCircle, Clock, ClipboardList } from 'lucide-react'
 import { toast } from 'sonner'
-import client from '@/api/client'
+import client, { BASE_URL } from '@/api/client'
 import { useAuth } from '@/lib/auth'
 import { formatDateTime } from '@/lib/format'
 import { showApiError } from '@/lib/apiRequest'
@@ -47,10 +47,11 @@ const isPdf = (fileType) => fileType === 'application/pdf'
 // Word files have no browser-native preview; offer them as a download/open
 // from the preview dialog instead of an empty or broken iframe.
 const isPreviewable = (fileType) => isImage(fileType) || isPdf(fileType)
-// The server mounts the files under /api too, so the browser reaches them
-// through the same proxy the rest of the API uses (and the auth cookie rides
-// along on the <img> / <iframe> request).
-const fileHref = (doc) => `/api${doc.fileUrl}`
+// BASE_URL, not a hardcoded '/api': in dev that's what Vite's proxy forwards,
+// but in prod the frontend and backend are on different origins, so a bare
+// '/api/...' resolves against the frontend's own host and 404s there (its
+// SPA fallback then quietly serves index.html instead of the file).
+const fileHref = (doc) => `${BASE_URL}${doc.fileUrl}`
 // The server stores files under a random generated name
 // (document-172...-....pdf); a staff member downloading it for a claim file
 // wants it named after the patient and the document, not that.

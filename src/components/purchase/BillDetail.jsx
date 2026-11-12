@@ -8,6 +8,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Loader2, CheckCircle2, XCircle, Pencil, Trash2, RotateCcw, Ban, AlertTriangle, PauseCircle, Wallet, FileText, ExternalLink, Upload } from 'lucide-react'
 import { toast } from 'sonner'
 import { purchaseApi } from '@/api/purchaseApi'
+import { BASE_URL } from '@/api/client'
 import { purchasePaymentApi } from '@/api/purchasePaymentApi'
 import { paymentAccess, usePaymentMode, billStillDue, billOwedByVendor, PAYMENT_STATUS, modeLabel } from './paymentAccess'
 import PaymentForm from './PaymentForm'
@@ -428,8 +429,9 @@ export default function BillDetail({ id, open, onOpenChange, onEdit, onChanged, 
                             </div>
                           </div>
                           <div className="flex shrink-0 items-center gap-1">
-                            {/* The file endpoint lives under /api (the only path the dev proxy forwards). */}
-                            <a href={`/api${d.fileUrl}`} target="_blank" rel="noreferrer">
+                            {/* BASE_URL, not a hardcoded '/api' — in prod the frontend and
+                                backend are on different origins (see api/client.js). */}
+                            <a href={`${BASE_URL}${d.fileUrl}`} target="_blank" rel="noreferrer">
                               <Button type="button" size="icon" variant="ghost" title="Open file" aria-label="Open file">
                                 <ExternalLink className="h-4 w-4 text-blue-600" />
                               </Button>

@@ -8,15 +8,14 @@ import { Textarea } from '@/components/ui/textarea'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Loader2, Pencil, Archive, Wrench, AlertCircle, Paperclip, FileText, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
-import client from '@/api/client'
+import client, { BASE_URL } from '@/api/client'
 import { showApiError } from '@/lib/apiRequest'
 import { formatMoney, formatDateTime, localYmd } from '@/lib/format'
 
-// The upload routes are mounted at both /uploads and /api/uploads — the /api
-// prefix is the only path the Vite dev proxy forwards (and the same-origin
-// path in production), so a bare /uploads/... URL 404s (same lesson as the
-// patient-document file links elsewhere in this app).
-const fileHref = (doc) => `/api${doc.fileUrl}`
+// BASE_URL, not a hardcoded '/api': in dev that's what Vite's proxy forwards,
+// but in prod the frontend and backend are on different origins, so a bare
+// '/api/...' resolves against the frontend's own host and 404s there.
+const fileHref = (doc) => `${BASE_URL}${doc.fileUrl}`
 
 const STATUS_BADGE = {
   ACTIVE: 'bg-green-50 text-green-700 border-green-200',
