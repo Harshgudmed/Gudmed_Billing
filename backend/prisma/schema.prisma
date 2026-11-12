@@ -519,8 +519,10 @@ model PatientDocument {
   uploadedAt   DateTime @default(now())
 
   // Verification fields
-  verificationStatus String  @default("PENDING") // PENDING, VERIFIED, REJECTED
+  verificationStatus String    @default("PENDING") // PENDING, VERIFIED, REJECTED
   rejectionReason    String?
+  verifiedById       String? // the doctor / nurse / staff who last set the status (audit)
+  verifiedAt         DateTime?
 
   // Relations
   organization Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)

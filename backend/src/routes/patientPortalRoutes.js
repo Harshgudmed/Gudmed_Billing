@@ -4,11 +4,14 @@ import path from 'path'
 import fs from 'fs'
 import { fileURLToPath } from 'url'
 import { getMyDashboard, uploadDocument, deleteDocument } from '../controllers/patientPortalController.js'
+import { PATIENT_DOC_MIME, PATIENT_DOC_EXT, PATIENT_DOC_MAX_BYTES, PATIENT_DOC_TYPES_LABEL, patientDocUploadError } from '../lib/patientDocumentUpload.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const UPLOAD_ROOT = path.join(__dirname, '..', '..', 'uploads')
 
-// Configure multer for local file uploads
+// Configure multer for local file uploads. Types/size limit are shared with
+// the staff-side upload in routes/uploadRoutes.js (lib/patientDocumentUpload.js)
+// — both write into the same PatientDocument table.
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
     const uploadPath = path.join(UPLOAD_ROOT, 'patient-documents')
@@ -19,20 +22,16 @@ const storage = multer.diskStorage({
     const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9)
     // Force the stored extension from an allowlist of known-safe types — never trust
     // the client's extension (prevents a .html/.svg/.exe being written to disk).
-    const ALLOWED_EXT = { 'image/jpeg': '.jpg', 'image/png': '.png', 'application/pdf': '.pdf' }
-    const ext = ALLOWED_EXT[file.mimetype] || ''
+    const ext = PATIENT_DOC_EXT[file.mimetype] || ''
     cb(null, file.fieldname + '-' + uniqueSuffix + ext)
   }
 })
-// Only allow patient documents to be images or PDFs, and cap the size so a single
-// upload can't exhaust disk / act as a DoS. Rejected types return a clear error.
-const ALLOWED_MIME = new Set(['image/jpeg', 'image/png', 'application/pdf'])
 const upload = multer({
   storage,
-  limits: { fileSize: 10 * 1024 * 1024, files: 1 }, // 10 MB, one file
+  limits: { fileSize: PATIENT_DOC_MAX_BYTES, files: 1 },
   fileFilter: (req, file, cb) => {
-    if (ALLOWED_MIME.has(file.mimetype)) return cb(null, true)
-    cb(new Error('Only JPG, PNG, or PDF files are allowed'))
+    if (PATIENT_DOC_MIME.has(file.mimetype)) return cb(null, true)
+    cb(new Error(`Only ${PATIENT_DOC_TYPES_LABEL} files are allowed`))
   },
 })
 
@@ -45,7 +44,7 @@ router.get('/me', getMyDashboard)
 // clean 400 instead of bubbling up as an unhandled error.
 router.post('/documents', (req, res, next) => {
   upload.single('document')(req, res, (err) => {
-    if (err) return res.status(400).json({ success: false, error: err.message || 'Upload failed' })
+    if (err) return res.status(400).json({ success: false, error: patientDocUploadError(err) })
     next()
   })
 }, uploadDocument)

@@ -12,9 +12,12 @@ import { FilterBar, FilterSelect } from '@/components/common/FilterBar'
 import { useLiveData } from '@/lib/useLiveData'
 import { useDebounce } from '@/lib/useDebounce'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
-import { ShieldCheck, Plus, Trash2, Loader2, AlertCircle, FileText, Users, Clock } from 'lucide-react'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { ShieldCheck, Plus, Trash2, Loader2, AlertCircle, FileText, Users, Clock, FolderOpen } from 'lucide-react'
 import { toast } from 'sonner'
 import client from '@/api/client'
+import PatientDocumentsPanel from '@/components/common/PatientDocumentsPanel'
+import { TPA_DOC_TYPES } from '@/lib/patientDocumentTypes'
 
 import { formatMoney as inr } from '@/lib/format'
 import { getFullName } from "@/lib/patient";
@@ -198,8 +201,12 @@ export default function InsuranceModule() {
                 {displayedCases.length === 0 ? (
                   <TableRow><TableCell colSpan={8} className="text-center py-10 text-gray-500">{pendingClaimsOnly ? 'No cases with pending claims.' : 'No insurance/TPA cases yet.'}</TableCell></TableRow>
                 ) : displayedCases.map(c => (
-                  <TableRow key={c.id}>
-                    <TableCell>{c.patient ? getFullName(c.patient) : '—'}</TableCell>
+                  <TableRow
+                    key={c.id}
+                    className="cursor-pointer hover:bg-gray-50"
+                    onClick={() => { setClaimForm(EMPTY_CLAIM); setClaimCase(c) }}
+                  >
+                    <TableCell className="font-medium text-blue-700">{c.patient ? getFullName(c.patient) : '—'}</TableCell>
                     <TableCell>
                       <div>{c.insurerName}</div>
                       <div className="text-xs text-gray-500">{c.payerType === 'TPA' ? (c.tpaName ? `TPA · ${c.tpaName}` : 'TPA') : 'Insurance'}</div>
@@ -211,10 +218,10 @@ export default function InsuranceModule() {
                     <TableCell><Badge className={`${STATUS_STYLES[c.status] || ''} hover:opacity-90`}>{c.status}</Badge></TableCell>
                     <TableCell className="text-right">
                       <div className="flex justify-end gap-2">
-                        <Button size="sm" className="bg-green-600 hover:bg-green-700" onClick={() => { setClaimForm(EMPTY_CLAIM); setClaimCase(c) }}>
+                        <Button size="sm" className="bg-green-600 hover:bg-green-700" onClick={(e) => { e.stopPropagation(); setClaimForm(EMPTY_CLAIM); setClaimCase(c) }}>
                           <FileText className="h-4 w-4 mr-1" /> Claim{c.claims?.length ? ` (${c.claims.length})` : ''}
                         </Button>
-                        <Button variant="ghost" size="icon" className="text-red-600 hover:bg-red-50" onClick={() => deleteCase(c.id)}><Trash2 className="h-4 w-4" /></Button>
+                        <Button variant="ghost" size="icon" className="text-red-600 hover:bg-red-50" onClick={(e) => { e.stopPropagation(); deleteCase(c.id) }}><Trash2 className="h-4 w-4" /></Button>
                       </div>
                     </TableCell>
                   </TableRow>
@@ -274,7 +281,7 @@ export default function InsuranceModule() {
 
       {/* Claims dialog */}
       <Dialog open={!!claimCase} onOpenChange={(o) => { if (!o) setClaimCase(null) }}>
-        <DialogContent className="max-w-2xl">
+        <DialogContent className="max-w-6xl w-[95vw] max-h-[90vh] overflow-y-auto">
           {claimCase && (
             <>
               <DialogHeader>
@@ -284,68 +291,96 @@ export default function InsuranceModule() {
                 {claimCase.insurerName} · Limit {inr(claimCase.coverageLimit)} · Used {inr(claimCase.amountUsed)} · Balance <span className="font-medium text-green-600">{inr(claimCase.balance)}</span>
               </div>
 
-              <div className="max-h-52 overflow-y-auto border rounded-md">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Claim #</TableHead><TableHead>Amount</TableHead><TableHead>Approved</TableHead><TableHead>Status</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {(claimCase.claims || []).length === 0 ? (
-                      <TableRow><TableCell colSpan={4} className="text-center py-6 text-gray-500">No claims filed yet.</TableCell></TableRow>
-                    ) : claimCase.claims.map(cl => (
-                      <TableRow key={cl.id}>
-                        <TableCell className="font-mono">{cl.claimNumber}</TableCell>
-                        <TableCell>{inr(cl.claimAmount)}</TableCell>
-                        <TableCell>{cl.approvedAmount != null ? inr(cl.approvedAmount) : '—'}</TableCell>
-                        <TableCell>
-                          <Select value={cl.status} onValueChange={v => changeClaimStatus(cl.id, v)}>
-                            <SelectTrigger className={`h-7 w-[120px] border-0 capitalize ${CLAIM_STYLES[cl.status] || ''}`}><SelectValue /></SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="pending">Pending</SelectItem>
-                              <SelectItem value="submitted">Submitted</SelectItem>
-                              <SelectItem value="approved">Approved</SelectItem>
-                              <SelectItem value="rejected">Rejected</SelectItem>
-                              <SelectItem value="settled">Settled</SelectItem>
-                            </SelectContent>
-                          </Select>
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </div>
+              <Tabs defaultValue="claims">
+                <TabsList className="grid w-full grid-cols-2">
+                  <TabsTrigger value="claims"><FileText className="h-4 w-4 mr-1.5" /> Claims</TabsTrigger>
+                  <TabsTrigger value="documents"><FolderOpen className="h-4 w-4 mr-1.5" /> Documents</TabsTrigger>
+                </TabsList>
 
-              <form onSubmit={handleAddClaim} className="space-y-3 border-t pt-4">
-                <div className="font-medium text-sm">File a new claim</div>
-                <div className="grid grid-cols-2 gap-3">
-                  <div><Label>Claim Amount (₹) *</Label><Input className="mt-1" type="number" value={claimForm.claimAmount} onChange={e => setClaim('claimAmount', e.target.value)} /></div>
-                  <div><Label>Approved Amount (₹)</Label><Input className="mt-1" type="number" value={claimForm.approvedAmount} onChange={e => setClaim('approvedAmount', e.target.value)} /></div>
-                </div>
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <Label>Status</Label>
-                    <Select value={claimForm.status} onValueChange={v => setClaim('status', v)}>
-                      <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="pending">Pending</SelectItem>
-                        <SelectItem value="submitted">Submitted</SelectItem>
-                        <SelectItem value="approved">Approved</SelectItem>
-                        <SelectItem value="rejected">Rejected</SelectItem>
-                        <SelectItem value="settled">Settled</SelectItem>
-                      </SelectContent>
-                    </Select>
+                <TabsContent value="claims" className="space-y-4 mt-4">
+                  <div className="max-h-52 overflow-y-auto border rounded-md">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Claim #</TableHead><TableHead>Amount</TableHead><TableHead>Approved</TableHead><TableHead>Status</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {(claimCase.claims || []).length === 0 ? (
+                          <TableRow><TableCell colSpan={4} className="text-center py-6 text-gray-500">No claims filed yet.</TableCell></TableRow>
+                        ) : claimCase.claims.map(cl => (
+                          <TableRow key={cl.id}>
+                            <TableCell className="font-mono">{cl.claimNumber}</TableCell>
+                            <TableCell>{inr(cl.claimAmount)}</TableCell>
+                            <TableCell>{cl.approvedAmount != null ? inr(cl.approvedAmount) : '—'}</TableCell>
+                            <TableCell>
+                              <Select value={cl.status} onValueChange={v => changeClaimStatus(cl.id, v)}>
+                                <SelectTrigger className={`h-7 w-[120px] border-0 capitalize ${CLAIM_STYLES[cl.status] || ''}`}><SelectValue /></SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="pending">Pending</SelectItem>
+                                  <SelectItem value="submitted">Submitted</SelectItem>
+                                  <SelectItem value="approved">Approved</SelectItem>
+                                  <SelectItem value="rejected">Rejected</SelectItem>
+                                  <SelectItem value="settled">Settled</SelectItem>
+                                </SelectContent>
+                              </Select>
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
                   </div>
-                  <div><Label>Diagnosis</Label><Input className="mt-1" value={claimForm.diagnosis} onChange={e => setClaim('diagnosis', e.target.value)} /></div>
-                </div>
-                <div><Label>Remarks</Label><Input className="mt-1" value={claimForm.remarks} onChange={e => setClaim('remarks', e.target.value)} /></div>
-                <DialogFooter>
-                  <Button type="submit" className="bg-green-600 hover:bg-green-700" disabled={savingClaim}>
-                    {savingClaim ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Plus className="h-4 w-4 mr-2" />} File Claim
-                  </Button>
-                </DialogFooter>
-              </form>
+
+                  <form onSubmit={handleAddClaim} className="space-y-3 border-t pt-4">
+                    <div className="font-medium text-sm">File a new claim</div>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div><Label>Claim Amount (₹) *</Label><Input className="mt-1" type="number" value={claimForm.claimAmount} onChange={e => setClaim('claimAmount', e.target.value)} /></div>
+                      <div><Label>Approved Amount (₹)</Label><Input className="mt-1" type="number" value={claimForm.approvedAmount} onChange={e => setClaim('approvedAmount', e.target.value)} /></div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <Label>Status</Label>
+                        <Select value={claimForm.status} onValueChange={v => setClaim('status', v)}>
+                          <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="pending">Pending</SelectItem>
+                            <SelectItem value="submitted">Submitted</SelectItem>
+                            <SelectItem value="approved">Approved</SelectItem>
+                            <SelectItem value="rejected">Rejected</SelectItem>
+                            <SelectItem value="settled">Settled</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div><Label>Diagnosis</Label><Input className="mt-1" value={claimForm.diagnosis} onChange={e => setClaim('diagnosis', e.target.value)} /></div>
+                    </div>
+                    <div><Label>Remarks</Label><Input className="mt-1" value={claimForm.remarks} onChange={e => setClaim('remarks', e.target.value)} /></div>
+                    <DialogFooter>
+                      <Button type="submit" className="bg-green-600 hover:bg-green-700" disabled={savingClaim}>
+                        {savingClaim ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Plus className="h-4 w-4 mr-2" />} File Claim
+                      </Button>
+                    </DialogFooter>
+                  </form>
+                </TabsContent>
+
+                {/* Same patient-documents store the Appointments/OPD/IPD panels and
+                    the patient portal write to (PatientDocument) — a pre-auth
+                    letter or discharge summary uploaded anywhere already shows up
+                    here, and anything attached here (e.g. a claim form) shows up
+                    there too. No separate TPA document store. */}
+                <TabsContent value="documents" className="mt-4">
+                  <PatientDocumentsPanel
+                    patientId={claimCase.patientId}
+                    types={TPA_DOC_TYPES}
+                    patientInfo={{ name: claimCase.patient ? getFullName(claimCase.patient) : '', uhid: claimCase.patient?.mrn }}
+                    claimInfo={{
+                      insurerName: claimCase.insurerName,
+                      tpaName: claimCase.tpaName,
+                      policyNumber: claimCase.policyNumber,
+                      claimNumber: claimCase.claims?.[0]?.claimNumber,
+                    }}
+                  />
+                </TabsContent>
+              </Tabs>
             </>
           )}
         </DialogContent>

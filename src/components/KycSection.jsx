@@ -5,16 +5,15 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } f
 import { Button } from '@/components/ui/button'
 import { toast } from 'sonner'
 import client from '@/api/client'
+import { PATIENT_DOC_TYPE_LABEL } from '@/lib/patientDocumentTypes'
 
-const KYC_DOCS = [
-  { id: 'aadhaar', label: 'Aadhaar Card' },
-  { id: 'pan', label: 'PAN Card' },
-  { id: 'insurance', label: 'Insurance Policy' },
-  { id: 'referral', label: 'Referral Letter' },
-  { id: 'lab_report', label: 'Previous Lab Reports' },
-  { id: 'prescription', label: 'Previous Prescriptions' },
-  { id: 'history', label: 'Medical History Report' },
-]
+// The identity proofs + previous-record types a patient fills in from their
+// own portal. Labels come from lib/patientDocumentTypes.js — the same list
+// the staff-facing PatientDocumentsPanel (Appointments/OPD/IPD/Insurance-TPA)
+// reads, so a document the patient uploads here shows up there under the
+// same name, and vice versa.
+const KYC_DOC_IDS = ['aadhaar', 'pan', 'employee_id', 'photograph', 'insurance', 'referral', 'lab_report', 'prescription', 'history']
+const KYC_DOCS = KYC_DOC_IDS.map((id) => ({ id, label: PATIENT_DOC_TYPE_LABEL[id] }))
 
 export default function KycSection({ documents = [], onUploadSuccess, primaryColor }) {
   const [uploading, setUploading] = useState(false)
@@ -31,8 +30,10 @@ export default function KycSection({ documents = [], onUploadSuccess, primaryCol
     const file = e.target.files?.[0]
     if (!file || !selectedDocType) return
 
-    if (file.size > 50 * 1024 * 1024) {
-      toast.error('File too large (Max 50MB)')
+    // Matches the server's limit (lib/patientDocumentUpload.js) — checking
+    // here too avoids a wasted upload that the server would reject anyway.
+    if (file.size > 20 * 1024 * 1024) {
+      toast.error('File too large (max 20MB)')
       return
     }
 
@@ -76,12 +77,11 @@ export default function KycSection({ documents = [], onUploadSuccess, primaryCol
     return acc
   }, {})
 
-  const getMediaUrl = (url) => {
-    if (!url) return ''
-    const baseUrl = import.meta.env.VITE_API_URL || 'http://localhost:5000/api'
-    const prefix = baseUrl.endsWith('/api') ? baseUrl.slice(0, -4) : baseUrl
-    return `${prefix}${url}`
-  }
+  // The file route lives under /api (the only path the Vite dev proxy
+  // forwards, and the same-origin path in production) — a bare `/uploads/...`
+  // URL skips the proxy, reaches the backend's own origin directly, and the
+  // auth cookie doesn't cross with it, which 404s as "file not found".
+  const getMediaUrl = (url) => (url ? `/api${url}` : '')
 
   return (
     <Card className="col-span-full mb-6">
@@ -100,7 +100,7 @@ export default function KycSection({ documents = [], onUploadSuccess, primaryCol
           type="file" 
           ref={fileInputRef} 
           className="hidden" 
-          accept="image/*,application/pdf"
+          accept="image/jpeg,image/png,image/webp,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
           capture="environment" 
           onChange={handleFileChange} 
         />
@@ -231,17 +231,26 @@ export default function KycSection({ documents = [], onUploadSuccess, primaryCol
           </DialogHeader>
           <div className="flex-1 overflow-hidden rounded-md border bg-gray-50 flex items-center justify-center p-2 relative">
             {viewDoc && viewDoc.fileType && viewDoc.fileType.includes('image') ? (
-              <img 
-                src={getMediaUrl(viewDoc.fileUrl)} 
-                alt="Document preview" 
+              <img
+                src={getMediaUrl(viewDoc.fileUrl)}
+                alt="Document preview"
                 className="max-w-full max-h-full object-contain"
               />
-            ) : viewDoc ? (
-              <iframe 
-                src={getMediaUrl(viewDoc.fileUrl)} 
+            ) : viewDoc && viewDoc.fileType === 'application/pdf' ? (
+              <iframe
+                src={getMediaUrl(viewDoc.fileUrl)}
                 className="w-full h-full border-0"
                 title="Document viewer"
               />
+            ) : viewDoc ? (
+              // Word files (now accepted on upload) have no inline browser
+              // preview — an <iframe> just shows blank — so offer a direct
+              // link instead of a dead-looking frame.
+              <div className="flex flex-col items-center gap-3 text-center text-gray-500 p-6">
+                <File className="h-10 w-10" />
+                <p className="text-sm">This file type can't be previewed here.</p>
+                <a href={getMediaUrl(viewDoc.fileUrl)} target="_blank" rel="noreferrer" className="text-sm text-blue-600 hover:underline">Open it in a new tab</a>
+              </div>
             ) : null}
           </div>
         </DialogContent>

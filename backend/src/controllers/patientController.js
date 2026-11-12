@@ -5,6 +5,7 @@ import { optionalMobileSchema, normalizeIndianMobile } from '../lib/phone.js'
 import { dayRange, ymdInZone } from '../lib/dates.js'
 import { generateUHID } from '../lib/counters.js'
 import { getOrgId } from "../lib/reqContext.js";
+import { PATIENT_DOC_ROLES } from '../lib/patientDocumentUpload.js'
 import { z } from 'zod'
 
 // Who keeps the patient register (deactivating a patient). Mirrored on the
@@ -351,17 +352,24 @@ export async function listDocuments(req, res, next) {
     // document count, and the newest are kept (orderBy desc).
     const documents = await db.patientDocument.findMany({ where, orderBy: { uploadedAt: 'desc' }, take: 200 })
 
-    // uploadedById is a plain column (no relation), so the uploader's name is
-    // resolved in one extra lookup rather than a join.
-    const uploaderIds = [...new Set(documents.map((d) => d.uploadedById).filter(Boolean))]
-    const uploaders = uploaderIds.length
-      ? await db.user.findMany({ where: { id: { in: uploaderIds } }, select: { id: true, fullName: true } })
+    // uploadedById/verifiedById are plain columns (no relation), so both names
+    // are resolved in one extra lookup rather than a join.
+    const userIds = [...new Set([
+      ...documents.map((d) => d.uploadedById),
+      ...documents.map((d) => d.verifiedById),
+    ].filter(Boolean))]
+    const users = userIds.length
+      ? await db.user.findMany({ where: { id: { in: userIds } }, select: { id: true, fullName: true } })
       : []
-    const nameById = Object.fromEntries(uploaders.map((u) => [u.id, u.fullName]))
+    const nameById = Object.fromEntries(users.map((u) => [u.id, u.fullName]))
 
     res.json({
       success: true,
-      data: documents.map((d) => ({ ...d, uploadedByName: d.uploadedById ? nameById[d.uploadedById] || null : null })),
+      data: documents.map((d) => ({
+        ...d,
+        uploadedByName: d.uploadedById ? nameById[d.uploadedById] || null : null,
+        verifiedByName: d.verifiedById ? nameById[d.verifiedById] || null : null,
+      })),
     })
   } catch (err) {
     next(err)
@@ -664,14 +672,27 @@ export async function setStatus(req, res, next) {
   }
 }
 
+// Same roles allowed to upload/manage a patient's documents (uploadRoutes.js,
+// PatientDocumentsPanel.jsx canManage) — this route had no role check at all
+// until now, so any authenticated staff member (e.g. a lab tech with no
+// business reviewing a KYC/claim document) could call it.
+const DOCUMENT_REVIEWERS = new Set(PATIENT_DOC_ROLES)
+
 export async function verifyDocument(req, res, next) {
   try {
     const organizationId = getOrgId(req)
     const { id, docId } = req.params
     const { status, reason } = req.body
 
+    if (!DOCUMENT_REVIEWERS.has(req.user?.role)) {
+      return res.status(403).json({ success: false, error: 'Only clinical or front-desk staff can verify a document' })
+    }
     if (!['VERIFIED', 'REJECTED', 'PENDING'].includes(status)) {
       return res.status(400).json({ success: false, error: "Invalid verification status" })
+    }
+    // A doctor verifies documents only for their own patients, as everywhere else.
+    if (doctorPatientFilter(req) && !(await doctorOwnsPatient(req.user.userId, id))) {
+      return res.status(404).json({ success: false, error: 'Patient not found' })
     }
 
     const doc = await db.patientDocument.findFirst({
@@ -686,7 +707,9 @@ export async function verifyDocument(req, res, next) {
       where: { id: docId },
       data: {
         verificationStatus: status,
-        rejectionReason: status === 'REJECTED' ? reason : null
+        rejectionReason: status === 'REJECTED' ? reason : null,
+        verifiedById: req.user.userId,
+        verifiedAt: new Date(),
       }
     })
 

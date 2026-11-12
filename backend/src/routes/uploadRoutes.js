@@ -7,6 +7,7 @@ import { db } from '../config/db.js'
 import { authenticate, authorize } from '../middleware/auth.js'
 import { getOrgId } from '../lib/reqContext.js'
 import { canManageMasters, canSeeBills, canSeeVendors, canReceive, requirePurchaseOn } from '../lib/purchaseAccess.js'
+import { PATIENT_DOC_MIME, PATIENT_DOC_EXT, PATIENT_DOC_MAX_BYTES, PATIENT_DOC_TYPES_LABEL, PATIENT_DOC_ROLES, patientDocUploadError } from '../lib/patientDocumentUpload.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const UPLOAD_ROOT = path.join(__dirname, '..', '..', 'uploads')
@@ -335,9 +336,6 @@ router.get('/receipt-documents/:filename', authenticate, requirePurchaseOn, asyn
 // IPD admission they are working in. Several files can go up at once; each
 // becomes its own PatientDocument row. Served back by the GET route below.
 
-const PATIENT_DOC_MIME = new Set(['image/jpeg', 'image/png', 'image/webp', 'application/pdf'])
-const PATIENT_DOC_EXT = { 'image/jpeg': '.jpg', 'image/png': '.png', 'image/webp': '.webp', 'application/pdf': '.pdf' }
-
 const patientDocStorage = multer.diskStorage({
   destination: (_req, _file, cb) => {
     const dir = path.join(UPLOAD_ROOT, 'patient-documents')
@@ -352,10 +350,10 @@ const patientDocStorage = multer.diskStorage({
 
 const uploadPatientDoc = multer({
   storage: patientDocStorage,
-  limits: { fileSize: 10 * 1024 * 1024, files: 10 },
+  limits: { fileSize: PATIENT_DOC_MAX_BYTES, files: 10 },
   fileFilter: (_req, file, cb) => {
     if (PATIENT_DOC_MIME.has(file.mimetype)) return cb(null, true)
-    cb(new Error('Only JPG, PNG, WEBP or PDF files are allowed'))
+    cb(new Error(`Only ${PATIENT_DOC_TYPES_LABEL} files are allowed`))
   },
 })
 
@@ -363,9 +361,9 @@ const removeFiles = (files = []) => { for (const f of files) fs.unlink(f.path, (
 
 // POST /uploads/patient-documents  — upload one or more documents for a patient,
 // optionally tagged to the OPD consultation or IPD admission it was taken in.
-router.post('/patient-documents', authenticate, authorize('doctor', 'nurse', 'receptionist', 'admin'), (req, res, next) => {
+router.post('/patient-documents', authenticate, authorize(...PATIENT_DOC_ROLES), (req, res, next) => {
   uploadPatientDoc.array('documents', 10)(req, res, (err) => {
-    if (err) return res.status(400).json({ success: false, error: err.message || 'Upload failed' })
+    if (err) return res.status(400).json({ success: false, error: patientDocUploadError(err) })
     next()
   })
 }, async (req, res, next) => {
@@ -415,7 +413,7 @@ router.post('/patient-documents', authenticate, authorize('doctor', 'nurse', 're
 
 // DELETE /uploads/patient-documents/:id  — remove a document (row + file).
 // Doctor, nurse and admin may delete; only within their own hospital.
-router.delete('/patient-documents/:id', authenticate, authorize('doctor', 'nurse', 'receptionist', 'admin'), async (req, res, next) => {
+router.delete('/patient-documents/:id', authenticate, authorize(...PATIENT_DOC_ROLES), async (req, res, next) => {
   try {
     const orgId = getOrgId(req)
     const doc = await db.patientDocument.findFirst({

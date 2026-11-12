@@ -11,8 +11,21 @@ import { format } from 'date-fns'
 // Brand navy for print. Matches the existing lab/radiology reports.
 export const PRINT_NAVY = '#1e3a5f'
 
-/** Print without tripping popup blockers. */
-export function printViaIframe(html) {
+// Chrome's "Save as PDF" dialog takes its suggested filename from the TOP
+// window's title, not the hidden iframe's — so a banner/title with a "/" in
+// it (e.g. "TPA / Insurance") showed up raw in that box and Windows refused
+// it as an invalid filename. Strip the characters Windows/macOS both forbid.
+export function sanitizeFilename(s) {
+  return String(s ?? '').replace(/[\\/:*?"<>|]/g, '-').replace(/\s+/g, ' ').trim()
+}
+
+/**
+ * Print without tripping popup blockers.
+ * @param filename  optional — briefly becomes the page's own title while the
+ *   print dialog is open, so "Save as PDF" suggests this (sanitized) name
+ *   instead of whatever the app's tab title happens to be; restored after.
+ */
+export function printViaIframe(html, filename) {
   const iframe = document.createElement('iframe')
   iframe.style.cssText = 'position:fixed;top:-9999px;left:-9999px;width:0;height:0;border:none;'
   document.body.appendChild(iframe)
@@ -20,9 +33,14 @@ export function printViaIframe(html) {
   iframe.contentDocument.write(html)
   iframe.contentDocument.close()
   iframe.contentWindow.focus()
+  const prevTitle = document.title
+  if (filename) document.title = sanitizeFilename(filename)
   setTimeout(() => {
     iframe.contentWindow.print()
-    setTimeout(() => document.body.removeChild(iframe), 1000)
+    setTimeout(() => {
+      document.body.removeChild(iframe)
+      if (filename) document.title = prevTitle
+    }, 1000)
   }, 300)
 }
 
@@ -95,7 +113,7 @@ export function gudmedDocument({ orgInfo = {}, title, banner, subtitle = '', hea
   const printedAt = format(new Date(), 'dd MMM yyyy HH:mm')
   const addr = [orgInfo.address, orgInfo.city].filter(Boolean).join(', ')
   const hospital = orgInfo.name || 'Hospital'
-  return `<!DOCTYPE html><html><head><title>${escapeHtml(title)}</title><style>${CSS}</style></head><body>
+  return `<!DOCTYPE html><html><head><title>${escapeHtml(sanitizeFilename(title))}</title><style>${CSS}</style></head><body>
 <div class="page${variant ? ` ${escapeHtml(variant)}` : ''}">
   <div class="hosp-header">
     <div>
