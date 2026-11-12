@@ -136,6 +136,7 @@ const ALL_MODULES = [
   { key: 'purchase',             label: 'Purchase & Supply Chain', description: 'Requests, RFQs, orders, goods receipt, stock, store indents, returns, vendor bills and payments' },
   { key: 'pharmacy',             label: 'Pharmacy',             description: 'Drug inventory, dispensing, and sales' },
   { key: 'doctorAccountability', label: 'Doctor Accountability', description: 'Doctor commissions and settlements' },
+  { key: 'assetManagement',      label: 'Asset Management',     description: 'Equipment register, warranty/AMC and maintenance tracking' },
   { key: 'inventory',            label: 'Inventory',            description: 'Stock management across departments' },
   { key: 'accounting',           label: 'Accounting',           description: 'Financial accounting and reporting' },
 ]

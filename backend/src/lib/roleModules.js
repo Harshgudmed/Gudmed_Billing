@@ -11,14 +11,14 @@
 // is no role and every module is open, as on every other route.
 
 export const ROLE_MODULES = {
-  doctor: ['dashboard', 'opd', 'appointments', 'queue', 'patients', 'doctorAccountability', 'ot', 'storeIndent', 'purchase'],
-  receptionist: ['dashboard', 'appointments', 'preTriage', 'queue', 'patients', 'billing', 'ot', 'storeIndent'],
-  nurse: ['dashboard', 'preTriage', 'patients', 'ot', 'storeIndent', 'purchase'],
-  pharmacist: ['dashboard', 'pharmacy', 'storeIndent'],
-  billing: ['dashboard', 'billing', 'storeIndent'],
-  finance_controller: ['dashboard', 'billing', 'purchase', 'storeIndent'],
-  purchase_officer: ['purchase'],
-  store_keeper: ['purchase'],
+  doctor: ['dashboard', 'opd', 'appointments', 'queue', 'patients', 'doctorAccountability', 'ot', 'storeIndent', 'purchase', 'assetManagement'],
+  receptionist: ['dashboard', 'appointments', 'preTriage', 'queue', 'patients', 'billing', 'ot', 'storeIndent', 'assetManagement'],
+  nurse: ['dashboard', 'preTriage', 'patients', 'ot', 'storeIndent', 'purchase', 'assetManagement'],
+  pharmacist: ['dashboard', 'pharmacy', 'storeIndent', 'assetManagement'],
+  billing: ['dashboard', 'billing', 'storeIndent', 'assetManagement'],
+  finance_controller: ['dashboard', 'billing', 'purchase', 'storeIndent', 'assetManagement'],
+  purchase_officer: ['purchase', 'assetManagement'],
+  store_keeper: ['purchase', 'assetManagement'],
 }
 
 const EVERYWHERE = new Set(['admin', 'super_admin'])

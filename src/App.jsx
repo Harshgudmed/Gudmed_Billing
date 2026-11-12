@@ -51,6 +51,7 @@ const InpatientPage            = lazy(() => import('./pages/InpatientPage.jsx'))
 const OtPage                   = lazy(() => import('./pages/OtPage.jsx'))
 const PurchasePage             = lazy(() => import('./pages/PurchasePage.jsx'))
 const StoreIndentPage          = lazy(() => import('./pages/StoreIndentPage.jsx'))
+const AssetManagementPage      = lazy(() => import('./pages/AssetManagementPage.jsx'))
 const NotFoundPage             = lazy(() => import('./pages/NotFoundPage.jsx'))
 // No Shell (no sidebar/header) — this runs full-screen on a lobby TV/second
 // monitor, so it's mounted outside both the legacy and role-based Shell trees.
@@ -83,6 +84,7 @@ const PAGE_BY_MODULE = {
   pharmacy:             PharmacyPage,
   billing:              BillingPage,
   doctorAccountability: DoctorAccountabilityPage,
+  assetManagement:      AssetManagementPage,
   settings:             SettingsPage,
 }
 
@@ -109,6 +111,7 @@ const LEGACY_NAV = [
   { to: '/store-indent',          label: 'Store Indent' },
   { to: '/billing',               label: 'Billing' },
   { to: '/doctor-accountability', label: 'Doctor Accountability' },
+  { to: '/assets',                label: 'Asset Management' },
   { to: '/settings',              label: 'Settings' },
 ]
 
@@ -129,6 +132,7 @@ const MODULE_BY_PATH = {
   '/store-indent':          'storeIndent',
   '/pharmacy':              'pharmacy',
   '/doctor-accountability': 'doctorAccountability',
+  '/assets':                'assetManagement',
 }
 
 function hexToHsl(hex) {
@@ -421,6 +425,7 @@ function LegacyApp() {
         <Route path="/pharmacy"              element={<PharmacyPage />} />
         <Route path="/billing"               element={<BillingPage />} />
         <Route path="/doctor-accountability" element={<DoctorAccountabilityPage />} />
+        <Route path="/assets"                element={<AssetManagementPage />} />
         <Route path="/settings"              element={<SettingsPage />} />
         <Route path="*"                      element={<NotFoundPage />} />
       </Routes>

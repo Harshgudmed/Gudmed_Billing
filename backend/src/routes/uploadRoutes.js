@@ -8,6 +8,7 @@ import { authenticate, authorize } from '../middleware/auth.js'
 import { getOrgId } from '../lib/reqContext.js'
 import { canManageMasters, canSeeBills, canSeeVendors, canReceive, requirePurchaseOn } from '../lib/purchaseAccess.js'
 import { PATIENT_DOC_MIME, PATIENT_DOC_EXT, PATIENT_DOC_MAX_BYTES, PATIENT_DOC_TYPES_LABEL, PATIENT_DOC_ROLES, patientDocUploadError } from '../lib/patientDocumentUpload.js'
+import { canManageAssets } from '../lib/assetAccess.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const UPLOAD_ROOT = path.join(__dirname, '..', '..', 'uploads')
@@ -322,6 +323,111 @@ router.get('/receipt-documents/:filename', authenticate, requirePurchaseOn, asyn
       return res.status(404).json({ success: false, error: 'File not found' })
     }
     const filePath = path.join(UPLOAD_ROOT, 'receipt-documents', filename)
+    if (!filePath.startsWith(UPLOAD_ROOT) || !fs.existsSync(filePath)) {
+      return res.status(404).json({ success: false, error: 'File not found' })
+    }
+    res.setHeader('Cache-Control', 'private, no-store')
+    return res.sendFile(filePath)
+  } catch (err) { next(err) }
+})
+
+// ─── Asset maintenance document upload (bill / receipt / invoice) ────────────
+// Admin and the Purchase/Store side attach the service bill or receipt to a
+// maintenance log entry. Several files can go up against the same entry.
+
+const ASSET_MAINT_DOC_MIME = BILL_DOC_MIME
+const ASSET_MAINT_DOC_EXT = BILL_DOC_EXT
+
+const assetMaintDocStorage = multer.diskStorage({
+  destination: (_req, _file, cb) => {
+    const dir = path.join(UPLOAD_ROOT, 'asset-maintenance-documents')
+    fs.mkdirSync(dir, { recursive: true })
+    cb(null, dir)
+  },
+  filename: (_req, file, cb) => {
+    const suffix = `${Date.now()}-${Math.round(Math.random() * 1e9)}`
+    cb(null, `assetmaintdoc-${suffix}${ASSET_MAINT_DOC_EXT[file.mimetype] || ''}`)
+  },
+})
+
+const uploadAssetMaintDoc = multer({
+  storage: assetMaintDocStorage,
+  limits: { fileSize: 10 * 1024 * 1024, files: 1 },
+  fileFilter: (_req, file, cb) => {
+    if (ASSET_MAINT_DOC_MIME.has(file.mimetype)) return cb(null, true)
+    cb(new Error('Only PDF, Word (.doc/.docx), JPG or PNG files are allowed'))
+  },
+})
+
+// POST /uploads/asset-maintenance-documents — attach a bill/receipt to a maintenance log entry
+router.post('/asset-maintenance-documents', authenticate, (req, res, next) => {
+  if (!canManageAssets(req)) return res.status(403).json({ success: false, error: 'Only an administrator or the Purchase/Store team attach asset maintenance documents' })
+  uploadAssetMaintDoc.single('document')(req, res, (err) => {
+    if (err) return res.status(400).json({ success: false, error: err.message || 'Upload failed' })
+    next()
+  })
+}, async (req, res, next) => {
+  try {
+    const orgId = getOrgId(req)
+    const { maintenanceLogId, label } = req.body
+    if (!maintenanceLogId) return res.status(400).json({ success: false, error: 'maintenanceLogId is required' })
+    if (!req.file) return res.status(400).json({ success: false, error: 'No file uploaded' })
+
+    // Confirm the log entry belongs to this hospital (IDOR guard)
+    const log = await db.assetMaintenanceLog.findFirst({ where: { id: maintenanceLogId, organizationId: orgId }, select: { id: true } })
+    if (!log) {
+      fs.unlinkSync(req.file.path)
+      return res.status(404).json({ success: false, error: 'Maintenance log entry not found' })
+    }
+
+    const fileUrl = `/uploads/asset-maintenance-documents/${req.file.filename}`
+    const doc = await db.assetMaintenanceDocument.create({
+      data: {
+        organizationId: orgId,
+        maintenanceLogId,
+        label: label?.trim() || null,
+        fileName: req.file.originalname,
+        fileUrl,
+        uploadedById: req.user?.id || null,
+      },
+    })
+    res.json({ success: true, data: doc })
+  } catch (err) {
+    if (req.file) fs.unlink(req.file.path, () => {})
+    next(err)
+  }
+})
+
+// DELETE /uploads/asset-maintenance-documents/:id — remove an attachment (its file + row)
+router.delete('/asset-maintenance-documents/:id', authenticate, async (req, res, next) => {
+  try {
+    if (!canManageAssets(req)) return res.status(403).json({ success: false, error: 'Only an administrator or the Purchase/Store team remove asset maintenance documents' })
+    const orgId = getOrgId(req)
+    const doc = await db.assetMaintenanceDocument.findFirst({ where: { id: req.params.id, organizationId: orgId } })
+    if (!doc) return res.status(404).json({ success: false, error: 'Document not found' })
+    await db.assetMaintenanceDocument.delete({ where: { id: doc.id } })
+    const filePath = path.join(UPLOAD_ROOT, 'asset-maintenance-documents', path.basename(doc.fileUrl))
+    if (filePath.startsWith(UPLOAD_ROOT)) fs.unlink(filePath, () => {})
+    res.json({ success: true })
+  } catch (err) { next(err) }
+})
+
+// GET /uploads/asset-maintenance-documents/:filename — serve one to this hospital's staff
+// (read is open to every role that can reach Asset Management — not just managers)
+router.get('/asset-maintenance-documents/:filename', authenticate, async (req, res, next) => {
+  try {
+    const { filename } = req.params
+    if (!/^[A-Za-z0-9._-]+$/.test(filename) || filename.includes('..')) {
+      return res.status(404).json({ success: false, error: 'File not found' })
+    }
+    const doc = await db.assetMaintenanceDocument.findFirst({
+      where: { fileUrl: `/uploads/asset-maintenance-documents/${filename}` },
+      select: { organizationId: true },
+    })
+    if (!doc || getOrgId(req) !== doc.organizationId) {
+      return res.status(404).json({ success: false, error: 'File not found' })
+    }
+    const filePath = path.join(UPLOAD_ROOT, 'asset-maintenance-documents', filename)
     if (!filePath.startsWith(UPLOAD_ROOT) || !fs.existsSync(filePath)) {
       return res.status(404).json({ success: false, error: 'File not found' })
     }

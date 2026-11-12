@@ -179,6 +179,9 @@ model Organization {
   rfqLines              RfqLine[]
   rfqVendors            RfqVendor[]
   rfqQuotes             RfqQuote[]
+  assets                    Asset[]
+  assetMaintenanceLogs      AssetMaintenanceLog[]
+  assetMaintenanceDocuments AssetMaintenanceDocument[]
 }
 
 /// User (Staff)
@@ -317,9 +320,116 @@ model Department {
   budgets           Budget[]
   storeIndents      StoreIndent[]
   storeIssues       StoreIssue[]
+  assets            Asset[]
 
   @@unique([organizationId, name])
   @@index([organizationId])
+}
+
+/// A physical asset the hospital owns — equipment, furniture, IT, a vehicle —
+/// tracked from purchase through its service life to disposal. Read is open
+/// to every role (lib/assetAccess.js); create/edit/retire/log-maintenance is
+/// Admin and Purchase/Store officer only, enforced in assetController.js.
+model Asset {
+  id             String @id @default(cuid())
+  organizationId String
+
+  assetTag     String // "AST-0001" — nextMasterCode, no financial year
+  name         String
+  category     String // free text, same convention as PatientDocument.documentType
+  serialNumber String?
+  departmentId String?
+  location     String? // free-text room/floor, finer than department
+
+  status String @default("ACTIVE") // ACTIVE, UNDER_REPAIR, RETIRED, DISPOSED
+
+  vendorId     String?
+  purchaseDate DateTime?
+  purchaseCost Float?
+
+  warrantyExpiry DateTime?
+  amcVendorId    String?
+  amcStartDate   DateTime?
+  amcExpiry      DateTime?
+  amcCost        Float?
+
+  // Depreciation is computed on read (purchaseCost, residualValue,
+  // usefulLifeYears), never stored — see lib/assetDepreciation.js.
+  usefulLifeYears Int?
+  residualValue   Float @default(0)
+
+  // Recurring maintenance. logMaintenance() re-anchors nextMaintenanceDue off
+  // the actual completion date (never the original schedule), so a late
+  // service doesn't push every future date later. maintenanceReminderSentAt
+  // guards the "due in 10 days" bell notification from firing on every page
+  // load once an asset enters that window — reset to null on each log entry.
+  maintenanceIntervalDays   Int?
+  nextMaintenanceDue        DateTime?
+  maintenanceReminderSentAt DateTime?
+
+  assignedToUserId String?
+  notes            String?
+  createdById      String?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  organization    Organization          @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  department      Department?           @relation(fields: [departmentId], references: [id], onDelete: SetNull)
+  vendor          Vendor?               @relation("AssetVendor", fields: [vendorId], references: [id], onDelete: SetNull)
+  amcVendor       Vendor?               @relation("AssetAmcVendor", fields: [amcVendorId], references: [id], onDelete: SetNull)
+  maintenanceLogs AssetMaintenanceLog[]
+
+  @@unique([organizationId, assetTag])
+  @@index([organizationId])
+  @@index([departmentId])
+  @@index([status])
+}
+
+/// One completed (or logged) service visit for an Asset. scheduledFor keeps
+/// what nextMaintenanceDue was right before this entry, so "was this early or
+/// late" is readable straight off the row without recomputing anything.
+model AssetMaintenanceLog {
+  id             String @id @default(cuid())
+  organizationId String
+  assetId        String
+
+  scheduledFor DateTime?
+  performedAt  DateTime
+  performedBy  String?
+  vendorId     String?
+  cost         Float?
+  notes        String?
+
+  createdById String?
+  createdAt   DateTime @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  asset        Asset        @relation(fields: [assetId], references: [id], onDelete: Cascade)
+  vendor       Vendor?      @relation("AssetMaintenanceVendor", fields: [vendorId], references: [id], onDelete: SetNull)
+  documents    AssetMaintenanceDocument[]
+
+  @@index([organizationId])
+  @@index([assetId])
+}
+
+/// The bill/receipt (or any other scan) for one maintenance visit — several
+/// may go up against the same log row. Mirrors GoodsReceiptDocument.
+model AssetMaintenanceDocument {
+  id               String   @id @default(cuid())
+  organizationId   String
+  maintenanceLogId String
+
+  label        String?
+  fileName     String
+  fileUrl      String
+  uploadedById String?
+  uploadedAt   DateTime @default(now())
+
+  organization   Organization         @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  maintenanceLog AssetMaintenanceLog  @relation(fields: [maintenanceLogId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@index([maintenanceLogId])
 }
 
 /// Patient
@@ -1161,6 +1271,10 @@ model Vendor {
   rateContracts  RateContract[]
 
   documents VendorDocument[]
+
+  assetsSupplied    Asset[]               @relation("AssetVendor")
+  assetsUnderAmc    Asset[]               @relation("AssetAmcVendor")
+  assetMaintenances AssetMaintenanceLog[] @relation("AssetMaintenanceVendor")
 
   // Unique within a hospital. NULL codes (older vendors) never collide:
   // Postgres treats each NULL as different.

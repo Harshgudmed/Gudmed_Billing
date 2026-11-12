@@ -66,8 +66,8 @@ export const PATIENT_DOC_TYPES = [
   // Death Summary replaces the Discharge Summary only when the patient dies
   // in hospital — a case has one or the other, never both.
   { value: 'death_summary', label: 'Death Summary', group: 'preauth_billing', optional: true },
-  { value: 'discharge_medications', label: 'Discharge Medications', group: 'preauth_billing', optional: true },
-  { value: 'discharge_instructions', label: 'Discharge Instructions', group: 'preauth_billing', optional: true },
+  { value: 'discharge_medications', label: 'Discharge Medications', group: 'preauth_billing' },
+  { value: 'discharge_instructions', label: 'Discharge Instructions', group: 'preauth_billing' },
   { value: 'followup_instructions', label: 'Follow-up Instructions', group: 'preauth_billing', optional: true },
   { value: 'investigation_bills', label: 'Investigation Bills / Receipts', group: 'preauth_billing' },
   { value: 'pharmacy_bill', label: 'Pharmacy Bills / Invoices', group: 'preauth_billing' },

@@ -24,6 +24,7 @@ import roomRoutes from './roomRoutes.js'
 import displayRoutes from './displayRoutes.js'
 import screenRoutes from './screenRoutes.js'
 import dayCareRoutes from './dayCareRoutes.js'
+import assetRoutes from './assetRoutes.js'
 import ambulanceRoutes from './ambulanceRoutes.js'
 import insuranceRoutes from './insuranceRoutes.js'
 import { INSURANCE_READERS } from '../lib/billingAccess.js'
@@ -170,6 +171,9 @@ router.use('/rooms',                 authorize(), roomRoutes)
 router.use('/display',               authorize(), displayRoutes)
 router.use('/screens',               authorize(), screenRoutes)
 router.use('/day-care',              authorize(), requireModule('dayCare'), dayCareRoutes)
+// Read is open to every role in ROLE_MODULES['assetManagement']; write is
+// gated inside assetController.js by lib/assetAccess.js (Admin/Purchase/Store).
+router.use('/assets',                authorize(), requireModule('assetManagement'), assetRoutes)
 router.use('/ambulance',             authorize(), requireModule('ambulance'), ambulanceRoutes)
 // Insurance cases carry patients' policies and claims: the billing desk and
 // Finance only (lib/billingAccess.js), administrators always.

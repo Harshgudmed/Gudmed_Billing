@@ -35,6 +35,7 @@ export const MODULES = {
   pharmacy:             { path: 'pharmacy',              label: 'Pharmacy',             toggle: 'pharmacy' },
   billing:              { path: 'billing',               label: 'Billing',              toggle: null },
   doctorAccountability: { path: 'doctor-accountability', label: 'Doctor Accountability', toggle: 'doctorAccountability' },
+  assetManagement:      { path: 'assets',                label: 'Asset Management',     toggle: 'assetManagement' },
   settings:             { path: 'settings',              label: 'Settings',             toggle: null },
 }
 
@@ -46,7 +47,7 @@ export const ROLES = {
     modules: [
       'dashboard', 'patients', 'appointments', 'preTriage', 'queue', 'opd', 'pharmacy',
       'laboratory', 'radiology', 'dayCare', 'ambulance', 'insurance', 'deathCertificate', 'inpatient', 'ot', 'purchase',
-      'storeIndent', 'billing', 'doctorAccountability', 'settings',
+      'storeIndent', 'billing', 'doctorAccountability', 'assetManagement', 'settings',
     ],
   },
   doctor: {
@@ -60,12 +61,12 @@ export const ROLES = {
     // the query, so this cannot widen what they see. Without it the dashboard's
     // "Today's Appointments → View All" button pointed at a route this role has
     // no entry for, and the catch-all bounced them back to OPD.
-    modules: ['dashboard', 'opd', 'appointments', 'queue', 'patients', 'doctorAccountability', 'ot', 'storeIndent', 'purchase'],
+    modules: ['dashboard', 'opd', 'appointments', 'queue', 'patients', 'doctorAccountability', 'ot', 'storeIndent', 'purchase', 'assetManagement'],
   },
   receptionist: {
     label: 'Receptionist',
     home: 'appointments',
-    modules: ['dashboard', 'appointments', 'preTriage', 'queue', 'patients', 'billing', 'ot', 'storeIndent'],
+    modules: ['dashboard', 'appointments', 'preTriage', 'queue', 'patients', 'billing', 'ot', 'storeIndent', 'assetManagement'],
   },
 
   // ── Phase 3.0: clinical-orders roles. Mapped in backend rbac.js already; these
@@ -73,17 +74,17 @@ export const ROLES = {
   nurse: {
     label: 'Nurse',
     home: 'dashboard',
-    modules: ['dashboard', 'preTriage', 'patients', 'ot', 'storeIndent', 'purchase'],
+    modules: ['dashboard', 'preTriage', 'patients', 'ot', 'storeIndent', 'purchase', 'assetManagement'],
   },
   pharmacist: {
     label: 'Pharmacist',
     home: 'pharmacy',
-    modules: ['dashboard', 'pharmacy', 'storeIndent'],
+    modules: ['dashboard', 'pharmacy', 'storeIndent', 'assetManagement'],
   },
   billing: {
     label: 'Billing',
     home: 'billing',
-    modules: ['dashboard', 'billing', 'storeIndent'],
+    modules: ['dashboard', 'billing', 'storeIndent', 'assetManagement'],
   },
   finance_controller: {
     label: 'Finance Controller',
@@ -92,20 +93,21 @@ export const ROLES = {
     // billing and refunds are still one click away in the sidebar.
     home: 'purchase',
     // Purchase: to approve requests above the hospital's limit, and to read.
-    modules: ['dashboard', 'billing', 'purchase', 'storeIndent'],
+    modules: ['dashboard', 'billing', 'purchase', 'storeIndent', 'assetManagement'],
   },
 
   // ── Purchase & Supply Chain. Purchase only: the backend lets these roles
-  //    reach /purchase and nothing clinical. ──
+  //    reach /purchase and nothing clinical. Asset Management is theirs too —
+  //    assets are usually bought through Purchase and they manage it. ──
   purchase_officer: {
     label: 'Purchase Officer',
     home: 'purchase',
-    modules: ['purchase'],
+    modules: ['purchase', 'assetManagement'],
   },
   store_keeper: {
     label: 'Store Keeper',
     home: 'purchase',
-    modules: ['purchase'],
+    modules: ['purchase', 'assetManagement'],
   },
 }
 
@@ -116,7 +118,7 @@ export const KNOWN_ROLES = Object.keys(ROLES)
 // for it, and reading "no key" as "on" kept their screens as they were. A
 // module still being built must not appear in every hospital's sidebar the day
 // it ships, so it reads "no key" as OFF instead.
-const OFF_UNTIL_ENABLED = new Set(['purchase'])
+const OFF_UNTIL_ENABLED = new Set(['purchase', 'assetManagement'])
 
 /**
  * Is this module switched on for the hospital? `toggle` is a MODULES[...].toggle
